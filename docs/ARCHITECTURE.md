@@ -1,0 +1,88 @@
+# CourseForge – Architecture Overview
+
+## 1. High‑level architecture
+
+CourseForge consists of three main layers:
+
+1. **Core layer (`src/core`)**
+   - Data models (textbook, chapter, section, vocab, equation, concept)
+   - Database access layer
+   - XML export logic
+
+2. **Web app (`src/webapp`)**
+   - Full‑screen UI for:
+     - Creating and editing textbooks
+     - Managing chapters and sections
+     - Editing vocab, equations, concepts, key ideas
+     - Exporting XML
+
+3. **Browser extension (`src/extension`)**
+   - Sidebar UI for:
+     - Quick capture of vocab, equations, concepts while viewing the textbook
+   - Shares core logic and database with the web app.
+
+---
+
+## 2. Data flow
+
+1. Teacher uses web app or sidebar to enter data.
+2. Data is persisted via the core database service.
+3. When requested, the XML exporter reads from the database and generates a schema‑compliant XML document.
+4. The game engine and AI tutor consume the XML.
+
+---
+
+## 3. Database
+
+- Local‑first approach (e.g., IndexedDB or SQLite via WASM).
+- Stores:
+  - Textbooks
+  - Chapters
+  - Sections
+  - Vocab terms
+  - Equations
+  - Concepts
+  - Key ideas
+  - Timestamps and basic versioning
+
+See `DB_SCHEMA.md` for details.
+
+---
+
+## 4. XML export
+
+- XML is the canonical export format.
+- Designed to be:
+  - AI‑readable
+  - Game‑engine‑readable
+  - Hierarchical and semantic
+- Export granularity:
+  - Full textbook
+  - Single chapter
+  - Single section
+
+See `XML_SCHEMA.md` for details.
+
+---
+
+## 5. Extension vs web app
+
+- **Web app**
+  - Full editing experience
+  - Structure management
+  - XML export
+- **Extension sidebar**
+  - Quick capture while viewing textbook pages
+  - Minimal UI, keyboard‑first
+  - Uses the same core models and database services
+
+---
+
+## 6. Future integration points
+
+- Cloud sync service for multi‑device and multi‑teacher use.
+- API endpoints for game engines to fetch XML directly.
+- AI services for:
+  - Vocab definition suggestions
+  - Equation suggestions
+  - Student hint generation based on XML.

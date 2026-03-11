@@ -13,12 +13,16 @@ import { SectionForm } from "./components/sections/SectionForm";
 import { SectionList } from "./components/sections/SectionList";
 import { TextbookForm } from "./components/textbooks/TextbookForm";
 import { TextbookList } from "./components/textbooks/TextbookList";
+import { getCurrentUser, onAuthStateChangedListener, signInWithGoogle } from "../firebase/auth";
 
 /**
  * Root shell for the CourseForge webapp.
  * Phase C1 keeps this intentionally minimal before feature-specific UI is added.
  */
 export function App(): React.JSX.Element {
+  const [isSigningIn, setIsSigningIn] = React.useState(false);
+  const [signInError, setSignInError] = React.useState<string | null>(null);
+  const [currentUserEmail, setCurrentUserEmail] = React.useState<string | null>(null);
   const [textbooks, setTextbooks] = React.useState<Textbook[]>([]);
   const [isLoadingTextbooks, setIsLoadingTextbooks] = React.useState(true);
   const [textbookLoadError, setTextbookLoadError] = React.useState<string | null>(null);
@@ -30,6 +34,18 @@ export function App(): React.JSX.Element {
   const [selectedSectionId, setSelectedSectionId] = React.useState<string | null>(null);
   const [activeWorkflowTab, setActiveWorkflowTab] = React.useState<WorkflowTab>("textbook");
   const [expandedTile, setExpandedTile] = React.useState<WorkflowTab | null>("textbook");
+
+  React.useEffect(() => {
+    setCurrentUserEmail(getCurrentUser()?.email ?? null);
+
+    const unsubscribe = onAuthStateChangedListener((user) => {
+      setCurrentUserEmail(user?.email ?? null);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   React.useEffect(() => {
     let isMounted = true;
@@ -138,6 +154,22 @@ export function App(): React.JSX.Element {
     }
   }
 
+  async function handleGoogleSignIn(): Promise<void> {
+    setIsSigningIn(true);
+    setSignInError(null);
+
+    try {
+      const user = await signInWithGoogle();
+      console.log("Signed in user uid:", user.uid);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to sign in with Google.";
+      setSignInError(message);
+      console.error("Google sign-in failed:", error);
+    } finally {
+      setIsSigningIn(false);
+    }
+  }
+
   function renderWorkflowPanel(): React.JSX.Element | null {
     if (activeWorkflowTab === "textbook") {
       return (
@@ -225,6 +257,11 @@ export function App(): React.JSX.Element {
         <section className="placeholder-panel">
           <h2>Onboarding Workflow</h2>
           <p>Set up textbooks, chapters, and sections in sequence, then continue into section content capture.</p>
+          <p><strong>Auth:</strong> {currentUserEmail ?? "Not signed in"}</p>
+          <button type="button" onClick={() => { void handleGoogleSignIn(); }} disabled={isSigningIn}>
+            {isSigningIn ? "Signing in..." : "Sign in with Google"}
+          </button>
+          {signInError ? <p className="error-text">Sign-in failed: {signInError}</p> : null}
         </section>
 
         <WorkflowRibbon

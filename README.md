@@ -76,6 +76,21 @@ npm run test:integration
 - Admin operations now go through callable Cloud Functions instead of direct browser-side cross-user writes.
 - The admin custom claim is enforced from the auth token, while the mirrored Firestore `users` document exists only for admin UX and reporting.
 
+### Firestore data paths and rules (v1.1)
+
+- Canonical content paths:
+	- `/textbooks/{textbookId}`
+	- `/textbooks/{textbookId}/chapters/{chapterId}`
+	- `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}`
+	- `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}`
+- Legacy user-scoped subcollection paths are blocked by rules:
+	- `/users/{uid}/textbooks/*`
+	- `/users/{uid}/chapters/*`
+	- `/users/{uid}/sections/*`
+	- `/users/{uid}/vocabTerms/*`
+- Ownership checks accept `userId` (current schema) and `ownerId` (forward compatibility).
+- Admin write override uses the custom auth claim: `request.auth.token.admin == true`.
+
 ## Documentation
 
 - `docs/ARCHITECTURE.md`

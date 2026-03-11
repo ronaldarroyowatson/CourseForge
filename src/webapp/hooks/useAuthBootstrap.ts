@@ -67,6 +67,8 @@ export function useAuthBootstrap(): void {
         lastSyncedUserId = user.uid;
         const pending = await getPendingSyncDiagnostics();
         uiStore.setPendingSyncCount(pending.pendingCount);
+        uiStore.setRetryCount(0);
+        uiStore.setLastSyncErrorCode(null);
         uiStore.setSyncStatus("synced", "Your data is synced.");
       } catch (error) {
         if (!isActive) {
@@ -110,7 +112,11 @@ export function useAuthBootstrap(): void {
 
       // Refresh pending counters after token/bootstrap events.
       const quickSync = await syncNow();
-      useUIStore.getState().setPendingSyncCount(quickSync.pendingCount);
+      const ui = useUIStore.getState();
+      ui.setPendingSyncCount(quickSync.pendingCount);
+      ui.setWriteBudget(quickSync.writeCount, quickSync.writeBudgetLimit, quickSync.writeBudgetExceeded);
+      ui.setRetryLimit(quickSync.retryLimit);
+      ui.setLastSyncErrorCode(quickSync.errorCode);
     }
 
     void initializePersistentAuth()

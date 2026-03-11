@@ -15,6 +15,7 @@ import { Sidebar } from "../layout/Sidebar";
 import { WorkflowRibbon, type WorkflowTab } from "../layout/WorkflowRibbon";
 import { SectionForm } from "../sections/SectionForm";
 import { SectionList } from "../sections/SectionList";
+import { SettingsPage } from "../settings/SettingsPage";
 import { TextbookForm } from "../textbooks/TextbookForm";
 import { TextbookList } from "../textbooks/TextbookList";
 
@@ -25,9 +26,10 @@ const AdminToolsPage = React.lazy(async () => {
 
 interface TextbookWorkspaceProps {
   showAdminPage?: boolean;
+  showSettingsPage?: boolean;
 }
 
-export function TextbookWorkspace({ showAdminPage = false }: TextbookWorkspaceProps): React.JSX.Element {
+export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = false }: TextbookWorkspaceProps): React.JSX.Element {
   const navigate = useNavigate();
   const params = useParams<{ id: string }>();
   const currentUserId = useAuthStore((state) => state.userId);
@@ -285,6 +287,12 @@ export function TextbookWorkspace({ showAdminPage = false }: TextbookWorkspacePr
               }}
             />
           </React.Suspense>
+        ) : showSettingsPage ? (
+          <SettingsPage
+            onBack={() => {
+              navigate("/textbooks");
+            }}
+          />
         ) : (
           <>
             <section className="placeholder-panel">

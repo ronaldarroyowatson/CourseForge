@@ -8,7 +8,7 @@ import {
   getAllTextbooksAdmin,
 } from "../../../core/services";
 
-type CollectionFilter = "all" | "textbooks" | "chapters" | "sections" | "vocabTerms";
+type CollectionFilter = "all" | "textbooks" | "chapters" | "sections" | "vocab";
 
 interface EditState {
   title: string;
@@ -100,7 +100,7 @@ export function ContentBrowser(): React.JSX.Element {
         return { name: nextState.title.trim(), description: nextState.summary.trim() || undefined, status: nextState.status };
       case "sections":
         return { title: nextState.title.trim(), notes: nextState.summary.trim() || undefined, status: nextState.status };
-      case "vocabTerms":
+      case "vocab":
         return { word: nextState.title.trim(), definition: nextState.summary.trim() || undefined, status: nextState.status };
       default:
         return { status: nextState.status };
@@ -200,7 +200,7 @@ export function ContentBrowser(): React.JSX.Element {
             <option value="textbooks">Textbooks</option>
             <option value="chapters">Chapters</option>
             <option value="sections">Sections</option>
-            <option value="vocabTerms">Vocab Terms</option>
+            <option value="vocab">Vocab Terms</option>
           </select>
         </label>
       </div>

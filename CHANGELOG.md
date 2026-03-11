@@ -13,6 +13,8 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Improved sync diagnostics across auth, sync service, and admin callable operations for faster issue triage.
 - Resolved admin panel module-resolution and accessibility issues in admin content editing flows.
 - Stabilized integration tests for the updated sync API surface (`syncNow`, pending diagnostics).
+- Migrated cloud sync writes and reads to the canonical Firestore hierarchy (`textbooks -> chapters -> sections -> vocab`) and removed legacy user-scoped content writes.
+- Added production Firestore security rules to enforce signed-in reads, owner/admin writes, explicit legacy-path blocking, and catch-all deny guardrails.
 
 ### Changed (1.1.0)
 
@@ -25,6 +27,7 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - `npm run test:core`
 - `npm run test:integration`
 - `npm run build`
+- `npm --prefix functions run build`
 
 ## [1.1.0] - 2026-03-11
 

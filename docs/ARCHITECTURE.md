@@ -44,6 +44,17 @@ CourseForge consists of three main layers:
   - Concepts
   - Key ideas
   - Timestamps and basic versioning
+- Firestore cloud mirror for synced entities:
+  - `/textbooks/{textbookId}`
+  - `/textbooks/{textbookId}/chapters/{chapterId}`
+  - `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}`
+  - `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}`
+- User profile docs stored at `/users/{uid}` for auth bootstrap and admin user management.
+- Firestore security model:
+  - Authenticated users can read canonical curriculum docs.
+  - Users can only write docs they own (`userId` / `ownerId` match).
+  - Admin claim (`request.auth.token.admin == true`) bypasses ownership checks.
+  - Legacy user-scoped content subcollections under `/users/{uid}` are explicitly denied.
 
 See `DB_SCHEMA.md` for details.
 

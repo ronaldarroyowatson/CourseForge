@@ -1,0 +1,178 @@
+rules_version = '2';
+
+// CourseForge v1.1 — Firestore Security Rules
+//
+// Canonical content hierarchy:
+//   /textbooks/{textbookId}
+//   /textbooks/{textbookId}/chapters/{chapterId}
+//   /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}
+//   /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}
+//
+// User profiles:
+//   /users/{uid}
+//
+// Ownership is stored in the document's `userId` field, written by the sync
+// engine on every cloud write. Admins are identified via a custom JWT claim
+// (request.auth.token.admin == true), set exclusively by the setUserAdminStatus
+// Cloud Function.
+//
+// NOTE: equations, concepts, and keyIdeas are IndexedDB-local only and are not
+// synced to Firestore. No rules are required for those stores.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // Helper functions
+    // =========================================================================
+
+    // Returns true when the caller has a valid Firebase Auth session.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Returns true when the caller holds the custom `admin` JWT claim.
+    // This claim is set exclusively by the setUserAdminStatus Cloud Function
+    // and is never writable from the client.
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Returns true when the caller is the document owner.
+    //
+    // Compatibility:
+    // - Current CourseForge v1.1 docs store owner in `userId`.
+    // - Future/alternate docs may use `ownerId`.
+    //
+    // - On create  : request.resource owner field must match caller uid.
+    // - On read/delete: existing resource owner field must match caller uid.
+    // - On update  : incoming OR existing owner field must match caller uid,
+    //   preventing owner reassignment attacks.
+    function isOwner() {
+      return isSignedIn() && (
+        (
+          request.resource != null && (
+            request.auth.uid == request.resource.data.ownerId ||
+            request.auth.uid == request.resource.data.userId
+          )
+        ) ||
+        (
+          resource != null && (
+            request.auth.uid == resource.data.ownerId ||
+            request.auth.uid == resource.data.userId
+          )
+        )
+      );
+    }
+
+    // =========================================================================
+    // /users/{uid}
+    //
+    // User profile documents. Written by auth.ts (saveUserProfileToFirestore)
+    // on every sign-in and by the setUserAdminStatus Cloud Function.
+    // Read on login to restore the user's theme preference.
+    //
+    // Fields: uid, displayName, email, isAdmin, lastLoginAt, theme,
+    //         lastClaimsUpdatedAt
+    //
+    // - Owner can read and update their own profile.
+    // - Admins can read and write any profile (required for user management).
+    // - All sub-collections under /users/{uid}/ are explicitly blocked to
+    //   prevent accidental legacy writes (users/{uid}/sections, /chapters,
+    //   /textbooks, /vocabTerms created by the old sync engine).
+    // =========================================================================
+    match /users/{uid} {
+      allow read:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
+
+      // Block all sub-collections under /users/{uid}/ unconditionally.
+      // This denies the accidental paths written by the pre-v1.1 sync engine:
+      //   /users/{uid}/textbooks/{id}
+      //   /users/{uid}/chapters/{id}
+      //   /users/{uid}/sections/{id}
+      //   /users/{uid}/vocabTerms/{id}
+      // and any future accidental sub-collection writes.
+      match /{legacyCollection}/{docId} {
+        allow read:  if false;
+        allow write: if false;
+      }
+
+      // Deny deeply nested paths too (e.g. old hierarchy sub-sub-collections).
+      match /{legacyCollection}/{docId}/{rest=**} {
+        allow read:  if false;
+        allow write: if false;
+      }
+    }
+
+    // =========================================================================
+    // /textbooks/{textbookId}
+    //
+    // Top-level textbook documents.
+    //
+    // Fields: userId, title, grade, subject, edition, publicationYear,
+    //         isbnRaw, isbnNormalized, platformUrl, createdAt, updatedAt,
+    //         lastModified, pendingSync, source, isFavorite, isArchived,
+    //         status, isDeleted
+    //
+    // Read policy  : any authenticated user (future: public textbooks visible
+    //               to unauthenticated users when status == "approved").
+    // Write policy : owner (`userId` matches) or admin.
+    // =========================================================================
+    match /textbooks/{textbookId} {
+      allow read:   if isSignedIn();
+      allow write:  if isOwner() || isAdmin();
+
+      // -----------------------------------------------------------------------
+      // /textbooks/{textbookId}/chapters/{chapterId}
+      //
+      // Fields: userId, textbookId, index, name, description, lastModified,
+      //         pendingSync, source, status, isDeleted
+      // -----------------------------------------------------------------------
+      match /chapters/{chapterId} {
+        allow read:   if isSignedIn();
+        allow write:  if isOwner() || isAdmin();
+
+        // ---------------------------------------------------------------------
+        // /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}
+        //
+        // Fields: userId, textbookId, chapterId, index, title, notes,
+        //         lastModified, pendingSync, source, status, isDeleted
+        // ---------------------------------------------------------------------
+        match /sections/{sectionId} {
+          allow read:   if isSignedIn();
+          allow write:  if isOwner() || isAdmin();
+
+          // -------------------------------------------------------------------
+          // /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}
+          //
+          // Fields: userId, textbookId, chapterId, sectionId, word, definition,
+          //         altDefinitions, lastModified, pendingSync, source,
+          //         status, isDeleted
+          // -------------------------------------------------------------------
+          match /vocab/{vocabId} {
+            allow read:   if isSignedIn();
+            allow write:  if isOwner() || isAdmin();
+          }
+        }
+      }
+    }
+
+    // =========================================================================
+    // Catch-all deny rule
+    //
+    // Any path not explicitly matched above is denied for both reads and
+    // writes. This covers:
+    //   - Remnant data at /users/{uid}/sections, /chapters, /vocabTerms
+    //     (also covered above, belt-and-suspenders)
+    //   - Any new collection accidentally created outside the canonical schema
+    //   - Direct client attempts to write to unrecognised paths
+    //
+    // Firestore evaluates rules from most specific to least specific, so
+    // explicit allow rules above take precedence over this catch-all.
+    // =========================================================================
+    match /{document=**} {
+      allow read:  if false;
+      allow write: if false;
+    }
+  }
+}

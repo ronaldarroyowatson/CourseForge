@@ -38,11 +38,13 @@ export interface QuickKeyIdeaInput {
   text: string;
 }
 
-function buildVocabTerm(input: QuickVocabInput): VocabTerm {
+function buildVocabTerm(input: QuickVocabInput, chapterId: string, textbookId: string): VocabTerm {
   const timestamp = new Date().toISOString();
 
   return {
     id: crypto.randomUUID(),
+    textbookId,
+    chapterId,
     sectionId: input.sectionId,
     word: input.word,
     definition: input.definition,
@@ -108,7 +110,12 @@ export function useRepositories() {
   }, []);
 
   const createVocabTerm = useCallback(async (input: QuickVocabInput): Promise<string> => {
-    return saveVocabTerm(buildVocabTerm(input));
+    const section = await getSectionById(input.sectionId);
+    if (!section?.chapterId || !section.textbookId) {
+      throw new Error("Cannot create vocab because the parent section is missing hierarchy IDs.");
+    }
+
+    return saveVocabTerm(buildVocabTerm(input, section.chapterId, section.textbookId));
   }, []);
 
   const createEquation = useCallback(async (input: QuickEquationInput): Promise<string> => {

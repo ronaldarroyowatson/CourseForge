@@ -5,7 +5,7 @@ admin.initializeApp();
 
 const auth = admin.auth();
 const firestore = admin.firestore();
-const SUPPORTED_COLLECTIONS = ["textbooks", "chapters", "sections", "vocabTerms"] as const;
+const SUPPORTED_COLLECTIONS = ["textbooks", "chapters", "sections", "vocab"] as const;
 type SupportedCollection = (typeof SUPPORTED_COLLECTIONS)[number];
 
 type ContentStatus = "draft" | "submitted" | "approved" | "rejected";
@@ -77,18 +77,42 @@ function toIsoString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-function parseDocPath(docPath: string): { ownerId: string; collectionName: SupportedCollection; docId: string } {
+function parseDocPath(docPath: string): { ownerId: string | null; collectionName: SupportedCollection; docId: string } {
   const parts = docPath.split("/");
 
-  if (parts.length !== 4 || parts[0] !== "users" || !SUPPORTED_COLLECTIONS.includes(parts[2] as SupportedCollection)) {
-    throw new HttpsError("invalid-argument", "Unsupported document path.");
+  if (parts.length === 2 && parts[0] === "textbooks") {
+    return {
+      ownerId: null,
+      collectionName: "textbooks",
+      docId: parts[1],
+    };
   }
 
-  return {
-    ownerId: parts[1],
-    collectionName: parts[2] as SupportedCollection,
-    docId: parts[3],
-  };
+  if (parts.length === 4 && parts[0] === "textbooks" && parts[2] === "chapters") {
+    return {
+      ownerId: null,
+      collectionName: "chapters",
+      docId: parts[3],
+    };
+  }
+
+  if (parts.length === 6 && parts[0] === "textbooks" && parts[2] === "chapters" && parts[4] === "sections") {
+    return {
+      ownerId: null,
+      collectionName: "sections",
+      docId: parts[5],
+    };
+  }
+
+  if (parts.length === 8 && parts[0] === "textbooks" && parts[2] === "chapters" && parts[4] === "sections" && parts[6] === "vocab") {
+    return {
+      ownerId: null,
+      collectionName: "vocab",
+      docId: parts[7],
+    };
+  }
+
+  throw new HttpsError("invalid-argument", "Unsupported document path.");
 }
 
 async function getOwnerEmailMap(): Promise<Map<string, string>> {
@@ -113,7 +137,7 @@ function getRecordTitle(collectionName: SupportedCollection, data: FirebaseFires
       return typeof data.name === "string" ? data.name : fallbackId;
     case "sections":
       return typeof data.title === "string" ? data.title : fallbackId;
-    case "vocabTerms":
+    case "vocab":
       return typeof data.word === "string" ? data.word : fallbackId;
   }
 }
@@ -124,7 +148,7 @@ function getRecordSummary(collectionName: SupportedCollection, data: FirebaseFir
       return typeof data.description === "string" ? data.description : undefined;
     case "sections":
       return typeof data.notes === "string" ? data.notes : undefined;
-    case "vocabTerms":
+    case "vocab":
       return typeof data.definition === "string" ? data.definition : undefined;
     default:
       return undefined;
@@ -149,7 +173,7 @@ function buildAdminContentRecord(
   ownerEmailMap: Map<string, string>
 ): AdminContentRecord {
   const data = snapshot.data();
-  const ownerId = snapshot.ref.path.split("/")[1] ?? "unknown";
+  const ownerId = typeof data.userId === "string" ? data.userId : "unknown";
 
   return {
     docPath: snapshot.ref.path,
@@ -177,7 +201,7 @@ function buildModerationItem(
   ownerEmailMap: Map<string, string>
 ): ModerationItem {
   const data = snapshot.data();
-  const ownerId = snapshot.ref.path.split("/")[1] ?? "unknown";
+  const ownerId = typeof data.userId === "string" ? data.userId : "unknown";
 
   return {
     docPath: snapshot.ref.path,
@@ -244,7 +268,7 @@ export const getModerationQueue = onCall(async (request) => {
   const items: ModerationItem[] = [];
 
   await Promise.all(
-    (["textbooks", "chapters", "sections"] as const).map(async (collectionName) => {
+    (["textbooks", "chapters", "sections", "vocab"] as const).map(async (collectionName) => {
         const snapshot = await firestore.collectionGroup(collectionName).where("status", "==", "submitted").get();
         snapshot.docs.forEach((docSnap) => {
           items.push(buildModerationItem(collectionName, docSnap, ownerEmailMap));
@@ -392,7 +416,7 @@ export const updateAdminContent = onCall(async (request) => {
     textbooks: ["title", "grade", "subject", "edition", "publicationYear", "status"],
     chapters: ["name", "description", "status"],
     sections: ["title", "notes", "status"],
-    vocabTerms: ["word", "definition", "status"],
+    vocab: ["word", "definition", "status"],
   };
 
   const sanitizedUpdates = Object.fromEntries(

@@ -4,6 +4,7 @@ import type { Textbook } from "../../core/models";
 export type ThemeMode = "light" | "dark";
 
 const THEME_STORAGE_KEY = "courseforge.theme";
+const AUTO_RETRIES_STORAGE_KEY = "courseforge.automaticRetriesEnabled";
 
 function getInitialTheme(): ThemeMode {
   if (typeof window === "undefined") {
@@ -26,6 +27,15 @@ function applyTheme(theme: ThemeMode): void {
   document.documentElement.setAttribute("data-theme", theme);
 }
 
+function getInitialAutomaticRetriesEnabled(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const saved = window.localStorage.getItem(AUTO_RETRIES_STORAGE_KEY);
+  return saved === "true";
+}
+
 /**
  * Global UI store for CourseForge.
  * Manages sync state, selected textbook for editing, and other global UI state.
@@ -37,8 +47,15 @@ interface UIStore {
   syncMessage: string | null;
   lastSyncTime: string | null;
   lastSyncError: string | null;
+  lastSyncErrorCode: string | null;
   pendingSyncCount: number;
   pendingChangesCount: number;
+  writeCount: number;
+  retryCount: number;
+  writeBudgetLimit: number;
+  retryLimit: number;
+  writeBudgetExceeded: boolean;
+  automaticRetriesEnabled: boolean;
   permissionDeniedSyncBlocked: boolean;
   writeLoopBlocked: boolean;
   localChangeVersion: number;
@@ -46,6 +63,12 @@ interface UIStore {
   setIsSyncing: (value: boolean) => void;
   setSyncStatus: (status: "idle" | "syncing" | "synced" | "error", message?: string | null) => void;
   setPendingSyncCount: (count: number) => void;
+  setLastSyncErrorCode: (code: string | null) => void;
+  setWriteCount: (count: number) => void;
+  setRetryCount: (count: number) => void;
+  setWriteBudget: (count: number, limit: number, exceeded: boolean) => void;
+  setRetryLimit: (limit: number) => void;
+  setAutomaticRetriesEnabled: (enabled: boolean) => void;
   setPermissionDeniedSyncBlocked: (value: boolean) => void;
   setWriteLoopBlocked: (value: boolean) => void;
   markLocalChange: () => void;
@@ -72,8 +95,15 @@ export const useUIStore = create<UIStore>((set) => ({
   syncMessage: null,
   lastSyncTime: null,
   lastSyncError: null,
+  lastSyncErrorCode: null,
   pendingSyncCount: 0,
   pendingChangesCount: 0,
+  writeCount: 0,
+  retryCount: 0,
+  writeBudgetLimit: 500,
+  retryLimit: 3,
+  writeBudgetExceeded: false,
+  automaticRetriesEnabled: getInitialAutomaticRetriesEnabled(),
   permissionDeniedSyncBlocked: false,
   writeLoopBlocked: false,
   localChangeVersion: 0,
@@ -96,10 +126,27 @@ export const useUIStore = create<UIStore>((set) => ({
         isSyncing: status === "syncing",
         lastSyncTime: status === "synced" ? new Date().toISOString() : state.lastSyncTime,
         lastSyncError: status === "error" ? message : status === "synced" ? null : state.lastSyncError,
+        lastSyncErrorCode: status === "synced" ? null : state.lastSyncErrorCode,
         syncDebugEvents: nextSyncEvents,
       };
     }),
   setPendingSyncCount: (count: number) => set({ pendingSyncCount: count, pendingChangesCount: count }),
+  setLastSyncErrorCode: (code: string | null) => set({ lastSyncErrorCode: code }),
+  setWriteCount: (count: number) => set({ writeCount: count }),
+  setRetryCount: (count: number) => set({ retryCount: count }),
+  setWriteBudget: (count: number, limit: number, exceeded: boolean) =>
+    set({
+      writeCount: count,
+      writeBudgetLimit: limit,
+      writeBudgetExceeded: exceeded,
+    }),
+  setRetryLimit: (limit: number) => set({ retryLimit: limit }),
+  setAutomaticRetriesEnabled: (enabled: boolean) => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(AUTO_RETRIES_STORAGE_KEY, String(enabled));
+    }
+    set({ automaticRetriesEnabled: enabled });
+  },
   setPermissionDeniedSyncBlocked: (value: boolean) => set({ permissionDeniedSyncBlocked: value }),
   setWriteLoopBlocked: (value: boolean) => set({ writeLoopBlocked: value }),
   markLocalChange: () =>
@@ -148,8 +195,10 @@ export const useUIStore = create<UIStore>((set) => ({
       syncMessage: null,
       isSyncing: false,
       lastSyncError: null,
+      lastSyncErrorCode: null,
       pendingSyncCount: 0,
       pendingChangesCount: 0,
+      retryCount: 0,
       permissionDeniedSyncBlocked: false,
       writeLoopBlocked: false,
       syncDebugEvents: [],

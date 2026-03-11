@@ -48,6 +48,7 @@ export interface Chapter {
 export interface Section {
   id: string;
   userId?: string;
+  textbookId?: string;
   chapterId: string;
   index: number;
   title: string;
@@ -62,6 +63,8 @@ export interface Section {
 export interface VocabTerm {
   id: string;
   userId?: string;
+  textbookId?: string;
+  chapterId?: string;
   sectionId: string;
   word: string;
   definition?: string;

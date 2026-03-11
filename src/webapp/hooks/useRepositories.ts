@@ -10,6 +10,8 @@ import {
   deleteTextbook,
   deleteVocabTerm,
   findTextbookByIsbn,
+  getChapterById,
+  getSectionById,
   listChaptersByTextbookId,
   listConceptsBySectionId,
   listEquationsBySectionId,
@@ -114,10 +116,11 @@ function buildChapterFromInput(input: CreateChapterInput): Chapter {
   };
 }
 
-function buildSectionFromInput(input: CreateSectionInput): Section {
+function buildSectionFromInput(input: CreateSectionInput, textbookId: string): Section {
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    textbookId,
     chapterId: input.chapterId,
     index: input.index,
     title: input.title,
@@ -128,10 +131,12 @@ function buildSectionFromInput(input: CreateSectionInput): Section {
   };
 }
 
-function buildVocabTermFromInput(input: CreateVocabTermInput): VocabTerm {
+function buildVocabTermFromInput(input: CreateVocabTermInput, chapterId: string, textbookId: string): VocabTerm {
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    textbookId,
+    chapterId,
     sectionId: input.sectionId,
     word: input.word,
     definition: input.definition,
@@ -233,7 +238,12 @@ export function useRepositories() {
   }, []);
 
   const createSection = useCallback(async (input: CreateSectionInput): Promise<string> => {
-    const section = buildSectionFromInput(input);
+    const chapter = await getChapterById(input.chapterId);
+    if (!chapter?.textbookId) {
+      throw new Error("Cannot create section because the parent chapter is missing textbookId.");
+    }
+
+    const section = buildSectionFromInput(input, chapter.textbookId);
     const id = await saveSection(section);
     markLocalChange();
     return id;
@@ -249,7 +259,12 @@ export function useRepositories() {
   }, []);
 
   const createVocabTerm = useCallback(async (input: CreateVocabTermInput): Promise<string> => {
-    const term = buildVocabTermFromInput(input);
+    const section = await getSectionById(input.sectionId);
+    if (!section?.chapterId || !section.textbookId) {
+      throw new Error("Cannot create vocab because the parent section is missing hierarchy IDs.");
+    }
+
+    const term = buildVocabTermFromInput(input, section.chapterId, section.textbookId);
     const id = await saveVocabTerm(term);
     markLocalChange();
     return id;

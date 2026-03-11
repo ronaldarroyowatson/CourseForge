@@ -132,7 +132,7 @@ export async function getAllTextbooksAdmin(filters?: {
   titleContains?: string;
   ownerEmail?: string;
   ownerUid?: string;
-  collectionName?: "textbooks" | "chapters" | "sections" | "vocabTerms" | "all";
+  collectionName?: "textbooks" | "chapters" | "sections" | "vocab" | "all";
 }): Promise<AdminContentRecord[]> {
   return callAdminFunction<typeof filters, AdminContentRecord[]>("searchAdminContent", {
     isbn: filters?.isbn,

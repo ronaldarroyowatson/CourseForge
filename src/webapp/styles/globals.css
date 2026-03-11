@@ -15,6 +15,12 @@
   --error-color: #c63a3a;
   --success-color: #1f6d2c;
   --on-accent: #ffffff;
+  --primary-bg: #2563eb;
+  --primary-bg-hover: #1e4fb8;
+  --primary-border: #1e4fb8;
+  --danger-bg: #dc2626;
+  --danger-bg-hover: #b91c1c;
+  --danger-border: #b91c1c;
 
   --status-draft-bg: #e9edf2;
   --status-draft-fg: #425466;
@@ -52,6 +58,12 @@
   --error-color: #ff8e8e;
   --success-color: #8fe0a0;
   --on-accent: #ffffff;
+  --primary-bg: #4d86ff;
+  --primary-bg-hover: #3b6fd9;
+  --primary-border: #3b6fd9;
+  --danger-bg: #ef5350;
+  --danger-bg-hover: #d84343;
+  --danger-border: #d84343;
 
   --status-draft-bg: #2a333d;
   --status-draft-fg: #d4deea;
@@ -483,6 +495,64 @@ body {
   color: var(--success-color);
 }
 
+.settings-page {
+  margin-top: 1rem;
+}
+
+.settings-page__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+
+.settings-page__header h2 {
+  margin: 0;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.settings-card {
+  border: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  border-radius: 8px;
+  padding: 0.9rem;
+}
+
+.settings-card h3 {
+  margin: 0 0 0.5rem;
+}
+
+.settings-card p {
+  margin: 0 0 0.6rem;
+  color: var(--text-secondary);
+}
+
+.settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--button-bg);
+  color: var(--text-primary);
+  padding: 0.4rem 0.55rem;
+  cursor: pointer;
+}
+
+.settings-toggle input {
+  accent-color: var(--primary-bg);
+}
+
+.settings-meta {
+  font-size: 0.9rem;
+}
+
 .admin-shell {
   margin-top: 1rem;
   display: grid;
@@ -746,23 +816,23 @@ body {
 }
 
 .btn-primary-sm {
-  background: #2563eb;
+  background: var(--primary-bg);
   color: var(--on-accent);
-  border-color: #1e4fb8;
+  border-color: var(--primary-border);
 }
 
 .btn-primary-sm:hover {
-  background: #1e4fb8;
+  background: var(--primary-bg-hover);
 }
 
 .btn-danger-sm {
-  background: #dc2626;
+  background: var(--danger-bg);
   color: var(--on-accent);
-  border-color: #b91c1c;
+  border-color: var(--danger-border);
 }
 
 .btn-danger-sm:hover {
-  background: #b91c1c;
+  background: var(--danger-bg-hover);
 }
 
 @media (max-width: 768px) {
@@ -780,6 +850,10 @@ body {
   }
 
   .panel-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-grid {
     grid-template-columns: 1fr;
   }
 

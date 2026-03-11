@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, query, setDoc, where } from "firebase/firestore";
+import { collection, collectionGroup, doc, getDocs, query, setDoc, where } from "firebase/firestore";
 
 import type { CourseForgeEntityMap } from "../models";
 import { getAll, save, STORE_NAMES } from "./db";
@@ -9,6 +9,10 @@ import { useUIStore } from "../../webapp/store/uiStore";
 
 type SyncStoreName = "textbooks" | "chapters" | "sections" | "vocabTerms";
 type SyncEntity = CourseForgeEntityMap[SyncStoreName];
+type HierarchyIndexes = {
+  chapterById: Map<string, CourseForgeEntityMap["chapters"]>;
+  sectionById: Map<string, CourseForgeEntityMap["sections"]>;
+};
 
 const SYNC_STORES: SyncStoreName[] = [
   STORE_NAMES.textbooks,
@@ -18,16 +22,30 @@ const SYNC_STORES: SyncStoreName[] = [
 ];
 
 const WRITE_LOOP_WINDOW_MS = 500;
+// Prevent back-to-back sync invocations from flooding Firestore writes.
 const SYNC_THROTTLE_MS = 5000;
+// Session budget guardrail to avoid runaway browser-side sync writes.
+const DEFAULT_WRITE_BUDGET_LIMIT = Number(import.meta.env.VITE_SYNC_WRITE_BUDGET ?? "500");
+const DEFAULT_RETRY_LIMIT = 3;
+const WRITE_BUDGET_WARNING = "Cloud sync paused to prevent excessive writes. Please review your data or try again later.";
 
 const recentWrites = new Map<string, number>();
 let lastSyncAttemptAt = 0;
 let writeLoopTriggered = false;
+let writeBudgetExceeded = false;
+let sessionWriteCount = 0;
 let syncContext: { uid: string | null; isAdmin: boolean | null } = { uid: null, isAdmin: null };
 
 interface SyncErrorLike {
   code?: string;
   message?: string;
+}
+
+interface SyncNowDependencies {
+  nowFn?: () => number;
+  getCurrentUserFn?: () => { uid?: string | null } | null;
+  getPendingSyncDiagnosticsFn?: typeof getPendingSyncDiagnostics;
+  syncUserDataFn?: typeof syncUserData;
 }
 
 function getErrorCode(error: unknown): string {
@@ -43,6 +61,7 @@ export function logSyncEvent(type: string, path: string, payload: unknown, error
     type,
     path,
     payload,
+    success: !error,
     uid: syncContext.uid,
     isAdmin: syncContext.isAdmin,
     timestamp: new Date().toISOString(),
@@ -68,6 +87,7 @@ function shouldSkipWriteForLoop(path: string): boolean {
 
   if (previous && now - previous < WRITE_LOOP_WINDOW_MS) {
     writeLoopTriggered = true;
+    console.warn(`[CourseForge sync] Write loop protection triggered for ${path}`);
     logSyncEvent("write:loop-protected", path, {
       previousTimestamp: previous,
       currentTimestamp: now,
@@ -80,10 +100,43 @@ function shouldSkipWriteForLoop(path: string): boolean {
   return false;
 }
 
+function hasWriteBudgetCapacity(path: string, payload: unknown): boolean {
+  if (writeBudgetExceeded || sessionWriteCount >= DEFAULT_WRITE_BUDGET_LIMIT) {
+    writeBudgetExceeded = true;
+    logSyncEvent("write:budget-exceeded", path, {
+      payload,
+      writeCount: sessionWriteCount,
+      writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+    });
+    return false;
+  }
+
+  return true;
+}
+
 export function consumeWriteLoopTriggered(): boolean {
   const wasTriggered = writeLoopTriggered;
   writeLoopTriggered = false;
   return wasTriggered;
+}
+
+/**
+ * Test-only helper to keep sync safety tests deterministic.
+ */
+export function resetSyncSafetyStateForTests(): void {
+  recentWrites.clear();
+  lastSyncAttemptAt = 0;
+  writeLoopTriggered = false;
+  writeBudgetExceeded = false;
+  sessionWriteCount = 0;
+}
+
+/**
+ * Test-only helper to simulate budget exhaustion without mutating Firestore.
+ */
+export function setWriteBudgetStateForTests(exceeded: boolean, writeCount = DEFAULT_WRITE_BUDGET_LIMIT): void {
+  writeBudgetExceeded = exceeded;
+  sessionWriteCount = writeCount;
 }
 
 export async function getPendingSyncDiagnostics(): Promise<{ pendingCount: number; byStore: Record<SyncStoreName, number> }> {
@@ -159,6 +212,93 @@ function toIsoNow(): string {
   return new Date().toISOString();
 }
 
+function isForbiddenUserScopedPath(path: string): boolean {
+  return path.startsWith("users/");
+}
+
+function stripLegacyUserScopedKeys<T extends Record<string, unknown>>(value: T): T {
+  const next = { ...value } as Record<string, unknown>;
+  delete next.syncPath;
+  delete next.firestorePath;
+  delete next.userScopedPath;
+  delete next.cloudPath;
+  return next as T;
+}
+
+function getDocPathFromStoreItem(
+  storeName: SyncStoreName,
+  item: SyncEntity,
+  indexes: HierarchyIndexes
+): { path: string; payload: Record<string, unknown> } | null {
+  if (storeName === STORE_NAMES.textbooks) {
+    return {
+      path: `textbooks/${item.id}`,
+      payload: item as unknown as Record<string, unknown>,
+    };
+  }
+
+  if (storeName === STORE_NAMES.chapters) {
+    const chapter = item as CourseForgeEntityMap["chapters"];
+    if (!chapter.textbookId) {
+      logSyncEvent("write:skip-missing-textbook", `chapters/${chapter.id}`, chapter);
+      return null;
+    }
+
+    return {
+      path: `textbooks/${chapter.textbookId}/chapters/${chapter.id}`,
+      payload: chapter as unknown as Record<string, unknown>,
+    };
+  }
+
+  if (storeName === STORE_NAMES.sections) {
+    const section = item as CourseForgeEntityMap["sections"];
+    if (!section.chapterId) {
+      logSyncEvent("write:skip-missing-chapter", `sections/${section.id}`, section);
+      return null;
+    }
+
+    const chapter = indexes.chapterById.get(section.chapterId);
+    const textbookId = section.textbookId ?? chapter?.textbookId;
+
+    if (!textbookId) {
+      logSyncEvent("write:skip-missing-textbook", `sections/${section.id}`, section);
+      return null;
+    }
+
+    return {
+      path: `textbooks/${textbookId}/chapters/${section.chapterId}/sections/${section.id}`,
+      payload: {
+        ...section,
+        textbookId,
+      } as Record<string, unknown>,
+    };
+  }
+
+  const vocab = item as CourseForgeEntityMap["vocabTerms"];
+  if (!vocab.sectionId) {
+    logSyncEvent("write:skip-missing-section", `vocab/${vocab.id}`, vocab);
+    return null;
+  }
+
+  const section = indexes.sectionById.get(vocab.sectionId);
+  const chapterId = vocab.chapterId ?? section?.chapterId;
+  const textbookId = vocab.textbookId ?? section?.textbookId;
+
+  if (!chapterId || !textbookId) {
+    logSyncEvent("write:skip-missing-hierarchy", `vocab/${vocab.id}`, vocab);
+    return null;
+  }
+
+  return {
+    path: `textbooks/${textbookId}/chapters/${chapterId}/sections/${vocab.sectionId}/vocab/${vocab.id}`,
+    payload: {
+      ...vocab,
+      chapterId,
+      textbookId,
+    } as Record<string, unknown>,
+  };
+}
+
 function withSyncDefaults<T extends SyncEntity>(
   item: T,
   source: "local" | "cloud",
@@ -176,22 +316,69 @@ function withSyncDefaults<T extends SyncEntity>(
   };
 }
 
-function userCollection(storeName: SyncStoreName, userId: string) {
-  return collection(firestoreDb, "users", userId, storeName);
-}
-
 async function fetchCloudStore<T extends SyncStoreName>(
   storeName: T,
   userId: string
 ): Promise<Array<CourseForgeEntityMap[T]>> {
-  const path = `users/${userId}/${storeName}`;
+  const path = `cloud/${storeName}`;
   logSyncEvent("read:start", path, { userId, storeName });
-  const snapshot = await getDocs(userCollection(storeName, userId));
+
+  const snapshot = await (async () => {
+    if (storeName === STORE_NAMES.textbooks) {
+      return getDocs(query(collection(firestoreDb, "textbooks"), where("userId", "==", userId)));
+    }
+
+    if (storeName === STORE_NAMES.chapters) {
+      return getDocs(query(collectionGroup(firestoreDb, "chapters"), where("userId", "==", userId)));
+    }
+
+    if (storeName === STORE_NAMES.sections) {
+      return getDocs(query(collectionGroup(firestoreDb, "sections"), where("userId", "==", userId)));
+    }
+
+    return getDocs(query(collectionGroup(firestoreDb, "vocab"), where("userId", "==", userId)));
+  })();
+
   logSyncEvent("read:success", path, { docs: snapshot.size });
 
   return snapshot.docs.map((docSnapshot) => {
-    const data = docSnapshot.data() as CourseForgeEntityMap[T];
-    const withId = { ...data, id: docSnapshot.id, userId } as CourseForgeEntityMap[T];
+    const data = docSnapshot.data() as Record<string, unknown>;
+    const parts = docSnapshot.ref.path.split("/");
+
+    let withId: CourseForgeEntityMap[T];
+
+    if (storeName === STORE_NAMES.chapters) {
+      withId = {
+        ...(data as unknown as CourseForgeEntityMap["chapters"]),
+        id: docSnapshot.id,
+        userId,
+        textbookId: (data.textbookId as string | undefined) ?? parts[1],
+      } as CourseForgeEntityMap[T];
+    } else if (storeName === STORE_NAMES.sections) {
+      withId = {
+        ...(data as unknown as CourseForgeEntityMap["sections"]),
+        id: docSnapshot.id,
+        userId,
+        textbookId: (data.textbookId as string | undefined) ?? parts[1],
+        chapterId: (data.chapterId as string | undefined) ?? parts[3],
+      } as CourseForgeEntityMap[T];
+    } else if (storeName === STORE_NAMES.vocabTerms) {
+      withId = {
+        ...(data as unknown as CourseForgeEntityMap["vocabTerms"]),
+        id: docSnapshot.id,
+        userId,
+        textbookId: (data.textbookId as string | undefined) ?? parts[1],
+        chapterId: (data.chapterId as string | undefined) ?? parts[3],
+        sectionId: (data.sectionId as string | undefined) ?? parts[5],
+      } as CourseForgeEntityMap[T];
+    } else {
+      withId = {
+        ...(data as unknown as CourseForgeEntityMap[T]),
+        id: docSnapshot.id,
+        userId,
+      } as CourseForgeEntityMap[T];
+    }
+
     return withSyncDefaults(withId, "cloud", false) as CourseForgeEntityMap[T];
   });
 }
@@ -201,6 +388,82 @@ async function fetchLocalStore<T extends SyncStoreName>(
 ): Promise<Array<CourseForgeEntityMap[T]>> {
   const rows = await getAll(storeName);
   return rows.map((row) => withSyncDefaults(row, "local", true) as CourseForgeEntityMap[T]);
+}
+
+async function migrateLocalHierarchyData(): Promise<void> {
+  const [chapters, sections, vocabTerms] = await Promise.all([
+    fetchLocalStore(STORE_NAMES.chapters),
+    fetchLocalStore(STORE_NAMES.sections),
+    fetchLocalStore(STORE_NAMES.vocabTerms),
+  ]);
+
+  const chapterById = new Map(chapters.map((chapter) => [chapter.id, chapter]));
+  const sectionById = new Map(sections.map((section) => [section.id, section]));
+
+  await Promise.all(
+    chapters.map(async (chapter) => {
+      const cleaned = stripLegacyUserScopedKeys(chapter as unknown as Record<string, unknown>) as unknown as CourseForgeEntityMap["chapters"];
+      if (JSON.stringify(cleaned) !== JSON.stringify(chapter)) {
+        await saveLocalStoreItem(STORE_NAMES.chapters, cleaned);
+      }
+    })
+  );
+
+  await Promise.all(
+    sections.map(async (section) => {
+      const parentChapter = chapterById.get(section.chapterId);
+      const textbookId = section.textbookId ?? parentChapter?.textbookId;
+
+      if (!section.chapterId || !textbookId) {
+        logSyncEvent("migration:skip-section", `sections/${section.id}`, section);
+        return;
+      }
+
+      const cleaned = stripLegacyUserScopedKeys({
+        ...section,
+        textbookId,
+      } as Record<string, unknown>) as unknown as CourseForgeEntityMap["sections"];
+
+      if (JSON.stringify(cleaned) !== JSON.stringify(section)) {
+        await saveLocalStoreItem(STORE_NAMES.sections, cleaned);
+      }
+    })
+  );
+
+  await Promise.all(
+    vocabTerms.map(async (term) => {
+      const parentSection = sectionById.get(term.sectionId);
+      const chapterId = term.chapterId ?? parentSection?.chapterId;
+      const textbookId = term.textbookId ?? parentSection?.textbookId;
+
+      if (!term.sectionId || !chapterId || !textbookId) {
+        logSyncEvent("migration:skip-vocab", `vocab/${term.id}`, term);
+        return;
+      }
+
+      const cleaned = stripLegacyUserScopedKeys({
+        ...term,
+        chapterId,
+        textbookId,
+      } as Record<string, unknown>) as unknown as CourseForgeEntityMap["vocabTerms"];
+
+      if (JSON.stringify(cleaned) !== JSON.stringify(term)) {
+        await saveLocalStoreItem(STORE_NAMES.vocabTerms, cleaned);
+      }
+    })
+  );
+}
+
+async function buildHierarchyIndexes(): Promise<HierarchyIndexes> {
+  const [chapters, sections] = await Promise.all([
+    fetchLocalStore(STORE_NAMES.chapters),
+    fetchLocalStore(STORE_NAMES.sections),
+  ]);
+
+  return {
+    chapterById: new Map(chapters.map((chapter) => [chapter.id, chapter])),
+    sectionById: new Map(sections.map((section) => [section.id, section])),
+  };
 }
 
 async function saveLocalStoreItem<T extends SyncStoreName>(
@@ -213,11 +476,26 @@ async function saveLocalStoreItem<T extends SyncStoreName>(
 async function saveCloudStoreItem<T extends SyncStoreName>(
   storeName: T,
   userId: string,
-  item: CourseForgeEntityMap[T]
+  item: CourseForgeEntityMap[T],
+  indexes: HierarchyIndexes
 ): Promise<boolean> {
-  const path = `users/${userId}/${storeName}/${item.id}`;
+  const resolved = getDocPathFromStoreItem(storeName, item, indexes);
+  if (!resolved) {
+    return false;
+  }
+
+  const path = resolved.path;
+
+  if (isForbiddenUserScopedPath(path)) {
+    logSyncEvent("write:blocked-user-scope", path, resolved.payload, {
+      code: "invalid-sync-path",
+      message: "Blocked user-scoped cloud write path.",
+    });
+    return false;
+  }
+
   const cloudRecord = {
-    ...item,
+    ...resolved.payload,
     userId,
     pendingSync: false,
     source: "cloud",
@@ -228,9 +506,14 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
     return false;
   }
 
+  if (!hasWriteBudgetCapacity(path, cloudRecord)) {
+    return false;
+  }
+
   logSyncEvent("write:start", path, cloudRecord);
   try {
-    await setDoc(doc(firestoreDb, "users", userId, storeName, item.id), cloudRecord, { merge: true });
+    await setDoc(doc(firestoreDb, path), cloudRecord, { merge: true });
+    sessionWriteCount += 1;
     logSyncEvent("write:success", path, { id: item.id });
     return true;
   } catch (error) {
@@ -246,6 +529,9 @@ export async function uploadLocalChanges(userId: string): Promise<void> {
 
   try {
     await logSyncIdentity(userId);
+    await migrateLocalHierarchyData();
+    const indexes = await buildHierarchyIndexes();
+
     await Promise.all(
       SYNC_STORES.map(async (storeName) => {
         const localItems = await fetchLocalStore(storeName);
@@ -263,7 +549,7 @@ export async function uploadLocalChanges(userId: string): Promise<void> {
               lastModified: item.lastModified ?? toIsoNow(),
             } as CourseForgeEntityMap[typeof storeName];
 
-            const wroteToCloud = await saveCloudStoreItem(storeName, userId, synced);
+            const wroteToCloud = await saveCloudStoreItem(storeName, userId, synced, indexes);
             if (wroteToCloud) {
               await saveLocalStoreItem(storeName, synced);
             }
@@ -272,7 +558,7 @@ export async function uploadLocalChanges(userId: string): Promise<void> {
       })
     );
   } catch (error) {
-    logSyncEvent("upload:error", `users/${userId}`, { userId }, error);
+    logSyncEvent("upload:error", "textbooks/*", { userId }, error);
     console.error("uploadLocalChanges failed", error);
     throw new Error(getSyncErrorMessage(error));
   }
@@ -308,7 +594,7 @@ export async function downloadCloudData(userId: string): Promise<void> {
       })
     );
   } catch (error) {
-    logSyncEvent("download:error", `users/${userId}`, { userId }, error);
+    logSyncEvent("download:error", "textbooks/*", { userId }, error);
     console.error("downloadCloudData failed", error);
     throw new Error(getSyncErrorMessage(error));
   }
@@ -321,8 +607,11 @@ export async function syncUserData(userId: string): Promise<void> {
 
   try {
     await logSyncIdentity(userId);
+    await migrateLocalHierarchyData();
+    const indexes = await buildHierarchyIndexes();
+
     const before = await getPendingSyncDiagnostics();
-    logSyncEvent("sync:start", `users/${userId}`, { userId, pendingBefore: before.pendingCount });
+    logSyncEvent("sync:start", "textbooks/*", { userId, pendingBefore: before.pendingCount });
 
     await Promise.all(
       SYNC_STORES.map(async (storeName) => {
@@ -371,7 +660,7 @@ export async function syncUserData(userId: string): Promise<void> {
                 false
               ) as CourseForgeEntityMap[typeof storeName];
 
-              const wroteToCloud = await saveCloudStoreItem(storeName, userId, localWinner);
+              const wroteToCloud = await saveCloudStoreItem(storeName, userId, localWinner, indexes);
               if (wroteToCloud) {
                 await saveLocalStoreItem(storeName, localWinner);
               }
@@ -390,7 +679,7 @@ export async function syncUserData(userId: string): Promise<void> {
                 false
               ) as CourseForgeEntityMap[typeof storeName];
 
-              const wroteToCloud = await saveCloudStoreItem(storeName, userId, localOnly);
+              const wroteToCloud = await saveCloudStoreItem(storeName, userId, localOnly, indexes);
               if (wroteToCloud) {
                 await saveLocalStoreItem(storeName, localOnly);
               }
@@ -417,26 +706,35 @@ export async function syncUserData(userId: string): Promise<void> {
     );
 
     const after = await getPendingSyncDiagnostics();
-    logSyncEvent("sync:success", `users/${userId}`, { userId, pendingAfter: after.pendingCount, byStore: after.byStore });
+    logSyncEvent("sync:success", "textbooks/*", { userId, pendingAfter: after.pendingCount, byStore: after.byStore });
   } catch (error) {
-    logSyncEvent("sync:error", `users/${userId}`, { userId, code: getErrorCode(error) }, error);
+    logSyncEvent("sync:error", "textbooks/*", { userId, code: getErrorCode(error) }, error);
     console.error("syncUserData failed", error);
     throw new Error(getSyncErrorMessage(error));
   }
 }
 
-export async function syncNow(): Promise<{
+export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
   success: boolean;
   message: string;
   retryable: boolean;
   permissionDenied: boolean;
   throttled: boolean;
   writeLoopTriggered: boolean;
+  writeBudgetExceeded: boolean;
+  writeCount: number;
+  writeBudgetLimit: number;
+  retryLimit: number;
+  errorCode: string | null;
   pendingCount: number;
 }> {
-  const now = Date.now();
+  const now = deps.nowFn ? deps.nowFn() : Date.now();
+  const getPending = deps.getPendingSyncDiagnosticsFn ?? getPendingSyncDiagnostics;
+  const getUser = deps.getCurrentUserFn ?? getCurrentUser;
+  const runSyncUserData = deps.syncUserDataFn ?? syncUserData;
+
   if (now - lastSyncAttemptAt < SYNC_THROTTLE_MS) {
-    const pending = await getPendingSyncDiagnostics();
+    const pending = await getPending();
     return {
       success: false,
       message: "Sync skipped to avoid excessive write frequency.",
@@ -444,15 +742,20 @@ export async function syncNow(): Promise<{
       permissionDenied: false,
       throttled: true,
       writeLoopTriggered: consumeWriteLoopTriggered(),
+      writeBudgetExceeded,
+      writeCount: sessionWriteCount,
+      writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      retryLimit: DEFAULT_RETRY_LIMIT,
+      errorCode: null,
       pendingCount: pending.pendingCount,
     };
   }
 
   lastSyncAttemptAt = now;
-  const user = getCurrentUser();
+  const user = getUser();
 
   if (!user?.uid) {
-    const pending = await getPendingSyncDiagnostics();
+    const pending = await getPending();
     return {
       success: false,
       message: "Sign in to sync your local data with the cloud.",
@@ -460,13 +763,54 @@ export async function syncNow(): Promise<{
       permissionDenied: false,
       throttled: false,
       writeLoopTriggered: consumeWriteLoopTriggered(),
+      writeBudgetExceeded,
+      writeCount: sessionWriteCount,
+      writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      retryLimit: DEFAULT_RETRY_LIMIT,
+      errorCode: null,
+      pendingCount: pending.pendingCount,
+    };
+  }
+
+  if (writeBudgetExceeded) {
+    const pending = await getPending();
+    return {
+      success: false,
+      message: WRITE_BUDGET_WARNING,
+      retryable: false,
+      permissionDenied: false,
+      throttled: false,
+      writeLoopTriggered: consumeWriteLoopTriggered(),
+      writeBudgetExceeded: true,
+      writeCount: sessionWriteCount,
+      writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      retryLimit: DEFAULT_RETRY_LIMIT,
+      errorCode: null,
       pendingCount: pending.pendingCount,
     };
   }
 
   try {
-    await syncUserData(user.uid);
-    const pending = await getPendingSyncDiagnostics();
+    await runSyncUserData(user.uid);
+    const pending = await getPending();
+
+    if (writeBudgetExceeded) {
+      return {
+        success: false,
+        message: WRITE_BUDGET_WARNING,
+        retryable: false,
+        permissionDenied: false,
+        throttled: false,
+        writeLoopTriggered: consumeWriteLoopTriggered(),
+        writeBudgetExceeded: true,
+        writeCount: sessionWriteCount,
+        writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+        retryLimit: DEFAULT_RETRY_LIMIT,
+        errorCode: null,
+        pendingCount: pending.pendingCount,
+      };
+    }
+
     return {
       success: true,
       message: "Sync completed successfully.",
@@ -474,12 +818,18 @@ export async function syncNow(): Promise<{
       permissionDenied: false,
       throttled: false,
       writeLoopTriggered: consumeWriteLoopTriggered(),
+      writeBudgetExceeded: false,
+      writeCount: sessionWriteCount,
+      writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      retryLimit: DEFAULT_RETRY_LIMIT,
+      errorCode: null,
       pendingCount: pending.pendingCount,
     };
   } catch (error) {
-    const pending = await getPendingSyncDiagnostics();
+    const pending = await getPending();
     const permissionDenied = isPermissionDenied(error);
     const retryable = isNetworkFailure(error);
+    const errorCode = getErrorCode(error);
 
     return {
       success: false,
@@ -488,6 +838,11 @@ export async function syncNow(): Promise<{
       permissionDenied,
       throttled: false,
       writeLoopTriggered: consumeWriteLoopTriggered(),
+      writeBudgetExceeded,
+      writeCount: sessionWriteCount,
+      writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      retryLimit: DEFAULT_RETRY_LIMIT,
+      errorCode,
       pendingCount: pending.pendingCount,
     };
   }
@@ -501,10 +856,10 @@ export async function findCloudTextbookByISBN(userId: string, isbnInput: string)
     return null;
   }
 
-  const textbooksRef = userCollection(STORE_NAMES.textbooks, userId);
+  const textbooksRef = collection(firestoreDb, "textbooks");
 
-  const rawPath = `users/${userId}/textbooks?isbnRaw=${raw}`;
-  const normalizedPath = `users/${userId}/textbooks?isbnNormalized=${normalized}`;
+  const rawPath = `textbooks?userId=${userId}&isbnRaw=${raw}`;
+  const normalizedPath = `textbooks?userId=${userId}&isbnNormalized=${normalized}`;
 
   logSyncEvent("read:start", rawPath, { userId, isbnRaw: raw });
   if (normalized) {
@@ -512,9 +867,9 @@ export async function findCloudTextbookByISBN(userId: string, isbnInput: string)
   }
 
   const [rawMatches, normalizedMatches] = await Promise.all([
-    getDocs(query(textbooksRef, where("isbnRaw", "==", raw))),
+    getDocs(query(textbooksRef, where("userId", "==", userId), where("isbnRaw", "==", raw))),
     normalized
-      ? getDocs(query(textbooksRef, where("isbnNormalized", "==", normalized)))
+      ? getDocs(query(textbooksRef, where("userId", "==", userId), where("isbnNormalized", "==", normalized)))
       : Promise.resolve(null),
   ]);
 

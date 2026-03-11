@@ -43,6 +43,9 @@ export function App(): React.JSX.Element {
         <Route path="/" element={<Navigate to="/textbooks" replace />} />
         <Route path="/textbooks" element={<TextbookWorkspace />} />
         <Route path="/textbooks/:id" element={<TextbookWorkspace />} />
+        <Route path="/textbooks/:id/chapters/:chapterId" element={<TextbookWorkspace />} />
+        <Route path="/textbooks/:id/chapters/:chapterId/sections/:sectionId" element={<TextbookWorkspace />} />
+        <Route path="/textbooks/:id/chapters/:chapterId/sections/:sectionId/:contentTab" element={<TextbookWorkspace />} />
         <Route path="/settings" element={<TextbookWorkspace showSettingsPage />} />
 
         <Route element={<RequireAdmin />}>

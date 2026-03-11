@@ -281,12 +281,15 @@ export function useRepositories() {
 
   const createEquation = useCallback(async (input: CreateEquationInput): Promise<string> => {
     const equation = buildEquationFromInput(input);
-    return saveEquation(equation);
-  }, []);
+    const id = await saveEquation(equation);
+    markLocalChange();
+    return id;
+  }, [markLocalChange]);
 
   const removeEquation = useCallback(async (id: string): Promise<void> => {
     await deleteEquation(id);
-  }, []);
+    markLocalChange();
+  }, [markLocalChange]);
 
   const fetchConceptsBySectionId = useCallback(async (sectionId: string): Promise<Concept[]> => {
     return listConceptsBySectionId(sectionId);
@@ -294,12 +297,15 @@ export function useRepositories() {
 
   const createConcept = useCallback(async (input: CreateConceptInput): Promise<string> => {
     const concept = buildConceptFromInput(input);
-    return saveConcept(concept);
-  }, []);
+    const id = await saveConcept(concept);
+    markLocalChange();
+    return id;
+  }, [markLocalChange]);
 
   const removeConcept = useCallback(async (id: string): Promise<void> => {
     await deleteConcept(id);
-  }, []);
+    markLocalChange();
+  }, [markLocalChange]);
 
   const fetchKeyIdeasBySectionId = useCallback(async (sectionId: string): Promise<KeyIdea[]> => {
     return listKeyIdeasBySectionId(sectionId);
@@ -307,12 +313,15 @@ export function useRepositories() {
 
   const createKeyIdea = useCallback(async (input: CreateKeyIdeaInput): Promise<string> => {
     const keyIdea = buildKeyIdeaFromInput(input);
-    return saveKeyIdea(keyIdea);
-  }, []);
+    const id = await saveKeyIdea(keyIdea);
+    markLocalChange();
+    return id;
+  }, [markLocalChange]);
 
   const removeKeyIdea = useCallback(async (id: string): Promise<void> => {
     await deleteKeyIdea(id);
-  }, []);
+    markLocalChange();
+  }, [markLocalChange]);
 
   return {
     fetchTextbooks,

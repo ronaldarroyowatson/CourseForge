@@ -274,6 +274,15 @@ body {
   padding: 0.5rem;
 }
 
+.form-grid select {
+  width: 100%;
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border-radius: 6px;
+  padding: 0.5rem;
+}
+
 .form-grid button,
 .textbook-row button {
   border: 1px solid var(--border-strong);
@@ -493,6 +502,34 @@ body {
 
 .sync-indicator--synced {
   color: var(--success-color);
+}
+
+.content-workspace {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.section-nav-panel h3 {
+  margin-bottom: 0.6rem;
+}
+
+.nav-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.nav-button-row:last-child {
+  margin-bottom: 0;
+}
+
+.content-grid {
+  margin-top: 0;
+}
+
+.content-list {
+  margin-top: 0.75rem;
 }
 
 .settings-page {
@@ -863,6 +900,10 @@ body {
 
   .admin-filter-bar {
     grid-template-columns: 1fr;
+  }
+
+  .nav-button-row {
+    flex-direction: column;
   }
 
   .admin-queue-item {

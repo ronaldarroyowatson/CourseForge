@@ -1,20 +1,23 @@
 import React from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
-import type { Textbook } from "../../../core/models";
+import type { Chapter, Section, Textbook } from "../../../core/models";
 import { initDB } from "../../../core/services/db";
 import { getAll as getAllTextbooks } from "../../../core/services/repositories/textbookRepository";
 import { signOutCurrentUser } from "../../../firebase/auth";
+import { useRepositories } from "../../hooks/useRepositories";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 import { ChapterForm } from "../chapters/ChapterForm";
 import { ChapterList } from "../chapters/ChapterList";
+import { SectionContentPanel, type ContentPanelTab } from "../content/SectionContentPanel";
 import { AccordionTile } from "../layout/AccordionTile";
 import { Header } from "../layout/Header";
 import { Sidebar } from "../layout/Sidebar";
 import { WorkflowRibbon, type WorkflowTab } from "../layout/WorkflowRibbon";
 import { SectionForm } from "../sections/SectionForm";
 import { SectionList } from "../sections/SectionList";
+import { SectionNavigationBar } from "../sections/SectionNavigationBar";
 import { SettingsPage } from "../settings/SettingsPage";
 import { TextbookForm } from "../textbooks/TextbookForm";
 import { TextbookList } from "../textbooks/TextbookList";
@@ -30,12 +33,14 @@ interface TextbookWorkspaceProps {
 }
 
 export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = false }: TextbookWorkspaceProps): React.JSX.Element {
+  const location = useLocation();
   const navigate = useNavigate();
-  const params = useParams<{ id: string }>();
+  const params = useParams<{ id: string; chapterId?: string; sectionId?: string; contentTab?: string }>();
   const currentUserId = useAuthStore((state) => state.userId);
   const currentUserEmail = useAuthStore((state) => state.userEmail);
   const isAdmin = useAuthStore((state) => state.isAdmin);
   const { syncStatus, syncMessage } = useUIStore();
+  const { fetchChaptersByTextbookId, fetchSectionsByChapterId } = useRepositories();
 
   const [isSigningOut, setIsSigningOut] = React.useState(false);
   const [signOutError, setSignOutError] = React.useState<string | null>(null);
@@ -48,8 +53,56 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
   const [selectedTextbookId, setSelectedTextbookId] = React.useState<string | null>(null);
   const [selectedChapterId, setSelectedChapterId] = React.useState<string | null>(null);
   const [selectedSectionId, setSelectedSectionId] = React.useState<string | null>(null);
+  const [chapters, setChapters] = React.useState<Chapter[]>([]);
+  const [sections, setSections] = React.useState<Section[]>([]);
+  const [activeContentPanel, setActiveContentPanel] = React.useState<ContentPanelTab>("vocab");
+  const [workflowNotice, setWorkflowNotice] = React.useState<string | null>(null);
   const [activeWorkflowTab, setActiveWorkflowTab] = React.useState<WorkflowTab>("textbook");
   const [expandedTile, setExpandedTile] = React.useState<WorkflowTab | null>("textbook");
+  const sectionPanelRef = React.useRef<HTMLDivElement | null>(null);
+
+  const selectedChapter = React.useMemo(
+    () => chapters.find((chapter) => chapter.id === selectedChapterId) ?? null,
+    [chapters, selectedChapterId]
+  );
+  const selectedSection = React.useMemo(
+    () => sections.find((section) => section.id === selectedSectionId) ?? null,
+    [sections, selectedSectionId]
+  );
+  const selectedSectionIndex = React.useMemo(
+    () => sections.findIndex((section) => section.id === selectedSectionId),
+    [sections, selectedSectionId]
+  );
+  const previousSection = selectedSectionIndex > 0 ? sections[selectedSectionIndex - 1] : null;
+  const nextSection = selectedSectionIndex >= 0 && selectedSectionIndex < sections.length - 1
+    ? sections[selectedSectionIndex + 1]
+    : null;
+
+  function scrollToSectionPanel(): void {
+    window.requestAnimationFrame(() => {
+      sectionPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  function expandSection(sectionId: string, workflow: "sections" | "content" = "sections"): void {
+    setSelectedSectionId(sectionId);
+    setExpandedTile(workflow === "sections" ? "sections" : "content");
+    setActiveWorkflowTab(workflow);
+    setWorkflowNotice(null);
+    scrollToSectionPanel();
+  }
+
+  function toContentPanel(value: string | undefined): ContentPanelTab {
+    if (value === "equations") {
+      return "equations";
+    }
+
+    if (value === "concepts") {
+      return "concepts";
+    }
+
+    return "vocab";
+  }
 
   React.useEffect(() => {
     let isMounted = true;
@@ -86,10 +139,16 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
   }, [textbookRefreshKey]);
 
   React.useEffect(() => {
+    if (showAdminPage || showSettingsPage) {
+      return;
+    }
+
     if (!params.id) {
       setSelectedTextbookId(null);
       setSelectedChapterId(null);
       setSelectedSectionId(null);
+      setChapters([]);
+      setSections([]);
       setActiveWorkflowTab("textbook");
       setExpandedTile("textbook");
       return;
@@ -106,11 +165,117 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
     }
 
     setSelectedTextbookId(matchingTextbook.id);
+    if (params.chapterId) {
+      setSelectedChapterId(params.chapterId);
+
+      if (params.sectionId) {
+        setSelectedSectionId(params.sectionId);
+        if (params.contentTab) {
+          setActiveContentPanel(toContentPanel(params.contentTab));
+          setActiveWorkflowTab("content");
+          setExpandedTile("content");
+        } else {
+          setActiveWorkflowTab("sections");
+          setExpandedTile("sections");
+        }
+      } else {
+        setSelectedSectionId(null);
+        setActiveWorkflowTab("sections");
+        setExpandedTile("sections");
+      }
+      return;
+    }
+
     setSelectedChapterId(null);
     setSelectedSectionId(null);
     setActiveWorkflowTab("chapters");
     setExpandedTile("chapters");
-  }, [params.id, isLoadingTextbooks, navigate, textbooks]);
+  }, [params.id, params.chapterId, params.sectionId, params.contentTab, isLoadingTextbooks, navigate, showAdminPage, showSettingsPage, textbooks]);
+
+  React.useEffect(() => {
+    let isMounted = true;
+
+    async function loadChapters(): Promise<void> {
+      if (!selectedTextbookId) {
+        setChapters([]);
+        return;
+      }
+
+      const rows = await fetchChaptersByTextbookId(selectedTextbookId);
+      if (!isMounted) {
+        return;
+      }
+
+      const sortedRows = [...rows].sort((left, right) => left.index - right.index);
+      setChapters(sortedRows);
+      if (selectedChapterId && !sortedRows.some((chapter) => chapter.id === selectedChapterId)) {
+        setSelectedChapterId(null);
+        setSelectedSectionId(null);
+      }
+    }
+
+    void loadChapters();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchChaptersByTextbookId, selectedTextbookId, selectedChapterId, chapterRefreshKey]);
+
+  React.useEffect(() => {
+    let isMounted = true;
+
+    async function loadSections(): Promise<void> {
+      if (!selectedChapterId) {
+        setSections([]);
+        return;
+      }
+
+      const rows = await fetchSectionsByChapterId(selectedChapterId);
+      if (!isMounted) {
+        return;
+      }
+
+      const sortedRows = [...rows].sort((left, right) => left.index - right.index);
+      setSections(sortedRows);
+      if (selectedSectionId && !sortedRows.some((section) => section.id === selectedSectionId)) {
+        setSelectedSectionId(null);
+      }
+    }
+
+    void loadSections();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchSectionsByChapterId, selectedChapterId, selectedSectionId, sectionRefreshKey]);
+
+  React.useEffect(() => {
+    if (showAdminPage || showSettingsPage) {
+      return;
+    }
+
+    let targetPath = "/textbooks";
+
+    if (selectedTextbookId) {
+      targetPath = `/textbooks/${selectedTextbookId}`;
+    }
+
+    if (selectedTextbookId && selectedChapterId) {
+      targetPath = `/textbooks/${selectedTextbookId}/chapters/${selectedChapterId}`;
+    }
+
+    if (selectedTextbookId && selectedChapterId && selectedSectionId) {
+      targetPath = `/textbooks/${selectedTextbookId}/chapters/${selectedChapterId}/sections/${selectedSectionId}`;
+
+      if (activeWorkflowTab === "content") {
+        targetPath = `${targetPath}/${activeContentPanel}`;
+      }
+    }
+
+    if (location.pathname !== targetPath) {
+      navigate(targetPath, { replace: true });
+    }
+  }, [activeContentPanel, activeWorkflowTab, location.pathname, navigate, selectedChapterId, selectedSectionId, selectedTextbookId, showAdminPage, showSettingsPage]);
 
   React.useEffect(() => {
     if (!selectedTextbookId) {
@@ -138,6 +303,11 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
       setActiveWorkflowTab(selectedTextbookId ? "chapters" : "textbook");
       setExpandedTile(selectedTextbookId ? "chapters" : "textbook");
     }
+
+    if (!selectedChapterId && activeWorkflowTab === "content") {
+      setActiveWorkflowTab(selectedTextbookId ? "chapters" : "textbook");
+      setExpandedTile(selectedTextbookId ? "chapters" : "textbook");
+    }
   }, [activeWorkflowTab, selectedChapterId, selectedTextbookId]);
 
   function handleTextbookSaved(): void {
@@ -147,16 +317,61 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
     setExpandedTile("textbook");
   }
 
-  function handleChapterSaved(): void {
-    setChapterRefreshKey((current) => current + 1);
+  async function handleContinueToSections(): Promise<void> {
+    if (!selectedTextbookId) {
+      setWorkflowNotice("Select a textbook first.");
+      return;
+    }
+
+    const textbookChapters = await fetchChaptersByTextbookId(selectedTextbookId);
+    const sortedChapters = [...textbookChapters].sort((left, right) => left.index - right.index);
+
+    if (sortedChapters.length === 0) {
+      setSelectedChapterId(null);
+      setSelectedSectionId(null);
+      setActiveWorkflowTab("chapters");
+      setExpandedTile("chapters");
+      setWorkflowNotice("Create a chapter first, then continue to sections.");
+      return;
+    }
+
+    const chapterToUse = sortedChapters.find((chapter) => chapter.id === selectedChapterId) ?? sortedChapters[0];
+    setSelectedChapterId(chapterToUse.id);
+
+    const chapterSections = await fetchSectionsByChapterId(chapterToUse.id);
+    const sortedSections = [...chapterSections].sort((left, right) => left.index - right.index);
+
+    if (sortedSections.length === 0) {
+      setSelectedSectionId(null);
+      setActiveWorkflowTab("sections");
+      setExpandedTile("sections");
+      scrollToSectionPanel();
+      setWorkflowNotice("Create a section for this chapter to continue to content panels.");
+      return;
+    }
+
+    expandSection(sortedSections[0].id, "sections");
   }
 
-  function handleSectionSaved(): void {
+  function handleChapterSaved(chapterId: string): void {
+    setChapterRefreshKey((current) => current + 1);
+    setSelectedChapterId(chapterId);
+    setSelectedSectionId(null);
+    setActiveWorkflowTab("sections");
+    setExpandedTile("sections");
+  }
+
+  function handleSectionSaved(sectionId: string): void {
     setSectionRefreshKey((current) => current + 1);
+    expandSection(sectionId, "sections");
   }
 
   function handleTextbookSelected(id: string): void {
-    navigate(`/textbooks/${id}`);
+    setSelectedTextbookId(id);
+    setSelectedChapterId(null);
+    setSelectedSectionId(null);
+    setActiveWorkflowTab("chapters");
+    setExpandedTile("chapters");
   }
 
   function handleChapterSelected(id: string): void {
@@ -164,6 +379,50 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
     setSelectedSectionId(null);
     setActiveWorkflowTab("sections");
     setExpandedTile("sections");
+  }
+
+  function handleSectionSelected(id: string | null): void {
+    if (!id) {
+      setSelectedSectionId(null);
+      setActiveWorkflowTab("sections");
+      setExpandedTile("sections");
+      return;
+    }
+
+    expandSection(id, "sections");
+  }
+
+  function handleSectionSelectedById(id: string): void {
+    expandSection(id, "sections");
+  }
+
+  function handleContentSectionSelectedById(id: string): void {
+    expandSection(id, "content");
+  }
+
+  function handleOpenContent(panel: ContentPanelTab): void {
+    setActiveContentPanel(panel);
+    setActiveWorkflowTab("content");
+    setExpandedTile("content");
+    setWorkflowNotice(null);
+  }
+
+  function handleBackToSections(): void {
+    setActiveWorkflowTab("sections");
+    setExpandedTile("sections");
+    scrollToSectionPanel();
+  }
+
+  function handleFallbackChapterSelected(id: string | null): void {
+    setSelectedChapterId(id);
+    setSelectedSectionId(null);
+
+    if (id) {
+      setActiveWorkflowTab("sections");
+      return;
+    }
+
+    setActiveWorkflowTab(selectedTextbookId ? "chapters" : "textbook");
   }
 
   function handleTextbookDeleted(id: string): void {
@@ -210,6 +469,9 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
               loadError={textbookLoadError}
               selectedTextbookId={selectedTextbookId}
               onSelectTextbook={handleTextbookSelected}
+              onContinueToSections={() => {
+                void handleContinueToSections();
+              }}
               onDeleted={handleTextbookDeleted}
               onRefresh={() => setTextbookRefreshKey((current) => current + 1)}
             />
@@ -245,25 +507,61 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
 
     if (activeWorkflowTab === "sections" && selectedChapterId) {
       return (
+        <div ref={sectionPanelRef}>
+          <AccordionTile
+            title="Sections"
+            summary="Add the next section for the selected chapter."
+            isExpanded={expandedTile === "sections"}
+            onToggle={() => setExpandedTile((current) => current === "sections" ? null : "sections")}
+          >
+            <div className="panel-grid">
+              <SectionNavigationBar
+                selectedSection={selectedSection}
+                previousSection={previousSection}
+                nextSection={nextSection}
+                onSelectSection={handleSectionSelectedById}
+                onOpenContent={handleOpenContent}
+              />
+              <SectionForm
+                selectedChapterId={selectedChapterId}
+                refreshKey={sectionRefreshKey}
+                onSaved={handleSectionSaved}
+              />
+              <SectionList
+                selectedChapterId={selectedChapterId}
+                selectedSectionId={selectedSectionId}
+                onSelectSection={handleSectionSelected}
+                refreshKey={sectionRefreshKey}
+              />
+            </div>
+          </AccordionTile>
+        </div>
+      );
+    }
+
+    if (activeWorkflowTab === "content" && selectedTextbookId && selectedChapterId) {
+      return (
         <AccordionTile
-          title="Sections"
-          summary="Add the next section for the selected chapter."
-          isExpanded={expandedTile === "sections"}
-          onToggle={() => setExpandedTile((current) => current === "sections" ? null : "sections")}
+          title="Section Content"
+          summary="Add vocab, equations, concepts, and key ideas for the selected section."
+          isExpanded={expandedTile === "content"}
+          onToggle={() => setExpandedTile((current) => current === "content" ? null : "content")}
         >
-          <div className="panel-grid">
-            <SectionForm
-              selectedChapterId={selectedChapterId}
-              refreshKey={sectionRefreshKey}
-              onSaved={handleSectionSaved}
-            />
-            <SectionList
-              selectedChapterId={selectedChapterId}
-              selectedSectionId={selectedSectionId}
-              onSelectSection={setSelectedSectionId}
-              refreshKey={sectionRefreshKey}
-            />
-          </div>
+          <SectionContentPanel
+            selectedTextbookId={selectedTextbookId}
+            selectedChapterId={selectedChapterId}
+            selectedSectionId={selectedSectionId}
+            selectedChapter={selectedChapter}
+            selectedSection={selectedSection}
+            previousSection={previousSection}
+            nextSection={nextSection}
+            activePanel={activeContentPanel}
+            onSelectChapter={handleFallbackChapterSelected}
+            onSelectSection={handleSectionSelected}
+            onSelectSectionById={handleContentSectionSelectedById}
+            onBackToSections={handleBackToSections}
+            onSelectPanel={handleOpenContent}
+          />
         </AccordionTile>
       );
     }
@@ -299,6 +597,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
               <h2>Onboarding Workflow</h2>
               <p>Set up textbooks, chapters, and sections in sequence, then continue into section content capture.</p>
               <p><strong>Auth:</strong> {currentUserEmail ?? (currentUserId ? `UID: ${currentUserId}` : "Unknown user")}</p>
+              {workflowNotice ? <p className="sync-indicator">{workflowNotice}</p> : null}
               {syncStatus === "syncing" ? <p className="sync-indicator">Syncing...</p> : null}
               {syncStatus === "synced" ? <p className="sync-indicator sync-indicator--synced">Synced ✓</p> : null}
               {syncStatus === "error" && syncMessage ? <p className="error-text sync-indicator">Sync issue: {syncMessage}</p> : null}
@@ -323,7 +622,11 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
               activeTab={activeWorkflowTab}
               canOpenChapters={selectedTextbookId !== null}
               canOpenSections={selectedChapterId !== null}
+              canOpenContent={selectedSectionId !== null}
               onSelectTab={(tab) => {
+                if (tab === "content" && !selectedSectionId) {
+                  return;
+                }
                 setActiveWorkflowTab(tab);
                 setExpandedTile(tab);
               }}

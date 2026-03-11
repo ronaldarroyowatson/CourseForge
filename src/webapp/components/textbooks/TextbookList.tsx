@@ -13,6 +13,7 @@ interface TextbookListProps {
   loadError: string | null;
   selectedTextbookId: string | null;
   onSelectTextbook: (id: string) => void;
+  onContinueToSections: () => void;
   onDeleted: (id: string) => void;
   onRefresh: () => void;
 }
@@ -47,6 +48,7 @@ export function TextbookList({
   loadError,
   selectedTextbookId,
   onSelectTextbook,
+  onContinueToSections,
   onDeleted,
   onRefresh,
 }: TextbookListProps): React.JSX.Element {
@@ -96,6 +98,17 @@ export function TextbookList({
       {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
 
       {!isLoading && textbooks.length === 0 ? <p>No textbooks yet.</p> : null}
+
+      <div className="nav-button-row">
+        <button
+          type="button"
+          onClick={onContinueToSections}
+          disabled={!selectedTextbookId}
+          aria-label="Continue to sections"
+        >
+          Continue to Sections
+        </button>
+      </div>
 
       <ul className="textbook-list">
         {sorted.map((textbook) => {

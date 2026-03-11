@@ -79,15 +79,15 @@ npm run test:integration
 ### Firestore data paths and rules (v1.1)
 
 - Canonical content paths:
-	- `/textbooks/{textbookId}`
-	- `/textbooks/{textbookId}/chapters/{chapterId}`
-	- `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}`
-	- `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}`
+  - `/textbooks/{textbookId}`
+  - `/textbooks/{textbookId}/chapters/{chapterId}`
+  - `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}`
+  - `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}`
 - Legacy user-scoped subcollection paths are blocked by rules:
-	- `/users/{uid}/textbooks/*`
-	- `/users/{uid}/chapters/*`
-	- `/users/{uid}/sections/*`
-	- `/users/{uid}/vocabTerms/*`
+  - `/users/{uid}/textbooks/*`
+  - `/users/{uid}/chapters/*`
+  - `/users/{uid}/sections/*`
+  - `/users/{uid}/vocabTerms/*`
 - Ownership checks accept `userId` (current schema) and `ownerId` (forward compatibility).
 - Admin write override uses the custom auth claim: `request.auth.token.admin == true`.
 

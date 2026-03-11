@@ -112,10 +112,10 @@ Core entities:
 
 - Local‑first storage (IndexedDB/SQLite) with a simple abstraction in `src/core/services/db.ts`.
 - Cloud sync mirrors textbooks/chapters/sections/vocab to Firestore canonical hierarchy:
-	- `/textbooks/{textbookId}`
-	- `/textbooks/{textbookId}/chapters/{chapterId}`
-	- `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}`
-	- `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}`
+  - `/textbooks/{textbookId}`
+  - `/textbooks/{textbookId}/chapters/{chapterId}`
+  - `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}`
+  - `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}`
 - Firestore security ownership checks accept either `userId` (current) or `ownerId` (compatibility).
 - Legacy user-scoped subcollections are blocked (`/users/{uid}/textbooks|chapters|sections|vocabTerms`).
 - All entities should be easily serializable to XML.

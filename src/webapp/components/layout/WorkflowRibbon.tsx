@@ -1,11 +1,12 @@
 import React from "react";
 
-export type WorkflowTab = "textbook" | "chapters" | "sections";
+export type WorkflowTab = "textbook" | "chapters" | "sections" | "content";
 
 interface WorkflowRibbonProps {
   activeTab: WorkflowTab;
   canOpenChapters: boolean;
   canOpenSections: boolean;
+  canOpenContent: boolean;
   onSelectTab: (tab: WorkflowTab) => void;
 }
 
@@ -13,6 +14,7 @@ export function WorkflowRibbon({
   activeTab,
   canOpenChapters,
   canOpenSections,
+  canOpenContent,
   onSelectTab,
 }: WorkflowRibbonProps): React.JSX.Element {
   return (
@@ -39,6 +41,14 @@ export function WorkflowRibbon({
         disabled={!canOpenSections}
       >
         Sections
+      </button>
+      <button
+        type="button"
+        className={`workflow-ribbon-tab${activeTab === "content" ? " active" : ""}`}
+        onClick={() => onSelectTab("content")}
+        disabled={!canOpenContent}
+      >
+        Content
       </button>
     </nav>
   );

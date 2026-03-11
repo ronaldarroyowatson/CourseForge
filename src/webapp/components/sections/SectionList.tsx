@@ -6,7 +6,7 @@ import { useRepositories } from "../../hooks/useRepositories";
 interface SectionListProps {
   selectedChapterId: string | null;
   selectedSectionId: string | null;
-  onSelectSection: (id: string) => void;
+  onSelectSection: (id: string | null) => void;
   refreshKey: number;
 }
 
@@ -60,6 +60,9 @@ export function SectionList({
     try {
       await removeSection(id);
       setSections((current) => current.filter((section) => section.id !== id));
+      if (selectedSectionId === id) {
+        onSelectSection(null);
+      }
     } catch {
       setErrorMessage("Unable to delete section.");
     }

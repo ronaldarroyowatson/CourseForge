@@ -6,7 +6,7 @@ import { getNextIndex, incrementTrailingNumber } from "../../utils/predictiveTex
 interface ChapterFormProps {
   selectedTextbookId: string | null;
   refreshKey: number;
-  onSaved: () => void;
+  onSaved: (chapterId: string) => void;
 }
 
 interface ChapterFormState {
@@ -97,7 +97,7 @@ export function ChapterForm({ selectedTextbookId, refreshKey, onSaved }: Chapter
 
     try {
       setIsSaving(true);
-      await createChapter({
+      const createdChapterId = await createChapter({
         textbookId: selectedTextbookId,
         index: parsedIndex,
         name: form.name.trim(),
@@ -107,7 +107,7 @@ export function ChapterForm({ selectedTextbookId, refreshKey, onSaved }: Chapter
       setForm(INITIAL_FORM_STATE);
       previousSuggestedIndex.current = "";
       previousSuggestedName.current = "";
-      onSaved();
+      onSaved(createdChapterId);
     } catch {
       setErrorMessage("Unable to save chapter. Please try again.");
     } finally {

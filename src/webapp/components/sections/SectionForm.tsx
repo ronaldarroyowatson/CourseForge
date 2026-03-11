@@ -6,7 +6,7 @@ import { getNextIndex, incrementTrailingNumber } from "../../utils/predictiveTex
 interface SectionFormProps {
   selectedChapterId: string | null;
   refreshKey: number;
-  onSaved: () => void;
+  onSaved: (sectionId: string) => void;
 }
 
 interface SectionFormState {
@@ -97,7 +97,7 @@ export function SectionForm({ selectedChapterId, refreshKey, onSaved }: SectionF
 
     try {
       setIsSaving(true);
-      await createSection({
+      const createdSectionId = await createSection({
         chapterId: selectedChapterId,
         index: parsedIndex,
         title: form.title.trim(),
@@ -107,7 +107,7 @@ export function SectionForm({ selectedChapterId, refreshKey, onSaved }: SectionF
       setForm(INITIAL_FORM_STATE);
       previousSuggestedIndex.current = "";
       previousSuggestedTitle.current = "";
-      onSaved();
+      onSaved(createdSectionId);
     } catch {
       setErrorMessage("Unable to save section. Please try again.");
     } finally {

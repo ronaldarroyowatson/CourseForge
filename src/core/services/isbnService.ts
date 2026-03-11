@@ -13,7 +13,7 @@ export interface ISBNMetadata {
 /**
  * Normalize ISBN by removing all non-digit characters.
  */
-function normalizeISBN(isbn: string): string {
+export function normalizeISBN(isbn: string): string {
   return isbn.replace(/\D/g, "");
 }
 

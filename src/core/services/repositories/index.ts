@@ -35,10 +35,13 @@ export {
 } from "./sectionRepository";
 export {
   deleteTextbook,
+  findTextbookByIsbn,
   getAll as getAllTextbooks,
   getTextbookById,
   listTextbooks,
   saveTextbook,
+  updateTextbook,
+  updateTextbookFlags,
 } from "./textbookRepository";
 export {
   deleteVocabTerm,

@@ -1,0 +1,413 @@
+import * as admin from "firebase-admin";
+import { HttpsError, onCall } from "firebase-functions/v2/https";
+
+admin.initializeApp();
+
+const auth = admin.auth();
+const firestore = admin.firestore();
+const SUPPORTED_COLLECTIONS = ["textbooks", "chapters", "sections", "vocabTerms"] as const;
+type SupportedCollection = (typeof SUPPORTED_COLLECTIONS)[number];
+
+type ContentStatus = "draft" | "submitted" | "approved" | "rejected";
+
+interface CallableResult<T> {
+  success: boolean;
+  message: string;
+  data: T;
+}
+
+interface AdminUserRecord {
+  uid: string;
+  displayName: string;
+  email: string;
+  createdAt: string | null;
+  lastLoginAt: string | null;
+  isAdmin: boolean;
+}
+
+interface ModerationItem {
+  docPath: string;
+  collectionName: SupportedCollection;
+  ownerId: string;
+  ownerEmail: string | null;
+  title: string;
+  currentStatus: ContentStatus;
+  lastModified: string | null;
+  isArchived?: boolean;
+}
+
+interface AdminContentRecord {
+  docPath: string;
+  id: string;
+  collectionName: SupportedCollection;
+  ownerId: string;
+  ownerEmail: string | null;
+  title: string;
+  grade?: string;
+  subject?: string;
+  edition?: string;
+  publicationYear?: number;
+  isbnRaw?: string;
+  summary?: string;
+  status: ContentStatus;
+  isArchived: boolean;
+  isDeleted: boolean;
+  lastModified: string | null;
+}
+
+function success<T>(message: string, data: T): CallableResult<T> {
+  return { success: true, message, data };
+}
+
+function assertAdmin(authData: { token?: Record<string, unknown> } | null | undefined): void {
+  if (!authData) {
+    throw new HttpsError("unauthenticated", "You must be signed in to use admin functions.");
+  }
+
+  if (authData.token?.admin !== true) {
+    throw new HttpsError("permission-denied", "Admin privileges are required for this action.");
+  }
+}
+
+function toIsoString(value: unknown): string | null {
+  if (value instanceof admin.firestore.Timestamp) {
+    return value.toDate().toISOString();
+  }
+
+  return typeof value === "string" ? value : null;
+}
+
+function parseDocPath(docPath: string): { ownerId: string; collectionName: SupportedCollection; docId: string } {
+  const parts = docPath.split("/");
+
+  if (parts.length !== 4 || parts[0] !== "users" || !SUPPORTED_COLLECTIONS.includes(parts[2] as SupportedCollection)) {
+    throw new HttpsError("invalid-argument", "Unsupported document path.");
+  }
+
+  return {
+    ownerId: parts[1],
+    collectionName: parts[2] as SupportedCollection,
+    docId: parts[3],
+  };
+}
+
+async function getOwnerEmailMap(): Promise<Map<string, string>> {
+  const snapshot = await firestore.collection("users").get();
+  const map = new Map<string, string>();
+
+  for (const docSnap of snapshot.docs) {
+    const email = docSnap.get("email");
+    if (typeof email === "string" && email.length > 0) {
+      map.set(docSnap.id, email);
+    }
+  }
+
+  return map;
+}
+
+function getRecordTitle(collectionName: SupportedCollection, data: FirebaseFirestore.DocumentData, fallbackId: string): string {
+  switch (collectionName) {
+    case "textbooks":
+      return typeof data.title === "string" ? data.title : fallbackId;
+    case "chapters":
+      return typeof data.name === "string" ? data.name : fallbackId;
+    case "sections":
+      return typeof data.title === "string" ? data.title : fallbackId;
+    case "vocabTerms":
+      return typeof data.word === "string" ? data.word : fallbackId;
+  }
+}
+
+function getRecordSummary(collectionName: SupportedCollection, data: FirebaseFirestore.DocumentData): string | undefined {
+  switch (collectionName) {
+    case "chapters":
+      return typeof data.description === "string" ? data.description : undefined;
+    case "sections":
+      return typeof data.notes === "string" ? data.notes : undefined;
+    case "vocabTerms":
+      return typeof data.definition === "string" ? data.definition : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function toAdminUserRecord(snapshot: FirebaseFirestore.QueryDocumentSnapshot): AdminUserRecord {
+  const data = snapshot.data();
+  return {
+    uid: typeof data.uid === "string" ? data.uid : snapshot.id,
+    displayName: typeof data.displayName === "string" ? data.displayName : "",
+    email: typeof data.email === "string" ? data.email : "",
+    createdAt: toIsoString(data.createdAt),
+    lastLoginAt: toIsoString(data.lastLoginAt),
+    isAdmin: data.isAdmin === true,
+  };
+}
+
+function buildAdminContentRecord(
+  collectionName: SupportedCollection,
+  snapshot: FirebaseFirestore.QueryDocumentSnapshot,
+  ownerEmailMap: Map<string, string>
+): AdminContentRecord {
+  const data = snapshot.data();
+  const ownerId = snapshot.ref.path.split("/")[1] ?? "unknown";
+
+  return {
+    docPath: snapshot.ref.path,
+    id: snapshot.id,
+    collectionName,
+    ownerId,
+    ownerEmail: ownerEmailMap.get(ownerId) ?? null,
+    title: getRecordTitle(collectionName, data, snapshot.id),
+    grade: typeof data.grade === "string" ? data.grade : undefined,
+    subject: typeof data.subject === "string" ? data.subject : undefined,
+    edition: typeof data.edition === "string" ? data.edition : undefined,
+    publicationYear: typeof data.publicationYear === "number" ? data.publicationYear : undefined,
+    isbnRaw: typeof data.isbnRaw === "string" ? data.isbnRaw : undefined,
+    summary: getRecordSummary(collectionName, data),
+    status: (typeof data.status === "string" ? data.status : "draft") as ContentStatus,
+    isArchived: data.isArchived === true,
+    isDeleted: data.isDeleted === true,
+    lastModified: toIsoString(data.lastModified),
+  };
+}
+
+function buildModerationItem(
+  collectionName: SupportedCollection,
+  snapshot: FirebaseFirestore.QueryDocumentSnapshot,
+  ownerEmailMap: Map<string, string>
+): ModerationItem {
+  const data = snapshot.data();
+  const ownerId = snapshot.ref.path.split("/")[1] ?? "unknown";
+
+  return {
+    docPath: snapshot.ref.path,
+    collectionName,
+    ownerId,
+    ownerEmail: ownerEmailMap.get(ownerId) ?? null,
+    title: getRecordTitle(collectionName, data, snapshot.id),
+    currentStatus: "submitted",
+    lastModified: toIsoString(data.lastModified),
+    isArchived: data.isArchived === true,
+  };
+}
+
+export const setUserAdminStatus = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const data = request.data;
+  const uid = typeof data?.uid === "string" ? data.uid.trim() : "";
+  const isAdmin = data?.isAdmin === true;
+
+  if (!uid) {
+    throw new HttpsError("invalid-argument", "A user id is required.");
+  }
+
+  const userRecord = await auth.getUser(uid);
+  const nextClaims = { ...(userRecord.customClaims ?? {}) } as Record<string, unknown>;
+
+  if (isAdmin) {
+    nextClaims.admin = true;
+  } else {
+    delete nextClaims.admin;
+  }
+
+  await auth.setCustomUserClaims(uid, nextClaims);
+  await firestore.doc(`users/${uid}`).set(
+    {
+      uid,
+      email: userRecord.email ?? "",
+      displayName: userRecord.displayName ?? "",
+      isAdmin,
+      lastClaimsUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  const message = isAdmin
+    ? `Granted admin access to ${uid}.`
+    : `Removed admin access from ${uid}.`;
+
+  return success(message, message);
+});
+
+export const listAdminUsers = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const snapshot = await firestore.collection("users").orderBy("email").get();
+  return success("Loaded users.", snapshot.docs.map(toAdminUserRecord));
+});
+
+export const getModerationQueue = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const ownerEmailMap = await getOwnerEmailMap();
+  const items: ModerationItem[] = [];
+
+  await Promise.all(
+    (["textbooks", "chapters", "sections"] as const).map(async (collectionName) => {
+        const snapshot = await firestore.collectionGroup(collectionName).where("status", "==", "submitted").get();
+        snapshot.docs.forEach((docSnap) => {
+          items.push(buildModerationItem(collectionName, docSnap, ownerEmailMap));
+        });
+      })
+  );
+
+  items.sort((left, right) => (right.lastModified ?? "").localeCompare(left.lastModified ?? ""));
+  return success("Loaded moderation queue.", items);
+});
+
+export const updateModerationStatus = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const data = request.data;
+  const docPath = typeof data?.docPath === "string" ? data.docPath : "";
+  const status = typeof data?.status === "string" ? data.status as ContentStatus : null;
+
+  if (!docPath || !status) {
+    throw new HttpsError("invalid-argument", "A document path and status are required.");
+  }
+
+  parseDocPath(docPath);
+  await firestore.doc(docPath).update({
+    status,
+    pendingSync: false,
+    lastModified: new Date().toISOString(),
+  });
+
+  return success(`Updated status to ${status}.`, `Updated status to ${status}.`);
+});
+
+export const archiveAdminContent = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const data = request.data;
+  const docPath = typeof data?.docPath === "string" ? data.docPath : "";
+  const isArchived = data?.isArchived !== false;
+
+  if (!docPath) {
+    throw new HttpsError("invalid-argument", "A document path is required.");
+  }
+
+  parseDocPath(docPath);
+  await firestore.doc(docPath).update({
+    isArchived,
+    pendingSync: false,
+    lastModified: new Date().toISOString(),
+  });
+
+  return success(isArchived ? "Content archived." : "Content restored from archive.", isArchived ? "Content archived." : "Content restored from archive.");
+});
+
+export const softDeleteAdminContent = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const data = request.data;
+  const docPath = typeof data?.docPath === "string" ? data.docPath : "";
+  const isDeleted = data?.isDeleted !== false;
+
+  if (!docPath) {
+    throw new HttpsError("invalid-argument", "A document path is required.");
+  }
+
+  parseDocPath(docPath);
+  await firestore.doc(docPath).update({
+    isDeleted,
+    pendingSync: false,
+    lastModified: new Date().toISOString(),
+  });
+
+  return success(isDeleted ? "Content hidden from non-admin users." : "Content restored.", isDeleted ? "Content hidden from non-admin users." : "Content restored.");
+});
+
+export const searchAdminContent = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const data = request.data;
+  const titleContains = typeof data?.titleContains === "string" ? data.titleContains.toLowerCase() : "";
+  const isbn = typeof data?.isbn === "string" ? data.isbn.replace(/-/g, "") : "";
+  const ownerEmailFilter = typeof data?.ownerEmail === "string" ? data.ownerEmail.toLowerCase() : "";
+  const ownerUidFilter = typeof data?.ownerUid === "string" ? data.ownerUid : "";
+  const requestedCollection = typeof data?.collectionName === "string" ? data.collectionName : "all";
+
+  const collections = requestedCollection === "all"
+    ? SUPPORTED_COLLECTIONS
+    : SUPPORTED_COLLECTIONS.filter((name) => name === requestedCollection);
+
+  const ownerEmailMap = await getOwnerEmailMap();
+  const allowedOwnerIds = new Set<string>();
+
+  if (ownerEmailFilter) {
+    ownerEmailMap.forEach((email, uid) => {
+      if (email.toLowerCase().includes(ownerEmailFilter)) {
+        allowedOwnerIds.add(uid);
+      }
+    });
+  }
+
+  if (ownerUidFilter) {
+    allowedOwnerIds.add(ownerUidFilter);
+  }
+
+  const records: AdminContentRecord[] = [];
+
+  await Promise.all(collections.map(async (collectionName) => {
+    const snapshot = await firestore.collectionGroup(collectionName).get();
+    snapshot.docs.forEach((docSnap) => {
+      const record = buildAdminContentRecord(collectionName, docSnap, ownerEmailMap);
+      const normalizedIsbn = (record.isbnRaw ?? "").replace(/-/g, "");
+
+      if (titleContains && !record.title.toLowerCase().includes(titleContains)) {
+        return;
+      }
+
+      if (isbn && !normalizedIsbn.includes(isbn)) {
+        return;
+      }
+
+      if (allowedOwnerIds.size > 0 && !allowedOwnerIds.has(record.ownerId)) {
+        return;
+      }
+
+      records.push(record);
+    });
+  }));
+
+  records.sort((left, right) => (right.lastModified ?? "").localeCompare(left.lastModified ?? ""));
+  return success("Loaded admin content.", records);
+});
+
+export const updateAdminContent = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const data = request.data;
+  const docPath = typeof data?.docPath === "string" ? data.docPath : "";
+  const updates = typeof data?.data === "object" && data?.data !== null ? data.data as Record<string, unknown> : null;
+
+  if (!docPath || !updates) {
+    throw new HttpsError("invalid-argument", "A document path and update payload are required.");
+  }
+
+  const { collectionName } = parseDocPath(docPath);
+  const allowedFields: Record<SupportedCollection, string[]> = {
+    textbooks: ["title", "grade", "subject", "edition", "publicationYear", "status"],
+    chapters: ["name", "description", "status"],
+    sections: ["title", "notes", "status"],
+    vocabTerms: ["word", "definition", "status"],
+  };
+
+  const sanitizedUpdates = Object.fromEntries(
+    Object.entries(updates).filter(([key, value]) => allowedFields[collectionName].includes(key) && value !== undefined)
+  );
+
+  if (Object.keys(sanitizedUpdates).length === 0) {
+    throw new HttpsError("invalid-argument", "No supported fields were provided for update.");
+  }
+
+  await firestore.doc(docPath).update({
+    ...sanitizedUpdates,
+    pendingSync: false,
+    lastModified: new Date().toISOString(),
+  });
+
+  return success("Content updated.", "Content updated.");
+});

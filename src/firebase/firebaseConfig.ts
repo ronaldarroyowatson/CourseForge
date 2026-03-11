@@ -1,5 +1,3 @@
-import { initializeApp } from "firebase/app";
-
 export const firebaseConfig = {
   apiKey: "AIzaSyCFwFK--Lh-c-PSdz6a6c2F8p3TiYGuXW4",
   authDomain: "courseforge-prod.firebaseapp.com",
@@ -8,8 +6,6 @@ export const firebaseConfig = {
   messagingSenderId: "598291614670",
   appId: "1:598291614670:web:e4b168c603cff17344799f"
 };
-
-export const app = initializeApp(firebaseConfig);
 
 export function getFirebaseConfigError(): string | null {
   const PLACEHOLDER_VALUES = new Set([

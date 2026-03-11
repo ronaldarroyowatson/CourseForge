@@ -22,9 +22,16 @@ function buildSampleExportNode(): TextbookExportNode {
       subject: "Physics",
       edition: "2023",
       publicationYear: 2023,
+      isbnRaw: "978-0-13-468599-1",
+      isbnNormalized: "9780134685991",
       platformUrl: "https://example.com/path?a=1&b=2",
       createdAt: "2026-03-10T00:00:00.000Z",
       updatedAt: "2026-03-10T00:00:00.000Z",
+      lastModified: "2026-03-10T00:00:00.000Z",
+      pendingSync: false,
+      source: "local",
+        isFavorite: false,
+        isArchived: false,
     },
     chapters: [
       {
@@ -34,6 +41,9 @@ function buildSampleExportNode(): TextbookExportNode {
           index: 1,
           name: "Linear Motion",
           description: "Distance < displacement?",
+          lastModified: "2026-03-10T00:00:00.000Z",
+          pendingSync: false,
+          source: "local",
         },
         sections: [
           {
@@ -43,6 +53,9 @@ function buildSampleExportNode(): TextbookExportNode {
               index: 1,
               title: "Displacement & Distance",
               notes: "Teacher notes: compare scalar vs vector.",
+              lastModified: "2026-03-10T00:00:00.000Z",
+              pendingSync: false,
+              source: "local",
             },
             concepts: [
               {
@@ -68,6 +81,9 @@ function buildSampleExportNode(): TextbookExportNode {
                 word: "Displacement",
                 definition: "Change in position",
                 altDefinitions: ["Vector from start to finish", "How far out of place"],
+                lastModified: "2026-03-10T00:00:00.000Z",
+                pendingSync: false,
+                source: "local",
               },
             ],
             keyIdeas: [

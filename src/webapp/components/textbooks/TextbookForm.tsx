@@ -1,7 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
-import { fetchMetadataByISBN } from "../../../core/services/isbnService";
+import { fetchMetadataByISBN, normalizeISBN } from "../../../core/services/isbnService";
+import { findCloudTextbookByISBN } from "../../../core/services/syncService";
+import { getCurrentUser } from "../../../firebase/auth";
 import { useRepositories } from "../../hooks/useRepositories";
+import { useUIStore } from "../../store/uiStore";
 
 interface TextbookFormProps {
   onSaved: () => void;
@@ -28,7 +31,9 @@ const INITIAL_FORM_STATE: TextbookFormState = {
 };
 
 export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element {
-  const { createTextbook } = useRepositories();
+  const { createTextbook, editTextbook, findTextbookByISBN } = useRepositories();
+  const { selectedTextbook, setSelectedTextbook } = useUIStore();
+
   const [form, setForm] = useState<TextbookFormState>(INITIAL_FORM_STATE);
   const [isSaving, setIsSaving] = useState(false);
   const [isLookingUpISBN, setIsLookingUpISBN] = useState(false);
@@ -36,8 +41,43 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Populate form fields when a textbook is selected for editing
+  useEffect(() => {
+    if (selectedTextbook) {
+      setForm({
+        isbn: selectedTextbook.isbnRaw ?? "",
+        title: selectedTextbook.title,
+        grade: selectedTextbook.grade,
+        subject: selectedTextbook.subject,
+        edition: selectedTextbook.edition,
+        publicationYear: selectedTextbook.publicationYear.toString(),
+        platformUrl: selectedTextbook.platformUrl ?? "",
+      });
+      setErrorMessage(null);
+      setSuccessMessage(null);
+      setIsManualEntryMode(false);
+    } else {
+      setForm(INITIAL_FORM_STATE);
+    }
+  }, [selectedTextbook]);
+
+  const isEditMode = selectedTextbook !== null;
+
   function updateField<K extends keyof TextbookFormState>(field: K, value: TextbookFormState[K]): void {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function formatIsbn13ForDisplay(isbnDigits: string): string {
+    if (isbnDigits.length !== 13) {
+      return isbnDigits;
+    }
+    return `${isbnDigits.slice(0, 3)}-${isbnDigits.slice(3, 4)}-${isbnDigits.slice(4, 7)}-${isbnDigits.slice(7, 12)}-${isbnDigits.slice(12)}`;
+  }
+
+  function handleCancelEdit(): void {
+    setSelectedTextbook(null);
+    setErrorMessage(null);
+    setSuccessMessage(null);
   }
 
   async function handleISBNLookup(): Promise<void> {
@@ -67,11 +107,10 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
 
       const parsedYear = metadata.publicationDate ? Number.parseInt(metadata.publicationDate.slice(0, 4), 10) : null;
 
-      // Prefill form fields with fetched metadata
       setForm((current) => ({
         ...current,
         title: metadata.title ?? current.title,
-        edition: current.edition, // Edition is usually not in Open Library, keep existing
+        edition: current.edition,
         publicationYear: parsedYear && Number.isFinite(parsedYear)
           ? parsedYear.toString()
           : current.publicationYear,
@@ -101,19 +140,61 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
       return;
     }
 
+    const isbnRaw = form.isbn.trim();
+    const isbnNormalized = normalizeISBN(isbnRaw);
+
     try {
       setIsSaving(true);
-      await createTextbook({
-        title: form.title.trim(),
-        grade: form.grade.trim(),
-        subject: form.subject.trim(),
-        edition: form.edition.trim(),
-        publicationYear: parsedYear,
-        platformUrl: form.platformUrl.trim() || undefined,
-      });
 
-      setForm(INITIAL_FORM_STATE);
-      setIsManualEntryMode(false);
+      if (isEditMode && selectedTextbook) {
+        await editTextbook(selectedTextbook.id, {
+          title: form.title.trim(),
+          grade: form.grade.trim(),
+          subject: form.subject.trim(),
+          edition: form.edition.trim(),
+          publicationYear: parsedYear,
+          isbnRaw,
+          isbnNormalized,
+          platformUrl: form.platformUrl.trim() || undefined,
+        });
+        setSelectedTextbook(null);
+      } else {
+        if (isbnRaw) {
+          const existingLocal = await findTextbookByISBN(isbnRaw);
+          if (existingLocal) {
+            setErrorMessage("A textbook with this ISBN already exists in your local library.");
+            return;
+          }
+
+          const currentUser = getCurrentUser();
+          if (currentUser?.uid) {
+            try {
+              const existingCloud = await findCloudTextbookByISBN(currentUser.uid, isbnRaw);
+              if (existingCloud) {
+                setErrorMessage("A textbook with this ISBN already exists in your cloud library.");
+                return;
+              }
+            } catch {
+              // Cloud duplicate checks are best-effort and should not block local-first saves.
+            }
+          }
+        }
+
+        await createTextbook({
+          title: form.title.trim(),
+          grade: form.grade.trim(),
+          subject: form.subject.trim(),
+          edition: form.edition.trim(),
+          publicationYear: parsedYear,
+          isbnRaw,
+          isbnNormalized,
+          platformUrl: form.platformUrl.trim() || undefined,
+        });
+
+        setForm(INITIAL_FORM_STATE);
+        setIsManualEntryMode(false);
+      }
+
       onSaved();
     } catch {
       setErrorMessage("Unable to save textbook. Please try again.");
@@ -124,7 +205,7 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
 
   return (
     <section className="panel">
-      <h3>Add Textbook</h3>
+      <h3>{isEditMode ? `Edit: ${selectedTextbook?.title ?? "Textbook"}` : "Add Textbook"}</h3>
 
       {isManualEntryMode ? (
         <p className="manual-entry-banner">Manual Entry Mode: Please fill in the textbook details.</p>
@@ -138,6 +219,12 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
               id="isbn"
               value={form.isbn}
               onChange={(event) => updateField("isbn", event.target.value)}
+              onBlur={() => {
+                const normalized = normalizeISBN(form.isbn);
+                if (normalized.length === 13) {
+                  updateField("isbn", formatIsbn13ForDisplay(normalized));
+                }
+              }}
               placeholder="e.g., 978-0-13-468599-1"
             />
           </label>
@@ -209,9 +296,16 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
         {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
         {successMessage ? <p className="success-text">{successMessage}</p> : null}
 
-        <button type="submit" disabled={isSaving}>
-          {isSaving ? "Saving..." : "Save Textbook"}
-        </button>
+        <div className="form-actions">
+          <button type="submit" disabled={isSaving}>
+            {isSaving ? "Saving..." : isEditMode ? "Update Textbook" : "Save Textbook"}
+          </button>
+          {isEditMode ? (
+            <button type="button" onClick={handleCancelEdit} disabled={isSaving} className="btn-secondary">
+              Cancel
+            </button>
+          ) : null}
+        </div>
       </form>
     </section>
   );

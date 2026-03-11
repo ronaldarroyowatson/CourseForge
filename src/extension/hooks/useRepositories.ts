@@ -39,11 +39,16 @@ export interface QuickKeyIdeaInput {
 }
 
 function buildVocabTerm(input: QuickVocabInput): VocabTerm {
+  const timestamp = new Date().toISOString();
+
   return {
     id: crypto.randomUUID(),
     sectionId: input.sectionId,
     word: input.word,
     definition: input.definition,
+    lastModified: timestamp,
+    pendingSync: true,
+    source: "local",
   };
 }
 

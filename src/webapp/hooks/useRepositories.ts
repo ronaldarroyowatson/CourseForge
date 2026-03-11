@@ -9,6 +9,7 @@ import {
   deleteSection,
   deleteTextbook,
   deleteVocabTerm,
+  findTextbookByIsbn,
   listChaptersByTextbookId,
   listConceptsBySectionId,
   listEquationsBySectionId,
@@ -23,6 +24,8 @@ import {
   saveSection,
   saveTextbook,
   saveVocabTerm,
+  updateTextbook,
+  updateTextbookFlags,
 } from "../../core/services/repositories";
 
 export interface CreateTextbookInput {
@@ -31,6 +34,8 @@ export interface CreateTextbookInput {
   subject: string;
   edition: string;
   publicationYear: number;
+  isbnRaw: string;
+  isbnNormalized: string;
   platformUrl?: string;
 }
 
@@ -74,7 +79,6 @@ export interface CreateKeyIdeaInput {
 
 function buildTextbookFromInput(input: CreateTextbookInput): Textbook {
   const timestamp = new Date().toISOString();
-
   return {
     id: crypto.randomUUID(),
     title: input.title,
@@ -82,38 +86,57 @@ function buildTextbookFromInput(input: CreateTextbookInput): Textbook {
     subject: input.subject,
     edition: input.edition,
     publicationYear: input.publicationYear,
+    isbnRaw: input.isbnRaw,
+    isbnNormalized: input.isbnNormalized,
     platformUrl: input.platformUrl,
     createdAt: timestamp,
     updatedAt: timestamp,
+    lastModified: timestamp,
+    pendingSync: true,
+    source: "local",
+    isFavorite: false,
+    isArchived: false,
   };
 }
 
 function buildChapterFromInput(input: CreateChapterInput): Chapter {
+  const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
     textbookId: input.textbookId,
     index: input.index,
     name: input.name,
     description: input.description,
+    lastModified: timestamp,
+    pendingSync: true,
+    source: "local",
   };
 }
 
 function buildSectionFromInput(input: CreateSectionInput): Section {
+  const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
     chapterId: input.chapterId,
     index: input.index,
     title: input.title,
     notes: input.notes,
+    lastModified: timestamp,
+    pendingSync: true,
+    source: "local",
   };
 }
 
 function buildVocabTermFromInput(input: CreateVocabTermInput): VocabTerm {
+  const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
     sectionId: input.sectionId,
     word: input.word,
     definition: input.definition,
+    lastModified: timestamp,
+    pendingSync: true,
+    source: "local",
   };
 }
 
@@ -159,6 +182,22 @@ export function useRepositories() {
 
   const removeTextbook = useCallback(async (id: string): Promise<void> => {
     await deleteTextbook(id);
+  }, []);
+
+  const findTextbookByISBN = useCallback(async (isbnInput: string): Promise<Textbook | undefined> => {
+    return findTextbookByIsbn(isbnInput);
+  }, []);
+
+  const editTextbook = useCallback(async (id: string, changes: Partial<Textbook>): Promise<Textbook> => {
+    return updateTextbook(id, changes);
+  }, []);
+
+  const toggleTextbookFavorite = useCallback(async (id: string, isFavorite: boolean): Promise<Textbook> => {
+    return updateTextbookFlags(id, { isFavorite });
+  }, []);
+
+  const toggleTextbookArchive = useCallback(async (id: string, isArchived: boolean): Promise<Textbook> => {
+    return updateTextbookFlags(id, { isArchived });
   }, []);
 
   const fetchChaptersByTextbookId = useCallback(async (textbookId: string): Promise<Chapter[]> => {
@@ -243,6 +282,10 @@ export function useRepositories() {
     fetchTextbooks,
     createTextbook,
     removeTextbook,
+    findTextbookByISBN,
+    editTextbook,
+    toggleTextbookFavorite,
+    toggleTextbookArchive,
     fetchChaptersByTextbookId,
     createChapter,
     removeChapter,

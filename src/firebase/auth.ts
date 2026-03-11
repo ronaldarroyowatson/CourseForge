@@ -4,7 +4,9 @@ import {
   getAuth,
   GoogleAuthProvider,
   initializeAuth,
-  onAuthStateChanged,
+  onIdTokenChanged,
+  setPersistence,
+  signOut,
   signInWithPopup,
   type Unsubscribe,
   type User,
@@ -18,6 +20,7 @@ function isExtensionRuntime(): boolean {
 }
 
 let cachedAuth: Auth | null = null;
+let persistenceReady = false;
 
 async function getAuthInstance(): Promise<Auth> {
   if (cachedAuth) {
@@ -42,6 +45,19 @@ async function getAuthInstance(): Promise<Auth> {
   }
 }
 
+/**
+ * Ensures browser-local persistence before the app starts listening to auth state.
+ * This is what keeps users logged in across refreshes and browser restarts.
+ */
+async function ensureBrowserPersistence(auth: Auth): Promise<Auth> {
+  if (!persistenceReady) {
+    await setPersistence(auth, browserLocalPersistence);
+    persistenceReady = true;
+  }
+
+  return auth;
+}
+
 function getAuthInstanceSync(): Auth {
   if (!cachedAuth) {
     cachedAuth = getAuth(firebaseApp);
@@ -52,15 +68,25 @@ function getAuthInstanceSync(): Auth {
 
 const provider = new GoogleAuthProvider();
 
+export async function initializePersistentAuth(): Promise<Auth> {
+  const auth = await getAuthInstance();
+  return ensureBrowserPersistence(auth);
+}
+
 export async function signInWithGoogle(): Promise<User> {
   const configError = getFirebaseConfigError();
   if (configError) {
     throw new Error(configError);
   }
 
-  const auth = await getAuthInstance();
+  const auth = await initializePersistentAuth();
   const result = await signInWithPopup(auth, provider);
   return result.user;
+}
+
+export async function signOutCurrentUser(): Promise<void> {
+  const auth = await initializePersistentAuth();
+  await signOut(auth);
 }
 
 export function getCurrentUser(): User | null {
@@ -68,5 +94,109 @@ export function getCurrentUser(): User | null {
 }
 
 export function onAuthStateChangedListener(onChange: (user: User | null) => void): Unsubscribe {
-  return onAuthStateChanged(getAuthInstanceSync(), onChange);
+  return onIdTokenChanged(getAuthInstanceSync(), onChange);
+}
+
+export async function subscribeToAuthTokenChanges(
+  onChange: (user: User | null) => void
+): Promise<Unsubscribe> {
+  const auth = await initializePersistentAuth();
+  return onIdTokenChanged(auth, onChange);
+}
+
+export async function waitForAuthStateChange(timeoutMs = 12000): Promise<User | null> {
+  const auth = await initializePersistentAuth();
+
+  return new Promise<User | null>((resolve) => {
+    let resolved = false;
+    let unsubscribe: Unsubscribe = () => {};
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    unsubscribe = onIdTokenChanged(auth, (user) => {
+      if (resolved) {
+        return;
+      }
+
+      resolved = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      unsubscribe();
+      resolve(user);
+    });
+
+    timeoutId = setTimeout(() => {
+      if (resolved) {
+        return;
+      }
+
+      resolved = true;
+      unsubscribe();
+      resolve(auth.currentUser);
+    }, timeoutMs);
+  });
+}
+
+/**
+ * Reads the `admin` custom claim from the current user's ID token.
+ * Returns false if the user is not signed in or the claim is absent.
+ * NOTE: Custom claims are set server-side via a Cloud Function or the Admin SDK.
+ *       The `setAdmin.cjs` script in the project root can do this locally.
+ */
+export async function getAdminClaim(): Promise<boolean> {
+  const auth = await initializePersistentAuth();
+  const user = auth.currentUser;
+  if (!user) return false;
+
+  try {
+    // Force-refresh so we always read the latest claims after a promotion.
+    const tokenResult = await user.getIdTokenResult(/* forceRefresh */ true);
+    return tokenResult.claims["admin"] === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Convenience wrapper around getAdminClaim.
+ */
+export async function isAdminUser(): Promise<boolean> {
+  return getAdminClaim();
+}
+
+export async function refreshCurrentUserClaims(): Promise<boolean> {
+  return getAdminClaim();
+}
+
+/**
+ * Upserts the user's profile document in the top-level `users` Firestore collection.
+ * Called on every successful sign-in so the admin panel always has current user records.
+ * The `isAdmin` field mirrors the custom claim but is NOT used for access control —
+ * Firestore security rules and backend functions must enforce admin status via the token claim.
+ */
+export async function saveUserProfileToFirestore(user: User): Promise<void> {
+  // Import lazily to avoid pulling Firestore into the auth bootstrap path.
+  const { doc, getFirestore: getFs, serverTimestamp, setDoc } = await import("firebase/firestore");
+  const db = getFs(firebaseApp);
+  const userRef = doc(db, "users", user.uid);
+
+  let isAdmin = false;
+  try {
+    const tokenResult = await user.getIdTokenResult();
+    isAdmin = tokenResult.claims["admin"] === true;
+  } catch {
+    // Non-critical — proceed without claim info.
+  }
+
+  await setDoc(
+    userRef,
+    {
+      uid: user.uid,
+      displayName: user.displayName ?? "",
+      email: user.email ?? "",
+      lastLoginAt: serverTimestamp(),
+      isAdmin,
+    },
+    { merge: true } // Preserves createdAt set on first sign-in.
+  );
 }

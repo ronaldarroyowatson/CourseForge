@@ -33,8 +33,15 @@ function buildTextbook(id: string): Textbook {
     subject: "Chemistry",
     edition: "2024",
     publicationYear: 2024,
+    isbnRaw: "978-0-13-468599-1",
+    isbnNormalized: "9780134685991",
     createdAt: "2026-03-10T00:00:00.000Z",
     updatedAt: "2026-03-10T00:00:00.000Z",
+    lastModified: "2026-03-10T00:00:00.000Z",
+    pendingSync: false,
+    source: "local",
+      isFavorite: false,
+      isArchived: false,
   };
 }
 
@@ -44,6 +51,9 @@ function buildChapter(id: string, textbookId: string, index: number): Chapter {
     textbookId,
     index,
     name: `Chapter ${index}`,
+    lastModified: "2026-03-10T00:00:00.000Z",
+    pendingSync: false,
+    source: "local",
   };
 }
 
@@ -53,6 +63,9 @@ function buildSection(id: string, chapterId: string, index: number): Section {
     chapterId,
     index,
     title: `Section ${index}`,
+    lastModified: "2026-03-10T00:00:00.000Z",
+    pendingSync: false,
+    source: "local",
   };
 }
 
@@ -86,6 +99,9 @@ async function seedBasicGraph(seedId: string): Promise<{
     sectionId,
     word: "Molecule",
     definition: "Two or more bonded atoms",
+    lastModified: "2026-03-10T00:00:00.000Z",
+    pendingSync: false,
+    source: "local",
   };
   const keyIdea: KeyIdea = {
     id: `idea-${seedId}`,

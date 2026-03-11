@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "courseforge-prod"
+  },
+  "targets": {},
+  "etags": {}
+}

@@ -14,7 +14,7 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Resolved admin panel module-resolution and accessibility issues in admin content editing flows.
 - Stabilized integration tests for the updated sync API surface (`syncNow`, pending diagnostics).
 
-### Changed
+### Changed (1.1.0)
 
 - Added admin route lazy-loading and improved bundle chunking for faster non-admin initial load.
 - Refined dark/light theme token usage and readability in sync and admin UI surfaces.
@@ -46,13 +46,13 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Updated textbook actions to use dedicated edit, favorite, and archive icons with matching tooltips and state-aware sorting.
 - Expanded README documentation for the current platform shape and release workflow.
 
-### Fixed
+### Fixed (1.1.0)
 
 - Ensured admin claim refresh is observed by the client after token changes.
 - Fixed Functions callable typing to use the v2 request shape.
 - Stabilized the Vitest integration suite by using hoist-safe mocks and route-reset handling between cases.
 
-### Verified
+### Verified (1.1.0)
 
 - `npm run test:core`
 - `npm run test:integration`

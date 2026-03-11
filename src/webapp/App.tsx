@@ -2,6 +2,7 @@ import React from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { useAuthBootstrap } from "./hooks/useAuthBootstrap";
+import { useAutoSync } from "./hooks/useAutoSync";
 import { LoginPage } from "./components/auth/LoginPage";
 import { RequireAdmin } from "./components/auth/RequireAdmin";
 import { RequireAuth } from "./components/auth/RequireAuth";
@@ -17,6 +18,7 @@ import { useAuthStore } from "./store/authStore";
  */
 export function App(): React.JSX.Element {
   useAuthBootstrap();
+  useAutoSync();
 
   const authStatus = useAuthStore((state) => state.authStatus);
 

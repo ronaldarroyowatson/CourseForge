@@ -7,8 +7,8 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 
-import type { AdminUserRecord } from "../../../core/services/adminFirestoreService";
-import { getAllUsers, setUserAdminStatus } from "../../../core/services/adminFirestoreService";
+import type { AdminUserRecord } from "../../../core/services";
+import { getAllUsers, setUserAdminStatus } from "../../../core/services";
 import { refreshCurrentUserClaims } from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
 

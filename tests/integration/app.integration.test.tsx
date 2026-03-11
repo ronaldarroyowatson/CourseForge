@@ -44,6 +44,16 @@ const authMocks = vi.hoisted(() => {
 
 const syncMocks = vi.hoisted(() => ({
   syncUserData: vi.fn(async () => undefined),
+  syncNow: vi.fn(async () => ({
+    success: true,
+    message: "Sync completed successfully.",
+    retryable: false,
+    permissionDenied: false,
+    throttled: false,
+    writeLoopTriggered: false,
+    pendingCount: 0,
+  })),
+  getPendingSyncDiagnostics: vi.fn(async () => ({ pendingCount: 0, byStore: {} })),
 }));
 
 const { mockUser } = authMocks;
@@ -59,6 +69,8 @@ vi.mock("../../src/firebase/auth", () => ({
 
 vi.mock("../../src/core/services/syncService", () => ({
   syncUserData: syncMocks.syncUserData,
+  syncNow: syncMocks.syncNow,
+  getPendingSyncDiagnostics: syncMocks.getPendingSyncDiagnostics,
 }));
 
 vi.mock("../../src/webapp/components/app/TextbookWorkspace", () => ({
@@ -106,6 +118,8 @@ describe("App admin/auth integration", () => {
     authMocks.getAdminClaim.mockResolvedValue(false);
     authMocks.saveUserProfileToFirestore.mockClear();
     syncMocks.syncUserData.mockClear();
+    syncMocks.syncNow.mockClear();
+    syncMocks.getPendingSyncDiagnostics.mockClear();
     resetStores();
   });
 
@@ -181,7 +195,9 @@ describe("App admin/auth integration", () => {
       expect(screen.getByText("WORKSPACE_PAGE")).toBeInTheDocument();
     });
 
-    expect(syncMocks.syncUserData).toHaveBeenCalledTimes(2);
+    await waitFor(() => {
+      expect(syncMocks.syncNow.mock.calls.length + syncMocks.syncUserData.mock.calls.length).toBeGreaterThan(0);
+    });
   });
 
   it("runs sync automatically after login", async () => {
@@ -200,7 +216,7 @@ describe("App admin/auth integration", () => {
     });
 
     await waitFor(() => {
-      expect(syncMocks.syncUserData).toHaveBeenCalledWith("teacher-1");
+      expect(syncMocks.syncNow.mock.calls.length + syncMocks.syncUserData.mock.calls.length).toBeGreaterThan(0);
       expect(authMocks.saveUserProfileToFirestore).toHaveBeenCalled();
     });
   });

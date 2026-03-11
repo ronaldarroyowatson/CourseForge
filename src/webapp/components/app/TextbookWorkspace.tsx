@@ -7,7 +7,6 @@ import { getAll as getAllTextbooks } from "../../../core/services/repositories/t
 import { signOutCurrentUser } from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
-import { AdminToolsPage } from "../admin/AdminToolsPage";
 import { ChapterForm } from "../chapters/ChapterForm";
 import { ChapterList } from "../chapters/ChapterList";
 import { AccordionTile } from "../layout/AccordionTile";
@@ -18,6 +17,11 @@ import { SectionForm } from "../sections/SectionForm";
 import { SectionList } from "../sections/SectionList";
 import { TextbookForm } from "../textbooks/TextbookForm";
 import { TextbookList } from "../textbooks/TextbookList";
+
+const AdminToolsPage = React.lazy(async () => {
+  const module = await import("../admin/AdminToolsPage");
+  return { default: module.AdminToolsPage };
+});
 
 interface TextbookWorkspaceProps {
   showAdminPage?: boolean;
@@ -273,12 +277,14 @@ export function TextbookWorkspace({ showAdminPage = false }: TextbookWorkspacePr
         <Header />
 
         {showAdminPage ? (
-          <AdminToolsPage
-            currentUserEmail={currentUserEmail}
-            onBack={() => {
-              navigate("/textbooks");
-            }}
-          />
+          <React.Suspense fallback={<section className="placeholder-panel"><p>Loading admin tools...</p></section>}>
+            <AdminToolsPage
+              currentUserEmail={currentUserEmail}
+              onBack={() => {
+                navigate("/textbooks");
+              }}
+            />
+          </React.Suspense>
         ) : (
           <>
             <section className="placeholder-panel">

@@ -6,12 +6,12 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 
-import type { ModerationItem } from "../../../core/services/adminFirestoreService";
+import type { ModerationItem } from "../../../core/services";
 import {
   adminArchiveContent,
   getSubmittedContent,
   updateContentStatus,
-} from "../../../core/services/adminFirestoreService";
+} from "../../../core/services";
 
 export function ModerationQueue(): React.JSX.Element {
   const [items, setItems] = useState<ModerationItem[]>([]);

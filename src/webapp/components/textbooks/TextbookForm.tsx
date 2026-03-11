@@ -238,6 +238,10 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
           </button>
         </div>
 
+        <p className="form-hint">
+          You can type an ISBN and save without lookup. Lookup is optional and only helps prefill metadata.
+        </p>
+
         <label>
           Title
           <input

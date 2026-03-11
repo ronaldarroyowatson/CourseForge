@@ -12,9 +12,7 @@
  */
 import React, { useState } from "react";
 
-import { ContentBrowser } from "./ContentBrowser";
-import { ModerationQueue } from "./ModerationQueue";
-import { UserManagement } from "./UserManagement";
+import { ContentBrowser, ModerationQueue, UserManagement } from "./index";
 
 type AdminTab = "users" | "moderation" | "browser" | "system";
 

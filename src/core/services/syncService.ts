@@ -4,6 +4,8 @@ import type { CourseForgeEntityMap } from "../models";
 import { getAll, save, STORE_NAMES } from "./db";
 import { normalizeISBN } from "./isbnService";
 import { firestoreDb } from "../../firebase/firestore";
+import { getAdminClaim, getCurrentUser } from "../../firebase/auth";
+import { useUIStore } from "../../webapp/store/uiStore";
 
 type SyncStoreName = "textbooks" | "chapters" | "sections" | "vocabTerms";
 type SyncEntity = CourseForgeEntityMap[SyncStoreName];
@@ -15,8 +17,105 @@ const SYNC_STORES: SyncStoreName[] = [
   STORE_NAMES.vocabTerms,
 ];
 
+const WRITE_LOOP_WINDOW_MS = 500;
+const SYNC_THROTTLE_MS = 5000;
+
+const recentWrites = new Map<string, number>();
+let lastSyncAttemptAt = 0;
+let writeLoopTriggered = false;
+let syncContext: { uid: string | null; isAdmin: boolean | null } = { uid: null, isAdmin: null };
+
+interface SyncErrorLike {
+  code?: string;
+  message?: string;
+}
+
+function getErrorCode(error: unknown): string {
+  return (error as SyncErrorLike)?.code ?? "unknown";
+}
+
+export function logSyncEvent(type: string, path: string, payload: unknown, error?: unknown): void {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  const base = {
+    type,
+    path,
+    payload,
+    uid: syncContext.uid,
+    isAdmin: syncContext.isAdmin,
+    timestamp: new Date().toISOString(),
+  };
+
+  if (!error) {
+    console.info("[CourseForge sync]", base);
+    useUIStore.getState().addSyncDebugEvent(`${type} @ ${path}`);
+    return;
+  }
+
+  console.error("[CourseForge sync]", {
+    ...base,
+    errorCode: getErrorCode(error),
+    error,
+  });
+  useUIStore.getState().addSyncDebugEvent(`${type} @ ${path} (${getErrorCode(error)})`);
+}
+
+function shouldSkipWriteForLoop(path: string): boolean {
+  const now = Date.now();
+  const previous = recentWrites.get(path);
+
+  if (previous && now - previous < WRITE_LOOP_WINDOW_MS) {
+    writeLoopTriggered = true;
+    logSyncEvent("write:loop-protected", path, {
+      previousTimestamp: previous,
+      currentTimestamp: now,
+      windowMs: WRITE_LOOP_WINDOW_MS,
+    });
+    return true;
+  }
+
+  recentWrites.set(path, now);
+  return false;
+}
+
+export function consumeWriteLoopTriggered(): boolean {
+  const wasTriggered = writeLoopTriggered;
+  writeLoopTriggered = false;
+  return wasTriggered;
+}
+
+export async function getPendingSyncDiagnostics(): Promise<{ pendingCount: number; byStore: Record<SyncStoreName, number> }> {
+  const byStoreEntries = await Promise.all(
+    SYNC_STORES.map(async (storeName) => {
+      const localRows = await fetchLocalStore(storeName);
+      const count = localRows.filter((row) => row.pendingSync).length;
+      return [storeName, count] as const;
+    })
+  );
+
+  const byStore = Object.fromEntries(byStoreEntries) as Record<SyncStoreName, number>;
+  const pendingCount = Object.values(byStore).reduce((sum, value) => sum + value, 0);
+
+  return { pendingCount, byStore };
+}
+
+async function logSyncIdentity(userId: string): Promise<void> {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  const isAdmin = await getAdminClaim();
+  syncContext = { uid: userId, isAdmin };
+  logSyncEvent("identity", `users/${userId}`, {
+    uid: userId,
+    isAdmin,
+  });
+}
+
 function getSyncErrorMessage(error: unknown): string {
-  const err = error as { code?: string; message?: string };
+  const err = error as SyncErrorLike;
   const code = err.code ?? "";
 
   if (code === "permission-denied") {
@@ -36,6 +135,15 @@ function getSyncErrorMessage(error: unknown): string {
   }
 
   return "Signed in successfully, but cloud sync failed. Your local data is still safe, and you can retry shortly.";
+}
+
+function isPermissionDenied(error: unknown): boolean {
+  return getErrorCode(error) === "permission-denied";
+}
+
+function isNetworkFailure(error: unknown): boolean {
+  const code = getErrorCode(error);
+  return code === "unavailable" || code === "network-request-failed";
 }
 
 function toTimestamp(value?: string): number {
@@ -76,7 +184,10 @@ async function fetchCloudStore<T extends SyncStoreName>(
   storeName: T,
   userId: string
 ): Promise<Array<CourseForgeEntityMap[T]>> {
+  const path = `users/${userId}/${storeName}`;
+  logSyncEvent("read:start", path, { userId, storeName });
   const snapshot = await getDocs(userCollection(storeName, userId));
+  logSyncEvent("read:success", path, { docs: snapshot.size });
 
   return snapshot.docs.map((docSnapshot) => {
     const data = docSnapshot.data() as CourseForgeEntityMap[T];
@@ -103,7 +214,8 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
   storeName: T,
   userId: string,
   item: CourseForgeEntityMap[T]
-): Promise<void> {
+): Promise<boolean> {
+  const path = `users/${userId}/${storeName}/${item.id}`;
   const cloudRecord = {
     ...item,
     userId,
@@ -112,7 +224,19 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
     lastModified: item.lastModified ?? toIsoNow(),
   };
 
-  await setDoc(doc(firestoreDb, "users", userId, storeName, item.id), cloudRecord, { merge: true });
+  if (shouldSkipWriteForLoop(path)) {
+    return false;
+  }
+
+  logSyncEvent("write:start", path, cloudRecord);
+  try {
+    await setDoc(doc(firestoreDb, "users", userId, storeName, item.id), cloudRecord, { merge: true });
+    logSyncEvent("write:success", path, { id: item.id });
+    return true;
+  } catch (error) {
+    logSyncEvent("write:error", path, cloudRecord, error);
+    throw error;
+  }
 }
 
 export async function uploadLocalChanges(userId: string): Promise<void> {
@@ -121,6 +245,7 @@ export async function uploadLocalChanges(userId: string): Promise<void> {
   }
 
   try {
+    await logSyncIdentity(userId);
     await Promise.all(
       SYNC_STORES.map(async (storeName) => {
         const localItems = await fetchLocalStore(storeName);
@@ -138,13 +263,16 @@ export async function uploadLocalChanges(userId: string): Promise<void> {
               lastModified: item.lastModified ?? toIsoNow(),
             } as CourseForgeEntityMap[typeof storeName];
 
-            await saveCloudStoreItem(storeName, userId, synced);
-            await saveLocalStoreItem(storeName, synced);
+            const wroteToCloud = await saveCloudStoreItem(storeName, userId, synced);
+            if (wroteToCloud) {
+              await saveLocalStoreItem(storeName, synced);
+            }
           })
         );
       })
     );
   } catch (error) {
+    logSyncEvent("upload:error", `users/${userId}`, { userId }, error);
     console.error("uploadLocalChanges failed", error);
     throw new Error(getSyncErrorMessage(error));
   }
@@ -156,6 +284,7 @@ export async function downloadCloudData(userId: string): Promise<void> {
   }
 
   try {
+    await logSyncIdentity(userId);
     await Promise.all(
       SYNC_STORES.map(async (storeName) => {
         const cloudItems = await fetchCloudStore(storeName, userId);
@@ -179,6 +308,7 @@ export async function downloadCloudData(userId: string): Promise<void> {
       })
     );
   } catch (error) {
+    logSyncEvent("download:error", `users/${userId}`, { userId }, error);
     console.error("downloadCloudData failed", error);
     throw new Error(getSyncErrorMessage(error));
   }
@@ -190,6 +320,10 @@ export async function syncUserData(userId: string): Promise<void> {
   }
 
   try {
+    await logSyncIdentity(userId);
+    const before = await getPendingSyncDiagnostics();
+    logSyncEvent("sync:start", `users/${userId}`, { userId, pendingBefore: before.pendingCount });
+
     await Promise.all(
       SYNC_STORES.map(async (storeName) => {
         const [localRows, cloudRows] = await Promise.all([
@@ -237,8 +371,10 @@ export async function syncUserData(userId: string): Promise<void> {
                 false
               ) as CourseForgeEntityMap[typeof storeName];
 
-              await saveCloudStoreItem(storeName, userId, localWinner);
-              await saveLocalStoreItem(storeName, localWinner);
+              const wroteToCloud = await saveCloudStoreItem(storeName, userId, localWinner);
+              if (wroteToCloud) {
+                await saveLocalStoreItem(storeName, localWinner);
+              }
               return;
             }
 
@@ -254,8 +390,10 @@ export async function syncUserData(userId: string): Promise<void> {
                 false
               ) as CourseForgeEntityMap[typeof storeName];
 
-              await saveCloudStoreItem(storeName, userId, localOnly);
-              await saveLocalStoreItem(storeName, localOnly);
+              const wroteToCloud = await saveCloudStoreItem(storeName, userId, localOnly);
+              if (wroteToCloud) {
+                await saveLocalStoreItem(storeName, localOnly);
+              }
               return;
             }
 
@@ -277,9 +415,81 @@ export async function syncUserData(userId: string): Promise<void> {
         );
       })
     );
+
+    const after = await getPendingSyncDiagnostics();
+    logSyncEvent("sync:success", `users/${userId}`, { userId, pendingAfter: after.pendingCount, byStore: after.byStore });
   } catch (error) {
+    logSyncEvent("sync:error", `users/${userId}`, { userId, code: getErrorCode(error) }, error);
     console.error("syncUserData failed", error);
     throw new Error(getSyncErrorMessage(error));
+  }
+}
+
+export async function syncNow(): Promise<{
+  success: boolean;
+  message: string;
+  retryable: boolean;
+  permissionDenied: boolean;
+  throttled: boolean;
+  writeLoopTriggered: boolean;
+  pendingCount: number;
+}> {
+  const now = Date.now();
+  if (now - lastSyncAttemptAt < SYNC_THROTTLE_MS) {
+    const pending = await getPendingSyncDiagnostics();
+    return {
+      success: false,
+      message: "Sync skipped to avoid excessive write frequency.",
+      retryable: false,
+      permissionDenied: false,
+      throttled: true,
+      writeLoopTriggered: consumeWriteLoopTriggered(),
+      pendingCount: pending.pendingCount,
+    };
+  }
+
+  lastSyncAttemptAt = now;
+  const user = getCurrentUser();
+
+  if (!user?.uid) {
+    const pending = await getPendingSyncDiagnostics();
+    return {
+      success: false,
+      message: "Sign in to sync your local data with the cloud.",
+      retryable: false,
+      permissionDenied: false,
+      throttled: false,
+      writeLoopTriggered: consumeWriteLoopTriggered(),
+      pendingCount: pending.pendingCount,
+    };
+  }
+
+  try {
+    await syncUserData(user.uid);
+    const pending = await getPendingSyncDiagnostics();
+    return {
+      success: true,
+      message: "Sync completed successfully.",
+      retryable: false,
+      permissionDenied: false,
+      throttled: false,
+      writeLoopTriggered: consumeWriteLoopTriggered(),
+      pendingCount: pending.pendingCount,
+    };
+  } catch (error) {
+    const pending = await getPendingSyncDiagnostics();
+    const permissionDenied = isPermissionDenied(error);
+    const retryable = isNetworkFailure(error);
+
+    return {
+      success: false,
+      message: getSyncErrorMessage(error),
+      retryable,
+      permissionDenied,
+      throttled: false,
+      writeLoopTriggered: consumeWriteLoopTriggered(),
+      pendingCount: pending.pendingCount,
+    };
   }
 }
 
@@ -293,12 +503,25 @@ export async function findCloudTextbookByISBN(userId: string, isbnInput: string)
 
   const textbooksRef = userCollection(STORE_NAMES.textbooks, userId);
 
+  const rawPath = `users/${userId}/textbooks?isbnRaw=${raw}`;
+  const normalizedPath = `users/${userId}/textbooks?isbnNormalized=${normalized}`;
+
+  logSyncEvent("read:start", rawPath, { userId, isbnRaw: raw });
+  if (normalized) {
+    logSyncEvent("read:start", normalizedPath, { userId, isbnNormalized: normalized });
+  }
+
   const [rawMatches, normalizedMatches] = await Promise.all([
     getDocs(query(textbooksRef, where("isbnRaw", "==", raw))),
     normalized
       ? getDocs(query(textbooksRef, where("isbnNormalized", "==", normalized)))
       : Promise.resolve(null),
   ]);
+
+  logSyncEvent("read:success", rawPath, { docs: rawMatches.size });
+  if (normalizedMatches) {
+    logSyncEvent("read:success", normalizedPath, { docs: normalizedMatches.size });
+  }
 
   const candidates = [
     ...rawMatches.docs,

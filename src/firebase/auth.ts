@@ -11,8 +11,32 @@ import {
   type Unsubscribe,
   type User,
 } from "firebase/auth";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+
 import { firebaseApp } from "./firebaseApp";
 import { getFirebaseConfigError } from "./firebaseConfig";
+import { firestoreDb } from "./firestore";
+
+function logAuthSyncEvent(type: string, path: string, payload: unknown, error?: unknown): void {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  if (!error) {
+    console.info("[CourseForge auth-sync]", { type, path, payload, timestamp: new Date().toISOString() });
+    return;
+  }
+
+  const code = (error as { code?: string })?.code ?? "unknown";
+  console.error("[CourseForge auth-sync]", {
+    type,
+    path,
+    payload,
+    code,
+    error,
+    timestamp: new Date().toISOString(),
+  });
+}
 
 function isExtensionRuntime(): boolean {
   const runtimeId = (globalThis as { chrome?: { runtime?: { id?: unknown } } }).chrome?.runtime?.id;
@@ -175,10 +199,7 @@ export async function refreshCurrentUserClaims(): Promise<boolean> {
  * Firestore security rules and backend functions must enforce admin status via the token claim.
  */
 export async function saveUserProfileToFirestore(user: User): Promise<void> {
-  // Import lazily to avoid pulling Firestore into the auth bootstrap path.
-  const { doc, getFirestore: getFs, serverTimestamp, setDoc } = await import("firebase/firestore");
-  const db = getFs(firebaseApp);
-  const userRef = doc(db, "users", user.uid);
+  const userRef = doc(firestoreDb, "users", user.uid);
 
   let isAdmin = false;
   try {
@@ -188,15 +209,26 @@ export async function saveUserProfileToFirestore(user: User): Promise<void> {
     // Non-critical — proceed without claim info.
   }
 
-  await setDoc(
-    userRef,
-    {
-      uid: user.uid,
-      displayName: user.displayName ?? "",
-      email: user.email ?? "",
-      lastLoginAt: serverTimestamp(),
-      isAdmin,
-    },
-    { merge: true } // Preserves createdAt set on first sign-in.
-  );
+  const payload = {
+    uid: user.uid,
+    displayName: user.displayName ?? "",
+    email: user.email ?? "",
+    isAdmin,
+  };
+
+  logAuthSyncEvent("write:start", `users/${user.uid}`, payload);
+  try {
+    await setDoc(
+      userRef,
+      {
+        ...payload,
+        lastLoginAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    logAuthSyncEvent("write:success", `users/${user.uid}`, payload);
+  } catch (error) {
+    logAuthSyncEvent("write:error", `users/${user.uid}`, payload, error);
+    throw error;
+  }
 }

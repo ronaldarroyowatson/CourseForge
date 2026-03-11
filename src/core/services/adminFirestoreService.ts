@@ -2,6 +2,8 @@ import { httpsCallable } from "firebase/functions";
 
 import type { ContentStatus } from "../models/entities";
 import { functionsClient } from "../../firebase/functions";
+import { getAdminClaim, getCurrentUser } from "../../firebase/auth";
+import { logSyncEvent } from "./syncService";
 
 export interface AdminUserRecord {
   uid: string;
@@ -52,12 +54,37 @@ async function callAdminFunction<TRequest, TResponse>(
   name: string,
   requestData: TRequest
 ): Promise<TResponse> {
+  const currentUser = getCurrentUser();
+  const isAdmin = await getAdminClaim();
+  logSyncEvent("admin:call:start", `functions/${name}`, {
+    requestData,
+    uid: currentUser?.uid ?? null,
+    isAdmin,
+  });
+
   const callable = httpsCallable<TRequest, CallableResponse<TResponse>>(functionsClient, name);
-  const result = await callable(requestData);
+  let result;
+
+  try {
+    result = await callable(requestData);
+  } catch (error) {
+    logSyncEvent("admin:call:error", `functions/${name}`, {
+      requestData,
+      uid: currentUser?.uid ?? null,
+      isAdmin,
+    }, error);
+    throw error;
+  }
 
   if (!result.data.success) {
+    logSyncEvent("admin:call:failed", `functions/${name}`, result.data);
     throw new Error(result.data.message ?? `Admin function ${name} failed.`);
   }
+
+  logSyncEvent("admin:call:success", `functions/${name}`, {
+    uid: currentUser?.uid ?? null,
+    isAdmin,
+  });
 
   return result.data.data;
 }

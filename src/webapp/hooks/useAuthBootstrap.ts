@@ -1,13 +1,15 @@
 import React from "react";
 import type { User, Unsubscribe } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 
-import { syncUserData } from "../../core/services/syncService";
+import { getPendingSyncDiagnostics, syncNow, syncUserData } from "../../core/services/syncService";
 import {
   getAdminClaim,
   initializePersistentAuth,
   saveUserProfileToFirestore,
   subscribeToAuthTokenChanges,
 } from "../../firebase/auth";
+import { firestoreDb } from "../../firebase/firestore";
 import { useAuthStore } from "../store/authStore";
 import { useUIStore } from "../store/uiStore";
 
@@ -35,6 +37,16 @@ export function useAuthBootstrap(): void {
 
     async function syncAuthenticatedUser(user: User): Promise<void> {
       try {
+        const profileSnapshot = await getDoc(doc(firestoreDb, "users", user.uid));
+        const theme = profileSnapshot.get("theme");
+        if (theme === "dark" || theme === "light") {
+          useUIStore.getState().setTheme(theme);
+        }
+      } catch {
+        // Theme loading is non-blocking and should not break auth bootstrap.
+      }
+
+      try {
         await saveUserProfileToFirestore(user);
       } catch (error) {
         console.warn("saveUserProfileToFirestore failed (non-critical):", error);
@@ -53,6 +65,8 @@ export function useAuthBootstrap(): void {
           return;
         }
         lastSyncedUserId = user.uid;
+        const pending = await getPendingSyncDiagnostics();
+        uiStore.setPendingSyncCount(pending.pendingCount);
         uiStore.setSyncStatus("synced", "Your data is synced.");
       } catch (error) {
         if (!isActive) {
@@ -93,6 +107,10 @@ export function useAuthBootstrap(): void {
       });
 
       await syncAuthenticatedUser(user);
+
+      // Refresh pending counters after token/bootstrap events.
+      const quickSync = await syncNow();
+      useUIStore.getState().setPendingSyncCount(quickSync.pendingCount);
     }
 
     void initializePersistentAuth()

@@ -17,6 +17,18 @@ interface TextbookListProps {
   onRefresh: () => void;
 }
 
+function getSyncBadge(textbook: Textbook): { label: string; className: string } {
+  if (textbook.pendingSync) {
+    return { label: "Pending cloud sync", className: "sync-badge sync-badge--pending" };
+  }
+
+  if (textbook.source === "cloud") {
+    return { label: "Cloud synced", className: "sync-badge sync-badge--synced" };
+  }
+
+  return { label: "Local only", className: "sync-badge sync-badge--local" };
+}
+
 function sortTextbooks(textbooks: Textbook[]): Textbook[] {
   return [...textbooks].sort((a, b) => {
     // Favorites first
@@ -86,8 +98,10 @@ export function TextbookList({
       {!isLoading && textbooks.length === 0 ? <p>No textbooks yet.</p> : null}
 
       <ul className="textbook-list">
-        {sorted.map((textbook) => (
-          <li
+        {sorted.map((textbook) => {
+          const syncBadge = getSyncBadge(textbook);
+
+          return (<li
             key={textbook.id}
             className={[
               "textbook-row",
@@ -99,6 +113,12 @@ export function TextbookList({
               <strong>{textbook.title}</strong>
               <p>
                 Grade {textbook.grade} &bull; {textbook.subject} &bull; {textbook.publicationYear}
+              </p>
+              <p className="textbook-row__meta">
+                ISBN: {textbook.isbnRaw?.trim() ? textbook.isbnRaw : "Not set"}
+              </p>
+              <p className="textbook-row__meta">
+                <span className={syncBadge.className}>{syncBadge.label}</span>
               </p>
               <div className="textbook-row__actions">
                 <button
@@ -123,7 +143,6 @@ export function TextbookList({
                   className="btn-icon"
                   title="Favorite textbook"
                   aria-label="Favorite textbook"
-                  aria-pressed={textbook.isFavorite}
                 >
                   <StarIcon size={15} filled={textbook.isFavorite} />
                 </button>
@@ -133,7 +152,6 @@ export function TextbookList({
                   className="btn-icon"
                   title="Archive textbook"
                   aria-label="Archive textbook"
-                  aria-pressed={textbook.isArchived}
                 >
                   <ArchiveIcon size={15} />
                 </button>
@@ -143,8 +161,8 @@ export function TextbookList({
             <button type="button" onClick={() => void handleDelete(textbook.id)}>
               Delete
             </button>
-          </li>
-        ))}
+          </li>);
+        })}
       </ul>
     </section>
   );

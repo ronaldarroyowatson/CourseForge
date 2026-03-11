@@ -1,12 +1,12 @@
 import React from "react";
 
-import type { AdminContentRecord } from "../../../core/services/adminFirestoreService";
+import type { AdminContentRecord } from "../../../core/services";
 import {
   adminArchiveContent,
   adminSoftDeleteContent,
   adminUpdateContent,
   getAllTextbooksAdmin,
-} from "../../../core/services/adminFirestoreService";
+} from "../../../core/services";
 
 type CollectionFilter = "all" | "textbooks" | "chapters" | "sections" | "vocabTerms";
 
@@ -242,6 +242,9 @@ export function ContentBrowser(): React.JSX.Element {
                   {isEditing ? (
                     <input
                       value={editState.title}
+                      title="Content title"
+                      aria-label="Content title"
+                      placeholder="Enter content title"
                       onChange={(event) => setEditState((current) => current ? { ...current, title: event.target.value } : current)}
                     />
                   ) : record.title}
@@ -279,6 +282,9 @@ export function ContentBrowser(): React.JSX.Element {
                       ) : (
                         <textarea
                           value={editState.summary}
+                          title="Content summary"
+                          aria-label="Content summary"
+                          placeholder="Enter summary"
                           onChange={(event) => setEditState((current) => current ? { ...current, summary: event.target.value } : current)}
                           rows={3}
                         />
@@ -301,6 +307,8 @@ export function ContentBrowser(): React.JSX.Element {
                   {isEditing ? (
                     <select
                       value={editState.status}
+                      title="Content status"
+                      aria-label="Content status"
                       onChange={(event) => setEditState((current) => current ? { ...current, status: event.target.value as AdminContentRecord["status"] } : current)}
                     >
                       <option value="draft">draft</option>

@@ -8,6 +8,7 @@ export {
   STORE_NAMES,
 } from "./db";
 
+export * from "./adminFirestoreService";
 export * from "./repositories";
 export * from "./syncService";
 export * from "./xml";

@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [1.1.1] - 2026-03-11
+
+### Fixed
+
+- Hardened sync behavior with throttling, write-loop protection, and clearer permission/network handling.
+- Added manual and autosync guardrails so failed or blocked sync states do not cascade into repeated writes.
+- Improved sync diagnostics across auth, sync service, and admin callable operations for faster issue triage.
+- Resolved admin panel module-resolution and accessibility issues in admin content editing flows.
+- Stabilized integration tests for the updated sync API surface (`syncNow`, pending diagnostics).
+
+### Changed
+
+- Added admin route lazy-loading and improved bundle chunking for faster non-admin initial load.
+- Refined dark/light theme token usage and readability in sync and admin UI surfaces.
+
+### Verified
+
+- `npm run typecheck`
+- `npm run test:core`
+- `npm run test:integration`
+- `npm run build`
+
 ## [1.1.0] - 2026-03-11
 
 ### Added

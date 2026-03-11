@@ -2,7 +2,9 @@
 
 CourseForge is a local-first curriculum authoring platform for teachers. It combines a browser extension for quick capture with a full web app for textbook management, sync, moderation, and XML export.
 
-Version `1.1.0` adds persistent Firebase login, true path-based routing, Cloud Function-backed admin tools, and integration coverage for the auth and admin flows.
+Version `1.1.1` focuses on syncing and admin panel hardening, including safer autosync behavior, improved sync diagnostics, admin tooling fixes, and integration/build stability updates.
+
+Quick release note: v1.1.1 is primarily about fixing syncing reliability and tightening the admin panel workflows.
 
 ## What it does
 

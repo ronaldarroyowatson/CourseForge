@@ -27,6 +27,7 @@ import {
   updateTextbook,
   updateTextbookFlags,
 } from "../../core/services/repositories";
+import { useUIStore } from "../store/uiStore";
 
 export interface CreateTextbookInput {
   title: string;
@@ -171,34 +172,45 @@ function buildKeyIdeaFromInput(input: CreateKeyIdeaInput): KeyIdea {
  * Centralizes repository calls so UI components stay focused on rendering and form state.
  */
 export function useRepositories() {
+  const markLocalChange = useUIStore((state) => state.markLocalChange);
+
   const fetchTextbooks = useCallback(async (): Promise<Textbook[]> => {
     return listTextbooks();
   }, []);
 
   const createTextbook = useCallback(async (input: CreateTextbookInput): Promise<string> => {
     const textbook = buildTextbookFromInput(input);
-    return saveTextbook(textbook);
-  }, []);
+    const id = await saveTextbook(textbook);
+    markLocalChange();
+    return id;
+  }, [markLocalChange]);
 
   const removeTextbook = useCallback(async (id: string): Promise<void> => {
     await deleteTextbook(id);
-  }, []);
+    markLocalChange();
+  }, [markLocalChange]);
 
   const findTextbookByISBN = useCallback(async (isbnInput: string): Promise<Textbook | undefined> => {
     return findTextbookByIsbn(isbnInput);
   }, []);
 
   const editTextbook = useCallback(async (id: string, changes: Partial<Textbook>): Promise<Textbook> => {
-    return updateTextbook(id, changes);
-  }, []);
+    const updated = await updateTextbook(id, changes);
+    markLocalChange();
+    return updated;
+  }, [markLocalChange]);
 
   const toggleTextbookFavorite = useCallback(async (id: string, isFavorite: boolean): Promise<Textbook> => {
-    return updateTextbookFlags(id, { isFavorite });
-  }, []);
+    const updated = await updateTextbookFlags(id, { isFavorite });
+    markLocalChange();
+    return updated;
+  }, [markLocalChange]);
 
   const toggleTextbookArchive = useCallback(async (id: string, isArchived: boolean): Promise<Textbook> => {
-    return updateTextbookFlags(id, { isArchived });
-  }, []);
+    const updated = await updateTextbookFlags(id, { isArchived });
+    markLocalChange();
+    return updated;
+  }, [markLocalChange]);
 
   const fetchChaptersByTextbookId = useCallback(async (textbookId: string): Promise<Chapter[]> => {
     return listChaptersByTextbookId(textbookId);
@@ -206,12 +218,15 @@ export function useRepositories() {
 
   const createChapter = useCallback(async (input: CreateChapterInput): Promise<string> => {
     const chapter = buildChapterFromInput(input);
-    return saveChapter(chapter);
-  }, []);
+    const id = await saveChapter(chapter);
+    markLocalChange();
+    return id;
+  }, [markLocalChange]);
 
   const removeChapter = useCallback(async (id: string): Promise<void> => {
     await deleteChapter(id);
-  }, []);
+    markLocalChange();
+  }, [markLocalChange]);
 
   const fetchSectionsByChapterId = useCallback(async (chapterId: string): Promise<Section[]> => {
     return listSectionsByChapterId(chapterId);
@@ -219,12 +234,15 @@ export function useRepositories() {
 
   const createSection = useCallback(async (input: CreateSectionInput): Promise<string> => {
     const section = buildSectionFromInput(input);
-    return saveSection(section);
-  }, []);
+    const id = await saveSection(section);
+    markLocalChange();
+    return id;
+  }, [markLocalChange]);
 
   const removeSection = useCallback(async (id: string): Promise<void> => {
     await deleteSection(id);
-  }, []);
+    markLocalChange();
+  }, [markLocalChange]);
 
   const fetchVocabTermsBySectionId = useCallback(async (sectionId: string): Promise<VocabTerm[]> => {
     return listVocabTermsBySectionId(sectionId);
@@ -232,12 +250,15 @@ export function useRepositories() {
 
   const createVocabTerm = useCallback(async (input: CreateVocabTermInput): Promise<string> => {
     const term = buildVocabTermFromInput(input);
-    return saveVocabTerm(term);
-  }, []);
+    const id = await saveVocabTerm(term);
+    markLocalChange();
+    return id;
+  }, [markLocalChange]);
 
   const removeVocabTerm = useCallback(async (id: string): Promise<void> => {
     await deleteVocabTerm(id);
-  }, []);
+    markLocalChange();
+  }, [markLocalChange]);
 
   const fetchEquationsBySectionId = useCallback(async (sectionId: string): Promise<Equation[]> => {
     return listEquationsBySectionId(sectionId);

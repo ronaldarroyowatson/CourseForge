@@ -1,0 +1,175 @@
+.sidebar-shell {
+  width: 100%;
+  min-width: 480px;
+  max-width: 480px;
+  min-height: 640px;
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  box-sizing: border-box;
+}
+
+.sidebar-title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.sidebar-subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+}
+
+.sidebar-section-title {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.sidebar-section-copy {
+  margin: 0;
+}
+
+.selector-grid {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.selector-field {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.selector-field select {
+  border: 1px solid #c1cad3;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0.4rem;
+}
+
+.quick-grid {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.selection-summary {
+  border: 1px solid #d8dee5;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.selection-summary p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.selection-summary p + p {
+  margin-top: 0.25rem;
+}
+
+.quick-form {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid #d8dee5;
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: #ffffff;
+}
+
+.quick-form-fields {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.quick-form-title {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.quick-form input {
+  border: 1px solid #c1cad3;
+  border-radius: 6px;
+  padding: 0.4rem;
+}
+
+.quick-form button {
+  border: 1px solid #9ea9b5;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0.4rem;
+  cursor: pointer;
+}
+
+.sidebar-error {
+  margin: 0;
+  color: #a32323;
+  font-size: 0.85rem;
+}
+
+.sidebar-success {
+  margin: 0;
+  color: #1f6d2c;
+  font-size: 0.85rem;
+}
+
+.sidebar-note {
+  margin: 0;
+  color: #556577;
+  font-size: 0.82rem;
+}
+
+.sidebar-button-row {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.sidebar-textarea {
+  border: 1px solid #c1cad3;
+  border-radius: 6px;
+  width: 100%;
+  resize: vertical;
+  min-height: 120px;
+  padding: 0.45rem;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.8rem;
+}
+
+.quick-add-tabs {
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+  border-bottom: 1px solid #d8dee5;
+}
+
+.quick-add-tab {
+  flex: 1;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 0.5rem 0.4rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #556577;
+  transition: all 0.2s ease;
+}
+
+.quick-add-tab:hover {
+  color: #24292f;
+  background: #f6f8fa;
+  border-bottom-color: #e0e6ea;
+}
+
+.quick-add-tab.active {
+  color: #24292f;
+  border-bottom-color: #0969da;
+  font-weight: 500;
+}
+
+.quick-form-container {
+  display: grid;
+}
+

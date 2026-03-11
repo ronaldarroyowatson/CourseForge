@@ -1,9 +1,11 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 import { useRepositories } from "../../hooks/useRepositories";
+import { getNextIndex, incrementTrailingNumber } from "../../utils/predictiveText";
 
 interface ChapterFormProps {
   selectedTextbookId: string | null;
+  refreshKey: number;
   onSaved: () => void;
 }
 
@@ -19,11 +21,13 @@ const INITIAL_FORM_STATE: ChapterFormState = {
   description: "",
 };
 
-export function ChapterForm({ selectedTextbookId, onSaved }: ChapterFormProps): React.JSX.Element {
-  const { createChapter } = useRepositories();
+export function ChapterForm({ selectedTextbookId, refreshKey, onSaved }: ChapterFormProps): React.JSX.Element {
+  const { createChapter, fetchChaptersByTextbookId } = useRepositories();
   const [form, setForm] = useState<ChapterFormState>(INITIAL_FORM_STATE);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const previousSuggestedIndex = useRef("");
+  const previousSuggestedName = useRef("");
 
   function updateField<K extends keyof ChapterFormState>(
     field: K,
@@ -31,6 +35,50 @@ export function ChapterForm({ selectedTextbookId, onSaved }: ChapterFormProps): 
   ): void {
     setForm((current) => ({ ...current, [field]: value }));
   }
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadSuggestions(): Promise<void> {
+      if (!selectedTextbookId) {
+        previousSuggestedIndex.current = "";
+        previousSuggestedName.current = "";
+        setForm(INITIAL_FORM_STATE);
+        return;
+      }
+
+      const chapters = await fetchChaptersByTextbookId(selectedTextbookId);
+      if (!isMounted) {
+        return;
+      }
+
+      const sortedChapters = [...chapters].sort((left, right) => left.index - right.index);
+      const lastChapter = sortedChapters.at(-1);
+      const nextSuggestedIndex = getNextIndex(sortedChapters.map((chapter) => chapter.index));
+      const nextSuggestedName = lastChapter ? incrementTrailingNumber(lastChapter.name) : "";
+
+      setForm((current) => ({
+        ...current,
+        index:
+          current.index === "" || current.index === previousSuggestedIndex.current
+            ? nextSuggestedIndex
+            : current.index,
+        name:
+          current.name === "" || current.name === previousSuggestedName.current
+            ? nextSuggestedName
+            : current.name,
+      }));
+
+      previousSuggestedIndex.current = nextSuggestedIndex;
+      previousSuggestedName.current = nextSuggestedName;
+    }
+
+    void loadSuggestions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchChaptersByTextbookId, refreshKey, selectedTextbookId]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -57,6 +105,8 @@ export function ChapterForm({ selectedTextbookId, onSaved }: ChapterFormProps): 
       });
 
       setForm(INITIAL_FORM_STATE);
+      previousSuggestedIndex.current = "";
+      previousSuggestedName.current = "";
       onSaved();
     } catch {
       setErrorMessage("Unable to save chapter. Please try again.");

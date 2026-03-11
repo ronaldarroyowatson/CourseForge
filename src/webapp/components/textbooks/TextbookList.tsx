@@ -1,58 +1,32 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 
 import type { Textbook } from "../../../core/models";
 import { useRepositories } from "../../hooks/useRepositories";
 
 interface TextbookListProps {
-  refreshKey: number;
+  textbooks: Textbook[];
+  isLoading: boolean;
+  loadError: string | null;
   selectedTextbookId: string | null;
   onSelectTextbook: (id: string) => void;
+  onDeleted: (id: string) => void;
 }
 
 export function TextbookList({
-  refreshKey,
+  textbooks,
+  isLoading,
+  loadError,
   selectedTextbookId,
   onSelectTextbook,
+  onDeleted,
 }: TextbookListProps): React.JSX.Element {
-  const { fetchTextbooks, removeTextbook } = useRepositories();
-  const [textbooks, setTextbooks] = useState<Textbook[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { removeTextbook } = useRepositories();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadTextbooks(): Promise<void> {
-      try {
-        setIsLoading(true);
-        setErrorMessage(null);
-        const results = await fetchTextbooks();
-
-        if (isMounted) {
-          setTextbooks(results);
-        }
-      } catch {
-        if (isMounted) {
-          setErrorMessage("Unable to load textbooks.");
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
-    }
-
-    void loadTextbooks();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [fetchTextbooks, refreshKey]);
 
   async function handleDelete(id: string): Promise<void> {
     try {
       await removeTextbook(id);
-      setTextbooks((current) => current.filter((textbook) => textbook.id !== id));
+      onDeleted(id);
     } catch {
       setErrorMessage("Unable to delete textbook.");
     }
@@ -63,6 +37,7 @@ export function TextbookList({
       <h3>Textbooks</h3>
 
       {isLoading ? <p>Loading textbooks...</p> : null}
+      {loadError ? <p className="error-text">{loadError}</p> : null}
       {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
 
       {!isLoading && textbooks.length === 0 ? <p>No textbooks yet.</p> : null}

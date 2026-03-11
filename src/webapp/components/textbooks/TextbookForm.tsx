@@ -32,6 +32,7 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
   const [form, setForm] = useState<TextbookFormState>(INITIAL_FORM_STATE);
   const [isSaving, setIsSaving] = useState(false);
   const [isLookingUpISBN, setIsLookingUpISBN] = useState(false);
+  const [isManualEntryMode, setIsManualEntryMode] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -52,13 +53,27 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
       setIsLookingUpISBN(true);
       const metadata = await fetchMetadataByISBN(form.isbn);
 
+      if (!metadata) {
+        setIsManualEntryMode(true);
+        setForm((current) => ({
+          ...INITIAL_FORM_STATE,
+          isbn: current.isbn,
+        }));
+        setErrorMessage("This ISBN is not available in public databases. Please enter the textbook details manually.");
+        return;
+      }
+
+      setIsManualEntryMode(false);
+
+      const parsedYear = metadata.publicationDate ? Number.parseInt(metadata.publicationDate.slice(0, 4), 10) : null;
+
       // Prefill form fields with fetched metadata
       setForm((current) => ({
         ...current,
-        title: metadata.title || current.title,
+        title: metadata.title ?? current.title,
         edition: current.edition, // Edition is usually not in Open Library, keep existing
-        publicationYear: metadata.publishDate
-          ? new Date(metadata.publishDate).getFullYear().toString()
+        publicationYear: parsedYear && Number.isFinite(parsedYear)
+          ? parsedYear.toString()
           : current.publicationYear,
       }));
 
@@ -66,7 +81,7 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
       setSuccessMessage(`ISBN found! Author(s): ${authorList}. Form fields prefilled.`);
     } catch (error) {
       if (error instanceof Error) {
-        setErrorMessage(error.message);
+        setErrorMessage(error.message || "Unable to look up ISBN. Please try again.");
       } else {
         setErrorMessage("Unable to look up ISBN. Please try again.");
       }
@@ -98,6 +113,7 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
       });
 
       setForm(INITIAL_FORM_STATE);
+      setIsManualEntryMode(false);
       onSaved();
     } catch {
       setErrorMessage("Unable to save textbook. Please try again.");
@@ -109,6 +125,10 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
   return (
     <section className="panel">
       <h3>Add Textbook</h3>
+
+      {isManualEntryMode ? (
+        <p className="manual-entry-banner">Manual Entry Mode: Please fill in the textbook details.</p>
+      ) : null}
 
       <form onSubmit={handleSubmit} className="form-grid">
         <div className="form-group-isbn">

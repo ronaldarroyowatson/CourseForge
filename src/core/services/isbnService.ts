@@ -1,124 +1,146 @@
 /**
- * ISBN lookup service using Open Library API.
- * Fetches textbook metadata by ISBN to prefill form fields.
+ * ISBN lookup service with Google Books first, then Open Library fallback.
  */
 
 export interface ISBNMetadata {
-  title?: string;
-  authors?: string[];
-  publisher?: string;
-  publishDate?: string;
-  coverImageUrl?: string;
+  title: string | null;
+  authors: string[] | null;
+  publisher: string | null;
+  publicationDate: string | null;
+  coverImageUrl: string | null;
 }
 
 /**
- * Normalize ISBN by removing hyphens and spaces.
+ * Normalize ISBN by removing all non-digit characters.
  */
 function normalizeISBN(isbn: string): string {
-  return isbn.replace(/[-\s]/g, "").trim();
+  return isbn.replace(/\D/g, "");
 }
 
-/**
- * Validate ISBN-10 or ISBN-13 format.
- */
 function isValidISBN(isbn: string): boolean {
-  const normalized = normalizeISBN(isbn);
-  // Accept 10 or 13 digit ISBNs
-  return /^\d{10}$|^\d{13}$/.test(normalized);
+  return /^\d{10}$|^\d{13}$/.test(isbn);
+}
+
+function hasUsefulMetadata(metadata: ISBNMetadata): boolean {
+  return Boolean(metadata.title || metadata.authors || metadata.publisher || metadata.publicationDate || metadata.coverImageUrl);
+}
+
+function toArrayOfStrings(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const list = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  return list.length > 0 ? list : null;
 }
 
 /**
- * Fetch metadata from Open Library API by ISBN.
- * Returns title, authors, publisher, publish date, and cover image URL.
- *
- * @param isbn - ISBN-10 or ISBN-13
- * @returns ISBNMetadata object with fetched data
- * @throws Error if ISBN is invalid, API fails, or no results found
+ * Fetch ISBN metadata from Google Books.
+ * Returns null if no results are available or request fails.
  */
-export async function fetchMetadataByISBN(isbn: string): Promise<ISBNMetadata> {
-  const normalized = normalizeISBN(isbn);
-
-  if (!isValidISBN(normalized)) {
-    throw new Error("Invalid ISBN format. Please enter a valid ISBN-10 or ISBN-13.");
-  }
-
+export async function fetchFromGoogleBooks(isbn: string): Promise<ISBNMetadata | null> {
   try {
-    const url = `https://openlibrary.org/isbn/${normalized}.json`;
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
-    });
-
-    if (response.status === 404) {
-      throw new Error("ISBN not found in the Open Library database.");
-    }
-
+    const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
     if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
+      return null;
     }
 
-    const data = await response.json() as Record<string, unknown>;
+    const data = await response.json() as {
+      items?: Array<{
+        volumeInfo?: {
+          title?: string;
+          authors?: string[];
+          publisher?: string;
+          publishedDate?: string;
+          imageLinks?: {
+            thumbnail?: string;
+            smallThumbnail?: string;
+          };
+        };
+      }>;
+    };
 
-    const metadata: ISBNMetadata = {};
-
-    // Extract title
-    if (typeof data.title === "string") {
-      metadata.title = data.title;
+    const volumeInfo = data.items?.[0]?.volumeInfo;
+    if (!volumeInfo) {
+      return null;
     }
 
-    // Extract authors
-    if (Array.isArray(data.authors)) {
-      metadata.authors = data.authors
-        .map((author) => {
-          if (typeof author === "object" && author !== null && "name" in author) {
-            return (author as Record<string, unknown>).name;
-          }
-          return author;
-        })
-        .filter((name) => typeof name === "string") as string[];
-    }
+    const metadata: ISBNMetadata = {
+      title: typeof volumeInfo.title === "string" ? volumeInfo.title : null,
+      authors: toArrayOfStrings(volumeInfo.authors),
+      publisher: typeof volumeInfo.publisher === "string" ? volumeInfo.publisher : null,
+      publicationDate: typeof volumeInfo.publishedDate === "string" ? volumeInfo.publishedDate : null,
+      coverImageUrl:
+        typeof volumeInfo.imageLinks?.thumbnail === "string"
+          ? volumeInfo.imageLinks.thumbnail
+          : typeof volumeInfo.imageLinks?.smallThumbnail === "string"
+            ? volumeInfo.imageLinks.smallThumbnail
+            : null,
+    };
 
-    // Extract publisher
-    if (Array.isArray(data.publishers)) {
-      const publisherArray = data.publishers as unknown[];
-      const firstPublisher = publisherArray[0];
-      if (typeof firstPublisher === "string") {
-        metadata.publisher = firstPublisher;
-      }
-    }
-
-    // Extract publish date
-    if (typeof data.publish_date === "string") {
-      metadata.publishDate = data.publish_date;
-    }
-
-    // Extract cover image URL
-    if (Array.isArray(data.covers)) {
-      const coverArray = data.covers as unknown[];
-      const firstCoverId = coverArray[0];
-      if (typeof firstCoverId === "number") {
-        metadata.coverImageUrl = `https://covers.openlibrary.org/b/id/${firstCoverId}-S.jpg`;
-      }
-    }
-
-    // Ensure we got at least a title
-    if (!metadata.title) {
-      throw new Error("No textbook metadata found for this ISBN.");
-    }
-
-    return metadata;
-  } catch (error) {
-    if (error instanceof Error) {
-      // Re-throw our custom errors as-is
-      if (
-        error.message.includes("Invalid ISBN") ||
-        error.message.includes("ISBN not found") ||
-        error.message.includes("No textbook metadata")
-      ) {
-        throw error;
-      }
-      // Network or other errors
-      throw new Error(`Unable to fetch ISBN metadata: ${error.message}`);
-    }
-    throw new Error("Unable to fetch ISBN metadata due to an unexpected error.");
+    return hasUsefulMetadata(metadata) ? metadata : null;
+  } catch {
+    return null;
   }
+}
+
+/**
+ * Fetch ISBN metadata from Open Library.
+ * Returns null if no results are available or request fails.
+ */
+export async function fetchFromOpenLibrary(isbn: string): Promise<ISBNMetadata | null> {
+  try {
+    const response = await fetch(`https://openlibrary.org/isbn/${isbn}.json`);
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json() as {
+      title?: unknown;
+      authors?: unknown;
+      publishers?: unknown;
+      publish_date?: unknown;
+      covers?: unknown;
+    };
+
+    const publishers = toArrayOfStrings(data.publishers);
+    const coverIds = Array.isArray(data.covers)
+      ? data.covers.filter((id): id is number => typeof id === "number")
+      : [];
+
+    const metadata: ISBNMetadata = {
+      title: typeof data.title === "string" ? data.title : null,
+      authors: null,
+      publisher: publishers ? publishers[0] : null,
+      publicationDate: typeof data.publish_date === "string" ? data.publish_date : null,
+      coverImageUrl: coverIds.length > 0 ? `https://covers.openlibrary.org/b/id/${coverIds[0]}-M.jpg` : null,
+    };
+
+    return hasUsefulMetadata(metadata) ? metadata : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch metadata by ISBN using Google Books first, then Open Library fallback.
+ * Returns null when no metadata could be resolved from either source.
+ */
+export async function fetchMetadataByISBN(isbn: string): Promise<ISBNMetadata | null> {
+  const normalizedIsbn = normalizeISBN(isbn);
+  if (!isValidISBN(normalizedIsbn)) {
+    return null;
+  }
+
+  const googleMetadata = await fetchFromGoogleBooks(normalizedIsbn);
+  if (googleMetadata) {
+    return googleMetadata;
+  }
+
+  const openLibraryMetadata = await fetchFromOpenLibrary(normalizedIsbn);
+  if (openLibraryMetadata) {
+    return openLibraryMetadata;
+  }
+
+  return null;
 }

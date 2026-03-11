@@ -35,6 +35,7 @@ export {
 } from "./sectionRepository";
 export {
   deleteTextbook,
+  getAll as getAllTextbooks,
   getTextbookById,
   listTextbooks,
   saveTextbook,

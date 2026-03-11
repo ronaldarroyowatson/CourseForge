@@ -65,6 +65,70 @@ body {
   padding: 1rem;
 }
 
+.workflow-ribbon {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.workflow-ribbon-tab {
+  border: 1px solid #c1cad3;
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+}
+
+.workflow-ribbon-tab.active {
+  border-color: #6a7a8b;
+  background: #eef3f7;
+  font-weight: 600;
+}
+
+.workflow-ribbon-tab:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.accordion-tile {
+  border: 1px solid #d2d8de;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.accordion-tile-header {
+  width: 100%;
+  border: 0;
+  background: #ffffff;
+  padding: 0.9rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.accordion-tile-summary {
+  display: block;
+  margin-top: 0.2rem;
+  color: #556577;
+  font-size: 0.9rem;
+  font-weight: 400;
+}
+
+.accordion-tile-icon {
+  color: #556577;
+  font-size: 0.9rem;
+}
+
+.accordion-tile-body {
+  border-top: 1px solid #d2d8de;
+  padding: 1rem;
+}
+
 .panel-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -117,6 +181,16 @@ body {
 .success-text {
   margin: 0;
   color: #1f6d2c;
+}
+
+.manual-entry-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #d2d8de;
+  border-radius: 6px;
+  background: #f7f9fb;
+  color: #3c4a5a;
+  font-size: 0.9rem;
 }
 
 .form-group-isbn {

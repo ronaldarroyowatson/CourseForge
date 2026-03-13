@@ -13,6 +13,9 @@ function createPendingDiagnostics() {
       chapters: 0,
       sections: 0,
       vocabTerms: 0,
+      equations: 0,
+      concepts: 0,
+      keyIdeas: 0,
     },
   };
 }
@@ -72,5 +75,51 @@ describe("syncNow safety controls", () => {
     expect(result.success).toBe(false);
     expect(result.permissionDenied).toBe(true);
     expect(result.errorCode).toBe("permission-denied");
+  });
+
+  it("unauthenticated branch returns expected shape with all required guardrail keys", async () => {
+    const result = await syncNow({
+      nowFn: () => 99000,
+      getCurrentUserFn: () => null,
+      getPendingSyncDiagnosticsFn: async () => createPendingDiagnostics(),
+      syncUserDataFn: async () => Promise.resolve(),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.retryable).toBe(false);
+    expect(result.permissionDenied).toBe(false);
+    expect(result.throttled).toBe(false);
+    // All guardrail keys must be present and correctly typed
+    expect(result).toHaveProperty("writeBudgetLimit");
+    expect(result).toHaveProperty("retryLimit");
+    expect(result).toHaveProperty("pendingCount");
+    expect(result).toHaveProperty("errorCode");
+    expect(result.errorCode).toBeNull();
+    expect(result.pendingCount).toBe(0);
+  });
+
+  it("throttled branch carries all guardrail keys and the expected message", async () => {
+    const sharedDeps = {
+      nowFn: () => 80000,
+      getCurrentUserFn: () => ({ uid: "user-throttle-keys" }),
+      getPendingSyncDiagnosticsFn: async () => createPendingDiagnostics(),
+      syncUserDataFn: async () => Promise.resolve(),
+    };
+
+    // First call at t=80000 anchors lastSyncAttemptAt; second call 1ms later is throttled
+    const first = await syncNow(sharedDeps);
+    expect(first.success).toBe(true);
+
+    const result = await syncNow({ ...sharedDeps, nowFn: () => 80001 });
+
+    expect(result.throttled).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.retryable).toBe(false);
+    expect(result.permissionDenied).toBe(false);
+    expect(result.message).toContain("excessive write frequency");
+    expect(result).toHaveProperty("writeBudgetLimit");
+    expect(result).toHaveProperty("retryLimit");
+    expect(result).toHaveProperty("pendingCount");
+    expect(result.errorCode).toBeNull();
   });
 });

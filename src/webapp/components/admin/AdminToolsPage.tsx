@@ -12,9 +12,9 @@
  */
 import React, { useState } from "react";
 
-import { ContentBrowser, ModerationQueue, UserManagement } from "./index";
+import { ContentBrowser, ModerationQueue, PremiumUsagePanel, UserManagement } from "./index";
 
-type AdminTab = "users" | "moderation" | "browser" | "system";
+type AdminTab = "users" | "moderation" | "browser" | "premium";
 
 interface AdminToolsPageProps {
   currentUserEmail: string | null;
@@ -32,16 +32,8 @@ export function AdminToolsPage({ currentUserEmail, onBack }: AdminToolsPageProps
         return <ModerationQueue />;
       case "browser":
         return <ContentBrowser />;
-      case "system":
-        return (
-          <section className="admin-section">
-            <h3>System Tools</h3>
-            <p className="admin-note">
-              System-level utilities (bulk operations, DB migrations, feature flags)
-              will be added here in a future release.
-            </p>
-          </section>
-        );
+      case "premium":
+        return <PremiumUsagePanel />;
     }
   }
 
@@ -65,7 +57,7 @@ export function AdminToolsPage({ currentUserEmail, onBack }: AdminToolsPageProps
             { id: "users", label: "User Management" },
             { id: "moderation", label: "Moderation Queue" },
             { id: "browser", label: "Content Browser" },
-            { id: "system", label: "System Tools" },
+            { id: "premium", label: "Premium Management" },
           ] as { id: AdminTab; label: string }[]
         ).map(({ id, label }) => (
           <button

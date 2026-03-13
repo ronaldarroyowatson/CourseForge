@@ -76,24 +76,31 @@ export interface VocabTerm {
   isDeleted?: boolean;
 }
 
-export interface Equation {
+interface SectionContentEntity {
   id: string;
+  userId?: string;
+  textbookId?: string;
+  chapterId?: string;
   sectionId: string;
+  lastModified?: string;
+  pendingSync?: boolean;
+  source?: "local" | "cloud";
+  status?: ContentStatus;
+  isDeleted?: boolean;
+}
+
+export interface Equation extends SectionContentEntity {
   name: string;
   latex: string;
   description?: string;
 }
 
-export interface Concept {
-  id: string;
-  sectionId: string;
+export interface Concept extends SectionContentEntity {
   name: string;
   explanation?: string;
 }
 
-export interface KeyIdea {
-  id: string;
-  sectionId: string;
+export interface KeyIdea extends SectionContentEntity {
   text: string;
 }
 

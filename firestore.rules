@@ -7,17 +7,19 @@ rules_version = '2';
 //   /textbooks/{textbookId}/chapters/{chapterId}
 //   /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}
 //   /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}
+//   /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/equations/{equationId}
+//   /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/concepts/{conceptId}
+//   /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/keyIdeas/{keyIdeaId}
 //
 // User profiles:
 //   /users/{uid}
 //
-// Ownership is stored in the document's `userId` field, written by the sync
+// Ownership is stored in the document's userId field, written by the sync
 // engine on every cloud write. Admins are identified via a custom JWT claim
 // (request.auth.token.admin == true), set exclusively by the setUserAdminStatus
 // Cloud Function.
 //
-// NOTE: equations, concepts, and keyIdeas are IndexedDB-local only and are not
-// synced to Firestore. No rules are required for those stores.
+// Section-scoped content entities use the same ownership model as vocab.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -31,38 +33,34 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Returns true when the caller holds the custom `admin` JWT claim.
+    // Returns true when the caller holds the custom admin JWT claim.
     // This claim is set exclusively by the setUserAdminStatus Cloud Function
     // and is never writable from the client.
     function isAdmin() {
       return request.auth != null && request.auth.token.admin == true;
     }
 
-    // Returns true when the caller is the document owner.
-    //
-    // Compatibility:
-    // - Current CourseForge v1.1 docs store owner in `userId`.
-    // - Future/alternate docs may use `ownerId`.
-    //
-    // - On create  : request.resource owner field must match caller uid.
-    // - On read/delete: existing resource owner field must match caller uid.
-    // - On update  : incoming OR existing owner field must match caller uid,
-    //   preventing owner reassignment attacks.
-    function isOwner() {
+    // Returns true when the authenticated uid matches owner fields on data.
+    function ownerMatches(data) {
       return isSignedIn() && (
-        (
-          request.resource != null && (
-            request.auth.uid == request.resource.data.ownerId ||
-            request.auth.uid == request.resource.data.userId
-          )
-        ) ||
-        (
-          resource != null && (
-            request.auth.uid == resource.data.ownerId ||
-            request.auth.uid == resource.data.userId
-          )
-        )
+        request.auth.uid == data.userId ||
+        request.auth.uid == data.ownerId
       );
+    }
+
+    // Returns true when the caller can write an owned document.
+    // CREATE checks incoming ownership, UPDATE/DELETE check existing ownership.
+    function isOwner() {
+      return resource == null
+        ? ownerMatches(request.resource.data)
+        : ownerMatches(resource.data);
+    }
+
+    // Returns true when the caller may READ a content document.
+    // Restricts reads to the document owner or an admin.
+    // (FIX 2 — cross-tenant read exposure closed)
+    function isOwnerRead() {
+      return isAdmin() || ownerMatches(resource.data);
     }
 
     // =========================================================================
@@ -85,19 +83,40 @@ service cloud.firestore {
       allow read:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
       allow write: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
 
-      // Block all sub-collections under /users/{uid}/ unconditionally.
-      // This denies the accidental paths written by the pre-v1.1 sync engine:
-      //   /users/{uid}/textbooks/{id}
-      //   /users/{uid}/chapters/{id}
-      //   /users/{uid}/sections/{id}
-      //   /users/{uid}/vocabTerms/{id}
-      // and any future accidental sub-collection writes.
+      // Premium usage tracking: owners can read, only admins can mutate.
+      match /premiumUsage/{docId} {
+        allow read:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
+        allow write: if isAdmin();
+      }
+
+      // Explicitly block legacy sub-collections written by the pre-v1.1 sync engine.
+      match /textbooks/{docId} {
+        allow read:  if false;
+        allow write: if false;
+      }
+
+      match /chapters/{docId} {
+        allow read:  if false;
+        allow write: if false;
+      }
+
+      match /sections/{docId} {
+        allow read:  if false;
+        allow write: if false;
+      }
+
+      match /vocabTerms/{docId} {
+        allow read:  if false;
+        allow write: if false;
+      }
+
+      // Block any other unexpected sub-collection under /users/{uid}.
       match /{legacyCollection}/{docId} {
         allow read:  if false;
         allow write: if false;
       }
 
-      // Deny deeply nested paths too (e.g. old hierarchy sub-sub-collections).
+      // Deny deeply nested sub-paths too.
       match /{legacyCollection}/{docId}/{rest=**} {
         allow read:  if false;
         allow write: if false;
@@ -114,12 +133,11 @@ service cloud.firestore {
     //         lastModified, pendingSync, source, isFavorite, isArchived,
     //         status, isDeleted
     //
-    // Read policy  : any authenticated user (future: public textbooks visible
-    //               to unauthenticated users when status == "approved").
-    // Write policy : owner (`userId` matches) or admin.
+    // Read policy  : document owner or admin (FIX 2 — was any signed-in user).
+    // Write policy : owner (userId matches) or admin.
     // =========================================================================
     match /textbooks/{textbookId} {
-      allow read:   if isSignedIn();
+      allow read:   if isOwnerRead();
       allow write:  if isOwner() || isAdmin();
 
       // -----------------------------------------------------------------------
@@ -129,7 +147,7 @@ service cloud.firestore {
       //         pendingSync, source, status, isDeleted
       // -----------------------------------------------------------------------
       match /chapters/{chapterId} {
-        allow read:   if isSignedIn();
+        allow read:   if isOwnerRead();
         allow write:  if isOwner() || isAdmin();
 
         // ---------------------------------------------------------------------
@@ -139,7 +157,7 @@ service cloud.firestore {
         //         lastModified, pendingSync, source, status, isDeleted
         // ---------------------------------------------------------------------
         match /sections/{sectionId} {
-          allow read:   if isSignedIn();
+          allow read:   if isOwnerRead();
           allow write:  if isOwner() || isAdmin();
 
           // -------------------------------------------------------------------
@@ -150,7 +168,31 @@ service cloud.firestore {
           //         status, isDeleted
           // -------------------------------------------------------------------
           match /vocab/{vocabId} {
-            allow read:   if isSignedIn();
+            allow read:   if isOwnerRead();
+            allow write:  if isOwner() || isAdmin();
+          }
+
+          // -------------------------------------------------------------------
+          // /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/equations/{equationId}
+          // -------------------------------------------------------------------
+          match /equations/{equationId} {
+            allow read:   if isOwnerRead();
+            allow write:  if isOwner() || isAdmin();
+          }
+
+          // -------------------------------------------------------------------
+          // /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/concepts/{conceptId}
+          // -------------------------------------------------------------------
+          match /concepts/{conceptId} {
+            allow read:   if isOwnerRead();
+            allow write:  if isOwner() || isAdmin();
+          }
+
+          // -------------------------------------------------------------------
+          // /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/keyIdeas/{keyIdeaId}
+          // -------------------------------------------------------------------
+          match /keyIdeas/{keyIdeaId} {
+            allow read:   if isOwnerRead();
             allow write:  if isOwner() || isAdmin();
           }
         }

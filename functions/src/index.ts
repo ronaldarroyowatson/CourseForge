@@ -5,7 +5,7 @@ admin.initializeApp();
 
 const auth = admin.auth();
 const firestore = admin.firestore();
-const SUPPORTED_COLLECTIONS = ["textbooks", "chapters", "sections", "vocab"] as const;
+const SUPPORTED_COLLECTIONS = ["textbooks", "chapters", "sections", "vocab", "equations", "concepts", "keyIdeas"] as const;
 type SupportedCollection = (typeof SUPPORTED_COLLECTIONS)[number];
 
 type ContentStatus = "draft" | "submitted" | "approved" | "rejected";
@@ -23,6 +23,27 @@ interface AdminUserRecord {
   createdAt: string | null;
   lastLoginAt: string | null;
   isAdmin: boolean;
+}
+
+interface PremiumUsageState {
+  premiumRequestsUsedToday: number;
+  premiumRequestsUsedThisWeek: number;
+  premiumRequestsUsedThisMonth: number;
+  dailyLimitPercent: number;
+  weeklyLimitPercent: number;
+  monthlyLimitPercent: number;
+  freezePremium: boolean;
+  lastResetDate: string;
+  lastResetWeek: string;
+  lastResetMonth: string;
+}
+
+interface AdminPremiumUsageRow {
+  uid: string;
+  email: string;
+  displayName: string;
+  premiumTier: string;
+  premiumUsage: PremiumUsageState;
 }
 
 interface ModerationItem {
@@ -77,6 +98,146 @@ function toIsoString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+const MONTHLY_BASELINE_PERCENT = 8.6;
+const DAILY_BASELINE_MULTIPLIER = 0.4;
+const WEEKLY_BASELINE_MULTIPLIER = 2.7;
+const MONTHLY_LIMIT_PERCENT = 100;
+
+function roundToOneDecimal(value: number): number {
+  return Number(value.toFixed(1));
+}
+
+function getDefaultDailyLimitPercent(): number {
+  return roundToOneDecimal(MONTHLY_BASELINE_PERCENT * DAILY_BASELINE_MULTIPLIER);
+}
+
+function getDefaultWeeklyLimitPercent(): number {
+  return roundToOneDecimal(MONTHLY_BASELINE_PERCENT * WEEKLY_BASELINE_MULTIPLIER);
+}
+
+function getDateKey(now = new Date()): string {
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+
+function getDaysInMonth(year: number, monthIndex: number): number {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+function getMonthlyResetAnchor(year: number, monthIndex: number): Date {
+  const resetDay = Math.min(31, getDaysInMonth(year, monthIndex));
+  return new Date(year, monthIndex, resetDay, 7, 0, 0, 0);
+}
+
+function toMonthlyResetKey(anchor: Date): string {
+  return `${anchor.getFullYear()}-${pad2(anchor.getMonth() + 1)}-${pad2(anchor.getDate())}@07:00`;
+}
+
+function getMonthlyResetKey(now = new Date()): string {
+  const currentAnchor = getMonthlyResetAnchor(now.getFullYear(), now.getMonth());
+  if (now.getTime() >= currentAnchor.getTime()) {
+    return toMonthlyResetKey(currentAnchor);
+  }
+
+  const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const previousAnchor = getMonthlyResetAnchor(previousMonth.getFullYear(), previousMonth.getMonth());
+  return toMonthlyResetKey(previousAnchor);
+}
+
+function getIsoWeekKey(now = new Date()): string {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const utcDate = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  const day = utcDate.getUTCDay() || 7;
+  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
+
+  const isoYear = utcDate.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const week = Math.ceil((((utcDate.getTime() - yearStart.getTime()) / dayMs) + 1) / 7);
+
+  return `${isoYear}-W${pad2(week)}`;
+}
+
+function createDefaultPremiumUsage(now = new Date()): PremiumUsageState {
+  return {
+    premiumRequestsUsedToday: 0,
+    premiumRequestsUsedThisWeek: 0,
+    premiumRequestsUsedThisMonth: 0,
+    dailyLimitPercent: getDefaultDailyLimitPercent(),
+    weeklyLimitPercent: getDefaultWeeklyLimitPercent(),
+    monthlyLimitPercent: MONTHLY_LIMIT_PERCENT,
+    freezePremium: false,
+    lastResetDate: getDateKey(now),
+    lastResetWeek: getIsoWeekKey(now),
+    lastResetMonth: getMonthlyResetKey(now),
+  };
+}
+
+function normalizePremiumUsage(value: unknown, now = new Date()): PremiumUsageState {
+  const defaults = createDefaultPremiumUsage(now);
+  const record = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+
+  return {
+    premiumRequestsUsedToday: Number(record.premiumRequestsUsedToday ?? defaults.premiumRequestsUsedToday),
+    premiumRequestsUsedThisWeek: Number(record.premiumRequestsUsedThisWeek ?? defaults.premiumRequestsUsedThisWeek),
+    premiumRequestsUsedThisMonth: Number(record.premiumRequestsUsedThisMonth ?? defaults.premiumRequestsUsedThisMonth),
+    dailyLimitPercent: Number(record.dailyLimitPercent ?? defaults.dailyLimitPercent),
+    weeklyLimitPercent: Number(record.weeklyLimitPercent ?? defaults.weeklyLimitPercent),
+    monthlyLimitPercent: Number(record.monthlyLimitPercent ?? defaults.monthlyLimitPercent),
+    freezePremium: record.freezePremium === true,
+    lastResetDate: typeof record.lastResetDate === "string" ? record.lastResetDate : defaults.lastResetDate,
+    lastResetWeek: typeof record.lastResetWeek === "string" ? record.lastResetWeek : defaults.lastResetWeek,
+    lastResetMonth: typeof record.lastResetMonth === "string" ? record.lastResetMonth : defaults.lastResetMonth,
+  };
+}
+
+function applyPremiumResets(usage: PremiumUsageState, now = new Date()): PremiumUsageState {
+  const next = { ...usage };
+  const dateKey = getDateKey(now);
+  const weekKey = getIsoWeekKey(now);
+  const monthKey = getMonthlyResetKey(now);
+
+  if (next.lastResetDate !== dateKey) {
+    next.premiumRequestsUsedToday = 0;
+    next.lastResetDate = dateKey;
+  }
+
+  if (next.lastResetWeek !== weekKey) {
+    next.premiumRequestsUsedThisWeek = 0;
+    next.lastResetWeek = weekKey;
+  }
+
+  if (next.lastResetMonth !== monthKey) {
+    next.premiumRequestsUsedThisMonth = 0;
+    next.lastResetMonth = monthKey;
+  }
+
+  if (next.premiumRequestsUsedThisMonth > next.monthlyLimitPercent) {
+    next.freezePremium = true;
+  }
+
+  return next;
+}
+
+async function getPremiumUsageDocRef(uid: string): Promise<FirebaseFirestore.DocumentReference> {
+  return firestore.doc(`users/${uid}/premiumUsage/current`);
+}
+
+async function getOrCreatePremiumUsage(uid: string): Promise<PremiumUsageState> {
+  const docRef = await getPremiumUsageDocRef(uid);
+  const snapshot = await docRef.get();
+  const normalized = normalizePremiumUsage(snapshot.exists ? snapshot.data() : null);
+  const resetUsage = applyPremiumResets(normalized);
+
+  if (!snapshot.exists || JSON.stringify(resetUsage) !== JSON.stringify(normalized)) {
+    await docRef.set(resetUsage, { merge: true });
+  }
+
+  return resetUsage;
+}
+
 function parseDocPath(docPath: string): { ownerId: string | null; collectionName: SupportedCollection; docId: string } {
   const parts = docPath.split("/");
 
@@ -112,6 +273,30 @@ function parseDocPath(docPath: string): { ownerId: string | null; collectionName
     };
   }
 
+  if (parts.length === 8 && parts[0] === "textbooks" && parts[2] === "chapters" && parts[4] === "sections" && parts[6] === "equations") {
+    return {
+      ownerId: null,
+      collectionName: "equations",
+      docId: parts[7],
+    };
+  }
+
+  if (parts.length === 8 && parts[0] === "textbooks" && parts[2] === "chapters" && parts[4] === "sections" && parts[6] === "concepts") {
+    return {
+      ownerId: null,
+      collectionName: "concepts",
+      docId: parts[7],
+    };
+  }
+
+  if (parts.length === 8 && parts[0] === "textbooks" && parts[2] === "chapters" && parts[4] === "sections" && parts[6] === "keyIdeas") {
+    return {
+      ownerId: null,
+      collectionName: "keyIdeas",
+      docId: parts[7],
+    };
+  }
+
   throw new HttpsError("invalid-argument", "Unsupported document path.");
 }
 
@@ -139,6 +324,12 @@ function getRecordTitle(collectionName: SupportedCollection, data: FirebaseFires
       return typeof data.title === "string" ? data.title : fallbackId;
     case "vocab":
       return typeof data.word === "string" ? data.word : fallbackId;
+    case "equations":
+      return typeof data.name === "string" ? data.name : fallbackId;
+    case "concepts":
+      return typeof data.name === "string" ? data.name : fallbackId;
+    case "keyIdeas":
+      return typeof data.text === "string" ? data.text : fallbackId;
   }
 }
 
@@ -150,6 +341,12 @@ function getRecordSummary(collectionName: SupportedCollection, data: FirebaseFir
       return typeof data.notes === "string" ? data.notes : undefined;
     case "vocab":
       return typeof data.definition === "string" ? data.definition : undefined;
+    case "equations":
+      return typeof data.description === "string" ? data.description : undefined;
+    case "concepts":
+      return typeof data.explanation === "string" ? data.explanation : undefined;
+    case "keyIdeas":
+      return typeof data.text === "string" ? data.text : undefined;
     default:
       return undefined;
   }
@@ -173,7 +370,11 @@ function buildAdminContentRecord(
   ownerEmailMap: Map<string, string>
 ): AdminContentRecord {
   const data = snapshot.data();
-  const ownerId = typeof data.userId === "string" ? data.userId : "unknown";
+  const ownerId = typeof data.ownerId === "string"
+    ? data.ownerId
+    : typeof data.userId === "string"
+      ? data.userId
+      : "unknown";
 
   return {
     docPath: snapshot.ref.path,
@@ -201,7 +402,11 @@ function buildModerationItem(
   ownerEmailMap: Map<string, string>
 ): ModerationItem {
   const data = snapshot.data();
-  const ownerId = typeof data.userId === "string" ? data.userId : "unknown";
+  const ownerId = typeof data.ownerId === "string"
+    ? data.ownerId
+    : typeof data.userId === "string"
+      ? data.userId
+      : "unknown";
 
   return {
     docPath: snapshot.ref.path,
@@ -268,7 +473,7 @@ export const getModerationQueue = onCall(async (request) => {
   const items: ModerationItem[] = [];
 
   await Promise.all(
-    (["textbooks", "chapters", "sections", "vocab"] as const).map(async (collectionName) => {
+    SUPPORTED_COLLECTIONS.map(async (collectionName) => {
         const snapshot = await firestore.collectionGroup(collectionName).where("status", "==", "submitted").get();
         snapshot.docs.forEach((docSnap) => {
           items.push(buildModerationItem(collectionName, docSnap, ownerEmailMap));
@@ -417,6 +622,9 @@ export const updateAdminContent = onCall(async (request) => {
     chapters: ["name", "description", "status"],
     sections: ["title", "notes", "status"],
     vocab: ["word", "definition", "status"],
+    equations: ["name", "latex", "description", "status"],
+    concepts: ["name", "explanation", "status"],
+    keyIdeas: ["text", "status"],
   };
 
   const sanitizedUpdates = Object.fromEntries(
@@ -434,4 +642,101 @@ export const updateAdminContent = onCall(async (request) => {
   });
 
   return success("Content updated.", "Content updated.");
+});
+
+export const getPremiumUsageReport = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const usersSnapshot = await firestore.collection("users").orderBy("email").get();
+  const rows: AdminPremiumUsageRow[] = [];
+
+  await Promise.all(
+    usersSnapshot.docs.map(async (userDoc) => {
+      const data = userDoc.data();
+      const usage = await getOrCreatePremiumUsage(userDoc.id);
+      rows.push({
+        uid: userDoc.id,
+        email: typeof data.email === "string" ? data.email : "",
+        displayName: typeof data.displayName === "string" ? data.displayName : "",
+        premiumTier: typeof data.premiumTier === "string" ? data.premiumTier : "free",
+        premiumUsage: usage,
+      });
+    })
+  );
+
+  rows.sort((a, b) => a.email.localeCompare(b.email));
+  return success("Loaded premium usage report.", rows);
+});
+
+export const managePremiumUser = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const data = request.data;
+  const uid = typeof data?.uid === "string" ? data.uid.trim() : "";
+  const action = typeof data?.action === "string" ? data.action : "";
+  const freezePremium = data?.freezePremium === true;
+
+  if (!uid) {
+    throw new HttpsError("invalid-argument", "A user id is required.");
+  }
+
+  if (!["freeze", "unfreeze", "resetDaily", "resetWeekly", "resetMonthly"].includes(action)) {
+    throw new HttpsError("invalid-argument", "Unsupported premium usage action.");
+  }
+
+  const userRef = firestore.doc(`users/${uid}`);
+  const userSnapshot = await userRef.get();
+
+  if (!userSnapshot.exists) {
+    throw new HttpsError("not-found", "User not found.");
+  }
+
+  const usageRef = await getPremiumUsageDocRef(uid);
+  const current = await getOrCreatePremiumUsage(uid);
+  const next = { ...current };
+
+  if (action === "freeze") {
+    next.freezePremium = freezePremium !== false;
+  }
+
+  if (action === "unfreeze") {
+    next.freezePremium = false;
+  }
+
+  if (action === "resetDaily") {
+    next.premiumRequestsUsedToday = 0;
+    next.lastResetDate = getDateKey();
+  }
+
+  if (action === "resetWeekly") {
+    next.premiumRequestsUsedThisWeek = 0;
+    next.lastResetWeek = getIsoWeekKey();
+  }
+
+  if (action === "resetMonthly") {
+    next.premiumRequestsUsedThisMonth = 0;
+    next.lastResetMonth = getMonthlyResetKey();
+  }
+
+  await usageRef.set(next, { merge: true });
+
+  const userData = userSnapshot.data() ?? {};
+  const row: AdminPremiumUsageRow = {
+    uid,
+    email: typeof userData.email === "string" ? userData.email : "",
+    displayName: typeof userData.displayName === "string" ? userData.displayName : "",
+    premiumTier: typeof userData.premiumTier === "string" ? userData.premiumTier : "free",
+    premiumUsage: next,
+  };
+
+  return success("Premium usage updated.", row);
+});
+
+export const getCurrentPremiumUsage = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const usage = await getOrCreatePremiumUsage(request.auth.uid);
+  return success("Loaded premium usage.", usage);
 });

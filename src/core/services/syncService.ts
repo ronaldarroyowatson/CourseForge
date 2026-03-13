@@ -7,7 +7,7 @@ import { firestoreDb } from "../../firebase/firestore";
 import { getAdminClaim, getCurrentUser } from "../../firebase/auth";
 import { useUIStore } from "../../webapp/store/uiStore";
 
-type SyncStoreName = "textbooks" | "chapters" | "sections" | "vocabTerms";
+type SyncStoreName = "textbooks" | "chapters" | "sections" | "vocabTerms" | "equations" | "concepts" | "keyIdeas";
 type SyncEntity = CourseForgeEntityMap[SyncStoreName];
 type HierarchyIndexes = {
   chapterById: Map<string, CourseForgeEntityMap["chapters"]>;
@@ -19,6 +19,9 @@ const SYNC_STORES: SyncStoreName[] = [
   STORE_NAMES.chapters,
   STORE_NAMES.sections,
   STORE_NAMES.vocabTerms,
+  STORE_NAMES.equations,
+  STORE_NAMES.concepts,
+  STORE_NAMES.keyIdeas,
 ];
 
 const WRITE_LOOP_WINDOW_MS = 500;
@@ -44,7 +47,7 @@ interface SyncErrorLike {
 interface SyncNowDependencies {
   nowFn?: () => number;
   getCurrentUserFn?: () => { uid?: string | null } | null;
-  getPendingSyncDiagnosticsFn?: typeof getPendingSyncDiagnostics;
+  getPendingSyncDiagnosticsFn?: () => Promise<{ pendingCount: number; byStore: Partial<Record<SyncStoreName, number>> }>;
   syncUserDataFn?: typeof syncUserData;
 }
 
@@ -225,6 +228,16 @@ function stripLegacyUserScopedKeys<T extends Record<string, unknown>>(value: T):
   return next as T;
 }
 
+function mergeDocsByPath<T extends { ref: { path: string } }>(...docLists: T[][]): T[] {
+  const byPath = new Map<string, T>();
+  docLists.forEach((docList) => {
+    docList.forEach((docItem) => {
+      byPath.set(docItem.ref.path, docItem);
+    });
+  });
+  return [...byPath.values()];
+}
+
 function getDocPathFromStoreItem(
   storeName: SyncStoreName,
   item: SyncEntity,
@@ -275,28 +288,48 @@ function getDocPathFromStoreItem(
   }
 
   const vocab = item as CourseForgeEntityMap["vocabTerms"];
-  if (!vocab.sectionId) {
-    logSyncEvent("write:skip-missing-section", `vocab/${vocab.id}`, vocab);
-    return null;
-  }
+  const resolveSectionScopedPayload = <T extends CourseForgeEntityMap["vocabTerms"] | CourseForgeEntityMap["equations"] | CourseForgeEntityMap["concepts"] | CourseForgeEntityMap["keyIdeas"]>(
+    entity: T,
+    collectionName: string,
+    logPath: string
+  ): { path: string; payload: Record<string, unknown> } | null => {
+    if (!entity.sectionId) {
+      logSyncEvent("write:skip-missing-section", `${logPath}/${entity.id}`, entity);
+      return null;
+    }
 
-  const section = indexes.sectionById.get(vocab.sectionId);
-  const chapterId = vocab.chapterId ?? section?.chapterId;
-  const textbookId = vocab.textbookId ?? section?.textbookId;
+    const section = indexes.sectionById.get(entity.sectionId);
+    const chapterId = entity.chapterId ?? section?.chapterId;
+    const textbookId = entity.textbookId ?? section?.textbookId;
 
-  if (!chapterId || !textbookId) {
-    logSyncEvent("write:skip-missing-hierarchy", `vocab/${vocab.id}`, vocab);
-    return null;
-  }
+    if (!chapterId || !textbookId) {
+      logSyncEvent("write:skip-missing-hierarchy", `${logPath}/${entity.id}`, entity);
+      return null;
+    }
 
-  return {
-    path: `textbooks/${textbookId}/chapters/${chapterId}/sections/${vocab.sectionId}/vocab/${vocab.id}`,
-    payload: {
-      ...vocab,
-      chapterId,
-      textbookId,
-    } as Record<string, unknown>,
+    return {
+      path: `textbooks/${textbookId}/chapters/${chapterId}/sections/${entity.sectionId}/${collectionName}/${entity.id}`,
+      payload: {
+        ...entity,
+        chapterId,
+        textbookId,
+      } as Record<string, unknown>,
+    };
   };
+
+  if (storeName === STORE_NAMES.vocabTerms) {
+    return resolveSectionScopedPayload(vocab, "vocab", "vocab");
+  }
+
+  if (storeName === STORE_NAMES.equations) {
+    return resolveSectionScopedPayload(item as CourseForgeEntityMap["equations"], "equations", "equations");
+  }
+
+  if (storeName === STORE_NAMES.concepts) {
+    return resolveSectionScopedPayload(item as CourseForgeEntityMap["concepts"], "concepts", "concepts");
+  }
+
+  return resolveSectionScopedPayload(item as CourseForgeEntityMap["keyIdeas"], "keyIdeas", "keyIdeas");
 }
 
 function withSyncDefaults<T extends SyncEntity>(
@@ -323,25 +356,65 @@ async function fetchCloudStore<T extends SyncStoreName>(
   const path = `cloud/${storeName}`;
   logSyncEvent("read:start", path, { userId, storeName });
 
-  const snapshot = await (async () => {
+  const docs = await (async () => {
     if (storeName === STORE_NAMES.textbooks) {
-      return getDocs(query(collection(firestoreDb, "textbooks"), where("userId", "==", userId)));
+      const [byUserId, byOwnerId] = await Promise.all([
+        getDocs(query(collection(firestoreDb, "textbooks"), where("userId", "==", userId))),
+        getDocs(query(collection(firestoreDb, "textbooks"), where("ownerId", "==", userId))),
+      ]);
+      return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
     }
 
     if (storeName === STORE_NAMES.chapters) {
-      return getDocs(query(collectionGroup(firestoreDb, "chapters"), where("userId", "==", userId)));
+      const [byUserId, byOwnerId] = await Promise.all([
+        getDocs(query(collectionGroup(firestoreDb, "chapters"), where("userId", "==", userId))),
+        getDocs(query(collectionGroup(firestoreDb, "chapters"), where("ownerId", "==", userId))),
+      ]);
+      return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
     }
 
     if (storeName === STORE_NAMES.sections) {
-      return getDocs(query(collectionGroup(firestoreDb, "sections"), where("userId", "==", userId)));
+      const [byUserId, byOwnerId] = await Promise.all([
+        getDocs(query(collectionGroup(firestoreDb, "sections"), where("userId", "==", userId))),
+        getDocs(query(collectionGroup(firestoreDb, "sections"), where("ownerId", "==", userId))),
+      ]);
+      return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
     }
 
-    return getDocs(query(collectionGroup(firestoreDb, "vocab"), where("userId", "==", userId)));
+    if (storeName === STORE_NAMES.equations) {
+      const [byUserId, byOwnerId] = await Promise.all([
+        getDocs(query(collectionGroup(firestoreDb, "equations"), where("userId", "==", userId))),
+        getDocs(query(collectionGroup(firestoreDb, "equations"), where("ownerId", "==", userId))),
+      ]);
+      return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
+    }
+
+    if (storeName === STORE_NAMES.concepts) {
+      const [byUserId, byOwnerId] = await Promise.all([
+        getDocs(query(collectionGroup(firestoreDb, "concepts"), where("userId", "==", userId))),
+        getDocs(query(collectionGroup(firestoreDb, "concepts"), where("ownerId", "==", userId))),
+      ]);
+      return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
+    }
+
+    if (storeName === STORE_NAMES.keyIdeas) {
+      const [byUserId, byOwnerId] = await Promise.all([
+        getDocs(query(collectionGroup(firestoreDb, "keyIdeas"), where("userId", "==", userId))),
+        getDocs(query(collectionGroup(firestoreDb, "keyIdeas"), where("ownerId", "==", userId))),
+      ]);
+      return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
+    }
+
+    const [byUserId, byOwnerId] = await Promise.all([
+      getDocs(query(collectionGroup(firestoreDb, "vocab"), where("userId", "==", userId))),
+      getDocs(query(collectionGroup(firestoreDb, "vocab"), where("ownerId", "==", userId))),
+    ]);
+    return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
   })();
 
-  logSyncEvent("read:success", path, { docs: snapshot.size });
+  logSyncEvent("read:success", path, { docs: docs.length });
 
-  return snapshot.docs.map((docSnapshot) => {
+  return docs.map((docSnapshot) => {
     const data = docSnapshot.data() as Record<string, unknown>;
     const parts = docSnapshot.ref.path.split("/");
 
@@ -353,7 +426,7 @@ async function fetchCloudStore<T extends SyncStoreName>(
         id: docSnapshot.id,
         userId,
         textbookId: (data.textbookId as string | undefined) ?? parts[1],
-      } as CourseForgeEntityMap[T];
+      } as unknown as CourseForgeEntityMap[T];
     } else if (storeName === STORE_NAMES.sections) {
       withId = {
         ...(data as unknown as CourseForgeEntityMap["sections"]),
@@ -361,7 +434,7 @@ async function fetchCloudStore<T extends SyncStoreName>(
         userId,
         textbookId: (data.textbookId as string | undefined) ?? parts[1],
         chapterId: (data.chapterId as string | undefined) ?? parts[3],
-      } as CourseForgeEntityMap[T];
+      } as unknown as CourseForgeEntityMap[T];
     } else if (storeName === STORE_NAMES.vocabTerms) {
       withId = {
         ...(data as unknown as CourseForgeEntityMap["vocabTerms"]),
@@ -370,13 +443,40 @@ async function fetchCloudStore<T extends SyncStoreName>(
         textbookId: (data.textbookId as string | undefined) ?? parts[1],
         chapterId: (data.chapterId as string | undefined) ?? parts[3],
         sectionId: (data.sectionId as string | undefined) ?? parts[5],
-      } as CourseForgeEntityMap[T];
+      } as unknown as CourseForgeEntityMap[T];
+    } else if (storeName === STORE_NAMES.equations) {
+      withId = {
+        ...(data as unknown as CourseForgeEntityMap["equations"]),
+        id: docSnapshot.id,
+        userId,
+        textbookId: (data.textbookId as string | undefined) ?? parts[1],
+        chapterId: (data.chapterId as string | undefined) ?? parts[3],
+        sectionId: (data.sectionId as string | undefined) ?? parts[5],
+      } as unknown as CourseForgeEntityMap[T];
+    } else if (storeName === STORE_NAMES.concepts) {
+      withId = {
+        ...(data as unknown as CourseForgeEntityMap["concepts"]),
+        id: docSnapshot.id,
+        userId,
+        textbookId: (data.textbookId as string | undefined) ?? parts[1],
+        chapterId: (data.chapterId as string | undefined) ?? parts[3],
+        sectionId: (data.sectionId as string | undefined) ?? parts[5],
+      } as unknown as CourseForgeEntityMap[T];
+    } else if (storeName === STORE_NAMES.keyIdeas) {
+      withId = {
+        ...(data as unknown as CourseForgeEntityMap["keyIdeas"]),
+        id: docSnapshot.id,
+        userId,
+        textbookId: (data.textbookId as string | undefined) ?? parts[1],
+        chapterId: (data.chapterId as string | undefined) ?? parts[3],
+        sectionId: (data.sectionId as string | undefined) ?? parts[5],
+      } as unknown as CourseForgeEntityMap[T];
     } else {
       withId = {
         ...(data as unknown as CourseForgeEntityMap[T]),
         id: docSnapshot.id,
         userId,
-      } as CourseForgeEntityMap[T];
+      } as unknown as CourseForgeEntityMap[T];
     }
 
     return withSyncDefaults(withId, "cloud", false) as CourseForgeEntityMap[T];
@@ -391,10 +491,13 @@ async function fetchLocalStore<T extends SyncStoreName>(
 }
 
 async function migrateLocalHierarchyData(): Promise<void> {
-  const [chapters, sections, vocabTerms] = await Promise.all([
+  const [chapters, sections, vocabTerms, equations, concepts, keyIdeas] = await Promise.all([
     fetchLocalStore(STORE_NAMES.chapters),
     fetchLocalStore(STORE_NAMES.sections),
     fetchLocalStore(STORE_NAMES.vocabTerms),
+    fetchLocalStore(STORE_NAMES.equations),
+    fetchLocalStore(STORE_NAMES.concepts),
+    fetchLocalStore(STORE_NAMES.keyIdeas),
   ]);
 
   const chapterById = new Map(chapters.map((chapter) => [chapter.id, chapter]));
@@ -452,6 +555,75 @@ async function migrateLocalHierarchyData(): Promise<void> {
       }
     })
   );
+
+  await Promise.all(
+    equations.map(async (equation) => {
+      const parentSection = sectionById.get(equation.sectionId);
+      const chapterId = equation.chapterId ?? parentSection?.chapterId;
+      const textbookId = equation.textbookId ?? parentSection?.textbookId;
+
+      if (!equation.sectionId || !chapterId || !textbookId) {
+        logSyncEvent("migration:skip-equation", `equations/${equation.id}`, equation);
+        return;
+      }
+
+      const cleaned = stripLegacyUserScopedKeys({
+        ...equation,
+        chapterId,
+        textbookId,
+      } as Record<string, unknown>) as unknown as CourseForgeEntityMap["equations"];
+
+      if (JSON.stringify(cleaned) !== JSON.stringify(equation)) {
+        await saveLocalStoreItem(STORE_NAMES.equations, cleaned);
+      }
+    })
+  );
+
+  await Promise.all(
+    concepts.map(async (concept) => {
+      const parentSection = sectionById.get(concept.sectionId);
+      const chapterId = concept.chapterId ?? parentSection?.chapterId;
+      const textbookId = concept.textbookId ?? parentSection?.textbookId;
+
+      if (!concept.sectionId || !chapterId || !textbookId) {
+        logSyncEvent("migration:skip-concept", `concepts/${concept.id}`, concept);
+        return;
+      }
+
+      const cleaned = stripLegacyUserScopedKeys({
+        ...concept,
+        chapterId,
+        textbookId,
+      } as Record<string, unknown>) as unknown as CourseForgeEntityMap["concepts"];
+
+      if (JSON.stringify(cleaned) !== JSON.stringify(concept)) {
+        await saveLocalStoreItem(STORE_NAMES.concepts, cleaned);
+      }
+    })
+  );
+
+  await Promise.all(
+    keyIdeas.map(async (keyIdea) => {
+      const parentSection = sectionById.get(keyIdea.sectionId);
+      const chapterId = keyIdea.chapterId ?? parentSection?.chapterId;
+      const textbookId = keyIdea.textbookId ?? parentSection?.textbookId;
+
+      if (!keyIdea.sectionId || !chapterId || !textbookId) {
+        logSyncEvent("migration:skip-keyidea", `keyIdeas/${keyIdea.id}`, keyIdea);
+        return;
+      }
+
+      const cleaned = stripLegacyUserScopedKeys({
+        ...keyIdea,
+        chapterId,
+        textbookId,
+      } as Record<string, unknown>) as unknown as CourseForgeEntityMap["keyIdeas"];
+
+      if (JSON.stringify(cleaned) !== JSON.stringify(keyIdea)) {
+        await saveLocalStoreItem(STORE_NAMES.keyIdeas, cleaned);
+      }
+    })
+  );
 }
 
 async function buildHierarchyIndexes(): Promise<HierarchyIndexes> {
@@ -497,6 +669,7 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
   const cloudRecord = {
     ...resolved.payload,
     userId,
+    ownerId: userId,
     pendingSync: false,
     source: "cloud",
     lastModified: item.lastModified ?? toIsoNow(),
@@ -536,7 +709,7 @@ export async function uploadLocalChanges(userId: string): Promise<void> {
       SYNC_STORES.map(async (storeName) => {
         const localItems = await fetchLocalStore(storeName);
         const changedItems = localItems.filter((item) => {
-          return item.pendingSync || !item.userId || item.userId === userId;
+          return item.pendingSync || !item.userId;
         });
 
         await Promise.all(
@@ -646,6 +819,10 @@ export async function syncUserData(userId: string): Promise<void> {
                 ) as CourseForgeEntityMap[typeof storeName];
 
                 await saveLocalStoreItem(storeName, cloudWinner);
+                return;
+              }
+
+              if (localTs === cloudTs) {
                 return;
               }
 
@@ -866,22 +1043,29 @@ export async function findCloudTextbookByISBN(userId: string, isbnInput: string)
     logSyncEvent("read:start", normalizedPath, { userId, isbnNormalized: normalized });
   }
 
-  const [rawMatches, normalizedMatches] = await Promise.all([
+  const [rawByUserId, rawByOwnerId, normalizedByUserId, normalizedByOwnerId] = await Promise.all([
     getDocs(query(textbooksRef, where("userId", "==", userId), where("isbnRaw", "==", raw))),
+    getDocs(query(textbooksRef, where("ownerId", "==", userId), where("isbnRaw", "==", raw))),
     normalized
       ? getDocs(query(textbooksRef, where("userId", "==", userId), where("isbnNormalized", "==", normalized)))
       : Promise.resolve(null),
+    normalized
+      ? getDocs(query(textbooksRef, where("ownerId", "==", userId), where("isbnNormalized", "==", normalized)))
+      : Promise.resolve(null),
   ]);
 
-  logSyncEvent("read:success", rawPath, { docs: rawMatches.size });
-  if (normalizedMatches) {
-    logSyncEvent("read:success", normalizedPath, { docs: normalizedMatches.size });
+  const rawCandidates = mergeDocsByPath(rawByUserId.docs, rawByOwnerId.docs);
+  const normalizedCandidates = mergeDocsByPath(
+    normalizedByUserId ? normalizedByUserId.docs : [],
+    normalizedByOwnerId ? normalizedByOwnerId.docs : []
+  );
+
+  logSyncEvent("read:success", rawPath, { docs: rawCandidates.length });
+  if (normalized) {
+    logSyncEvent("read:success", normalizedPath, { docs: normalizedCandidates.length });
   }
 
-  const candidates = [
-    ...rawMatches.docs,
-    ...(normalizedMatches ? normalizedMatches.docs : []),
-  ];
+  const candidates = mergeDocsByPath(rawCandidates, normalizedCandidates);
 
   const first = candidates[0];
   if (!first) {

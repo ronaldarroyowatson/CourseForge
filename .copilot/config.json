@@ -1,0 +1,439 @@
+﻿{
+  "version": 1,
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./"]
+    },
+    "terminal": {
+      "command": "npx",
+      "args": ["-y", "@dillip285/mcp-terminal", "--allowed-paths", "./"]
+    }
+  },
+
+  "protocols": {
+    "agentExecution": {
+      "maxRetriesPerAgentTask": 3,
+      "pauseAndAskUserAfterRetryLimit": true,
+      "requireAgentRegistrationBeforeDispatch": true,
+      "autoSuggestFallbackAgentOnMissing": true,
+      "onMissingAgent": "route_to_agent_registry",
+      "detectStalledAgents": true,
+      "stalledProgressTimeoutSeconds": 90,
+      "reassignOnStall": true,
+      "preventInfiniteReinvocation": true,
+      "enforceAgentWriteBoundaries": true,
+      "enforceNoTestWritesOutsideReviewer": true,
+      "requireWorkflowSummary": true,
+      "requireDelegationForImplementationTasks": true,
+      "rejectSupervisorWriteAttempts": true,
+      "rejectSupervisorImplementationAttempts": true,
+      "preventRunawayPremiumUsage": true,
+      "maxDelegationsPerWorkflow": 20,
+      "maxTotalAgentAttemptsPerWorkflow": 40,
+      "requireStopAndAskUserWhenUsageThresholdExceeded": true,
+      "freeModelFirst": true,
+      "premiumEscalationPolicy": {
+        "requiredFreeFailureCount": 3,
+        "requireExplicitUserApproval": true,
+        "maxPremiumHandoffsPerWorkflow": 8,
+        "pauseAndAskBeforeEscalating": true
+      },
+      "premiumUsageBudgeting": {
+        "usageFilePath": "./.copilot/usage/premium-usage.json",
+        "workflowGuideFilePath": "./.copilot/WORKFLOW-HANDOFF.md",
+        "auditLogging": {
+          "enabled": true,
+          "logPath": "./.copilot/usage/escalation-audit.jsonl",
+          "logFormat": "jsonl"
+        },
+        "resetPolicy": {
+          "resetDailyAtLocalMidnight": true,
+          "resetWeeklyAtWeekStart": true,
+          "resetMonthlyAtLocalDay31": {
+            "time": "07:00",
+            "fallbackToLastDayOfMonth": true
+          },
+          "persistResetsVia": "coder"
+        },
+        "limits": {
+          "monthlyBaselinePercent": 8.6,
+          "dailyLimitFormula": "round(8.6 * 0.4, 1)",
+          "weeklyLimitFormula": "round(8.6 * 2.7, 1)",
+          "dailyLimitField": "dailyLimitPercent",
+          "weeklyLimitField": "weeklyLimitPercent",
+          "monthlyLimitField": "monthlyLimitPercent",
+          "freezeField": "freezePremium"
+        },
+        "strictEscalationRules": {
+          "requireFreeFailureCount": 3,
+          "requireExplicitUserApproval": true,
+          "denyIfFrozen": true,
+          "denyIfDailyExceeded": true,
+          "denyIfWeeklyExceeded": true,
+          "hardFreezeIfMonthlyExceeded": true
+        },
+        "userPrompts": {
+          "dailyExceeded": "Daily premium usage exceeded (baseline-derived cap). Continue with premium or switch to free-only mode?",
+          "weeklyExceeded": "Weekly premium usage exceeded (baseline-derived cap). Confirm to continue or freeze premium until next week.",
+          "frozenModeStart": "Premium usage is frozen due to budget limits. Running in free-only mode."
+        }
+      }
+    }
+  },
+
+  "capabilityCaps": {
+    "maxToolsPerAgent": 1,
+    "maxWriteDirectoriesPerAgent": 1,
+    "maxAllowedTaskTypesPerAgent": 3,
+    "prohibitFilesystemAndTerminalCombo": true,
+    "prohibitRootReadWriteCombo": true,
+    "freeModelRequired": true,
+    "premiumAllowedOnlyAfterFreeFailureCount": 3,
+    "premiumRequiresExplicitUserApproval": true
+  },
+
+  "supervisorAutoAgentCreation": {
+    "enabled": true,
+    "trigger": "sameTaskTypeFails >= 2 AND noExistingAgentSuitable",
+    "newAgentConstraints": {
+      "model": "free",
+      "maxWriteDirectories": 1,
+      "maxAllowedTaskTypes": 3,
+      "maxTools": 1,
+      "prohibitedToolCombos": ["filesystem+terminal"],
+      "prohibitRootReadWrite": true
+    },
+    "approvalProcess": {
+      "requireUserApproval": true,
+      "notifyWith": [
+        "reason",
+        "proposedModel",
+        "proposedTools",
+        "proposedCapabilities",
+        "proposedAllowedTaskTypes"
+      ],
+      "waitForApprovalBeforeCreating": true
+    },
+    "afterApproval": {
+      "writer": "agent_registry",
+      "target": "./.copilot/config.json"
+    },
+    "supervisorReportsAtWorkflowEnd": true
+  },
+
+  "agents": {
+    "supervisor": {
+      "description": "Control-plane only. Plans, routes, monitors, enforces boundaries. Never writes code, UI, Firestore changes, or tests. Routes free models first; escalates to premium only after 3 failures + user approval. Always asks before creating new agents.",
+      "model": "gpt-5.4",
+      "allowedTaskTypes": ["planning", "routing", "monitoring"],
+      "allowedDelegates": [
+        "explorer",
+        "coder",
+        "reviewer",
+        "uiux",
+        "firestore",
+        "agent_registry",
+        "reviewer_fallback"
+      ],
+      "executionMode": "control-plane-only",
+      "disallowedTaskTypes": [
+        "coding",
+        "ui",
+        "firestore",
+        "testing",
+        "direct-file-edits",
+        "terminal-command-execution",
+        "patch-application",
+        "implementation"
+      ],
+      "retryPolicy": {
+        "stuckTimeoutSeconds": 120,
+        "maxAutomaticAttemptsPerTask": 3,
+        "maxRetriesPerFailingTask": 3,
+        "maxIdenticalRetriesPerTask": 3,
+        "requireUserPromptAfterMax": true,
+        "pauseAfterRetriesMessage": "Task failed 3 times. Ask user permission before any further attempts.",
+        "preventInfiniteReinvocation": true,
+        "maxReinvocationsPerWorkflow": 12
+      },
+      "stallPolicy": {
+        "detectStalledAgents": true,
+        "meaningfulProgressTimeoutSeconds": 90,
+        "maxStallRecoveriesPerTask": 2,
+        "maxConsecutiveNoProgressUpdates": 2,
+        "onStall": "reassign_task"
+      },
+      "premiumEscalationRouting": {
+        "routeFreeModelsFirst": true,
+        "escalateOnlyAfterFreeFailures": 3,
+        "requireUserApprovalBeforeEscalation": true,
+        "askBeforeCreatingNewAgents": true
+      },
+      "usageGuardrails": {
+        "preventRunawayPremiumUsage": true,
+        "maxDelegationsPerWorkflow": 20,
+        "maxTotalAgentAttemptsPerWorkflow": 40,
+        "maxPremiumModelHandOffs": 8,
+        "requireStopAndAskUserWhenExceeded": true,
+        "usageFilePath": "./.copilot/usage/premium-usage.json",
+        "auditLogFilePath": "./.copilot/usage/escalation-audit.jsonl",
+        "auditPremiumDecisions": true,
+        "enforceFreezePremium": true,
+        "monthlyLimitHardFreeze": true
+      },
+      "boundaryEnforcement": {
+        "strictWriteBoundaryChecks": true,
+        "blockOutOfScopeWrites": true,
+        "auditBoundaryViolations": true,
+        "blockDirectExecutionBySupervisor": true,
+        "blockSupervisorWritePermissions": true,
+        "blockSupervisorSourceAccessForWrites": true
+      },
+      "workflowReporting": {
+        "requireEndOfWorkflowSummary": true,
+        "includeRetries": true,
+        "includeDelegations": true,
+        "includeBoundaryEvents": true,
+        "summarizeProgressAtWorkflowEnd": true,
+        "emitPerAgentOutcomeSummary": true,
+        "reportNewAgentsCreated": true,
+        "reportEscalationsRequested": true,
+        "reportCapabilityCapsApplied": true,
+        "reportPremiumRequestsUsedToday": true,
+        "reportPremiumRequestsUsedThisWeek": true,
+        "reportPremiumRequestsUsedThisMonth": true,
+        "reportPremiumUsed": true,
+        "reportPremiumFrozen": true,
+        "reportEscalationApproved": true,
+        "reportEscalationDeniedDueToLimits": true,
+        "auditPremiumEscalationDecisions": true,
+        "auditAllReasons": true
+      },
+      "capabilities": {
+        "read": ["./"]
+      },
+      "tools": []
+    },
+
+    "agent_registry": {
+      "description": "Config management agent. Creates and validates agent definitions in .copilot/config.json. Writes agent definitions on Supervisor instruction after user approval. Free model.",
+      "model": "gpt-5.4-mini",
+      "allowedTaskTypes": ["agent-registration", "config-validation", "workflow-recovery"],
+      "allowedDelegates": ["supervisor"],
+      "executionMode": "control-plane-only",
+      "disallowedTaskTypes": [
+        "product-coding",
+        "ui-implementation",
+        "firestore-data-mutation"
+      ],
+      "capabilities": {
+        "read": ["./"],
+        "write": ["./.copilot"]
+      },
+      "tools": ["filesystem"]
+    },
+
+    "explorer": {
+      "description": "Read-only discovery agent for fast, low-cost context scans before implementation. Free model and no write permissions.",
+      "model": "gpt-5.4-mini",
+      "allowedTaskTypes": ["exploration", "code-search", "context-gathering"],
+      "allowedDelegates": ["supervisor"],
+      "executionMode": "read-only",
+      "disallowedTaskTypes": [
+        "coding",
+        "refactoring",
+        "ui-implementation",
+        "firestore-data-mutation",
+        "agent-registration"
+      ],
+      "capabilities": {
+        "read": ["./"]
+      },
+      "tools": ["filesystem"]
+    },
+
+    "coder": {
+      "description": "Writes and edits application source code in ./src. Free model. Does not write config, rules, or test files unless directed by Supervisor for a specific approved task.",
+      "model": "gpt-5.4-mini",
+      "allowedTaskTypes": ["coding", "refactoring", "config-update"],
+      "capabilities": {
+        "read": ["./"],
+        "write": ["./src"]
+      },
+      "tools": ["filesystem"]
+    },
+
+    "reviewer": {
+      "description": "Runs tests and validates changes via terminal. Reports results to Supervisor. Writes test files to ./tests. Free model.",
+      "model": "gpt-5.4-mini",
+      "allowedTaskTypes": ["testing", "review", "validation"],
+      "capabilities": {
+        "read": ["./"],
+        "write": ["./tests"]
+      },
+      "tools": ["terminal"],
+      "testConfig": {
+        "unit": {
+          "command": "npm",
+          "args": ["run", "test"]
+        },
+        "e2e": {
+          "command": "npx",
+          "args": ["cypress", "run", "--browser", "chrome"]
+        }
+      }
+    },
+
+    "reviewer_fallback": {
+      "description": "Emergency backup reviewer. ONLY activated when reviewer is unavailable or broken. Free model; escalates to premium after 3 failures + user approval. Locked to testing only. No tools. No delegation. No routing to other agents.",
+      "model": "gpt-5.4-mini",
+      "allowedTaskTypes": ["testing"],
+      "allowedDelegates": [],
+      "executionMode": "restricted-read-only",
+      "disallowedTaskTypes": [
+        "coding",
+        "refactoring",
+        "ui-implementation",
+        "firestore-data-mutation",
+        "routing",
+        "agent-registration"
+      ],
+      "premiumEscalation": {
+        "enabled": true,
+        "requiredFreeFailures": 3,
+        "requireUserApproval": true,
+        "escalateTo": "gpt-5.4"
+      },
+      "capabilities": {
+        "read": ["./tests"],
+        "write": ["./tests"]
+      },
+      "tools": []
+    },
+
+    "uiux": {
+      "description": "Implements UI and styling changes for webapp in ./src/webapp. Free model. Does not write backend, config, or test files.",
+      "model": "gpt-5.4-mini",
+      "allowedTaskTypes": ["ui", "styling", "accessibility"],
+      "capabilities": {
+        "read": ["./"],
+        "write": ["./src/webapp"]
+      },
+      "tools": ["filesystem"]
+    },
+
+    "firestore": {
+      "description": "Handles Cloud Functions code in ./functions/src. Free model with premium escalation after 3 failures + user approval. Does not write application UI or frontend source code.",
+      "model": "gpt-5.4-mini",
+      "allowedTaskTypes": ["cloud-functions", "backend-sync", "firestore-rules"],
+      "premiumEscalation": {
+        "enabled": true,
+        "requiredFreeFailures": 3,
+        "requireUserApproval": true,
+        "escalateTo": "gpt-5.4"
+      },
+      "capabilities": {
+        "read": ["./"],
+        "write": ["./functions/src"]
+      },
+      "tools": ["filesystem"]
+    }
+  },
+
+  "workflows": {
+    "default": {
+      "entryAgent": "supervisor",
+
+      "steps": [
+        {
+          "agent": "supervisor",
+          "on": "user_request",
+          "routes": [
+            {
+              "condition": "task_requires_context_scan",
+              "next": "explorer"
+            },
+            {
+              "condition": "agent_available:coder",
+              "next": "coder"
+            },
+            {
+              "condition": "agent_missing:coder",
+              "next": "agent_registry"
+            }
+          ]
+        },
+
+        {
+          "agent": "explorer",
+          "on": "context_gathered",
+          "next": "supervisor"
+        },
+
+        {
+          "agent": "agent_registry",
+          "on": "agent_missing",
+          "next": "supervisor"
+        },
+
+        {
+          "agent": "coder",
+          "on": "code_change",
+          "routes": [
+            {
+              "condition": "agent_available:reviewer",
+              "next": "reviewer"
+            },
+            {
+              "condition": "agent_missing:reviewer",
+              "next": "reviewer_fallback"
+            }
+          ]
+        },
+
+        {
+          "agent": "reviewer",
+          "on": "after_tests",
+          "routes": [
+            {
+              "condition": "tests_pass",
+              "next": "supervisor"
+            },
+            {
+              "condition": "ui_issue",
+              "next": "uiux"
+            },
+            {
+              "condition": "backend_issue",
+              "next": "firestore"
+            }
+          ]
+        },
+
+        {
+          "agent": "reviewer_fallback",
+          "on": "reviewer_missing",
+          "routes": [
+            {
+              "condition": "tests_pass",
+              "next": "supervisor"
+            }
+          ]
+        },
+
+        {
+          "agent": "uiux",
+          "on": "ui_fix",
+          "next": "reviewer"
+        },
+
+        {
+          "agent": "firestore",
+          "on": "rules_fix",
+          "next": "reviewer"
+        }
+      ]
+    }
+  }
+}

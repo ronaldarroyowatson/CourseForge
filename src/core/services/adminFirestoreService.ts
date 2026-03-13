@@ -14,6 +14,27 @@ export interface AdminUserRecord {
   isAdmin: boolean;
 }
 
+export interface PremiumUsageRecord {
+  premiumRequestsUsedToday: number;
+  premiumRequestsUsedThisWeek: number;
+  premiumRequestsUsedThisMonth: number;
+  dailyLimitPercent: number;
+  weeklyLimitPercent: number;
+  monthlyLimitPercent: number;
+  freezePremium: boolean;
+  lastResetDate: string;
+  lastResetWeek: string;
+  lastResetMonth: string;
+}
+
+export interface AdminPremiumUsageRow {
+  uid: string;
+  email: string;
+  displayName: string;
+  premiumTier: string;
+  premiumUsage: PremiumUsageRecord;
+}
+
 export interface ModerationItem {
   docPath: string;
   collectionName: string;
@@ -151,4 +172,27 @@ export async function adminUpdateContent(
     docPath,
     data,
   });
+}
+
+export async function getPremiumUsageReport(): Promise<AdminPremiumUsageRow[]> {
+  return callAdminFunction<Record<string, never>, AdminPremiumUsageRow[]>("getPremiumUsageReport", {});
+}
+
+export async function managePremiumUser(
+  uid: string,
+  action: "freeze" | "unfreeze" | "resetDaily" | "resetWeekly" | "resetMonthly",
+  freezePremium?: boolean
+): Promise<AdminPremiumUsageRow> {
+  return callAdminFunction<
+    {
+      uid: string;
+      action: "freeze" | "unfreeze" | "resetDaily" | "resetWeekly" | "resetMonthly";
+      freezePremium?: boolean;
+    },
+    AdminPremiumUsageRow
+  >("managePremiumUser", { uid, action, freezePremium });
+}
+
+export async function getCurrentPremiumUsage(): Promise<PremiumUsageRecord> {
+  return callAdminFunction<Record<string, never>, PremiumUsageRecord>("getCurrentPremiumUsage", {});
 }

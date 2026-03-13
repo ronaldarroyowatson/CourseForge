@@ -5,13 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "webapp": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "build:extension": "vite build --config vite.extension.config.ts",
     "typecheck": "tsc --noEmit",
     "test:core": "tsx tests/core/runCoreTests.ts",
+    "test:unit": "vitest run tests/core",
     "test:integration": "vitest run tests/integration",
-    "test": "npm run test:core ; npm run test:integration"
+    "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/rules --passWithNoTests\"",
+    "test": "npm run test:core && npm run test:unit && npm run test:integration && npm run test:rules"
   },
   "dependencies": {
     "firebase": "^12.10.0",
@@ -23,12 +26,14 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^5.1.4",
     "fake-indexeddb": "^6.0.0",
+    "firebase-tools": "^15.10.0",
     "jsdom": "^28.1.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.2",

@@ -1,0 +1,12 @@
+{
+  "premiumRequestsUsedToday": 8.6,
+  "premiumRequestsUsedThisWeek": 8.6,
+  "premiumRequestsUsedThisMonth": 8.6,
+  "dailyLimitPercent": 3.4,
+  "weeklyLimitPercent": 23.2,
+  "monthlyLimitPercent": 100,
+  "freezePremium": false,
+  "lastResetDate": "2026-03-13",
+  "lastResetWeek": "2026-W11",
+  "lastResetMonth": "2026-02-28@07:00"
+}

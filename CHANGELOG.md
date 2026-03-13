@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [1.1.2] - 2026-03-13
+
+### Added
+
+- Premium usage governance module in shared core services with deterministic gating and workflow summary reporting.
+- Local premium usage tracker and JSONL audit logging under `.copilot/usage`.
+- Admin Premium Management panel for freeze/unfreeze operations and manual reset controls.
+- Firestore rules test suite (`tests/rules`) using emulator-backed `@firebase/rules-unit-testing`.
+
+### Changed
+
+- Replaced static premium caps with baseline-derived defaults (`monthly baseline 8.6`, derived daily/weekly, monthly hard limit `100`).
+- Updated monthly reset behavior from month-start to local `31st @ 07:00` with last-day fallback for shorter months.
+- Extended canonical sync coverage and moderation/admin handling for section-scoped entities: `equations`, `concepts`, and `keyIdeas`.
+- Hardened content read policies to owner-or-admin and preserved explicit legacy path deny rules.
+- Expanded test scripts to include unit and Firestore rules execution in main test flow.
+
+### Fixed
+
+- Prevented stale/unsafe premium escalation decisions when daily/weekly/monthly budgets are exceeded.
+- Corrected hierarchy propagation for section-scoped content created from webapp/extension quick-add flows.
+- Resolved auth listener fallback edge cases and stabilized premium/sync regression tests.
+
+### Verified
+
+- `npm run test:unit -- tests/core/premiumUsage.limits.test.ts tests/core/copilot.premiumUsageTracker.test.ts`
+- `npm run typecheck`
+- `npm --prefix functions run build`
+
 ## [1.1.1] - 2026-03-11
 
 ### Fixed

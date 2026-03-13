@@ -1,3 +1,35 @@
+:root {
+  color-scheme: light;
+  --cf-text-strong: #11253a;
+  --cf-text: #1d3247;
+  --cf-text-muted: #4b6178;
+  --cf-bg: linear-gradient(180deg, #f4f8fd 0%, #eaf1f8 58%, #e2ebf6 100%);
+  --cf-surface: #ffffff;
+  --cf-surface-strong: #f3f7fc;
+  --cf-surface-muted: #e9f0f8;
+  --cf-border: #cad8e6;
+  --cf-border-strong: #9fb4c8;
+  --cf-accent: #1f6fb6;
+  --cf-danger: #a32323;
+  --cf-success: #1f6d2c;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --cf-text-strong: #e6eef8;
+  --cf-text: #d9e4f0;
+  --cf-text-muted: #9eb0c3;
+  --cf-bg: linear-gradient(180deg, #0d1723 0%, #122030 52%, #0f1824 100%);
+  --cf-surface: rgba(17, 28, 42, 0.92);
+  --cf-surface-strong: #152131;
+  --cf-surface-muted: #182636;
+  --cf-border: #26384d;
+  --cf-border-strong: #38506d;
+  --cf-accent: #6fb3ff;
+  --cf-danger: #ffb0aa;
+  --cf-success: #9ce6bf;
+}
+
 .sidebar-shell {
   width: 100%;
   min-width: 480px;
@@ -7,6 +39,8 @@
   gap: 0.75rem;
   padding: 0.75rem;
   box-sizing: border-box;
+  background: var(--cf-bg);
+  color: var(--cf-text);
 }
 
 .sidebar-title {
@@ -24,8 +58,34 @@
   font-size: 1rem;
 }
 
+.sidebar-section-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sidebar-section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 1px solid var(--cf-border);
+  border-radius: 999px;
+  background: var(--cf-surface-strong);
+  color: var(--cf-accent);
+  box-shadow: 0 4px 12px rgba(17, 37, 58, 0.08);
+}
+
+.sidebar-section-icon-svg {
+  width: 1rem;
+  height: 1rem;
+}
+
 .sidebar-section-copy {
-  margin: 0;
+  margin: 0 0 0.45rem;
+  color: var(--cf-text-muted);
+  font-size: 0.82rem;
 }
 
 .selector-grid {
@@ -40,9 +100,10 @@
 }
 
 .selector-field select {
-  border: 1px solid #c1cad3;
+  border: 1px solid var(--cf-border-strong);
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--cf-surface);
+  color: var(--cf-text-strong);
   padding: 0.4rem;
 }
 
@@ -52,9 +113,9 @@
 }
 
 .selection-summary {
-  border: 1px solid #d8dee5;
+  border: 1px solid var(--cf-border);
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--cf-surface);
   padding: 0.5rem;
   margin-bottom: 0.6rem;
 }
@@ -71,10 +132,10 @@
 .quick-form {
   display: grid;
   gap: 0.35rem;
-  border: 1px solid #d8dee5;
+  border: 1px solid var(--cf-border);
   border-radius: 6px;
   padding: 0.5rem;
-  background: #ffffff;
+  background: var(--cf-surface);
 }
 
 .quick-form-fields {
@@ -91,34 +152,37 @@
 }
 
 .quick-form input {
-  border: 1px solid #c1cad3;
+  border: 1px solid var(--cf-border-strong);
   border-radius: 6px;
+  background: var(--cf-surface);
+  color: var(--cf-text-strong);
   padding: 0.4rem;
 }
 
 .quick-form button {
-  border: 1px solid #9ea9b5;
+  border: 1px solid var(--cf-border-strong);
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--cf-surface-strong);
+  color: var(--cf-text-strong);
   padding: 0.4rem;
   cursor: pointer;
 }
 
 .sidebar-error {
   margin: 0;
-  color: #a32323;
+  color: var(--cf-danger);
   font-size: 0.85rem;
 }
 
 .sidebar-success {
   margin: 0;
-  color: #1f6d2c;
+  color: var(--cf-success);
   font-size: 0.85rem;
 }
 
 .sidebar-note {
   margin: 0;
-  color: #556577;
+  color: var(--cf-text-muted);
   font-size: 0.82rem;
 }
 
@@ -128,9 +192,11 @@
 }
 
 .sidebar-textarea {
-  border: 1px solid #c1cad3;
+  border: 1px solid var(--cf-border-strong);
   border-radius: 6px;
   width: 100%;
+  background: var(--cf-surface);
+  color: var(--cf-text-strong);
   resize: vertical;
   min-height: 120px;
   padding: 0.45rem;
@@ -142,7 +208,7 @@
   display: flex;
   gap: 0.3rem;
   margin-bottom: 0.6rem;
-  border-bottom: 1px solid #d8dee5;
+  border-bottom: 1px solid var(--cf-border);
 }
 
 .quick-add-tab {
@@ -153,23 +219,27 @@
   padding: 0.5rem 0.4rem;
   cursor: pointer;
   font-size: 0.85rem;
-  color: #556577;
+  color: var(--cf-text-muted);
   transition: all 0.2s ease;
 }
 
 .quick-add-tab:hover {
-  color: #24292f;
-  background: #f6f8fa;
-  border-bottom-color: #e0e6ea;
+  color: var(--cf-text-strong);
+  background: var(--cf-surface-strong);
+  border-bottom-color: var(--cf-border);
 }
 
 .quick-add-tab.active {
-  color: #24292f;
-  border-bottom-color: #0969da;
+  color: var(--cf-text-strong);
+  border-bottom-color: var(--cf-accent);
   font-weight: 500;
 }
 
 .quick-form-container {
   display: grid;
+}
+
+:root[data-theme="dark"] .sidebar-section-icon {
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.24);
 }
 

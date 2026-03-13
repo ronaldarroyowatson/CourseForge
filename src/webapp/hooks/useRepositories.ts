@@ -146,30 +146,48 @@ function buildVocabTermFromInput(input: CreateVocabTermInput, chapterId: string,
   };
 }
 
-function buildEquationFromInput(input: CreateEquationInput): Equation {
+function buildEquationFromInput(input: CreateEquationInput, chapterId: string, textbookId: string): Equation {
+  const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    textbookId,
+    chapterId,
     sectionId: input.sectionId,
     name: input.name,
     latex: input.latex,
     description: input.description,
+    lastModified: timestamp,
+    pendingSync: true,
+    source: "local",
   };
 }
 
-function buildConceptFromInput(input: CreateConceptInput): Concept {
+function buildConceptFromInput(input: CreateConceptInput, chapterId: string, textbookId: string): Concept {
+  const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    textbookId,
+    chapterId,
     sectionId: input.sectionId,
     name: input.name,
     explanation: input.explanation,
+    lastModified: timestamp,
+    pendingSync: true,
+    source: "local",
   };
 }
 
-function buildKeyIdeaFromInput(input: CreateKeyIdeaInput): KeyIdea {
+function buildKeyIdeaFromInput(input: CreateKeyIdeaInput, chapterId: string, textbookId: string): KeyIdea {
+  const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    textbookId,
+    chapterId,
     sectionId: input.sectionId,
     text: input.text,
+    lastModified: timestamp,
+    pendingSync: true,
+    source: "local",
   };
 }
 
@@ -280,7 +298,12 @@ export function useRepositories() {
   }, []);
 
   const createEquation = useCallback(async (input: CreateEquationInput): Promise<string> => {
-    const equation = buildEquationFromInput(input);
+    const section = await getSectionById(input.sectionId);
+    if (!section?.chapterId || !section.textbookId) {
+      throw new Error("Cannot create equation because the parent section is missing hierarchy IDs.");
+    }
+
+    const equation = buildEquationFromInput(input, section.chapterId, section.textbookId);
     const id = await saveEquation(equation);
     markLocalChange();
     return id;
@@ -296,7 +319,12 @@ export function useRepositories() {
   }, []);
 
   const createConcept = useCallback(async (input: CreateConceptInput): Promise<string> => {
-    const concept = buildConceptFromInput(input);
+    const section = await getSectionById(input.sectionId);
+    if (!section?.chapterId || !section.textbookId) {
+      throw new Error("Cannot create concept because the parent section is missing hierarchy IDs.");
+    }
+
+    const concept = buildConceptFromInput(input, section.chapterId, section.textbookId);
     const id = await saveConcept(concept);
     markLocalChange();
     return id;
@@ -312,7 +340,12 @@ export function useRepositories() {
   }, []);
 
   const createKeyIdea = useCallback(async (input: CreateKeyIdeaInput): Promise<string> => {
-    const keyIdea = buildKeyIdeaFromInput(input);
+    const section = await getSectionById(input.sectionId);
+    if (!section?.chapterId || !section.textbookId) {
+      throw new Error("Cannot create key idea because the parent section is missing hierarchy IDs.");
+    }
+
+    const keyIdea = buildKeyIdeaFromInput(input, section.chapterId, section.textbookId);
     const id = await saveKeyIdea(keyIdea);
     markLocalChange();
     return id;

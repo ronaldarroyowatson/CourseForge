@@ -82,8 +82,8 @@ async function ensureBrowserPersistence(auth: Auth): Promise<Auth> {
   return auth;
 }
 
-function getAuthInstanceSync(): Auth {
-  if (!cachedAuth) {
+function getAuthInstanceSync(): Auth | null {
+  if (!cachedAuth && !isExtensionRuntime()) {
     cachedAuth = getAuth(firebaseApp);
   }
 
@@ -114,11 +114,34 @@ export async function signOutCurrentUser(): Promise<void> {
 }
 
 export function getCurrentUser(): User | null {
-  return getAuthInstanceSync().currentUser;
+  return getAuthInstanceSync()?.currentUser ?? null;
 }
 
 export function onAuthStateChangedListener(onChange: (user: User | null) => void): Unsubscribe {
-  return onIdTokenChanged(getAuthInstanceSync(), onChange);
+  let disposed = false;
+  let unsubscribe: Unsubscribe = () => {};
+
+  void initializePersistentAuth()
+    .then((auth) => {
+      if (disposed) {
+        return;
+      }
+      unsubscribe = onIdTokenChanged(auth, onChange);
+      onChange(auth.currentUser);
+    })
+    .catch(() => {
+      if (disposed) {
+        return;
+      }
+      const fallbackAuth = getAuth(firebaseApp);
+      unsubscribe = onIdTokenChanged(fallbackAuth, onChange);
+      onChange(fallbackAuth.currentUser);
+    });
+
+  return () => {
+    disposed = true;
+    unsubscribe();
+  };
 }
 
 export async function subscribeToAuthTokenChanges(

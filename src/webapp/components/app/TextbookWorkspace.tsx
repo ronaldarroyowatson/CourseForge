@@ -452,121 +452,191 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
     }
   }
 
-  function renderWorkflowPanel(): React.JSX.Element | null {
-    if (activeWorkflowTab === "textbook") {
-      return (
-        <AccordionTile
-          title="Textbook"
-          summary={selectedTextbookId ? "A textbook is selected for onboarding." : "Create or select a textbook to continue."}
-          isExpanded={expandedTile === "textbook"}
-          onToggle={() => setExpandedTile((current) => current === "textbook" ? null : "textbook")}
-        >
-          <div className="panel-grid">
-            <TextbookForm onSaved={handleTextbookSaved} />
-            <TextbookList
-              textbooks={textbooks}
-              isLoading={isLoadingTextbooks}
-              loadError={textbookLoadError}
-              selectedTextbookId={selectedTextbookId}
-              onSelectTextbook={handleTextbookSelected}
-              onContinueToSections={() => {
-                void handleContinueToSections();
-              }}
-              onDeleted={handleTextbookDeleted}
-              onRefresh={() => setTextbookRefreshKey((current) => current + 1)}
-            />
-          </div>
-        </AccordionTile>
-      );
+  const workflowOrder: WorkflowTab[] = ["textbook", "chapters", "sections", "content"];
+
+  function canOpenTab(tab: WorkflowTab): boolean {
+    if (tab === "textbook") {
+      return true;
     }
 
-    if (activeWorkflowTab === "chapters" && selectedTextbookId) {
-      return (
-        <AccordionTile
-          title="Chapters"
-          summary="Add the next chapter for the selected textbook."
-          isExpanded={expandedTile === "chapters"}
-          onToggle={() => setExpandedTile((current) => current === "chapters" ? null : "chapters")}
-        >
-          <div className="panel-grid">
-            <ChapterForm
-              selectedTextbookId={selectedTextbookId}
-              refreshKey={chapterRefreshKey}
-              onSaved={handleChapterSaved}
-            />
-            <ChapterList
-              selectedTextbookId={selectedTextbookId}
-              selectedChapterId={selectedChapterId}
-              onSelectChapter={handleChapterSelected}
-              refreshKey={chapterRefreshKey}
-            />
-          </div>
-        </AccordionTile>
-      );
+    if (tab === "chapters") {
+      return selectedTextbookId !== null;
     }
 
-    if (activeWorkflowTab === "sections" && selectedChapterId) {
+    if (tab === "sections") {
+      return selectedChapterId !== null;
+    }
+
+    return selectedSectionId !== null;
+  }
+
+  function toggleWorkflowTab(tab: WorkflowTab): void {
+    if (!canOpenTab(tab)) {
+      return;
+    }
+
+    if (activeWorkflowTab !== tab) {
+      setActiveWorkflowTab(tab);
+      setExpandedTile(tab);
+      return;
+    }
+
+    setExpandedTile((current) => current === tab ? null : tab);
+  }
+
+  function getCardSummary(tab: WorkflowTab): string {
+    if (tab === "textbook") {
+      return selectedTextbookId
+        ? "A textbook is selected for onboarding."
+        : "Create or select a textbook to continue.";
+    }
+
+    if (tab === "chapters") {
+      return selectedTextbookId
+        ? "Add the next chapter for the selected textbook."
+        : "Select a textbook to unlock chapter setup.";
+    }
+
+    if (tab === "sections") {
+      return selectedChapterId
+        ? "Add the next section for the selected chapter."
+        : "Select a chapter to unlock section setup.";
+    }
+
+    return selectedSectionId
+      ? "Add vocab, equations, concepts, and key ideas for the selected section."
+      : "Select a section to unlock content capture.";
+  }
+
+  function renderWorkflowCardBody(tab: WorkflowTab): React.JSX.Element {
+    if (tab === "textbook") {
       return (
-        <div ref={sectionPanelRef}>
-          <AccordionTile
-            title="Sections"
-            summary="Add the next section for the selected chapter."
-            isExpanded={expandedTile === "sections"}
-            onToggle={() => setExpandedTile((current) => current === "sections" ? null : "sections")}
-          >
-            <div className="panel-grid">
-              <SectionNavigationBar
-                selectedSection={selectedSection}
-                previousSection={previousSection}
-                nextSection={nextSection}
-                onSelectSection={handleSectionSelectedById}
-                onOpenContent={handleOpenContent}
-              />
-              <SectionForm
-                selectedChapterId={selectedChapterId}
-                refreshKey={sectionRefreshKey}
-                onSaved={handleSectionSaved}
-              />
-              <SectionList
-                selectedChapterId={selectedChapterId}
-                selectedSectionId={selectedSectionId}
-                onSelectSection={handleSectionSelected}
-                refreshKey={sectionRefreshKey}
-              />
-            </div>
-          </AccordionTile>
+        <div className="panel-grid">
+          <TextbookForm onSaved={handleTextbookSaved} />
+          <TextbookList
+            textbooks={textbooks}
+            isLoading={isLoadingTextbooks}
+            loadError={textbookLoadError}
+            selectedTextbookId={selectedTextbookId}
+            onSelectTextbook={handleTextbookSelected}
+            onContinueToSections={() => {
+              void handleContinueToSections();
+            }}
+            onDeleted={handleTextbookDeleted}
+            onRefresh={() => setTextbookRefreshKey((current) => current + 1)}
+          />
         </div>
       );
     }
 
-    if (activeWorkflowTab === "content" && selectedTextbookId && selectedChapterId) {
+    if (tab === "chapters") {
+      if (!selectedTextbookId) {
+        return <p className="workflow-card-placeholder">Select a textbook to begin adding chapters.</p>;
+      }
+
       return (
-        <AccordionTile
-          title="Section Content"
-          summary="Add vocab, equations, concepts, and key ideas for the selected section."
-          isExpanded={expandedTile === "content"}
-          onToggle={() => setExpandedTile((current) => current === "content" ? null : "content")}
-        >
-          <SectionContentPanel
+        <div className="panel-grid">
+          <ChapterForm
+            selectedTextbookId={selectedTextbookId}
+            refreshKey={chapterRefreshKey}
+            onSaved={handleChapterSaved}
+          />
+          <ChapterList
             selectedTextbookId={selectedTextbookId}
             selectedChapterId={selectedChapterId}
-            selectedSectionId={selectedSectionId}
-            selectedChapter={selectedChapter}
-            selectedSection={selectedSection}
-            previousSection={previousSection}
-            nextSection={nextSection}
-            activePanel={activeContentPanel}
-            onSelectChapter={handleFallbackChapterSelected}
-            onSelectSection={handleSectionSelected}
-            onSelectSectionById={handleContentSectionSelectedById}
-            onBackToSections={handleBackToSections}
-            onSelectPanel={handleOpenContent}
+            onSelectChapter={handleChapterSelected}
+            refreshKey={chapterRefreshKey}
           />
-        </AccordionTile>
+        </div>
       );
     }
 
-    return null;
+    if (tab === "sections") {
+      if (!selectedChapterId) {
+        return <p className="workflow-card-placeholder">Select a chapter to begin adding sections.</p>;
+      }
+
+      return (
+        <div ref={sectionPanelRef} className="panel-grid">
+          <SectionNavigationBar
+            selectedSection={selectedSection}
+            previousSection={previousSection}
+            nextSection={nextSection}
+            onSelectSection={handleSectionSelectedById}
+            onOpenContent={handleOpenContent}
+          />
+          <SectionForm
+            selectedChapterId={selectedChapterId}
+            refreshKey={sectionRefreshKey}
+            onSaved={handleSectionSaved}
+          />
+          <SectionList
+            selectedChapterId={selectedChapterId}
+            selectedSectionId={selectedSectionId}
+            onSelectSection={handleSectionSelected}
+            refreshKey={sectionRefreshKey}
+          />
+        </div>
+      );
+    }
+
+    if (!selectedTextbookId || !selectedChapterId) {
+      return <p className="workflow-card-placeholder">Select a chapter and section to open content panels.</p>;
+    }
+
+    return (
+      <SectionContentPanel
+        selectedTextbookId={selectedTextbookId}
+        selectedChapterId={selectedChapterId}
+        selectedSectionId={selectedSectionId}
+        selectedChapter={selectedChapter}
+        selectedSection={selectedSection}
+        previousSection={previousSection}
+        nextSection={nextSection}
+        activePanel={activeContentPanel}
+        onSelectChapter={handleFallbackChapterSelected}
+        onSelectSection={handleSectionSelected}
+        onSelectSectionById={handleContentSectionSelectedById}
+        onBackToSections={handleBackToSections}
+        onSelectPanel={handleOpenContent}
+      />
+    );
+  }
+
+  function renderWorkflowPanel(): React.JSX.Element {
+    const activeIndex = workflowOrder.indexOf(activeWorkflowTab);
+
+    return (
+      <div className="workflow-card-stack" aria-label="Onboarding workflow cards">
+        {workflowOrder.map((tab, index) => {
+          const isActive = index === activeIndex;
+          const isPeekPrevious = index === activeIndex - 1;
+          const isPeekNext = index === activeIndex + 1;
+
+          const positionClass = isActive
+            ? "workflow-card workflow-card--active"
+            : isPeekPrevious
+              ? "workflow-card workflow-card--peek-prev"
+              : isPeekNext
+                ? "workflow-card workflow-card--peek-next"
+                : "workflow-card workflow-card--hidden";
+
+          return (
+            <AccordionTile
+              key={tab}
+              title={tab === "content" ? "Section Content" : tab.charAt(0).toUpperCase() + tab.slice(1)}
+              summary={getCardSummary(tab)}
+              isExpanded={isActive && expandedTile === tab}
+              onToggle={() => toggleWorkflowTab(tab)}
+              className={positionClass}
+              disabled={!canOpenTab(tab)}
+            >
+              {renderWorkflowCardBody(tab)}
+            </AccordionTile>
+          );
+        })}
+      </div>
+    );
   }
 
   return (
@@ -623,13 +693,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
               canOpenChapters={selectedTextbookId !== null}
               canOpenSections={selectedChapterId !== null}
               canOpenContent={selectedSectionId !== null}
-              onSelectTab={(tab) => {
-                if (tab === "content" && !selectedSectionId) {
-                  return;
-                }
-                setActiveWorkflowTab(tab);
-                setExpandedTile(tab);
-              }}
+              onSelectTab={toggleWorkflowTab}
             />
 
             {renderWorkflowPanel()}

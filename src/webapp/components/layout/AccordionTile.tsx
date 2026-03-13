@@ -6,6 +6,8 @@ interface AccordionTileProps {
   isExpanded: boolean;
   onToggle: () => void;
   children: React.ReactNode;
+  className?: string;
+  disabled?: boolean;
 }
 
 export function AccordionTile({
@@ -14,10 +16,19 @@ export function AccordionTile({
   isExpanded,
   onToggle,
   children,
+  className,
+  disabled = false,
 }: AccordionTileProps): React.JSX.Element {
+  const rootClassName = className ? `accordion-tile ${className}` : "accordion-tile";
+
   return (
-    <section className="accordion-tile">
-      <button type="button" className="accordion-tile-header" onClick={onToggle}>
+    <section className={rootClassName}>
+      <button
+        type="button"
+        className="accordion-tile-header"
+        onClick={onToggle}
+        disabled={disabled}
+      >
         <span>
           <strong>{title}</strong>
           <span className="accordion-tile-summary">{summary}</span>

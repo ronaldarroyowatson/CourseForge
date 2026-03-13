@@ -55,29 +55,44 @@ function buildVocabTerm(input: QuickVocabInput, chapterId: string, textbookId: s
 }
 
 function buildEquation(input: QuickEquationInput): Equation {
+  const timestamp = new Date().toISOString();
+
   return {
     id: crypto.randomUUID(),
     sectionId: input.sectionId,
     name: input.name,
     latex: input.latex,
     description: input.description,
+    lastModified: timestamp,
+    pendingSync: true,
+    source: "local",
   };
 }
 
 function buildConcept(input: QuickConceptInput): Concept {
+  const timestamp = new Date().toISOString();
+
   return {
     id: crypto.randomUUID(),
     sectionId: input.sectionId,
     name: input.name,
     explanation: input.explanation,
+    lastModified: timestamp,
+    pendingSync: true,
+    source: "local",
   };
 }
 
 function buildKeyIdea(input: QuickKeyIdeaInput): KeyIdea {
+  const timestamp = new Date().toISOString();
+
   return {
     id: crypto.randomUUID(),
     sectionId: input.sectionId,
     text: input.text,
+    lastModified: timestamp,
+    pendingSync: true,
+    source: "local",
   };
 }
 
@@ -119,15 +134,42 @@ export function useRepositories() {
   }, []);
 
   const createEquation = useCallback(async (input: QuickEquationInput): Promise<string> => {
-    return saveEquation(buildEquation(input));
+    const section = await getSectionById(input.sectionId);
+    if (!section?.chapterId || !section.textbookId) {
+      throw new Error("Cannot create an equation because the parent section is missing hierarchy IDs.");
+    }
+
+    return saveEquation({
+      ...buildEquation(input),
+      chapterId: section.chapterId,
+      textbookId: section.textbookId,
+    });
   }, []);
 
   const createConcept = useCallback(async (input: QuickConceptInput): Promise<string> => {
-    return saveConcept(buildConcept(input));
+    const section = await getSectionById(input.sectionId);
+    if (!section?.chapterId || !section.textbookId) {
+      throw new Error("Cannot create a concept because the parent section is missing hierarchy IDs.");
+    }
+
+    return saveConcept({
+      ...buildConcept(input),
+      chapterId: section.chapterId,
+      textbookId: section.textbookId,
+    });
   }, []);
 
   const createKeyIdea = useCallback(async (input: QuickKeyIdeaInput): Promise<string> => {
-    return saveKeyIdea(buildKeyIdea(input));
+    const section = await getSectionById(input.sectionId);
+    if (!section?.chapterId || !section.textbookId) {
+      throw new Error("Cannot create a key idea because the parent section is missing hierarchy IDs.");
+    }
+
+    return saveKeyIdea({
+      ...buildKeyIdea(input),
+      chapterId: section.chapterId,
+      textbookId: section.textbookId,
+    });
   }, []);
 
   return {

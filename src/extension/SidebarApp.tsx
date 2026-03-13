@@ -11,6 +11,34 @@ import { SectionSelector } from "./components/selectors/SectionSelector";
 import { TextbookSelector } from "./components/selectors/TextbookSelector";
 import { useRepositories } from "./hooks/useRepositories";
 
+const SidebarSectionIcon = React.memo(function SidebarSectionIcon({ kind }: { kind: "library" | "capture" | "export" }): React.JSX.Element {
+  if (kind === "library") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" className="sidebar-section-icon-svg">
+        <path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v16H7.5A2.5 2.5 0 0 0 5 21.5v-16Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        <path d="M8 7h7M8 11h7M8 15h5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (kind === "capture") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" className="sidebar-section-icon-svg">
+        <path d="M12 4v16M4 12h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="sidebar-section-icon-svg">
+      <path d="M6 7h12v10H6z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M9 11h6M9 14h6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M10 4h4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+});
+
 /**
  * Root shell for the browser extension sidebar.
  * Manages selection persistence via localStorage and quick-add mode switching.
@@ -171,12 +199,18 @@ export function SidebarApp(): React.JSX.Element {
       <header>
         <h1 className="sidebar-title">CourseForge Sidebar</h1>
         <p className="sidebar-subtitle">
-          Quick capture workspace
+          Focused capture and export tools
         </p>
       </header>
 
       <section>
-        <h2 className="sidebar-section-title">Selectors</h2>
+        <h2 className="sidebar-section-title">
+          <span className="sidebar-section-heading">
+            <span className="sidebar-section-icon"><SidebarSectionIcon kind="library" /></span>
+            Library Scope
+          </span>
+        </h2>
+        <p className="sidebar-section-copy">Choose the textbook, chapter, and section the sidebar should act on.</p>
         <div className="selector-grid">
           <TextbookSelector
             selectedTextbookId={selectedTextbookId}
@@ -196,7 +230,13 @@ export function SidebarApp(): React.JSX.Element {
       </section>
 
       <section>
-        <h2 className="sidebar-section-title">Quick Add</h2>
+        <h2 className="sidebar-section-title">
+          <span className="sidebar-section-heading">
+            <span className="sidebar-section-icon"><SidebarSectionIcon kind="capture" /></span>
+            Quick Capture
+          </span>
+        </h2>
+        <p className="sidebar-section-copy">Create synced vocab, equations, concepts, and key ideas for the active section.</p>
         <div className="selection-summary" role="status" aria-live="polite">
           <p>
             <strong>Textbook:</strong> {selectedTextbookTitle}

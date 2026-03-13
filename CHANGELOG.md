@@ -45,7 +45,7 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Migrated cloud sync writes and reads to the canonical Firestore hierarchy (`textbooks -> chapters -> sections -> vocab`) and removed legacy user-scoped content writes.
 - Added production Firestore security rules to enforce signed-in reads, owner/admin writes, explicit legacy-path blocking, and catch-all deny guardrails.
 
-### Changed (1.1.0)
+### Changed (1.1.1)
 
 - Added admin route lazy-loading and improved bundle chunking for faster non-admin initial load.
 - Refined dark/light theme token usage and readability in sync and admin UI surfaces.

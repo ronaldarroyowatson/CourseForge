@@ -1,3 +1,5 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Scope = 'Function', Target = 'Parse-SemVer', Justification = 'Legacy function name removed; suppress stale analyzer warning in editor cache.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Scope = 'Function', Target = '*', Justification = 'Updater helper names use approved verbs; suppress false positives from stale diagnostics.')]
 param(
   [string]$PackageRoot,
   [string]$CurrentVersion,

@@ -6,9 +6,10 @@
     "node": "20"
   },
   "scripts": {
-    "build": "tsc",
-    "serve": "firebase emulators:start --only functions",
-    "deploy": "firebase deploy --only functions"
+    "check:runtime": "node ../scripts/check-node-version.mjs --min 20 --max 21 --label functions --strict",
+    "build": "npm run check:runtime && tsc",
+    "serve": "npm run check:runtime && firebase emulators:start --only functions",
+    "deploy": "npm run check:runtime && firebase deploy --only functions"
   },
   "dependencies": {
     "firebase-admin": "^13.7.0",

@@ -47,9 +47,35 @@ Quick release note: v1.2.0 is primarily about policy enforcement and reliability
 
 ### Prerequisites
 
-- Node.js `20` is recommended for the Firebase Functions workspace.
+- Node.js `20` for Firebase Functions development and deploy parity.
+- Node.js `20-24` for the root workspace (webapp/extension tooling); Node 24 is supported for canary validation only.
 - npm
 - A Firebase project configured to match the values in `src/firebase/firebaseConfig.ts`
+
+### Node runtime checks
+
+```bash
+npm run check:node
+npm run check:node:functions
+npm run verify:stable
+npm run verify:canary
+```
+
+- `check:node` validates root workspace compatibility (`>=20 <25`).
+- `check:node:functions` is strict and enforces Node 20 for Functions workflows.
+- `verify:stable` is the release lane (Node 20 root + strict Node 20 Functions).
+- `verify:canary` validates newer Node for root tooling and bridges Functions build through Node 20.
+- Node pins are tracked in `.nvmrc` and `.node-version`.
+
+When your local machine uses newer Node (for example Node 24) but you still need to run Functions checks safely:
+
+```bash
+npm run functions:build:compat
+npm run functions:serve:compat
+npm run functions:deploy:compat
+```
+
+These commands keep Functions runtime compatibility by executing Functions tasks on Node 20 automatically.
 
 ### Install
 
@@ -70,6 +96,14 @@ npm run dev
 npm run build
 cd functions && npm run build
 ```
+
+For planned Node 24 canary runs:
+
+```bash
+npm run check:node:next24
+```
+
+See `docs/NODE_RUNTIME_PLAN.md` for the staged adoption plan and release gates.
 
 ### Portable installer-style package check
 

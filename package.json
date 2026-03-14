@@ -3,7 +3,18 @@
   "version": "1.2.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20 <25"
+  },
   "scripts": {
+    "check:node": "node scripts/check-node-version.mjs --min 20 --max 25 --label workspace",
+    "check:node:functions": "node scripts/check-node-version.mjs --min 20 --max 21 --label functions --strict",
+    "check:node:next24": "node scripts/check-node-version.mjs --min 24 --max 25 --label next-node-canary",
+    "functions:build:compat": "node scripts/run-functions-compat.mjs build",
+    "functions:serve:compat": "node scripts/run-functions-compat.mjs serve",
+    "functions:deploy:compat": "node scripts/run-functions-compat.mjs deploy",
+    "verify:stable": "npm run check:node && npm run check:node:functions && npm run typecheck && npm run build && npm run build:extension && npm test && npm run check:installer && npm --prefix functions run build",
+    "verify:canary": "npm run check:node:next24 && npm run typecheck && npm run build && npm run build:extension && npm test && npm run check:installer && npm run functions:build:compat",
     "dev": "vite",
     "webapp": "vite",
     "build": "vite build",

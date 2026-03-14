@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useUIStore } from "../../src/webapp/store/uiStore";
 
 type MockQueryClause = { field: string; op: string; value: unknown };
 type MockQuery = {
@@ -375,5 +376,612 @@ describe("Firebase connection + sync integration flows", () => {
     expect(result.permissionDenied).toBe(true);
     expect(result.message.toLowerCase()).toContain("permission denied");
     expect(result.message).toContain("Firestore rules");
+  });
+});
+
+describe("Webapp/extension communication mutation checks", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as { chrome?: unknown }).chrome;
+  });
+
+  it("detects pending sync rows by store and ignores non-pending rows", async () => {
+    const { syncModule } = await importSyncServiceModule({
+      currentUid: "teacher-pending",
+      localByStore: {
+        textbooks: [
+          {
+            id: "tb-pending-1",
+            pendingSync: true,
+            source: "local",
+            title: "Pending",
+            grade: "9",
+            subject: "Science",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "7777777777777",
+            isbnNormalized: "7777777777777",
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T00:00:00.000Z",
+            isFavorite: false,
+            isArchived: false,
+          },
+        ],
+        chapters: [
+          {
+            id: "ch-clean-1",
+            textbookId: "tb-pending-1",
+            index: 1,
+            name: "No pending",
+            pendingSync: false,
+            source: "cloud",
+            lastModified: "2026-03-12T00:00:00.000Z",
+          },
+        ],
+      },
+    });
+
+    const diagnostics = await syncModule.getPendingSyncDiagnostics();
+    expect(diagnostics.pendingCount).toBe(1);
+    expect(diagnostics.byStore.textbooks).toBe(1);
+    expect(diagnostics.byStore.chapters).toBe(0);
+  });
+
+  it("resolves sync conflict in favor of newer local timestamp and uploads canonical payload", async () => {
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-conflict",
+      localByStore: {
+        textbooks: [
+          {
+            id: "tb-conflict-1",
+            title: "Local Winner",
+            grade: "8",
+            subject: "Math",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "8888888888888",
+            isbnNormalized: "8888888888888",
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T02:00:00.000Z",
+            pendingSync: false,
+            source: "local",
+            isFavorite: false,
+            isArchived: false,
+          },
+        ],
+      },
+      cloudQueryDocs: {
+        "collection:textbooks:userId": [
+          createMockDoc("textbooks/tb-conflict-1", "tb-conflict-1", {
+            id: "tb-conflict-1",
+            userId: "teacher-conflict",
+            ownerId: "teacher-conflict",
+            title: "Cloud Older",
+            grade: "8",
+            subject: "Math",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "8888888888888",
+            isbnNormalized: "8888888888888",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: false,
+            source: "cloud",
+            isFavorite: false,
+            isArchived: false,
+          }),
+        ],
+      },
+    });
+
+    await syncModule.syncUserData("teacher-conflict");
+
+    expect(mocks.setDoc).toHaveBeenCalled();
+    const cloudPayload = (mocks.setDoc.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    expect(cloudPayload.title).toBe("Local Winner");
+    expect(cloudPayload.ownerId).toBe("teacher-conflict");
+    expect(cloudPayload.pendingSync).toBe(false);
+  });
+
+  it("resolves sync conflict in favor of newer cloud timestamp (false-negative mutation guard)", async () => {
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-conflict-cloud",
+      localByStore: {
+        textbooks: [
+          {
+            id: "tb-conflict-2",
+            title: "Local Older",
+            grade: "8",
+            subject: "Math",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "9999999999999",
+            isbnNormalized: "9999999999999",
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: false,
+            source: "local",
+            isFavorite: false,
+            isArchived: false,
+          },
+        ],
+      },
+      cloudQueryDocs: {
+        "collection:textbooks:userId": [
+          createMockDoc("textbooks/tb-conflict-2", "tb-conflict-2", {
+            id: "tb-conflict-2",
+            userId: "teacher-conflict-cloud",
+            ownerId: "teacher-conflict-cloud",
+            title: "Cloud Winner",
+            grade: "8",
+            subject: "Math",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "9999999999999",
+            isbnNormalized: "9999999999999",
+            lastModified: "2026-03-12T03:00:00.000Z",
+            pendingSync: false,
+            source: "cloud",
+            isFavorite: false,
+            isArchived: false,
+          }),
+        ],
+      },
+    });
+
+    await syncModule.syncUserData("teacher-conflict-cloud");
+
+    expect(mocks.setDoc).not.toHaveBeenCalled();
+    const saveCalls = mocks.save.mock.calls as Array<[string, Record<string, unknown>]>;
+    const textbookSave = saveCalls.find((call) => call[0] === "textbooks");
+    expect(textbookSave?.[1]?.title).toBe("Cloud Winner");
+  });
+
+  it("surfaces permission-denied during upload with Firestore rules guidance", async () => {
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-upload-denied",
+      localByStore: {
+        textbooks: [
+          {
+            id: "tb-denied-1",
+            title: "Denied",
+            grade: "7",
+            subject: "History",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "1212121212121",
+            isbnNormalized: "1212121212121",
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T00:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+            isFavorite: false,
+            isArchived: false,
+          },
+        ],
+      },
+    });
+
+    mocks.setDoc.mockRejectedValueOnce({ code: "permission-denied", message: "Denied by rules" });
+    await expect(syncModule.uploadLocalChanges("teacher-upload-denied")).rejects.toThrow("Firestore rules");
+  });
+
+});
+
+describe("Cross-surface pipeline communication", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as { chrome?: unknown }).chrome;
+  });
+
+  it("webapp -> firestore -> extension pipeline keeps canonical ids and avoids tampered cloud ids", async () => {
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-pipeline-a",
+      localByStore: {
+        textbooks: [
+          {
+            id: "tb-pipeline-a-local",
+            title: "Pipeline A",
+            grade: "6",
+            subject: "Science",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "1313131313131",
+            isbnNormalized: "1313131313131",
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+            isFavorite: false,
+            isArchived: false,
+          },
+        ],
+      },
+      cloudQueryDocs: {
+        "collection:textbooks:userId": [
+          createMockDoc("textbooks/tb-pipeline-a-cloud", "tb-pipeline-a-cloud", {
+            id: "tb-tampered-id",
+            userId: "teacher-pipeline-a",
+            ownerId: "teacher-pipeline-a",
+            title: "Pipeline Cloud",
+            grade: "6",
+            subject: "Science",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "1313131313131",
+            isbnNormalized: "1313131313131",
+            lastModified: "2026-03-12T02:00:00.000Z",
+            pendingSync: false,
+            source: "cloud",
+            isFavorite: false,
+            isArchived: false,
+          }),
+        ],
+      },
+    });
+
+    await syncModule.uploadLocalChanges("teacher-pipeline-a");
+    (globalThis as { chrome?: { runtime?: { id?: string } } }).chrome = { runtime: { id: "extension-runtime" } };
+    await syncModule.downloadCloudData("teacher-pipeline-a");
+
+    expect(mocks.setDoc).toHaveBeenCalled();
+    const saveCalls = mocks.save.mock.calls as Array<[string, Record<string, unknown>]>;
+    expect(
+      saveCalls.some(
+        (call) =>
+          call[0] === "textbooks" &&
+          call[1]?.source === "cloud" &&
+          call[1]?.id === "tb-pipeline-a-cloud"
+      )
+    ).toBe(true);
+  });
+
+  it("extension -> firestore -> webapp pipeline round-trip syncs local content", async () => {
+    (globalThis as { chrome?: { runtime?: { id?: string } } }).chrome = { runtime: { id: "extension-runtime" } };
+
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-pipeline-b",
+      localByStore: {
+        textbooks: [
+          {
+            id: "tb-pipeline-b-local",
+            title: "Pipeline B",
+            grade: "5",
+            subject: "Biology",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "1414141414141",
+            isbnNormalized: "1414141414141",
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+            isFavorite: false,
+            isArchived: false,
+          },
+        ],
+      },
+      cloudQueryDocs: {
+        "collection:textbooks:userId": [
+          createMockDoc("textbooks/tb-pipeline-b-cloud", "tb-pipeline-b-cloud", {
+            id: "tb-pipeline-b-cloud",
+            userId: "teacher-pipeline-b",
+            ownerId: "teacher-pipeline-b",
+            title: "Pipeline B Cloud",
+            grade: "5",
+            subject: "Biology",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "1414141414141",
+            isbnNormalized: "1414141414141",
+            lastModified: "2026-03-12T02:00:00.000Z",
+            pendingSync: false,
+            source: "cloud",
+            isFavorite: false,
+            isArchived: false,
+          }),
+        ],
+      },
+    });
+
+    await syncModule.uploadLocalChanges("teacher-pipeline-b");
+    delete (globalThis as { chrome?: unknown }).chrome;
+    await syncModule.downloadCloudData("teacher-pipeline-b");
+
+    expect(mocks.setDoc).toHaveBeenCalled();
+    expect(mocks.save).toHaveBeenCalled();
+  });
+
+  it("webapp -> firestore -> function-like moderation -> firestore -> webapp applies moderated status", async () => {
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-pipeline-c",
+      localByStore: {
+        sections: [
+          {
+            id: "sec-pipeline-c",
+            textbookId: "tb-pipeline-c",
+            chapterId: "ch-pipeline-c",
+            index: 1,
+            title: "Pipeline Section",
+            notes: "draft notes",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+      },
+      cloudQueryDocs: {
+        "collectionGroup:sections:userId": [
+          createMockDoc("textbooks/tb-pipeline-c/chapters/ch-pipeline-c/sections/sec-pipeline-c", "sec-pipeline-c", {
+            id: "sec-pipeline-c",
+            userId: "teacher-pipeline-c",
+            ownerId: "teacher-pipeline-c",
+            textbookId: "tb-pipeline-c",
+            chapterId: "ch-pipeline-c",
+            index: 1,
+            title: "Pipeline Section",
+            notes: "approved notes",
+            status: "approved",
+            lastModified: "2026-03-12T03:00:00.000Z",
+            pendingSync: false,
+            source: "cloud",
+          }),
+        ],
+      },
+    });
+
+    await syncModule.uploadLocalChanges("teacher-pipeline-c");
+    await syncModule.downloadCloudData("teacher-pipeline-c");
+
+    const saveCalls = mocks.save.mock.calls as Array<[string, Record<string, unknown>]>;
+    expect(
+      saveCalls.some(
+        (call) =>
+          call[0] === "sections" &&
+          call[1]?.source === "cloud" &&
+          call[1]?.status === "approved" &&
+          call[1]?.notes === "approved notes"
+      )
+    ).toBe(true);
+  });
+
+  it("extension -> firestore -> function-like moderation -> firestore -> extension updates section-scoped entities", async () => {
+    (globalThis as { chrome?: { runtime?: { id?: string } } }).chrome = { runtime: { id: "extension-runtime" } };
+
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-pipeline-d",
+      localByStore: {
+        equations: [
+          {
+            id: "eq-pipeline-d",
+            textbookId: "tb-pipeline-d",
+            chapterId: "ch-pipeline-d",
+            sectionId: "sec-pipeline-d",
+            name: "Equation Draft",
+            latex: "x+y=z",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+      },
+      cloudQueryDocs: {
+        "collectionGroup:equations:userId": [
+          createMockDoc(
+            "textbooks/tb-pipeline-d/chapters/ch-pipeline-d/sections/sec-pipeline-d/equations/eq-pipeline-d",
+            "eq-pipeline-d",
+            {
+              id: "eq-pipeline-d",
+              userId: "teacher-pipeline-d",
+              ownerId: "teacher-pipeline-d",
+              textbookId: "tb-pipeline-d",
+              chapterId: "ch-pipeline-d",
+              sectionId: "sec-pipeline-d",
+              name: "Equation Approved",
+              latex: "x+y=z",
+              status: "approved",
+              lastModified: "2026-03-12T04:00:00.000Z",
+              pendingSync: false,
+              source: "cloud",
+            }
+          ),
+        ],
+      },
+    });
+
+    await syncModule.uploadLocalChanges("teacher-pipeline-d");
+    await syncModule.downloadCloudData("teacher-pipeline-d");
+
+    const saveCalls = mocks.save.mock.calls as Array<[string, Record<string, unknown>]>;
+    expect(
+      saveCalls.some(
+        (call) =>
+          call[0] === "equations" &&
+          call[1]?.source === "cloud" &&
+          call[1]?.name === "Equation Approved" &&
+          call[1]?.status === "approved"
+      )
+    ).toBe(true);
+  });
+
+  it("batch import upload writes canonical docs across hierarchy stores", async () => {
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-batch",
+      localByStore: {
+        textbooks: [
+          {
+            id: "tb-batch",
+            title: "Batch Textbook",
+            grade: "10",
+            subject: "Science",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "1515151515151",
+            isbnNormalized: "1515151515151",
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+            isFavorite: false,
+            isArchived: false,
+          },
+        ],
+        chapters: [
+          {
+            id: "ch-batch",
+            textbookId: "tb-batch",
+            index: 1,
+            name: "Batch Chapter",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+        sections: [
+          {
+            id: "sec-batch",
+            textbookId: "tb-batch",
+            chapterId: "ch-batch",
+            index: 1,
+            title: "Batch Section",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+        vocabTerms: [
+          {
+            id: "v-batch",
+            textbookId: "tb-batch",
+            chapterId: "ch-batch",
+            sectionId: "sec-batch",
+            word: "Batch term",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+        equations: [
+          {
+            id: "eq-batch",
+            textbookId: "tb-batch",
+            chapterId: "ch-batch",
+            sectionId: "sec-batch",
+            name: "Batch equation",
+            latex: "a+b=c",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+        concepts: [
+          {
+            id: "co-batch",
+            textbookId: "tb-batch",
+            chapterId: "ch-batch",
+            sectionId: "sec-batch",
+            name: "Batch concept",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+        keyIdeas: [
+          {
+            id: "ki-batch",
+            textbookId: "tb-batch",
+            chapterId: "ch-batch",
+            sectionId: "sec-batch",
+            text: "Batch key idea",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+      },
+    });
+
+    await syncModule.uploadLocalChanges("teacher-batch");
+
+    expect(mocks.setDoc).toHaveBeenCalledTimes(7);
+  });
+
+  it("minimizes cloud writes by skipping already-synced owned rows (false-negative mutation guard)", async () => {
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-min-write",
+      localByStore: {
+        textbooks: [
+          {
+            id: "tb-min-write",
+            userId: "teacher-min-write",
+            title: "Already synced",
+            grade: "9",
+            subject: "Math",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "1616161616161",
+            isbnNormalized: "1616161616161",
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T00:00:00.000Z",
+            pendingSync: false,
+            source: "cloud",
+            isFavorite: false,
+            isArchived: false,
+          },
+        ],
+      },
+    });
+
+    await syncModule.uploadLocalChanges("teacher-min-write");
+    expect(mocks.setDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe("Sync status UI and debug logging state", () => {
+  beforeEach(() => {
+    useUIStore.getState().clearSync();
+  });
+
+  it("records sync error events for debug panel", () => {
+    useUIStore.getState().setSyncStatus("error", "permission denied from rules");
+
+    const state = useUIStore.getState();
+    expect(state.syncStatus).toBe("error");
+    expect(state.syncDebugEvents.length).toBeGreaterThan(0);
+    expect(state.syncDebugEvents[0]?.toLowerCase()).toContain("sync:error");
+  });
+
+  it("tracks sync status transitions and write budget indicators", () => {
+    const ui = useUIStore.getState();
+
+    ui.setSyncStatus("syncing", "Syncing local changes...");
+    ui.setWriteBudget(510, 500, true);
+    ui.setSyncStatus("error", "Cloud sync paused to prevent excessive writes.");
+
+    const afterError = useUIStore.getState();
+    expect(afterError.syncStatus).toBe("error");
+    expect(afterError.writeBudgetExceeded).toBe(true);
+
+    ui.setSyncStatus("synced", "Local changes synced.");
+    const afterSuccess = useUIStore.getState();
+    expect(afterSuccess.syncStatus).toBe("synced");
+    expect(afterSuccess.syncMessage).toBe("Local changes synced.");
+  });
+
+  it("does not create false debug-error entries for non-error statuses (false-positive mutation guard)", () => {
+    const ui = useUIStore.getState();
+
+    ui.setSyncStatus("syncing", "syncing");
+    ui.setSyncStatus("synced", "done");
+
+    const state = useUIStore.getState();
+    expect(state.syncDebugEvents.some((event) => event.includes("sync:error"))).toBe(false);
   });
 });

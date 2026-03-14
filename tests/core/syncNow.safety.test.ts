@@ -77,6 +77,44 @@ describe("syncNow safety controls", () => {
     expect(result.errorCode).toBe("permission-denied");
   });
 
+  it("preserves wrapped permission-denied code from lower sync layer", async () => {
+    const result = await syncNow({
+      nowFn: () => 11000,
+      getCurrentUserFn: () => ({ uid: "user-1" }),
+      getPendingSyncDiagnosticsFn: async () => createPendingDiagnostics(),
+      syncUserDataFn: async () => {
+        const firebaseError = { code: "permission-denied", message: "Denied by rules" };
+        throw new Error("syncUserData failed", { cause: firebaseError });
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.permissionDenied).toBe(true);
+    expect(result.errorCode).toBe("permission-denied");
+  });
+
+  it("preserves wrapped unauthenticated and unavailable codes from lower sync layer", async () => {
+    const codes: Array<"unauthenticated" | "unavailable"> = ["unauthenticated", "unavailable"];
+
+    for (const code of codes) {
+      resetSyncSafetyStateForTests();
+
+      const result = await syncNow({
+        nowFn: () => 12000,
+        getCurrentUserFn: () => ({ uid: "user-1" }),
+        getPendingSyncDiagnosticsFn: async () => createPendingDiagnostics(),
+        syncUserDataFn: async () => {
+          const firebaseError = { code, message: `Wrapped ${code}` };
+          throw new Error("syncUserData failed", { cause: firebaseError });
+        },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.permissionDenied).toBe(false);
+      expect(result.errorCode).toBe(code);
+    }
+  });
+
   it("unauthenticated branch returns expected shape with all required guardrail keys", async () => {
     const result = await syncNow({
       nowFn: () => 99000,

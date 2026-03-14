@@ -359,4 +359,100 @@ describe("Firestore rules: users + canonical hierarchy", () => {
       await assertSucceeds(setDoc(doc(adminDb, canonicalDoc.path), canonicalDoc.payload));
     }
   });
+
+  it("blocks legacy nested vocab path under /users and allows canonical vocab path", async () => {
+    const ownerDb = rulesEnv.authenticatedContext(OWNER_UID).firestore();
+
+    await assertFails(
+      setDoc(doc(ownerDb, `users/${OWNER_UID}/sections/sec-legacy/vocab/v-legacy`), {
+        ...baseSyncFields(),
+        id: "v-legacy",
+        textbookId: "tb-legacy",
+        chapterId: "ch-legacy",
+        sectionId: "sec-legacy",
+        word: "legacy",
+      })
+    );
+
+    await assertSucceeds(
+      setDoc(doc(ownerDb, "textbooks/tb-vocab/chapters/ch-vocab/sections/sec-vocab/vocab/v-owner"), {
+        ...baseSyncFields(),
+        id: "v-owner",
+        textbookId: "tb-vocab",
+        chapterId: "ch-vocab",
+        sectionId: "sec-vocab",
+        word: "canonical",
+      })
+    );
+  });
+
+  it("enforces owner/non-owner/admin checks on canonical vocab path", async () => {
+    const ownerDb = rulesEnv.authenticatedContext(OWNER_UID).firestore();
+    const otherDb = rulesEnv.authenticatedContext(OTHER_UID).firestore();
+    const adminDb = rulesEnv.authenticatedContext("admin-vocab", { admin: true }).firestore();
+
+    const canonicalPath = "textbooks/tb-vocab-2/chapters/ch-vocab-2/sections/sec-vocab-2/vocab/v-2";
+
+    await assertSucceeds(
+      setDoc(doc(ownerDb, canonicalPath), {
+        ...baseSyncFields(),
+        id: "v-2",
+        textbookId: "tb-vocab-2",
+        chapterId: "ch-vocab-2",
+        sectionId: "sec-vocab-2",
+        word: "owner-write",
+      })
+    );
+
+    await assertFails(
+      setDoc(
+        doc(otherDb, canonicalPath),
+        {
+          ...baseSyncFields(),
+          id: "v-2",
+          textbookId: "tb-vocab-2",
+          chapterId: "ch-vocab-2",
+          sectionId: "sec-vocab-2",
+          word: "tampered-by-other",
+        },
+        { merge: true }
+      )
+    );
+
+    await assertFails(getDoc(doc(otherDb, canonicalPath)));
+
+    await assertSucceeds(
+      setDoc(
+        doc(adminDb, canonicalPath),
+        {
+          ...baseSyncFields(),
+          id: "v-2",
+          textbookId: "tb-vocab-2",
+          chapterId: "ch-vocab-2",
+          sectionId: "sec-vocab-2",
+          word: "admin-override",
+        },
+        { merge: true }
+      )
+    );
+
+    await assertSucceeds(getDoc(doc(adminDb, canonicalPath)));
+  });
+
+  it("rejects canonical vocab creation when owner fields are tampered (false-positive mutation guard)", async () => {
+    const ownerDb = rulesEnv.authenticatedContext(OWNER_UID).firestore();
+
+    await assertFails(
+      setDoc(doc(ownerDb, "textbooks/tb-vocab-3/chapters/ch-vocab-3/sections/sec-vocab-3/vocab/v-3"), {
+        ...baseSyncFields(),
+        ownerId: OTHER_UID,
+        userId: OTHER_UID,
+        id: "v-3",
+        textbookId: "tb-vocab-3",
+        chapterId: "ch-vocab-3",
+        sectionId: "sec-vocab-3",
+        word: "tampered-owner",
+      })
+    );
+  });
 });

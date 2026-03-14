@@ -23,24 +23,55 @@
   --cf-surface: rgba(17, 28, 42, 0.92);
   --cf-surface-strong: #152131;
   --cf-surface-muted: #182636;
-  --cf-border: #26384d;
-  --cf-border-strong: #38506d;
+  --cf-border: #35506f;
+  --cf-border-strong: #4a6788;
   --cf-accent: #6fb3ff;
   --cf-danger: #ffb0aa;
   --cf-success: #9ce6bf;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .sidebar-shell {
   width: 100%;
   min-width: 480px;
   max-width: 480px;
-  min-height: 640px;
+  height: 100%;
+  min-height: 0;
   display: grid;
   gap: 0.75rem;
   padding: 0.75rem;
   box-sizing: border-box;
   background: var(--cf-bg);
   color: var(--cf-text);
+  overflow-y: auto;
+}
+
+.sidebar-shell::-webkit-scrollbar {
+  width: 10px;
+}
+
+.sidebar-shell::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cf-border-strong) 65%, transparent);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.sidebar-shell::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-header-actions {
+  margin-top: 0.65rem;
+  display: flex;
+  gap: 0.45rem;
 }
 
 .sidebar-title {

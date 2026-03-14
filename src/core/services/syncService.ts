@@ -42,6 +42,7 @@ let syncContext: { uid: string | null; isAdmin: boolean | null } = { uid: null, 
 interface SyncErrorLike {
   code?: string;
   message?: string;
+  cause?: unknown;
 }
 
 interface SyncNowDependencies {
@@ -52,7 +53,48 @@ interface SyncNowDependencies {
 }
 
 function getErrorCode(error: unknown): string {
-  return (error as SyncErrorLike)?.code ?? "unknown";
+  const err = error as SyncErrorLike | undefined;
+  const directCode = err?.code;
+  if (typeof directCode === "string" && directCode.trim().length > 0) {
+    return directCode;
+  }
+
+  const causeCode = (err?.cause as SyncErrorLike | undefined)?.code;
+  if (typeof causeCode === "string" && causeCode.trim().length > 0) {
+    return causeCode;
+  }
+
+  const message = `${err?.message ?? ""} ${(err?.cause as SyncErrorLike | undefined)?.message ?? ""}`.toLowerCase();
+
+  if (message.includes("permission-denied")) {
+    return "permission-denied";
+  }
+
+  if (message.includes("unauthenticated")) {
+    return "unauthenticated";
+  }
+
+  if (message.includes("unavailable")) {
+    return "unavailable";
+  }
+
+  if (message.includes("network-request-failed")) {
+    return "network-request-failed";
+  }
+
+  return "unknown";
+}
+
+function wrapSyncError(error: unknown): Error {
+  const wrapped = new Error(getSyncErrorMessage(error)) as Error & SyncErrorLike;
+  const code = getErrorCode(error);
+
+  if (code !== "unknown") {
+    wrapped.code = code;
+  }
+
+  wrapped.cause = error;
+  return wrapped;
 }
 
 export function logSyncEvent(type: string, path: string, payload: unknown, error?: unknown): void {
@@ -238,6 +280,116 @@ function mergeDocsByPath<T extends { ref: { path: string } }>(...docLists: T[][]
   return [...byPath.values()];
 }
 
+const canonicalReadCache = new Map<string, Promise<Array<{ ref: { path: string }; id: string; data: () => Record<string, unknown> }>>>();
+
+function resetCanonicalReadCache(): void {
+  canonicalReadCache.clear();
+}
+
+function getCachedCanonicalDocs(
+  key: string,
+  factory: () => Promise<Array<{ ref: { path: string }; id: string; data: () => Record<string, unknown> }>>
+): Promise<Array<{ ref: { path: string }; id: string; data: () => Record<string, unknown> }>> {
+  const cached = canonicalReadCache.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const next = factory();
+  canonicalReadCache.set(key, next);
+  return next;
+}
+
+async function fetchCanonicalTextbookDocs(
+  userId: string
+): Promise<Array<{ ref: { path: string }; id: string; data: () => Record<string, unknown> }>> {
+  return getCachedCanonicalDocs(`textbooks:${userId}`, async () => {
+    const [byUserId, byOwnerId] = await Promise.all([
+      getDocs(query(collection(firestoreDb, "textbooks"), where("userId", "==", userId))),
+      getDocs(query(collection(firestoreDb, "textbooks"), where("ownerId", "==", userId))),
+    ]);
+    return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
+  });
+}
+
+async function fetchCanonicalChapterDocs(
+  userId: string
+): Promise<Array<{ ref: { path: string }; id: string; data: () => Record<string, unknown> }>> {
+  return getCachedCanonicalDocs(`chapters:${userId}`, async () => {
+    const textbookDocs = await fetchCanonicalTextbookDocs(userId);
+    const chapterSnapshots = await Promise.all(
+      textbookDocs.map((textbookDoc) => getDocs(collection(firestoreDb, `${textbookDoc.ref.path}/chapters`)))
+    );
+    return chapterSnapshots.flatMap((snapshot) => snapshot.docs);
+  });
+}
+
+async function fetchCanonicalSectionDocs(
+  userId: string
+): Promise<Array<{ ref: { path: string }; id: string; data: () => Record<string, unknown> }>> {
+  return getCachedCanonicalDocs(`sections:${userId}`, async () => {
+    const chapterDocs = await fetchCanonicalChapterDocs(userId);
+    const sectionSnapshots = await Promise.all(
+      chapterDocs.map((chapterDoc) => getDocs(collection(firestoreDb, `${chapterDoc.ref.path}/sections`)))
+    );
+    return sectionSnapshots.flatMap((snapshot) => snapshot.docs);
+  });
+}
+
+async function fetchCanonicalSectionChildDocs(
+  userId: string,
+  collectionName: "vocab" | "equations" | "concepts" | "keyIdeas"
+): Promise<Array<{ ref: { path: string }; id: string; data: () => Record<string, unknown> }>> {
+  return getCachedCanonicalDocs(`${collectionName}:${userId}`, async () => {
+    const sectionDocs = await fetchCanonicalSectionDocs(userId);
+    const childSnapshots = await Promise.all(
+      sectionDocs.map((sectionDoc) => getDocs(collection(firestoreDb, `${sectionDoc.ref.path}/${collectionName}`)))
+    );
+    return childSnapshots.flatMap((snapshot) => snapshot.docs);
+  });
+}
+
+async function fetchCollectionGroupWithCanonicalFallback(
+  userId: string,
+  groupName: "chapters" | "sections" | "vocab" | "equations" | "concepts" | "keyIdeas"
+): Promise<Array<{ ref: { path: string }; id: string; data: () => Record<string, unknown> }>> {
+  try {
+    const [byUserId, byOwnerId] = await Promise.all([
+      getDocs(query(collectionGroup(firestoreDb, groupName), where("userId", "==", userId))),
+      getDocs(query(collectionGroup(firestoreDb, groupName), where("ownerId", "==", userId))),
+    ]);
+    return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
+  } catch (error) {
+    if (getErrorCode(error) !== "permission-denied") {
+      throw error;
+    }
+
+    logSyncEvent("read:fallback-canonical", `cloud/${groupName}`, { userId, reason: "collection-group-permission-denied" }, error);
+
+    if (groupName === "chapters") {
+      return fetchCanonicalChapterDocs(userId);
+    }
+
+    if (groupName === "sections") {
+      return fetchCanonicalSectionDocs(userId);
+    }
+
+    if (groupName === "vocab") {
+      return fetchCanonicalSectionChildDocs(userId, "vocab");
+    }
+
+    if (groupName === "equations") {
+      return fetchCanonicalSectionChildDocs(userId, "equations");
+    }
+
+    if (groupName === "concepts") {
+      return fetchCanonicalSectionChildDocs(userId, "concepts");
+    }
+
+    return fetchCanonicalSectionChildDocs(userId, "keyIdeas");
+  }
+}
+
 function getDocPathFromStoreItem(
   storeName: SyncStoreName,
   item: SyncEntity,
@@ -356,61 +508,39 @@ async function fetchCloudStore<T extends SyncStoreName>(
   const path = `cloud/${storeName}`;
   logSyncEvent("read:start", path, { userId, storeName });
 
-  const docs = await (async () => {
-    if (storeName === STORE_NAMES.textbooks) {
-      const [byUserId, byOwnerId] = await Promise.all([
-        getDocs(query(collection(firestoreDb, "textbooks"), where("userId", "==", userId))),
-        getDocs(query(collection(firestoreDb, "textbooks"), where("ownerId", "==", userId))),
-      ]);
-      return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
-    }
+  let docs: Array<{ ref: { path: string }; id: string; data: () => Record<string, unknown> }>;
+  try {
+    docs = await (async () => {
+      if (storeName === STORE_NAMES.textbooks) {
+        return fetchCanonicalTextbookDocs(userId);
+      }
 
-    if (storeName === STORE_NAMES.chapters) {
-      const [byUserId, byOwnerId] = await Promise.all([
-        getDocs(query(collectionGroup(firestoreDb, "chapters"), where("userId", "==", userId))),
-        getDocs(query(collectionGroup(firestoreDb, "chapters"), where("ownerId", "==", userId))),
-      ]);
-      return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
-    }
+      if (storeName === STORE_NAMES.chapters) {
+        return fetchCollectionGroupWithCanonicalFallback(userId, "chapters");
+      }
 
-    if (storeName === STORE_NAMES.sections) {
-      const [byUserId, byOwnerId] = await Promise.all([
-        getDocs(query(collectionGroup(firestoreDb, "sections"), where("userId", "==", userId))),
-        getDocs(query(collectionGroup(firestoreDb, "sections"), where("ownerId", "==", userId))),
-      ]);
-      return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
-    }
+      if (storeName === STORE_NAMES.sections) {
+        return fetchCollectionGroupWithCanonicalFallback(userId, "sections");
+      }
 
-    if (storeName === STORE_NAMES.equations) {
-      const [byUserId, byOwnerId] = await Promise.all([
-        getDocs(query(collectionGroup(firestoreDb, "equations"), where("userId", "==", userId))),
-        getDocs(query(collectionGroup(firestoreDb, "equations"), where("ownerId", "==", userId))),
-      ]);
-      return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
-    }
+      if (storeName === STORE_NAMES.equations) {
+        return fetchCollectionGroupWithCanonicalFallback(userId, "equations");
+      }
 
-    if (storeName === STORE_NAMES.concepts) {
-      const [byUserId, byOwnerId] = await Promise.all([
-        getDocs(query(collectionGroup(firestoreDb, "concepts"), where("userId", "==", userId))),
-        getDocs(query(collectionGroup(firestoreDb, "concepts"), where("ownerId", "==", userId))),
-      ]);
-      return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
-    }
+      if (storeName === STORE_NAMES.concepts) {
+        return fetchCollectionGroupWithCanonicalFallback(userId, "concepts");
+      }
 
-    if (storeName === STORE_NAMES.keyIdeas) {
-      const [byUserId, byOwnerId] = await Promise.all([
-        getDocs(query(collectionGroup(firestoreDb, "keyIdeas"), where("userId", "==", userId))),
-        getDocs(query(collectionGroup(firestoreDb, "keyIdeas"), where("ownerId", "==", userId))),
-      ]);
-      return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
-    }
+      if (storeName === STORE_NAMES.keyIdeas) {
+        return fetchCollectionGroupWithCanonicalFallback(userId, "keyIdeas");
+      }
 
-    const [byUserId, byOwnerId] = await Promise.all([
-      getDocs(query(collectionGroup(firestoreDb, "vocab"), where("userId", "==", userId))),
-      getDocs(query(collectionGroup(firestoreDb, "vocab"), where("ownerId", "==", userId))),
-    ]);
-    return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
-  })();
+      return fetchCollectionGroupWithCanonicalFallback(userId, "vocab");
+    })();
+  } catch (error) {
+    logSyncEvent("read:error", path, { userId, storeName }, error);
+    throw error;
+  }
 
   logSyncEvent("read:success", path, { docs: docs.length });
 
@@ -733,7 +863,7 @@ export async function uploadLocalChanges(userId: string): Promise<void> {
   } catch (error) {
     logSyncEvent("upload:error", "textbooks/*", { userId }, error);
     console.error("uploadLocalChanges failed", error);
-    throw new Error(getSyncErrorMessage(error));
+    throw wrapSyncError(error);
   }
 }
 
@@ -743,6 +873,7 @@ export async function downloadCloudData(userId: string): Promise<void> {
   }
 
   try {
+    resetCanonicalReadCache();
     await logSyncIdentity(userId);
     await Promise.all(
       SYNC_STORES.map(async (storeName) => {
@@ -769,7 +900,7 @@ export async function downloadCloudData(userId: string): Promise<void> {
   } catch (error) {
     logSyncEvent("download:error", "textbooks/*", { userId }, error);
     console.error("downloadCloudData failed", error);
-    throw new Error(getSyncErrorMessage(error));
+    throw wrapSyncError(error);
   }
 }
 
@@ -779,6 +910,7 @@ export async function syncUserData(userId: string): Promise<void> {
   }
 
   try {
+    resetCanonicalReadCache();
     await logSyncIdentity(userId);
     await migrateLocalHierarchyData();
     const indexes = await buildHierarchyIndexes();
@@ -887,7 +1019,7 @@ export async function syncUserData(userId: string): Promise<void> {
   } catch (error) {
     logSyncEvent("sync:error", "textbooks/*", { userId, code: getErrorCode(error) }, error);
     console.error("syncUserData failed", error);
-    throw new Error(getSyncErrorMessage(error));
+    throw wrapSyncError(error);
   }
 }
 

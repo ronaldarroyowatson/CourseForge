@@ -2,9 +2,9 @@
 
 CourseForge is a local-first curriculum authoring platform for teachers. It combines a browser extension for quick capture with a full web app for textbook management, sync, moderation, and XML export.
 
-Version `1.1.2` focuses on premium-usage governance, section-content sync parity, and Firestore security hardening, including baseline-derived premium caps, deterministic reset windows, and expanded admin/test coverage.
+Version `1.2.0` focuses on premium-usage governance, section-content sync parity, and Firestore security hardening, including baseline-derived premium caps, deterministic reset windows, and expanded admin/test coverage.
 
-Quick release note: v1.1.2 is primarily about policy enforcement and reliability hardening across sync, rules, admin tooling, and validation.
+Quick release note: v1.2.0 is primarily about policy enforcement and reliability hardening across sync, rules, admin tooling, and validation.
 
 ## What it does
 
@@ -24,7 +24,7 @@ Quick release note: v1.1.2 is primarily about policy enforcement and reliability
 - Updated textbook action icons and favorite/archive sorting behavior.
 - Vitest integration tests covering login restore, admin route access, claim refresh, and sync bootstrap.
 
-## v1.1.2 highlights
+## v1.2.0 highlights
 
 - Baseline-driven premium usage limits across backend, shared services, and local tracker (`monthlyBaselinePercent = 8.6`, derived daily/weekly defaults).
 - Monthly premium reset policy standardized to local `31st @ 07:00` with end-of-month fallback.
@@ -86,7 +86,7 @@ npm run test:rules
 - Admin operations now go through callable Cloud Functions instead of direct browser-side cross-user writes.
 - The admin custom claim is enforced from the auth token, while the mirrored Firestore `users` document exists only for admin UX and reporting.
 
-### Firestore data paths and rules (v1.1)
+### Firestore data paths and rules (v1.2)
 
 - Canonical content paths:
   - `/textbooks/{textbookId}`

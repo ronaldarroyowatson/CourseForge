@@ -28,6 +28,7 @@ function shouldSkipAutoSyncRun(): boolean {
 }
 
 function applySyncMetrics(result: {
+  success: boolean;
   pendingCount: number;
   writeCount: number;
   writeBudgetLimit: number;
@@ -39,7 +40,15 @@ function applySyncMetrics(result: {
   ui.setPendingSyncCount(result.pendingCount);
   ui.setWriteBudget(result.writeCount, result.writeBudgetLimit, result.writeBudgetExceeded);
   ui.setRetryLimit(result.retryLimit);
-  ui.setLastSyncErrorCode(result.errorCode);
+
+  if (result.success) {
+    ui.setLastSyncErrorCode(null);
+    return;
+  }
+
+  if (result.errorCode) {
+    ui.setLastSyncErrorCode(result.errorCode);
+  }
 }
 
 /**
@@ -162,9 +171,6 @@ export function useAutoSync(): void {
 
     window.addEventListener("online", handleOnline);
 
-    // Run at startup for authenticated users.
-    void runSync("startup");
-
     return () => {
       isActive = false;
       if (retryTimeoutId) {
@@ -177,6 +183,10 @@ export function useAutoSync(): void {
 
   React.useEffect(() => {
     if (authStatus !== "authenticated") {
+      return;
+    }
+
+    if (localChangeVersion === 0) {
       return;
     }
 

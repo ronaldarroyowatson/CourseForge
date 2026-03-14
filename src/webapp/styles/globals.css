@@ -55,8 +55,8 @@
   --cf-surface: rgba(17, 28, 42, 0.92);
   --cf-surface-strong: #152131;
   --cf-surface-muted: #182636;
-  --cf-border: #26384d;
-  --cf-border-strong: #38506d;
+  --cf-border: #35506f;
+  --cf-border-strong: #4a6788;
   --cf-shadow-1: 0 2px 10px rgba(0, 0, 0, 0.25);
   --cf-shadow-2: 0 14px 40px rgba(0, 0, 0, 0.3);
   --cf-shadow-3: 0 20px 56px rgba(0, 0, 0, 0.36);
@@ -67,7 +67,7 @@
 }
 
 :root[data-theme="dark"] .workflow-card {
-  border-color: #3a4f67;
+  border-color: #4a6788;
   background: linear-gradient(180deg, rgba(20, 33, 49, 0.98) 0%, rgba(16, 27, 41, 0.98) 100%);
 }
 
@@ -80,7 +80,7 @@ body {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .app-main {
@@ -148,7 +148,7 @@ body {
   border-radius: 14px;
   background: var(--bg-panel);
   box-shadow: var(--cf-shadow-2);
-  overflow: hidden;
+  overflow: clip;
   transition: transform 0.28s ease, opacity 0.28s ease, box-shadow 0.28s ease;
 }
 
@@ -219,6 +219,22 @@ body {
 .accordion-tile-body {
   overflow: auto;
   padding: 0.9rem;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cf-border-strong) 65%, transparent);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .workflow-card-placeholder {

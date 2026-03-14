@@ -7,12 +7,28 @@ import { App } from "../../src/webapp/App";
 import { useAuthStore } from "../../src/webapp/store/authStore";
 import { useUIStore } from "../../src/webapp/store/uiStore";
 
+type SyncNowMockResult = {
+  success: boolean;
+  message: string;
+  retryable: boolean;
+  permissionDenied: boolean;
+  throttled: boolean;
+  writeLoopTriggered: boolean;
+  writeBudgetExceeded: boolean;
+  writeCount: number;
+  writeBudgetLimit: number;
+  retryLimit: number;
+  errorCode: string | null;
+  pendingCount: number;
+};
+
 const authMocks = vi.hoisted(() => {
   const mockUser = {
     uid: "teacher-1",
     email: "teacher@example.com",
     displayName: "Teacher One",
-  } as const;
+    getIdToken: vi.fn(async (_forceRefresh?: boolean) => "fresh-token"),
+  };
 
   const state = {
     currentUser: null as typeof mockUser | null,
@@ -44,13 +60,18 @@ const authMocks = vi.hoisted(() => {
 
 const syncMocks = vi.hoisted(() => ({
   syncUserData: vi.fn(async () => undefined),
-  syncNow: vi.fn(async () => ({
+  syncNow: vi.fn(async (): Promise<SyncNowMockResult> => ({
     success: true,
     message: "Sync completed successfully.",
     retryable: false,
     permissionDenied: false,
     throttled: false,
     writeLoopTriggered: false,
+    writeBudgetExceeded: false,
+    writeCount: 0,
+    writeBudgetLimit: 500,
+    retryLimit: 3,
+    errorCode: null,
     pendingCount: 0,
   })),
   getPendingSyncDiagnostics: vi.fn(async () => ({ pendingCount: 0, byStore: {} })),
@@ -92,6 +113,20 @@ function resetStores(): void {
     isSyncing: false,
     syncStatus: "idle",
     syncMessage: null,
+    lastSyncError: null,
+    lastSyncErrorCode: null,
+    pendingSyncCount: 0,
+    pendingChangesCount: 0,
+    retryCount: 0,
+    writeCount: 0,
+    writeBudgetLimit: 500,
+    retryLimit: 3,
+    writeBudgetExceeded: false,
+    automaticRetriesEnabled: false,
+    permissionDeniedSyncBlocked: false,
+    writeLoopBlocked: false,
+    localChangeVersion: 0,
+    syncDebugEvents: [],
     selectedTextbookId: null,
     selectedTextbook: null,
   });
@@ -116,6 +151,7 @@ describe("App admin/auth integration", () => {
     authMocks.signOutCurrentUser.mockClear();
     authMocks.getAdminClaim.mockReset();
     authMocks.getAdminClaim.mockResolvedValue(false);
+    authMocks.mockUser.getIdToken.mockClear();
     authMocks.saveUserProfileToFirestore.mockClear();
     syncMocks.syncUserData.mockClear();
     syncMocks.syncNow.mockClear();
@@ -219,5 +255,120 @@ describe("App admin/auth integration", () => {
       expect(syncMocks.syncNow.mock.calls.length + syncMocks.syncUserData.mock.calls.length).toBeGreaterThan(0);
       expect(authMocks.saveUserProfileToFirestore).toHaveBeenCalled();
     });
+  });
+
+  it("preserves permission-denied startup state without duplicate bootstrap sync errors", async () => {
+    authMocks.state.currentUser = mockUser;
+    authMocks.getAdminClaim.mockResolvedValue(true);
+    const permissionDeniedMessage = "Signed in successfully, but cloud sync is blocked by Firestore rules (permission denied). Local data remains available.";
+    syncMocks.syncNow
+      .mockResolvedValueOnce({
+        success: false,
+        message: permissionDeniedMessage,
+        retryable: false,
+        permissionDenied: true,
+        throttled: false,
+        writeLoopTriggered: false,
+        writeBudgetExceeded: false,
+        writeCount: 0,
+        writeBudgetLimit: 500,
+        retryLimit: 3,
+        errorCode: "permission-denied",
+        pendingCount: 0,
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        message: permissionDeniedMessage,
+        retryable: false,
+        permissionDenied: true,
+        throttled: false,
+        writeLoopTriggered: false,
+        writeBudgetExceeded: false,
+        writeCount: 0,
+        writeBudgetLimit: 500,
+        retryLimit: 3,
+        errorCode: "permission-denied",
+        pendingCount: 0,
+      });
+
+    renderAt("/textbooks");
+
+    await waitFor(() => {
+      expect(useAuthStore.getState().authStatus).toBe("authenticated");
+    });
+
+    await waitFor(() => {
+      expect(useUIStore.getState().syncStatus).toBe("error");
+    });
+
+    await act(async () => {
+      authMocks.state.authCallback?.(mockUser);
+    });
+
+    const state = useUIStore.getState();
+    expect(state.syncMessage).toBe(permissionDeniedMessage);
+    expect(state.lastSyncError).toBe(permissionDeniedMessage);
+    expect(state.lastSyncErrorCode).toBe("permission-denied");
+    expect(state.permissionDeniedSyncBlocked).toBe(true);
+    expect(state.syncDebugEvents.filter((event) => event.includes("sync:error")).length).toBe(2);
+    expect(syncMocks.syncNow).toHaveBeenCalledTimes(2);
+    expect(authMocks.mockUser.getIdToken).toHaveBeenCalledWith(true);
+    expect(authMocks.mockUser.getIdToken.mock.invocationCallOrder[0]).toBeLessThan(syncMocks.syncNow.mock.invocationCallOrder[0]);
+  });
+
+  it("retries admin bootstrap sync after token refresh and clears startup errors on success", async () => {
+    authMocks.state.currentUser = mockUser;
+    authMocks.getAdminClaim.mockResolvedValue(true);
+
+    syncMocks.syncNow
+      .mockResolvedValueOnce({
+        success: false,
+        message: "Signed in successfully, but cloud sync is blocked by Firestore rules (permission denied). Local data remains available.",
+        retryable: false,
+        permissionDenied: true,
+        throttled: false,
+        writeLoopTriggered: false,
+        writeBudgetExceeded: false,
+        writeCount: 0,
+        writeBudgetLimit: 500,
+        retryLimit: 3,
+        errorCode: "permission-denied",
+        pendingCount: 0,
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        message: "Sync completed successfully.",
+        retryable: false,
+        permissionDenied: false,
+        throttled: false,
+        writeLoopTriggered: false,
+        writeBudgetExceeded: false,
+        writeCount: 0,
+        writeBudgetLimit: 500,
+        retryLimit: 3,
+        errorCode: null,
+        pendingCount: 0,
+      });
+
+    renderAt("/textbooks");
+
+    await waitFor(() => {
+      expect(useUIStore.getState().syncStatus).toBe("error");
+    });
+
+    await act(async () => {
+      authMocks.state.authCallback?.(mockUser);
+    });
+
+    await waitFor(() => {
+      expect(useUIStore.getState().syncStatus).toBe("synced");
+    });
+
+    const state = useUIStore.getState();
+    expect(state.syncMessage).toBe("Your data is synced.");
+    expect(state.lastSyncError).toBeNull();
+    expect(state.lastSyncErrorCode).toBeNull();
+    expect(state.permissionDeniedSyncBlocked).toBe(false);
+    expect(syncMocks.syncNow).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,12 +13,15 @@
     "test:core": "tsx tests/core/runCoreTests.ts",
     "test:unit": "vitest run tests/core",
     "test:integration": "vitest run tests/integration",
-    "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/rules --passWithNoTests\"",
+    "probe:startup-sync": "vitest run tests/integration/startupSync.probe.test.tsx --reporter=verbose",
+    "test:rules": "tsx tests/rules/runRulesTests.ts",
+    "deploy:firestore": "firebase deploy --only firestore",
+    "deploy:functions": "firebase deploy --only functions",
+    "deploy:backend": "firebase deploy --only firestore,functions",
     "test": "npm run test:core && npm run test:unit && npm run test:integration && npm run test:rules"
   },
   "dependencies": {
     "firebase": "^12.10.0",
-    "firebase-admin": "^13.7.0",
     "idb": "^8.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

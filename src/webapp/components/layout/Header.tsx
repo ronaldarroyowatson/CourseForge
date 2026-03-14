@@ -158,6 +158,8 @@ export function Header(): React.JSX.Element {
             <div className="debug-panel__content">
               <p><strong>User UID:</strong> {userId ?? "n/a"}</p>
               <p><strong>Admin Claim:</strong> {isAdmin ? "true" : "false"}</p>
+              <p><strong>Sync Status:</strong> {syncStatus}</p>
+              <p><strong>Sync Message:</strong> {syncMessage ?? "none"}</p>
               <p><strong>Pending Sync Items:</strong> {pendingChangesCount}</p>
               <p><strong>Write Count:</strong> {writeCount}</p>
               <p><strong>Write Budget:</strong> {writeBudgetLimit}</p>
@@ -165,6 +167,7 @@ export function Header(): React.JSX.Element {
               <p><strong>Retry Limit:</strong> {retryLimit}</p>
               <p><strong>Last Sync Error:</strong> {lastSyncError ?? "none"}</p>
               <p><strong>Last Sync Error Code:</strong> {lastSyncErrorCode ?? "none"}</p>
+              <p><strong>Permission Denied Sync Blocked:</strong> {permissionDeniedSyncBlocked ? "true" : "false"}</p>
               <p><strong>Last Sync Time:</strong> {lastSyncTime ?? "never"}</p>
               <div>
                 <strong>Recent Sync Paths:</strong>

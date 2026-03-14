@@ -13,8 +13,7 @@ import { ChapterList } from "../chapters/ChapterList";
 import { SectionContentPanel, type ContentPanelTab } from "../content/SectionContentPanel";
 import { AccordionTile } from "../layout/AccordionTile";
 import { Header } from "../layout/Header";
-import { Sidebar } from "../layout/Sidebar";
-import { WorkflowRibbon, type WorkflowTab } from "../layout/WorkflowRibbon";
+import type { WorkflowTab } from "../layout/WorkflowRibbon";
 import { SectionForm } from "../sections/SectionForm";
 import { SectionList } from "../sections/SectionList";
 import { SectionNavigationBar } from "../sections/SectionNavigationBar";
@@ -624,8 +623,8 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
           return (
             <AccordionTile
               key={tab}
-              title={tab === "content" ? "Section Content" : tab.charAt(0).toUpperCase() + tab.slice(1)}
-              summary={getCardSummary(tab)}
+              title=""
+              summary=""
               isExpanded={isActive && expandedTile === tab}
               onToggle={() => toggleWorkflowTab(tab)}
               className={positionClass}
@@ -641,8 +640,6 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
 
   return (
     <div className="app-shell">
-      <Sidebar />
-
       <main className="app-main">
         <Header />
 
@@ -687,14 +684,6 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
               ) : null}
               {signOutError ? <p className="error-text">Sign-out failed: {signOutError}</p> : null}
             </section>
-
-            <WorkflowRibbon
-              activeTab={activeWorkflowTab}
-              canOpenChapters={selectedTextbookId !== null}
-              canOpenSections={selectedChapterId !== null}
-              canOpenContent={selectedSectionId !== null}
-              onSelectTab={toggleWorkflowTab}
-            />
 
             {renderWorkflowPanel()}
           </>

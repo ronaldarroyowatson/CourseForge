@@ -60,6 +60,7 @@ export function SidebarApp(): React.JSX.Element {
   const [selectedTextbookTitle, setSelectedTextbookTitle] = React.useState("None");
   const [selectedChapterName, setSelectedChapterName] = React.useState("None");
   const [selectedSectionTitle, setSelectedSectionTitle] = React.useState("None");
+  const quickCaptureSectionRef = React.useRef<HTMLElement | null>(null);
 
   /**
    * Restore persisted selections and quick-add mode from localStorage on mount.
@@ -152,6 +153,16 @@ export function SidebarApp(): React.JSX.Element {
     setSelectedSectionId(undefined);
   }
 
+  function focusQuickCapture(): void {
+    setQuickAddMode("vocab");
+    quickCaptureSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.requestAnimationFrame(() => {
+      quickCaptureSectionRef.current
+        ?.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select")
+        ?.focus();
+    });
+  }
+
   React.useEffect(() => {
     async function loadTextbookSummary(): Promise<void> {
       if (!selectedTextbookId) {
@@ -229,13 +240,18 @@ export function SidebarApp(): React.JSX.Element {
         </div>
       </section>
 
-      <section>
+      <section ref={quickCaptureSectionRef}>
         <h2 className="sidebar-section-title">
           <span className="sidebar-section-heading">
             <span className="sidebar-section-icon"><SidebarSectionIcon kind="capture" /></span>
             Quick Capture
           </span>
         </h2>
+        <div className="sidebar-header-actions">
+          <button type="button" className="btn-secondary" onClick={focusQuickCapture}>
+            Focus quick capture
+          </button>
+        </div>
         <p className="sidebar-section-copy">Create synced vocab, equations, concepts, and key ideas for the active section.</p>
         <div className="selection-summary" role="status" aria-live="polite">
           <p>

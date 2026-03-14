@@ -37,14 +37,16 @@ service cloud.firestore {
     // This claim is set exclusively by the setUserAdminStatus Cloud Function
     // and is never writable from the client.
     function isAdmin() {
-      return request.auth != null && request.auth.token.admin == true;
+      return request.auth != null
+        && 'admin' in request.auth.token
+        && request.auth.token.admin == true;
     }
 
     // Returns true when the authenticated uid matches owner fields on data.
     function ownerMatches(data) {
       return isSignedIn() && (
-        request.auth.uid == data.userId ||
-        request.auth.uid == data.ownerId
+        ('userId' in data && request.auth.uid == data.userId) ||
+        ('ownerId' in data && request.auth.uid == data.ownerId)
       );
     }
 

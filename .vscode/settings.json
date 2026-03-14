@@ -1,0 +1,4 @@
+{
+  "powershell.scriptAnalysis.enable": false,
+  "powershell.scriptAnalysis.settingsPath": ".vscode/PSScriptAnalyzerSettings.psd1"
+}

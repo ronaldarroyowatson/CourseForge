@@ -1,0 +1,27 @@
+{
+    "name":  "CourseForge",
+    "version":  "1.2.0",
+    "packageType":  "windows",
+    "createdAtUtc":  "2026-03-14T02:44:03.2933764Z",
+    "includes":  [
+                     "webapp/",
+                     "extension/",
+                     "AutoUpdate-CourseForge.ps1",
+                     "Check-For-CourseForge-Updates.cmd",
+                     "Start-CourseForge.cmd",
+                     "CourseForge-Start.url",
+                     "Install-CourseForge-Windows.ps1",
+                     "Install-CourseForge-Windows.cmd",
+                     "README.md",
+                     "CHANGELOG.md",
+                     "LICENSE"
+                 ],
+    "updates":  {
+                    "provider":  "github-releases",
+                    "owner":  "ronaldarroyowatson",
+                    "repo":  "CourseForge",
+                    "latestEndpoint":  "https://api.github.com/repos/ronaldarroyowatson/CourseForge/releases/latest",
+                    "assetTemplate":  "CourseForge-{version}-windows.zip",
+                    "startupCheck":  true
+                }
+}

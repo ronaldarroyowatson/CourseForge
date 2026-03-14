@@ -1,0 +1,177 @@
+param(
+  [string]$Version
+)
+
+$ErrorActionPreference = "Stop"
+
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+Set-Location $repoRoot
+
+$packageJsonPath = Join-Path $repoRoot "package.json"
+$packageJson = Get-Content -Path $packageJsonPath -Raw | ConvertFrom-Json
+if ([string]::IsNullOrWhiteSpace($Version)) {
+  $Version = $packageJson.version
+}
+
+$releaseRoot = Join-Path $repoRoot "release"
+$portableName = "CourseForge-$Version-portable"
+$portableDir = Join-Path $releaseRoot $portableName
+
+if (-not (Test-Path $portableDir)) {
+  Write-Host "[package] Portable package missing; generating first..."
+  & (Join-Path $PSScriptRoot "create-portable-package.ps1") -Version $Version
+}
+
+$packageName = "CourseForge-$Version-windows"
+$packageDir = Join-Path $releaseRoot $packageName
+$zipPath = Join-Path $releaseRoot "$packageName.zip"
+
+if (Test-Path $packageDir) {
+  Remove-Item $packageDir -Recurse -Force
+}
+if (Test-Path $zipPath) {
+  Remove-Item $zipPath -Force
+}
+
+Copy-Item -Path $portableDir -Destination $packageDir -Recurse -Force
+
+$startCmd = @"
+@echo off
+setlocal
+set ROOT=%~dp0
+if exist "%ROOT%AutoUpdate-CourseForge.ps1" (
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%AutoUpdate-CourseForge.ps1" -CurrentVersion "$Version" -AssetNameTemplate "CourseForge-{version}-windows.zip" >nul 2>&1
+)
+set APP=%ROOT%webapp\index.html
+if not exist "%APP%" (
+  echo [CourseForge] Missing webapp\index.html in package.
+  exit /b 1
+)
+start "CourseForge" "%APP%"
+"@
+Set-Content -Path (Join-Path $packageDir "Start-CourseForge.cmd") -Value $startCmd -Encoding ASCII
+
+$checkUpdatesCmd = @"
+@echo off
+setlocal
+set ROOT=%~dp0
+if not exist "%ROOT%AutoUpdate-CourseForge.ps1" (
+  echo [CourseForge] Missing AutoUpdate-CourseForge.ps1 in package.
+  endlocal
+  exit /b 1
+)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%AutoUpdate-CourseForge.ps1" -CurrentVersion "$Version" -AssetNameTemplate "CourseForge-{version}-windows.zip" -CheckOnly
+set EXITCODE=%ERRORLEVEL%
+if "%EXITCODE%"=="2" (
+  echo Update available.
+  endlocal
+  exit /b 0
+)
+if "%EXITCODE%"=="0" (
+  echo No update available.
+  endlocal
+  exit /b 0
+)
+echo Update check failed.
+endlocal
+exit /b 1
+"@
+Set-Content -Path (Join-Path $packageDir "Check-For-CourseForge-Updates.cmd") -Value $checkUpdatesCmd -Encoding ASCII
+
+$installerPs1 = @"
+param(
+  [string]`$InstallPath = "`$env:LOCALAPPDATA\CourseForge",
+  [switch]`$CreateDesktopShortcut
+)
+
+`$ErrorActionPreference = "Stop"
+
+`$sourceRoot = Split-Path -Parent `$PSCommandPath
+`$resolvedInstall = [System.IO.Path]::GetFullPath(`$InstallPath)
+
+if (-not (Test-Path `$resolvedInstall)) {
+  New-Item -Path `$resolvedInstall -ItemType Directory -Force | Out-Null
+}
+
+`$null = robocopy `$sourceRoot `$resolvedInstall /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XF updater.log Install-CourseForge-Windows.ps1 Install-CourseForge-Windows.cmd
+if (`$LASTEXITCODE -gt 7) {
+  throw "Installer copy failed with robocopy exit code `$LASTEXITCODE"
+}
+
+if (`$CreateDesktopShortcut) {
+  `$desktopPath = [Environment]::GetFolderPath("Desktop")
+  `$shortcutPath = Join-Path `$desktopPath "CourseForge.lnk"
+  `$targetPath = Join-Path `$resolvedInstall "Start-CourseForge.cmd"
+
+  `$shell = New-Object -ComObject WScript.Shell
+  `$shortcut = `$shell.CreateShortcut(`$shortcutPath)
+  `$shortcut.TargetPath = `$targetPath
+  `$shortcut.WorkingDirectory = `$resolvedInstall
+  `$shortcut.IconLocation = "$env:SystemRoot\System32\SHELL32.dll,220"
+  `$shortcut.Save()
+}
+
+Write-Host "CourseForge installed to `$resolvedInstall"
+Write-Host "Run Start-CourseForge.cmd to launch."
+"@
+Set-Content -Path (Join-Path $packageDir "Install-CourseForge-Windows.ps1") -Value $installerPs1 -Encoding ASCII
+
+$installerCmd = @"
+@echo off
+setlocal
+set ROOT=%~dp0
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%Install-CourseForge-Windows.ps1" -CreateDesktopShortcut
+set EXITCODE=%ERRORLEVEL%
+if not "%EXITCODE%"=="0" (
+  echo [CourseForge] Installation failed with code %EXITCODE%.
+  exit /b %EXITCODE%
+)
+echo [CourseForge] Installation completed.
+exit /b 0
+"@
+Set-Content -Path (Join-Path $packageDir "Install-CourseForge-Windows.cmd") -Value $installerCmd -Encoding ASCII
+
+$manifestPath = Join-Path $packageDir "package-manifest.json"
+$manifest = Get-Content -Path $manifestPath -Raw | ConvertFrom-Json
+$manifest.packageType = "windows"
+$manifest.includes = @(
+  "webapp/",
+  "extension/",
+  "AutoUpdate-CourseForge.ps1",
+  "Check-For-CourseForge-Updates.cmd",
+  "Start-CourseForge.cmd",
+  "CourseForge-Start.url",
+  "Install-CourseForge-Windows.ps1",
+  "Install-CourseForge-Windows.cmd",
+  "README.md",
+  "CHANGELOG.md",
+  "LICENSE"
+)
+$manifest.updates.assetTemplate = "CourseForge-{version}-windows.zip"
+$manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $manifestPath -Encoding ASCII
+
+$zipSucceeded = $false
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+  try {
+    Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $zipPath -CompressionLevel Optimal
+    $zipSucceeded = $true
+    break
+  }
+  catch {
+    if ($attempt -ge 3) {
+      throw
+    }
+
+    Start-Sleep -Seconds 1
+    if (Test-Path $zipPath) {
+      Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
+if (-not $zipSucceeded) {
+  throw "Failed to create Windows package zip: $zipPath"
+}
+
+Write-Host "[package] Windows package created: $zipPath"
+Write-Host "[package] Installer file: $packageDir\Install-CourseForge-Windows.cmd"

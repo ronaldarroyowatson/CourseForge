@@ -9,7 +9,10 @@ export {
 } from "./db";
 
 export * from "./adminFirestoreService";
+export * from "./coverImageService";
+export * from "./documentIngestService";
 export * from "./premiumUsageService";
+export * from "./presentationService";
 export * from "./repositories";
 export * from "./syncService";
 export * from "./xml";

@@ -144,3 +144,43 @@ export async function fetchMetadataByISBN(isbn: string): Promise<ISBNMetadata | 
 
   return null;
 }
+
+import type { RelatedIsbn, RelatedIsbnType } from "../models";
+
+/** The result of a multi-ISBN lookup — includes which ISBN matched and its role. */
+export interface ISBNMatchResult {
+  metadata: ISBNMetadata;
+  /** The normalized ISBN that actually matched. */
+  matchedIsbn: string;
+  /** "primary" when the main isbnNormalized matched; otherwise the relatedIsbn type. */
+  matchedType: RelatedIsbnType | "primary";
+}
+
+/**
+ * Look up metadata for a textbook that might be indexed under one of several related ISBNs.
+ * Tries the primary ISBN first, then falls back through each related ISBN in order.
+ * Returns the first successful match with the matched ISBN context included.
+ */
+export async function fetchMetadataByAnyISBN(
+  primaryIsbn: string,
+  relatedIsbns: RelatedIsbn[] = []
+): Promise<ISBNMatchResult | null> {
+  const primary = normalizeISBN(primaryIsbn);
+  if (primary && isValidISBN(primary)) {
+    const metadata = await fetchMetadataByISBN(primary);
+    if (metadata) {
+      return { metadata, matchedIsbn: primary, matchedType: "primary" };
+    }
+  }
+
+  for (const related of relatedIsbns) {
+    const normalized = normalizeISBN(related.isbn);
+    if (!normalized || !isValidISBN(normalized)) continue;
+    const metadata = await fetchMetadataByISBN(normalized);
+    if (metadata) {
+      return { metadata, matchedIsbn: normalized, matchedType: related.type };
+    }
+  }
+
+  return null;
+}

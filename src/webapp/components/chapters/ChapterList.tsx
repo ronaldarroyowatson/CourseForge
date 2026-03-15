@@ -76,29 +76,39 @@ export function ChapterList({
       {selectedTextbookId && !isLoading && chapters.length === 0 ? <p>No chapters yet.</p> : null}
 
       <ul className="textbook-list">
-        {chapters.map((chapter) => (
-          <li key={chapter.id} className="textbook-row">
-            <div>
-              <strong>
-                {chapter.index}. {chapter.name}
-              </strong>
-              {chapter.description ? <p>{chapter.description}</p> : null}
-              <p>
-                <button
-                  type="button"
-                  onClick={() => onSelectChapter(chapter.id)}
-                  disabled={selectedChapterId === chapter.id}
-                >
-                  {selectedChapterId === chapter.id ? "Selected" : "Select"}
-                </button>
-              </p>
-            </div>
+        {chapters.map((chapter) => {
+          const hasDescription = Boolean(chapter.description?.trim());
+          const rowClassName = hasDescription
+            ? "textbook-row textbook-row--complete"
+            : "textbook-row textbook-row--needs-attention";
 
-            <button type="button" onClick={() => void handleDelete(chapter.id)}>
-              Delete
-            </button>
-          </li>
-        ))}
+          return (
+            <li key={chapter.id} className={rowClassName}>
+              <div>
+                <strong>
+                  {chapter.index}. {chapter.name}
+                </strong>
+                <span className={hasDescription ? "content-health-badge content-health-badge--ready" : "content-health-badge content-health-badge--missing"}>
+                  {hasDescription ? "Ready" : "Missing Summary"}
+                </span>
+                {chapter.description ? <p>{chapter.description}</p> : <p>Add a chapter summary to mark this chapter complete.</p>}
+                <p>
+                  <button
+                    type="button"
+                    onClick={() => onSelectChapter(chapter.id)}
+                    disabled={selectedChapterId === chapter.id}
+                  >
+                    {selectedChapterId === chapter.id ? "Selected" : "Select"}
+                  </button>
+                </p>
+              </div>
+
+              <button type="button" onClick={() => void handleDelete(chapter.id)}>
+                Delete
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

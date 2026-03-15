@@ -8,6 +8,7 @@ interface SectionNavigationBarProps {
   nextSection: Section | null;
   onSelectSection: (sectionId: string) => void;
   onOpenContent: (panel: "vocab" | "equations" | "concepts") => void;
+  onOpenPowerPoints: () => void;
 }
 
 export function SectionNavigationBar({
@@ -16,6 +17,7 @@ export function SectionNavigationBar({
   nextSection,
   onSelectSection,
   onOpenContent,
+  onOpenPowerPoints,
 }: SectionNavigationBarProps): React.JSX.Element {
   return (
     <section className="panel section-nav-panel" aria-label="Section navigation controls">
@@ -73,6 +75,14 @@ export function SectionNavigationBar({
           aria-label="Add concepts for selected section"
         >
           Add Concepts
+        </button>
+        <button
+          type="button"
+          onClick={onOpenPowerPoints}
+          disabled={!selectedSection}
+          aria-label="Open PowerPoints for selected section"
+        >
+          PowerPoints
         </button>
       </div>
     </section>

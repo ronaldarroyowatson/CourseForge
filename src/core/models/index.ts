@@ -1,10 +1,18 @@
 export type {
   Chapter,
   Concept,
+  ContentStatus,
   CourseForgeEntityMap,
+  DesignSuggestions,
+  DocumentIngestFingerprint,
   Equation,
+  ExtractedPresentation,
   KeyIdea,
+  PresentationSlide,
+  RelatedIsbn,
+  RelatedIsbnType,
   Section,
+  SlideContentType,
   Textbook,
   VocabTerm,
 } from "./entities";

@@ -197,6 +197,16 @@ service cloud.firestore {
             allow read:   if isOwnerRead();
             allow write:  if isOwner() || isAdmin();
           }
+
+          // -------------------------------------------------------------------
+          // /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/presentations/{presentationId}
+          //
+          // Extracted and redesigned PowerPoint artifacts.
+          // -------------------------------------------------------------------
+          match /presentations/{presentationId} {
+            allow read:   if isOwnerRead();
+            allow write:  if isOwner() || isAdmin();
+          }
         }
       }
     }

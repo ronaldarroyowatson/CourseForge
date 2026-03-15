@@ -305,6 +305,68 @@ body {
   gap: 0.75rem;
 }
 
+.textbook-row--needs-attention {
+  border-color: #c39b2f;
+  background: color-mix(in srgb, #f5cc58 16%, var(--bg-panel));
+}
+
+.textbook-row--complete {
+  border-color: #2f8b5c;
+  background: color-mix(in srgb, #3ab976 14%, var(--bg-panel));
+}
+
+.content-health-badge {
+  display: inline-flex;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.powerpoint-card {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.powerpoint-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.powerpoint-upload {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.powerpoint-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+@media (max-width: 900px) {
+  .powerpoint-review-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.content-health-badge--missing {
+  color: #7a5400;
+  border-color: #c39b2f;
+  background: rgba(245, 204, 88, 0.26);
+}
+
+.content-health-badge--ready {
+  color: #0f5a38;
+  border-color: #2f8b5c;
+  background: rgba(58, 185, 118, 0.2);
+}
+
 .textbook-row p {
   margin: 0.35rem 0 0;
   color: var(--text-secondary);
@@ -832,4 +894,256 @@ body {
   .admin-queue-item {
     flex-direction: column;
   }
+}
+
+/* ============================================================
+   Textbook Cover Image
+   ============================================================ */
+
+.textbook-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.textbook-row__cover {
+  width: 52px;
+  height: 70px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-default);
+}
+
+.textbook-row__info {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Cover image form UI */
+.cover-preview-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.cover-preview-thumb {
+  width: 80px;
+  height: 100px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border-default);
+}
+
+.cover-input-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.cover-file-label {
+  display: inline-block;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+  background: var(--button-bg);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.cover-file-label:hover {
+  background: var(--button-bg-hover, var(--bg-hover));
+}
+
+.cover-file-label-hidden {
+  display: none;
+}
+
+.cover-file-input {
+  display: none;
+}
+
+.camera-video {
+  width: 100%;
+  max-height: 240px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.camera-canvas-hidden {
+  display: none;
+}
+
+.camera-capture-area {
+  display: grid;
+  gap: 0.6rem;
+}
+
+/* ============================================================
+   Related ISBNs
+   ============================================================ */
+
+.related-isbn-badge {
+  font-size: 0.75rem;
+  color: var(--cf-accent);
+  margin-left: 0.3rem;
+  white-space: nowrap;
+}
+
+.form-fieldset {
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 0;
+}
+
+.form-fieldset legend {
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0 0.4rem;
+}
+
+.related-isbn-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.related-isbn-input {
+  min-width: 0;
+}
+
+.related-isbn-type {
+  width: 120px;
+}
+
+.related-isbn-note {
+  min-width: 0;
+}
+
+.btn-danger {
+  color: var(--danger, #c0392b);
+  border-color: var(--danger-border, #e74c3c);
+  background: transparent;
+}
+
+.btn-danger:hover {
+  background: var(--danger, #c0392b);
+  color: #fff;
+  border-color: var(--danger, #c0392b);
+}
+
+/* ============================================================
+   Document Ingest Panel
+   ============================================================ */
+
+.ingest-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.ingest-panel h3 {
+  margin: 0;
+}
+
+.ingest-dropzone {
+  border: 2px dashed var(--border-strong);
+  border-radius: 10px;
+  padding: 1rem;
+  background: var(--bg-panel);
+  display: grid;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+.ingest-dropzone:hover,
+.ingest-dropzone:focus-visible {
+  border-color: var(--cf-accent);
+  outline: none;
+}
+
+.ingest-picker-button {
+  appearance: none;
+}
+
+.ingest-review-section {
+  margin-bottom: 1rem;
+}
+
+.ingest-review-section h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+.ingest-item-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.ingest-item-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.ingest-item-input {
+  min-width: 0;
+  width: 100%;
+}
+
+.ingest-item-date {
+  max-width: 160px;
+  min-width: 0;
+}
+
+.ingest-empty {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.ingest-alert {
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+}
+
+.ingest-alert strong {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.ingest-alert p {
+  margin: 0.35rem 0 0;
+}
+
+.ingest-alert-error {
+  background: rgba(192, 57, 43, 0.08);
+  border: 1px solid rgba(192, 57, 43, 0.35);
+  color: #7b241c;
+}
+
+.ingest-alert-warning {
+  background: rgba(180, 122, 0, 0.1);
+  border: 1px solid rgba(180, 122, 0, 0.3);
+  color: #7a5200;
+}
+
+.ingest-issue-list {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.ingest-layout-summary {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
 }

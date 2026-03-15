@@ -1,5 +1,15 @@
 import * as admin from "firebase-admin";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import {
+  analyzeDocumentQuality,
+  buildExtractionPrompts,
+  createEmptyExtractionData,
+  extractReadableDocumentText,
+  mergeQualityReports,
+  type DocumentExtractionContext,
+  type ExtractedDocumentData,
+  type ExtractionQualityReport,
+} from "./documentExtraction";
 
 admin.initializeApp();
 
@@ -739,4 +749,444 @@ export const getCurrentPremiumUsage = onCall(async (request) => {
 
   const usage = await getOrCreatePremiumUsage(request.auth.uid);
   return success("Loaded premium usage.", usage);
+});
+
+// ---------------------------------------------------------------------------
+// AI Document Content Extraction
+// ---------------------------------------------------------------------------
+
+function sanitizeExtractionContext(value: unknown): DocumentExtractionContext | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const context = value as Record<string, unknown>;
+  const result: DocumentExtractionContext = {};
+
+  if (typeof context.textbookTitle === "string") {
+    result.textbookTitle = context.textbookTitle.trim();
+  }
+  if (typeof context.textbookSubject === "string") {
+    result.textbookSubject = context.textbookSubject.trim();
+  }
+  if (typeof context.chapterTitle === "string") {
+    result.chapterTitle = context.chapterTitle.trim();
+  }
+  if (typeof context.sectionTitle === "string") {
+    result.sectionTitle = context.sectionTitle.trim();
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function uniqueTrimmedStrings(values: unknown): string[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return [...new Set(
+    values
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter(Boolean)
+  )];
+}
+
+function buildBlockedExtraction(quality: ExtractionQualityReport): ExtractedDocumentData {
+  const empty = createEmptyExtractionData();
+  return {
+    ...empty,
+    quality,
+  };
+}
+
+/**
+ * Extract structured educational content from a document using AI.
+ *
+ * Expects either:
+ *   - { fileName, mimeType, text }   — plain-text content already extracted by the client
+ *   - { fileName, mimeType, base64 } — Base64-encoded PDF or DOCX for server-side extraction
+ *
+ * Reads OPENAI_API_KEY from Firebase Function config (set via `firebase functions:config:set openai.key="sk-..."`).
+ * Falls back to an empty extraction result rather than throwing when the key is not configured,
+ * so the UI can still display the review screen with a prompt to configure the key.
+ */
+export const extractDocumentContent = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in to use document extraction.");
+  }
+
+  const data = request.data as {
+    fileName?: unknown;
+    mimeType?: unknown;
+    text?: unknown;
+    base64?: unknown;
+    context?: unknown;
+  };
+
+  const fileName = typeof data.fileName === "string" ? data.fileName : "document";
+  const mimeType = typeof data.mimeType === "string" ? data.mimeType : "text/plain";
+  const rawText = typeof data.text === "string" ? data.text : null;
+  const base64Data = typeof data.base64 === "string" ? data.base64 : null;
+  const context = sanitizeExtractionContext(data.context);
+
+  if (!rawText && !base64Data) {
+    throw new HttpsError("invalid-argument", "Either text or base64 document content is required.");
+  }
+
+  const documentText = await extractReadableDocumentText({
+    fileName,
+    mimeType,
+    rawText,
+    base64Data,
+  });
+
+  if (!documentText.trim()) {
+    throw new HttpsError("invalid-argument", "Could not extract readable text from the document.");
+  }
+
+  // Truncate to a safe context size (approx 12 000 tokens @ ~4 chars/token)
+  const MAX_CHARS = 48_000;
+  const truncated = documentText.length > MAX_CHARS
+    ? documentText.slice(0, MAX_CHARS) + "\n[... content truncated ...]"
+    : documentText;
+
+  const heuristicQuality = analyzeDocumentQuality({
+    text: truncated,
+    fileName,
+    mimeType,
+    context,
+  });
+
+  if (!heuristicQuality.accepted) {
+    return success("Document blocked for review.", buildBlockedExtraction(heuristicQuality));
+  }
+
+  const openaiKey = process.env.OPENAI_API_KEY ?? "";
+  if (!openaiKey) {
+    const quality = mergeQualityReports(heuristicQuality, {
+      accepted: false,
+      documentType: heuristicQuality.documentType,
+      detectedLanguage: heuristicQuality.detectedLanguage,
+      questionAnswerLayouts: heuristicQuality.questionAnswerLayouts,
+      issues: [{
+        code: "extraction_unavailable",
+        severity: "error",
+        message: "AI extraction is unavailable because OPENAI_API_KEY is not configured.",
+      }],
+    });
+    return success(
+      `OpenAI key not configured. Set it with: firebase functions:config:set openai.key="sk-..."`,
+      buildBlockedExtraction(quality)
+    );
+  }
+
+  const { systemPrompt, userPrompt } = buildExtractionPrompts({
+    fileName,
+    truncatedText: truncated,
+    context,
+    quality: heuristicQuality,
+  });
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${openaiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      max_tokens: 1500,
+      temperature: 0.2,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new HttpsError("internal", `OpenAI API error: ${response.status} ${response.statusText}`);
+  }
+
+  const json = await response.json() as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+
+  const content = json.choices?.[0]?.message?.content?.trim() ?? "";
+
+  let extracted: ExtractedDocumentData;
+  try {
+    // Strip potential markdown code fences
+    const cleaned = content.replace(/^```[a-z]*\n?|```$/gm, "").trim();
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    const aiQuality = typeof parsed.quality === "object" && parsed.quality !== null
+      ? parsed.quality as Partial<ExtractionQualityReport>
+      : undefined;
+    const mergedQuality = mergeQualityReports(heuristicQuality, aiQuality);
+
+    extracted = {
+      vocab: mergedQuality.accepted ? uniqueTrimmedStrings(parsed.vocab) : [],
+      concepts: mergedQuality.accepted ? uniqueTrimmedStrings(parsed.concepts) : [],
+      equations: mergedQuality.accepted ? uniqueTrimmedStrings(parsed.equations) : [],
+      namesAndDates: Array.isArray(parsed.namesAndDates)
+        ? (parsed.namesAndDates as Array<{ name?: unknown; date?: unknown }>)
+            .filter((entry) => typeof entry.name === "string")
+            .map((entry) => ({ name: (entry.name as string).trim(), date: typeof entry.date === "string" ? entry.date.trim() || undefined : undefined }))
+            .filter((entry) => mergedQuality.accepted && entry.name.length > 0)
+        : [],
+      keyIdeas: mergedQuality.accepted ? uniqueTrimmedStrings(parsed.keyIdeas) : [],
+      quality: mergedQuality,
+    };
+  } catch {
+    throw new HttpsError("internal", "AI returned malformed JSON. Please try again.");
+  }
+
+  return success(
+    extracted.quality.issues.length > 0 ? "Extraction completed with review notes." : "Extraction complete.",
+    extracted
+  );
+});
+
+/**
+ * Generate theme and visual redesign suggestions for imported slide decks.
+ */
+export const generatePresentationDesignSuggestions = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in to generate design suggestions.");
+  }
+
+  const payload = request.data as {
+    presentationTitle?: unknown;
+    topic?: unknown;
+    slideTexts?: unknown;
+  };
+
+  const presentationTitle = typeof payload.presentationTitle === "string" ? payload.presentationTitle.trim() : "Untitled Presentation";
+  const topic = typeof payload.topic === "string" ? payload.topic.trim() : "general education";
+  const slideTexts = Array.isArray(payload.slideTexts)
+    ? payload.slideTexts.filter((value): value is string => typeof value === "string").slice(0, 50)
+    : [];
+
+  const openaiKey = process.env.OPENAI_API_KEY ?? "";
+  if (!openaiKey) {
+    return success("Fallback design suggestions generated.", {
+      themeName: "Clear Professional",
+      backgroundAssets: [
+        "https://images.unsplash.com/photo-1557683316-973673baf926",
+        "https://images.unsplash.com/photo-1526498460520-4c246339dccb",
+      ],
+      fontChoices: ["Calibri", "Trebuchet MS"],
+      animationStyle: "fade-in",
+      iconSuggestions: {
+        vocabulary: "book-open",
+        quiz: "lightbulb",
+      },
+      videoBackgroundSuggestions: ["https://cdn.pixabay.com/video/2021/08/15/85138-587284861_large.mp4"],
+    });
+  }
+
+  const systemPrompt = [
+    "You are an instructional design assistant for K-12 teachers.",
+    "Return ONLY valid JSON without markdown.",
+    "Suggest a modern and professional slide redesign package.",
+    "Use this exact schema:",
+    "{",
+    '  "themeName": string,',
+    '  "backgroundAssets": string[],',
+    '  "fontChoices": string[],',
+    '  "animationStyle": string,',
+    '  "iconSuggestions": Record<string, string>,',
+    '  "videoBackgroundSuggestions": string[]',
+    "}",
+    "Prefer high-resolution image and video URLs.",
+    "Keep entries practical for classroom use.",
+  ].join("\n");
+
+  const userPrompt = [
+    `Presentation title: ${presentationTitle}`,
+    `Detected topic: ${topic}`,
+    "Slide text samples:",
+    ...slideTexts.map((text, index) => `${index + 1}. ${text}`),
+  ].join("\n");
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openaiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      max_tokens: 900,
+      temperature: 0.35,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new HttpsError("internal", `OpenAI API error: ${response.status} ${response.statusText}`);
+  }
+
+  const json = await response.json() as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+
+  const content = json.choices?.[0]?.message?.content?.trim() ?? "";
+  try {
+    const cleaned = content.replace(/^```[a-z]*\n?|```$/gm, "").trim();
+    const parsed = JSON.parse(cleaned) as {
+      themeName?: unknown;
+      backgroundAssets?: unknown;
+      fontChoices?: unknown;
+      animationStyle?: unknown;
+      iconSuggestions?: unknown;
+      videoBackgroundSuggestions?: unknown;
+    };
+
+    return success("Design suggestions generated.", {
+      themeName: typeof parsed.themeName === "string" ? parsed.themeName : "Modern Classroom",
+      backgroundAssets: Array.isArray(parsed.backgroundAssets)
+        ? parsed.backgroundAssets.filter((value): value is string => typeof value === "string")
+        : [],
+      fontChoices: Array.isArray(parsed.fontChoices)
+        ? parsed.fontChoices.filter((value): value is string => typeof value === "string")
+        : ["Calibri", "Segoe UI"],
+      animationStyle: typeof parsed.animationStyle === "string" ? parsed.animationStyle : "fade-in",
+      iconSuggestions: typeof parsed.iconSuggestions === "object" && parsed.iconSuggestions !== null
+        ? parsed.iconSuggestions as Record<string, string>
+        : {},
+      videoBackgroundSuggestions: Array.isArray(parsed.videoBackgroundSuggestions)
+        ? parsed.videoBackgroundSuggestions.filter((value): value is string => typeof value === "string")
+        : [],
+    });
+  } catch {
+    throw new HttpsError("internal", "AI returned malformed JSON for design suggestions.");
+  }
+});
+
+interface ConvertPresentationApiPayload {
+  fileName: string;
+  base64: string;
+}
+
+interface ConvertPresentationApiResponse {
+  fileName?: unknown;
+  mimeType?: unknown;
+  base64?: unknown;
+}
+
+function isValidBase64(value: string): boolean {
+  if (!value || value.length < 20) {
+    return false;
+  }
+
+  return /^[a-zA-Z0-9+/=]+$/.test(value);
+}
+
+async function callConversionEndpoint(input: {
+  url: string;
+  apiKey: string;
+  payload: ConvertPresentationApiPayload;
+}): Promise<ConvertPresentationApiResponse> {
+  const response = await fetch(input.url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${input.apiKey}`,
+    },
+    body: JSON.stringify(input.payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`conversion_http_${response.status}`);
+  }
+
+  return await response.json() as ConvertPresentationApiResponse;
+}
+
+/**
+ * Converts legacy .ppt files to .pptx through an external conversion API.
+ *
+ * Environment variables:
+ * - CONVERSION_API_URL: primary conversion endpoint
+ * - CONVERSION_API_KEY: bearer token for conversion service
+ * - CONVERSION_FALLBACK_API_URL: optional backup endpoint
+ */
+export const convertPresentationFile = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in to convert presentation files.");
+  }
+
+  const data = request.data as { fileName?: unknown; base64?: unknown };
+  const fileName = typeof data.fileName === "string" ? data.fileName.trim() : "";
+  const base64 = typeof data.base64 === "string" ? data.base64.trim() : "";
+
+  if (!fileName.toLowerCase().endsWith(".ppt")) {
+    throw new HttpsError("invalid-argument", "Only legacy .ppt files should be sent to conversion.");
+  }
+
+  if (!isValidBase64(base64)) {
+    throw new HttpsError("invalid-argument", "Invalid or empty presentation payload.");
+  }
+
+  const apiKey = process.env.CONVERSION_API_KEY ?? "";
+  const apiUrl = process.env.CONVERSION_API_URL ?? "";
+  const fallbackUrl = process.env.CONVERSION_FALLBACK_API_URL ?? "";
+
+  if (!apiKey || !apiUrl) {
+    return {
+      success: false,
+      message: "Automatic .ppt conversion is not configured. Please convert to .pptx manually for now.",
+      data: {
+        fileName,
+        mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        base64: "",
+      },
+    };
+  }
+
+  const endpoints = [apiUrl, fallbackUrl].filter(Boolean);
+  let lastError: unknown = null;
+
+  for (const endpoint of endpoints) {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const converted = await callConversionEndpoint({
+          url: endpoint,
+          apiKey,
+          payload: { fileName, base64 },
+        });
+
+        const convertedBase64 = typeof converted.base64 === "string" ? converted.base64.trim() : "";
+        if (!isValidBase64(convertedBase64)) {
+          throw new Error("conversion_response_invalid");
+        }
+
+        const convertedName = typeof converted.fileName === "string"
+          ? converted.fileName
+          : fileName.replace(/\.ppt$/i, ".pptx");
+
+        return {
+          success: true,
+          message: "Presentation converted.",
+          data: {
+            fileName: convertedName,
+            mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            base64: convertedBase64,
+          },
+        };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+
+  throw new HttpsError(
+    "unavailable",
+    `Automatic .ppt conversion failed after retries. Please retry or convert manually. (${String(lastError)})`
+  );
 });

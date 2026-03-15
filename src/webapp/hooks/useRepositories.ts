@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 
-import type { Chapter, Concept, Equation, KeyIdea, Section, Textbook, VocabTerm } from "../../core/models";
+import type { Chapter, Concept, Equation, KeyIdea, RelatedIsbn, Section, Textbook, VocabTerm } from "../../core/models";
 import {
   deleteConcept,
   deleteEquation,
@@ -29,6 +29,7 @@ import {
   updateTextbook,
   updateTextbookFlags,
 } from "../../core/services/repositories";
+import { uploadTextbookCoverFromDataUrl, uploadTextbookCoverImage } from "../../core/services/coverImageService";
 import { useUIStore } from "../store/uiStore";
 
 export interface CreateTextbookInput {
@@ -39,7 +40,13 @@ export interface CreateTextbookInput {
   publicationYear: number;
   isbnRaw: string;
   isbnNormalized: string;
+  relatedIsbns?: RelatedIsbn[];
   platformUrl?: string;
+  coverImageUrl?: string | null;
+  /** Pass a File to have it uploaded during createTextbook. */
+  coverFile?: File;
+  /** Pass a data-URL to have it uploaded during createTextbook. */
+  coverDataUrl?: string;
 }
 
 export interface CreateChapterInput {
@@ -80,7 +87,7 @@ export interface CreateKeyIdeaInput {
   text: string;
 }
 
-function buildTextbookFromInput(input: CreateTextbookInput): Textbook {
+function buildTextbookFromInput(input: CreateTextbookInput, resolvedCoverUrl?: string | null): Textbook {
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
@@ -91,7 +98,9 @@ function buildTextbookFromInput(input: CreateTextbookInput): Textbook {
     publicationYear: input.publicationYear,
     isbnRaw: input.isbnRaw,
     isbnNormalized: input.isbnNormalized,
+    relatedIsbns: input.relatedIsbns,
     platformUrl: input.platformUrl,
+    coverImageUrl: resolvedCoverUrl ?? input.coverImageUrl ?? null,
     createdAt: timestamp,
     updatedAt: timestamp,
     lastModified: timestamp,
@@ -203,6 +212,14 @@ export function useRepositories() {
 
   const createTextbook = useCallback(async (input: CreateTextbookInput): Promise<string> => {
     const textbook = buildTextbookFromInput(input);
+
+    // Upload cover image if provided as a file or data-URL
+    if (input.coverFile) {
+      textbook.coverImageUrl = await uploadTextbookCoverImage(textbook.id, input.coverFile);
+    } else if (input.coverDataUrl) {
+      textbook.coverImageUrl = await uploadTextbookCoverFromDataUrl(textbook.id, input.coverDataUrl);
+    }
+
     const id = await saveTextbook(textbook);
     markLocalChange();
     return id;

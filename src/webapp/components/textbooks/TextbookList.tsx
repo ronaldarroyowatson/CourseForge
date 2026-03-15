@@ -122,6 +122,14 @@ export function TextbookList({
               textbook.isFavorite ? "textbook-row--favorite" : "",
             ].filter(Boolean).join(" ")}
           >
+            {textbook.coverImageUrl ? (
+              <img
+                src={textbook.coverImageUrl}
+                alt={`${textbook.title} cover`}
+                className="textbook-row__cover"
+              />
+            ) : null}
+
             <div className="textbook-row__info">
               <strong>{textbook.title}</strong>
               <p>
@@ -129,6 +137,11 @@ export function TextbookList({
               </p>
               <p className="textbook-row__meta">
                 ISBN: {textbook.isbnRaw?.trim() ? textbook.isbnRaw : "Not set"}
+                {textbook.relatedIsbns && textbook.relatedIsbns.length > 0 ? (
+                  <span className="related-isbn-badge">
+                    {" "}+{textbook.relatedIsbns.length} related
+                  </span>
+                ) : null}
               </p>
               <p className="textbook-row__meta">
                 <span className={syncBadge.className}>{syncBadge.label}</span>

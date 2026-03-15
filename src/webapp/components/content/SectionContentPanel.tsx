@@ -1,13 +1,25 @@
-import React from "react";
-import type { Chapter, Section } from "../../../core/models";
+import React, { useState } from "react";
 
+import type { Chapter, Section, Textbook } from "../../../core/models";
 import { ConceptPanel } from "../concepts/ConceptPanel";
 import { EquationPanel } from "../equations/EquationPanel";
 import { SectionSelectorFallback } from "../sections/SectionSelectorFallback";
 import { VocabPanel } from "../vocab/VocabPanel";
+import { DocumentIngestPanel } from "./DocumentIngestPanel";
 import { KeyIdeaPanel } from "./KeyIdeaPanel";
 
 export type ContentPanelTab = "vocab" | "equations" | "concepts";
+
+/** Subjects for which the Equations tab is not shown. */
+const SUBJECTS_WITHOUT_EQUATIONS = new Set([
+  "History",
+  "ELA",
+  "Social Studies",
+  "Art",
+  "Music",
+  "Physical Education",
+  "Foreign Language",
+]);
 
 interface SectionContentPanelProps {
   selectedTextbookId: string | null;
@@ -15,6 +27,7 @@ interface SectionContentPanelProps {
   selectedSectionId: string | null;
   selectedChapter: Chapter | null;
   selectedSection: Section | null;
+  selectedTextbook: Textbook | null;
   previousSection: Section | null;
   nextSection: Section | null;
   activePanel: ContentPanelTab;
@@ -31,6 +44,7 @@ export function SectionContentPanel({
   selectedSectionId,
   selectedChapter,
   selectedSection,
+  selectedTextbook,
   previousSection,
   nextSection,
   activePanel,
@@ -40,8 +54,13 @@ export function SectionContentPanel({
   onBackToSections,
   onSelectPanel,
 }: SectionContentPanelProps): React.JSX.Element {
+  const [showIngest, setShowIngest] = useState(false);
+
+  const subject = selectedTextbook?.subject ?? "";
+  const showEquations = !SUBJECTS_WITHOUT_EQUATIONS.has(subject);
+
   function renderActivePanel(): React.JSX.Element {
-    if (activePanel === "equations") {
+    if (activePanel === "equations" && showEquations) {
       return <EquationPanel selectedSectionId={selectedSectionId} />;
     }
 
@@ -50,6 +69,23 @@ export function SectionContentPanel({
     }
 
     return <VocabPanel selectedSectionId={selectedSectionId} />;
+  }
+
+  if (showIngest) {
+    return (
+      <section className="content-workspace">
+        <DocumentIngestPanel
+          selectedSectionId={selectedSectionId}
+          extractionContext={{
+            textbookTitle: selectedTextbook?.title,
+            textbookSubject: selectedTextbook?.subject,
+            chapterTitle: selectedChapter?.name,
+            sectionTitle: selectedSection?.title,
+          }}
+          onDone={() => setShowIngest(false)}
+        />
+      </section>
+    );
   }
 
   return (
@@ -116,19 +152,29 @@ export function SectionContentPanel({
           >
             Add Vocab
           </button>
-          <button
-            type="button"
-            className={activePanel === "equations" ? "btn-secondary" : ""}
-            onClick={() => onSelectPanel("equations")}
-          >
-            Add Equations
-          </button>
+          {showEquations ? (
+            <button
+              type="button"
+              className={activePanel === "equations" ? "btn-secondary" : ""}
+              onClick={() => onSelectPanel("equations")}
+            >
+              Add Equations
+            </button>
+          ) : null}
           <button
             type="button"
             className={activePanel === "concepts" ? "btn-secondary" : ""}
             onClick={() => onSelectPanel("concepts")}
           >
             Add Concepts
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowIngest(true)}
+            disabled={!selectedSectionId}
+            title="Upload a document and use AI to extract content"
+          >
+            Upload Document
           </button>
         </div>
       </section>

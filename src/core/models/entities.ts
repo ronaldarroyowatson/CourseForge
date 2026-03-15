@@ -1,11 +1,21 @@
 /**
  * Moderation lifecycle for user-submitted content.
- * draft      – created locally, not submitted for review.
- * submitted  – owner submitted for admin approval.
- * approved   – visible to all teachers.
- * rejected   – only visible to the owner.
+ * draft      - created locally, not submitted for review.
+ * submitted  - owner submitted for admin approval.
+ * approved   - visible to all teachers.
+ * rejected   - only visible to the owner.
  */
 export type ContentStatus = "draft" | "submitted" | "approved" | "rejected";
+
+/** Describes the role of a related ISBN (different editions, formats, etc.). */
+export type RelatedIsbnType = "student" | "teacher" | "digital" | "workbook" | "assessment" | "other";
+
+/** An additional ISBN associated with the same textbook in a different edition or format. */
+export interface RelatedIsbn {
+  isbn: string;
+  type: RelatedIsbnType;
+  note?: string;
+}
 
 export interface Textbook {
   id: string;
@@ -17,7 +27,11 @@ export interface Textbook {
   publicationYear: number;
   isbnRaw: string;
   isbnNormalized: string;
+  /** Additional related ISBNs (student, teacher, digital, etc.). */
+  relatedIsbns?: RelatedIsbn[];
   platformUrl?: string;
+  /** Firebase Storage download URL for the cover image. */
+  coverImageUrl?: string | null;
   createdAt: string;
   updatedAt: string;
   lastModified: string;
@@ -104,6 +118,54 @@ export interface KeyIdea extends SectionContentEntity {
   text: string;
 }
 
+export interface DocumentIngestFingerprint {
+  id: string;
+  sectionId: string;
+  fileName: string;
+  fileHash: string;
+  extractedSignature: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Classifies the educational purpose of a slide extracted from a PowerPoint file. */
+export type SlideContentType = "title" | "vocab" | "content" | "diagram" | "quizQuestion" | "quizAnswer";
+
+export interface PresentationSlide {
+  id: string;
+  index: number;
+  type: SlideContentType;
+  rawText: string[];
+  extractedFormulas?: string[];
+  extractedImages?: string[];
+  notes?: string;
+}
+
+export interface DesignSuggestions {
+  themeName: string;
+  backgroundAssets: string[];
+  fontChoices: string[];
+  animationStyle: string;
+  iconSuggestions?: Record<string, string>;
+  videoBackgroundSuggestions?: string[];
+}
+
+export interface ExtractedPresentation {
+  id: string;
+  userId?: string;
+  textbookId?: string;
+  chapterId?: string;
+  sectionId?: string;
+  presentationTitle: string;
+  fileName: string;
+  slides: PresentationSlide[];
+  designSuggestions?: DesignSuggestions;
+  createdAt: string;
+  updatedAt: string;
+  pendingSync: boolean;
+  source: "local" | "cloud";
+}
+
 export interface CourseForgeEntityMap {
   textbooks: Textbook;
   chapters: Chapter;
@@ -112,4 +174,6 @@ export interface CourseForgeEntityMap {
   equations: Equation;
   concepts: Concept;
   keyIdeas: KeyIdea;
+  ingestFingerprints: DocumentIngestFingerprint;
+  extractedPresentations: ExtractedPresentation;
 }

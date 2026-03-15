@@ -10,6 +10,7 @@ import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 import { ChapterForm } from "../chapters/ChapterForm";
 import { ChapterList } from "../chapters/ChapterList";
+import { PowerPointWorkspaceCard } from "../content/PowerPointWorkspaceCard";
 import { SectionContentPanel, type ContentPanelTab } from "../content/SectionContentPanel";
 import { AccordionTile } from "../layout/AccordionTile";
 import { Header } from "../layout/Header";
@@ -170,9 +171,14 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
       if (params.sectionId) {
         setSelectedSectionId(params.sectionId);
         if (params.contentTab) {
-          setActiveContentPanel(toContentPanel(params.contentTab));
-          setActiveWorkflowTab("content");
-          setExpandedTile("content");
+          if (params.contentTab === "powerpoints") {
+            setActiveWorkflowTab("powerpoints");
+            setExpandedTile("powerpoints");
+          } else {
+            setActiveContentPanel(toContentPanel(params.contentTab));
+            setActiveWorkflowTab("content");
+            setExpandedTile("content");
+          }
         } else {
           setActiveWorkflowTab("sections");
           setExpandedTile("sections");
@@ -269,6 +275,10 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
       if (activeWorkflowTab === "content") {
         targetPath = `${targetPath}/${activeContentPanel}`;
       }
+
+      if (activeWorkflowTab === "powerpoints") {
+        targetPath = `${targetPath}/powerpoints`;
+      }
     }
 
     if (location.pathname !== targetPath) {
@@ -304,6 +314,11 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
     }
 
     if (!selectedChapterId && activeWorkflowTab === "content") {
+      setActiveWorkflowTab(selectedTextbookId ? "chapters" : "textbook");
+      setExpandedTile(selectedTextbookId ? "chapters" : "textbook");
+    }
+
+    if (!selectedChapterId && activeWorkflowTab === "powerpoints") {
       setActiveWorkflowTab(selectedTextbookId ? "chapters" : "textbook");
       setExpandedTile(selectedTextbookId ? "chapters" : "textbook");
     }
@@ -406,6 +421,12 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
     setWorkflowNotice(null);
   }
 
+  function handleOpenPowerPoints(): void {
+    setActiveWorkflowTab("powerpoints");
+    setExpandedTile("powerpoints");
+    setWorkflowNotice(null);
+  }
+
   function handleBackToSections(): void {
     setActiveWorkflowTab("sections");
     setExpandedTile("sections");
@@ -451,7 +472,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
     }
   }
 
-  const workflowOrder: WorkflowTab[] = ["textbook", "chapters", "sections", "content"];
+  const workflowOrder: WorkflowTab[] = ["textbook", "chapters", "sections", "content", "powerpoints"];
 
   function canOpenTab(tab: WorkflowTab): boolean {
     if (tab === "textbook") {
@@ -502,9 +523,15 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
         : "Select a chapter to unlock section setup.";
     }
 
-    return selectedSectionId
+    if (tab === "content") {
+      return selectedSectionId
       ? "Add vocab, equations, concepts, and key ideas for the selected section."
       : "Select a section to unlock content capture.";
+    }
+
+    return selectedSectionId
+      ? "Import and redesign PowerPoint decks for the selected section."
+      : "Select a section to unlock PowerPoint tools.";
   }
 
   function renderWorkflowCardBody(tab: WorkflowTab): React.JSX.Element {
@@ -563,6 +590,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
             nextSection={nextSection}
             onSelectSection={handleSectionSelectedById}
             onOpenContent={handleOpenContent}
+            onOpenPowerPoints={handleOpenPowerPoints}
           />
           <SectionForm
             selectedChapterId={selectedChapterId}
@@ -579,6 +607,16 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
       );
     }
 
+    if (tab === "powerpoints") {
+      return (
+        <PowerPointWorkspaceCard
+          selectedTextbook={textbooks.find((t) => t.id === selectedTextbookId) ?? null}
+          selectedChapter={selectedChapter}
+          selectedSection={selectedSection}
+        />
+      );
+    }
+
     if (!selectedTextbookId || !selectedChapterId) {
       return <p className="workflow-card-placeholder">Select a chapter and section to open content panels.</p>;
     }
@@ -590,6 +628,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
         selectedSectionId={selectedSectionId}
         selectedChapter={selectedChapter}
         selectedSection={selectedSection}
+        selectedTextbook={textbooks.find((t) => t.id === selectedTextbookId) ?? null}
         previousSection={previousSection}
         nextSection={nextSection}
         activePanel={activeContentPanel}

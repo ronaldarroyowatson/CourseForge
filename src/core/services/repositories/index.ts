@@ -50,3 +50,10 @@ export {
   listVocabTermsBySectionId,
   saveVocabTerm,
 } from "./vocabRepository";
+export {
+  deleteExtractedPresentation,
+  getExtractedPresentationById,
+  listExtractedPresentations,
+  listExtractedPresentationsBySectionId,
+  saveExtractedPresentation,
+} from "./presentationRepository";

@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
+import type { RelatedIsbn, RelatedIsbnType } from "../../../core/models";
+import { uploadTextbookCoverFromDataUrl, uploadTextbookCoverImage } from "../../../core/services/coverImageService";
 import { fetchMetadataByISBN, normalizeISBN } from "../../../core/services/isbnService";
 import { findCloudTextbookByISBN } from "../../../core/services/syncService";
 import { getCurrentUser } from "../../../firebase/auth";
@@ -30,16 +32,52 @@ const INITIAL_FORM_STATE: TextbookFormState = {
   platformUrl: "",
 };
 
+const INITIAL_ISBN_ROW: RelatedIsbn = { isbn: "", type: "student" };
+
+const SUBJECTS = [
+  "ELA",
+  "Math",
+  "Science",
+  "History",
+  "Social Studies",
+  "Art",
+  "Music",
+  "Physical Education",
+  "Computer Science",
+  "Foreign Language",
+  "Other",
+];
+
+const ISBN_TYPES: RelatedIsbnType[] = [
+  "student",
+  "teacher",
+  "digital",
+  "workbook",
+  "assessment",
+  "other",
+];
+
 export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element {
   const { createTextbook, editTextbook, findTextbookByISBN } = useRepositories();
   const { selectedTextbook, setSelectedTextbook } = useUIStore();
 
   const [form, setForm] = useState<TextbookFormState>(INITIAL_FORM_STATE);
+  const [relatedIsbns, setRelatedIsbns] = useState<RelatedIsbn[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isLookingUpISBN, setIsLookingUpISBN] = useState(false);
   const [isManualEntryMode, setIsManualEntryMode] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Cover image state
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverDataUrl, setCoverDataUrl] = useState<string | null>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [captureError, setCaptureError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   // Populate form fields when a textbook is selected for editing
   useEffect(() => {
@@ -53,13 +91,34 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
         publicationYear: selectedTextbook.publicationYear.toString(),
         platformUrl: selectedTextbook.platformUrl ?? "",
       });
+      setRelatedIsbns(selectedTextbook.relatedIsbns ?? []);
+      setCoverPreviewUrl(selectedTextbook.coverImageUrl ?? null);
+      setCoverFile(null);
+      setCoverDataUrl(null);
       setErrorMessage(null);
       setSuccessMessage(null);
       setIsManualEntryMode(false);
     } else {
       setForm(INITIAL_FORM_STATE);
+      setRelatedIsbns([]);
+      setCoverPreviewUrl(null);
+      setCoverFile(null);
+      setCoverDataUrl(null);
     }
   }, [selectedTextbook]);
+
+  // Stop camera stream when component unmounts or capture mode exits
+  const stopStream = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    setIsCapturing(false);
+  }, []);
+
+  useEffect(() => {
+    return stopStream;
+  }, [stopStream]);
 
   const isEditMode = selectedTextbook !== null;
 
@@ -78,7 +137,71 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
     setSelectedTextbook(null);
     setErrorMessage(null);
     setSuccessMessage(null);
+    stopStream();
   }
+
+  // ── Related ISBNs helpers ───────────────────────────────────────────────
+
+  function addRelatedIsbn(): void {
+    setRelatedIsbns((prev) => [...prev, { ...INITIAL_ISBN_ROW }]);
+  }
+
+  function removeRelatedIsbn(index: number): void {
+    setRelatedIsbns((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function updateRelatedIsbn(index: number, field: keyof RelatedIsbn, value: string): void {
+    setRelatedIsbns((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, [field]: value } : row))
+    );
+  }
+
+  // ── Cover image helpers ──────────────────────────────────────────────────
+
+  function handleCoverFileChange(event: React.ChangeEvent<HTMLInputElement>): void {
+    const file = event.target.files?.[0] ?? null;
+    if (!file) return;
+    setCoverFile(file);
+    setCoverDataUrl(null);
+    const url = URL.createObjectURL(file);
+    setCoverPreviewUrl(url);
+    setCaptureError(null);
+  }
+
+  async function handleStartCapture(): Promise<void> {
+    setCaptureError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      streamRef.current = stream;
+      setIsCapturing(true);
+      requestAnimationFrame(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          void videoRef.current.play();
+        }
+      });
+    } catch {
+      setCaptureError("Camera access denied. Please allow camera access or upload an image instead.");
+    }
+  }
+
+  function handleTakeSnapshot(): void {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    setCoverDataUrl(dataUrl);
+    setCoverFile(null);
+    setCoverPreviewUrl(dataUrl);
+    stopStream();
+  }
+
+  // ── ISBN Lookup ──────────────────────────────────────────────────────────
 
   async function handleISBNLookup(): Promise<void> {
     setErrorMessage(null);
@@ -142,11 +265,19 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
 
     const isbnRaw = form.isbn.trim();
     const isbnNormalized = normalizeISBN(isbnRaw);
+    const validRelatedIsbns = relatedIsbns.filter((r) => r.isbn.trim().length > 0);
 
     try {
       setIsSaving(true);
 
       if (isEditMode && selectedTextbook) {
+        let coverImageUrl = selectedTextbook.coverImageUrl ?? null;
+        if (coverFile) {
+          coverImageUrl = await uploadTextbookCoverImage(selectedTextbook.id, coverFile);
+        } else if (coverDataUrl) {
+          coverImageUrl = await uploadTextbookCoverFromDataUrl(selectedTextbook.id, coverDataUrl);
+        }
+
         await editTextbook(selectedTextbook.id, {
           title: form.title.trim(),
           grade: form.grade.trim(),
@@ -155,7 +286,9 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
           publicationYear: parsedYear,
           isbnRaw,
           isbnNormalized,
+          relatedIsbns: validRelatedIsbns,
           platformUrl: form.platformUrl.trim() || undefined,
+          coverImageUrl,
         });
         setSelectedTextbook(null);
       } else {
@@ -188,10 +321,18 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
           publicationYear: parsedYear,
           isbnRaw,
           isbnNormalized,
+          relatedIsbns: validRelatedIsbns,
           platformUrl: form.platformUrl.trim() || undefined,
+          coverImageUrl: null,
+          coverFile: coverFile ?? undefined,
+          coverDataUrl: coverDataUrl ?? undefined,
         });
 
         setForm(INITIAL_FORM_STATE);
+        setRelatedIsbns([]);
+        setCoverPreviewUrl(null);
+        setCoverFile(null);
+        setCoverDataUrl(null);
         setIsManualEntryMode(false);
       }
 
@@ -212,6 +353,50 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
       ) : null}
 
       <form onSubmit={handleSubmit} className="form-grid">
+
+        {/* ── Cover Image ─────────────────────────────────────────────── */}
+        <fieldset className="form-fieldset">
+          <legend>Cover Image (optional)</legend>
+
+          {coverPreviewUrl ? (
+            <div className="cover-preview-row">
+              <img src={coverPreviewUrl} alt="Cover preview" className="cover-preview-thumb" />
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => { setCoverPreviewUrl(null); setCoverFile(null); setCoverDataUrl(null); }}
+              >
+                Remove
+              </button>
+            </div>
+          ) : null}
+
+          {isCapturing ? (
+            <div className="camera-capture-area">
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+              <video ref={videoRef} className="camera-video" playsInline />
+              <canvas ref={canvasRef} className="camera-canvas-hidden" />
+              <div className="form-actions">
+                <button type="button" onClick={handleTakeSnapshot}>Take Snapshot</button>
+                <button type="button" className="btn-secondary" onClick={stopStream}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div className="cover-input-row">
+              <label className="cover-file-label">
+                Upload Image
+                <input type="file" accept="image/*" onChange={handleCoverFileChange} className="cover-file-input" />
+              </label>
+              <button type="button" className="btn-secondary" onClick={() => void handleStartCapture()}>
+                Capture from Camera
+              </button>
+            </div>
+          )}
+
+          {captureError ? <p className="error-text">{captureError}</p> : null}
+        </fieldset>
+
+        {/* ── Primary ISBN ─────────────────────────────────────────────── */}
         <div className="form-group-isbn">
           <label htmlFor="isbn">
             ISBN (optional)
@@ -242,6 +427,55 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
           You can type an ISBN and save without lookup. Lookup is optional and only helps prefill metadata.
         </p>
 
+        {/* ── Related ISBNs ─────────────────────────────────────────────── */}
+        <fieldset className="form-fieldset">
+          <legend>Related ISBNs (optional)</legend>
+          <p className="form-hint">Add student edition, teacher edition, digital, workbook, or assessment ISBNs.</p>
+
+          {relatedIsbns.map((row, index) => (
+            <div key={index} className="related-isbn-row">
+              <input
+                value={row.isbn}
+                onChange={(e) => updateRelatedIsbn(index, "isbn", e.target.value)}
+                placeholder="ISBN-10 or ISBN-13"
+                className="related-isbn-input"
+              />
+              <select
+                value={row.type}
+                onChange={(e) => updateRelatedIsbn(index, "type", e.target.value)}
+                aria-label={`Related ISBN type ${index + 1}`}
+                className="related-isbn-type"
+              >
+                {ISBN_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={row.note ?? ""}
+                onChange={(e) => updateRelatedIsbn(index, "note", e.target.value)}
+                placeholder="Note (optional)"
+                className="related-isbn-note"
+              />
+              <button
+                type="button"
+                className="btn-icon btn-danger"
+                onClick={() => removeRelatedIsbn(index)}
+                aria-label="Remove related ISBN"
+                title="Remove"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+
+          <button type="button" className="btn-secondary" onClick={addRelatedIsbn}>
+            + Add Related ISBN
+          </button>
+        </fieldset>
+
+        {/* ── Core fields ──────────────────────────────────────────────── */}
         <label>
           Title
           <input
@@ -262,11 +496,16 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
 
         <label>
           Subject
-          <input
+          <select
             value={form.subject}
             onChange={(event) => updateField("subject", event.target.value)}
             required
-          />
+          >
+            <option value="">— Select subject —</option>
+            {SUBJECTS.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
         </label>
 
         <label>

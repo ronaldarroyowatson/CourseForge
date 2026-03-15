@@ -32,7 +32,19 @@ export async function findTextbookByIsbn(isbnInput: string): Promise<Textbook | 
     const textbookRaw = textbook.isbnRaw?.trim() ?? "";
     const textbookNormalized = textbook.isbnNormalized ?? "";
 
-    return textbookRaw === raw || (normalized.length > 0 && textbookNormalized === normalized);
+    // Check primary ISBN
+    if (textbookRaw === raw || (normalized.length > 0 && textbookNormalized === normalized)) {
+      return true;
+    }
+
+    // Check relatedIsbns
+    if (textbook.relatedIsbns && normalized.length > 0) {
+      return textbook.relatedIsbns.some(
+        (related) => normalizeISBN(related.isbn) === normalized
+      );
+    }
+
+    return false;
   });
 }
 

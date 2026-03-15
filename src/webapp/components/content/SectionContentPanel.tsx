@@ -61,7 +61,17 @@ export function SectionContentPanel({
 
   function renderActivePanel(): React.JSX.Element {
     if (activePanel === "equations" && showEquations) {
-      return <EquationPanel selectedSectionId={selectedSectionId} />;
+      return (
+        <EquationPanel
+          selectedSectionId={selectedSectionId}
+          equationContext={{
+            textbookSubject: selectedTextbook?.subject,
+            textbookTitle: selectedTextbook?.title,
+            conceptName: selectedSection?.title,
+            gradeLevel: selectedTextbook?.grade,
+          }}
+        />
+      );
     }
 
     if (activePanel === "concepts") {
@@ -79,6 +89,7 @@ export function SectionContentPanel({
           extractionContext={{
             textbookTitle: selectedTextbook?.title,
             textbookSubject: selectedTextbook?.subject,
+            gradeLevel: selectedTextbook?.grade,
             chapterTitle: selectedChapter?.name,
             sectionTitle: selectedSection?.title,
           }}

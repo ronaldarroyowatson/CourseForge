@@ -28,6 +28,7 @@ describe("Functions backend callable contract verification", () => {
       "getPremiumUsageReport",
       "managePremiumUser",
       "getCurrentPremiumUsage",
+      "generateTieredQuestionVariations",
     ];
 
     for (const callableExport of callableExports) {

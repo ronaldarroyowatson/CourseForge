@@ -21,11 +21,13 @@ import { DocumentIngestPanel } from "../../src/webapp/components/content/Documen
 const documentIngestMocks = vi.hoisted(() => ({
   extractFromDocuments: vi.fn<(_: File[]) => Promise<ExtractedDocumentData>>(),
   isSupportedDocumentType: vi.fn(() => true),
+  generateTieredQuestionBankFromSeedItems: vi.fn(),
 }));
 
 vi.mock("../../src/core/services/documentIngestService", () => ({
   extractFromDocuments: documentIngestMocks.extractFromDocuments,
   isSupportedDocumentType: documentIngestMocks.isSupportedDocumentType,
+  generateTieredQuestionBankFromSeedItems: documentIngestMocks.generateTieredQuestionBankFromSeedItems,
 }));
 
 async function clearDatabase(): Promise<void> {
@@ -88,6 +90,14 @@ describe("DocumentIngestPanel", () => {
     documentIngestMocks.extractFromDocuments.mockReset();
     documentIngestMocks.isSupportedDocumentType.mockReset();
     documentIngestMocks.isSupportedDocumentType.mockReturnValue(true);
+    documentIngestMocks.generateTieredQuestionBankFromSeedItems.mockReset();
+    documentIngestMocks.generateTieredQuestionBankFromSeedItems.mockResolvedValue({
+      level1: [],
+      level2: [],
+      level3: [],
+      all: [],
+    });
+    window.localStorage.removeItem("courseforge:ingest:alwaysSkipAiMaterials");
   });
 
   it("ingests extracted data, lets the teacher review it, and persists pending-sync records into IndexedDB", async () => {
@@ -174,8 +184,8 @@ describe("DocumentIngestPanel", () => {
     expect(concepts[0]?.chapterId).toBe(chapterId);
 
     expect(equations).toHaveLength(1);
-    expect(equations[0]?.latex).toBe("work = force * distance");
-    expect(equations[0]?.name).toBe("work = force * distance");
+    expect(equations[0]?.latex).toBe("work = force \\cdot distance");
+    expect(equations[0]?.name).toBe("work = force \\cdot distance");
     expect(equations[0]?.pendingSync).toBe(true);
 
     expect(keyIdeas).toHaveLength(2);
@@ -274,5 +284,203 @@ describe("DocumentIngestPanel", () => {
 
     expect(documentIngestMocks.extractFromDocuments).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/Detected worksheet layout: split-pages/i)).toBeInTheDocument();
+  });
+
+  it("detects existing Level 1-only items and adds missing Level 2/3 AI variants when enabled", async () => {
+    const textbookId = "tb-ingest-4";
+    const chapterId = "ch-ingest-4";
+    const sectionId = "sec-ingest-4";
+
+    await saveTextbook(buildTextbook(textbookId));
+    await saveChapter(buildChapter(chapterId, textbookId));
+    await saveSection(buildSection(sectionId, textbookId, chapterId));
+
+    const { saveVocabTerm } = await import("../../src/core/services/repositories");
+    await saveVocabTerm({
+      id: "vocab-base-1",
+      textbookId,
+      chapterId,
+      sectionId,
+      word: "momentum",
+      definition: "Mass in motion.",
+      difficultyLevel: 1,
+      isOriginal: true,
+      variationOf: null,
+      lastModified: "2026-03-14T00:00:00.000Z",
+      pendingSync: false,
+      source: "local",
+    });
+
+    documentIngestMocks.extractFromDocuments.mockResolvedValue({
+      vocab: ["inertia"],
+      concepts: [],
+      equations: [],
+      namesAndDates: [],
+      keyIdeas: [],
+      vocabWithDefinitions: [{ word: "inertia", definition: "Resistance to change in motion." }],
+      quality: {
+        accepted: true,
+        documentType: "lesson",
+        detectedLanguage: "english",
+        questionAnswerLayouts: [],
+        issues: [],
+      },
+      tieredQuestionBank: {
+        level1: [],
+        level2: [],
+        level3: [],
+        all: [],
+      },
+    });
+
+    documentIngestMocks.generateTieredQuestionBankFromSeedItems.mockResolvedValue({
+      level1: [],
+      level2: [
+        {
+          id: "vocab-base-1:l2:1",
+          baseItemId: "vocab-base-1",
+          contentType: "vocab",
+          question: "Which statement best explains momentum?",
+          correctAnswer: "Mass in motion.",
+          distractors: ["Mass at rest.", "Heat transfer.", "Electrical charge."],
+          difficultyLevel: 2,
+          isOriginal: false,
+          variationOf: "vocab-base-1:l1",
+          sourceMetadata: {
+            sourceType: "document-ingest",
+            originalFilename: "physics.txt",
+            variationAllowed: true,
+          },
+        },
+      ],
+      level3: [
+        {
+          id: "vocab-base-1:l3:1",
+          baseItemId: "vocab-base-1",
+          contentType: "vocab",
+          question: "Which option is NOT a valid momentum interpretation?",
+          correctAnswer: "Mass in motion.",
+          distractors: ["Momentum depends on velocity.", "Momentum is a vector.", "Momentum is conserved."],
+          difficultyLevel: 3,
+          isOriginal: false,
+          variationOf: "vocab-base-1:l1",
+          sourceMetadata: {
+            sourceType: "document-ingest",
+            originalFilename: "physics.txt",
+            variationAllowed: true,
+          },
+        },
+      ],
+      all: [
+        {
+          id: "vocab-base-1:l2:1",
+          baseItemId: "vocab-base-1",
+          contentType: "vocab",
+          question: "Which statement best explains momentum?",
+          correctAnswer: "Mass in motion.",
+          distractors: ["Mass at rest.", "Heat transfer.", "Electrical charge."],
+          difficultyLevel: 2,
+          isOriginal: false,
+          variationOf: "vocab-base-1:l1",
+          sourceMetadata: {
+            sourceType: "document-ingest",
+            originalFilename: "physics.txt",
+            variationAllowed: true,
+          },
+        },
+        {
+          id: "vocab-base-1:l3:1",
+          baseItemId: "vocab-base-1",
+          contentType: "vocab",
+          question: "Which option is NOT a valid momentum interpretation?",
+          correctAnswer: "Mass in motion.",
+          distractors: ["Momentum depends on velocity.", "Momentum is a vector.", "Momentum is conserved."],
+          difficultyLevel: 3,
+          isOriginal: false,
+          variationOf: "vocab-base-1:l1",
+          sourceMetadata: {
+            sourceType: "document-ingest",
+            originalFilename: "physics.txt",
+            variationAllowed: true,
+          },
+        },
+      ],
+    });
+
+    render(<DocumentIngestPanel selectedSectionId={sectionId} onDone={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("Browse Files"), {
+      target: {
+        files: [new File(["Momentum notes"], "physics.txt", { type: "text/plain" })],
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/missing Level 2\/3 AI variants/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save to Section" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Saved \d+ new item\(s\) to this section\./i)).toBeInTheDocument();
+    });
+
+    const vocabTerms = await listVocabTermsBySectionId(sectionId);
+    expect(vocabTerms.some((item) => item.variationOf === "vocab-base-1" && item.difficultyLevel === 2)).toBe(true);
+    expect(vocabTerms.some((item) => item.variationOf === "vocab-base-1" && item.difficultyLevel === 3)).toBe(true);
+  });
+
+  it("respects always-skip AI materials preference", async () => {
+    const textbookId = "tb-ingest-5";
+    const chapterId = "ch-ingest-5";
+    const sectionId = "sec-ingest-5";
+
+    await saveTextbook(buildTextbook(textbookId));
+    await saveChapter(buildChapter(chapterId, textbookId));
+    await saveSection(buildSection(sectionId, textbookId, chapterId));
+
+    documentIngestMocks.extractFromDocuments.mockResolvedValue({
+      vocab: ["velocity"],
+      concepts: [],
+      equations: [],
+      namesAndDates: [],
+      keyIdeas: [],
+      vocabWithDefinitions: [{ word: "velocity", definition: "Speed with direction." }],
+      quality: {
+        accepted: true,
+        documentType: "lesson",
+        detectedLanguage: "english",
+        questionAnswerLayouts: [],
+        issues: [],
+      },
+      tieredQuestionBank: {
+        level1: [],
+        level2: [],
+        level3: [],
+        all: [],
+      },
+    });
+
+    render(<DocumentIngestPanel selectedSectionId={sectionId} onDone={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("Browse Files"), {
+      target: {
+        files: [new File(["Velocity notes"], "velocity.txt", { type: "text/plain" })],
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/AI Harder-Material Options/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText(/Always skip AI-generated materials/i));
+    fireEvent.click(screen.getByRole("button", { name: "Save to Section" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Saved \d+ new item\(s\) to this section\./i)).toBeInTheDocument();
+    });
+
+    expect(documentIngestMocks.generateTieredQuestionBankFromSeedItems).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem("courseforge:ingest:alwaysSkipAiMaterials")).toBe("1");
   });
 });

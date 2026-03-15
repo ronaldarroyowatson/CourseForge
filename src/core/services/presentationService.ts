@@ -14,6 +14,7 @@ import type {
   Chapter,
   Section,
 } from "../models";
+import { normalizeEquationInput } from "./equationFormatService";
 import { getCurrentUser } from "../../firebase/auth";
 import { firestoreDb } from "../../firebase/firestore";
 import { functionsClient } from "../../firebase/functions";
@@ -185,8 +186,44 @@ function extractTextFromSlideXml(xml: string): string[] {
   return [...new Set(lines)];
 }
 
-function extractFormulas(lines: string[]): string[] {
-  return lines.filter((line) => /\$[^$]+\$|\\frac|\\sum|\\int|=/.test(line));
+function extractFormulaCandidatesFromXml(xml: string): string[] {
+  const candidates: string[] = [];
+
+  const ommlMatches = [...xml.matchAll(/<m:oMath[\s\S]*?<\/m:oMath>/gi)];
+  ommlMatches.forEach((match) => {
+    if (match[0]) {
+      candidates.push(match[0]);
+    }
+  });
+
+  const mathMlMatches = [...xml.matchAll(/<math[\s\S]*?<\/math>/gi)];
+  mathMlMatches.forEach((match) => {
+    if (match[0]) {
+      candidates.push(match[0]);
+    }
+  });
+
+  return candidates;
+}
+
+function extractFormulas(lines: string[], xml: string, context?: { subject?: string; concept?: string }): string[] {
+  const lineCandidates = lines.filter((line) => /\$[^$]+\$|\\frac|\\sum|\\int|=/.test(line));
+  const xmlCandidates = extractFormulaCandidatesFromXml(xml);
+  const candidates = [...lineCandidates, ...xmlCandidates];
+
+  const normalized = candidates
+    .map((candidate) => normalizeEquationInput({
+      raw: candidate,
+      context: {
+        textbookSubject: context?.subject,
+        conceptName: context?.concept,
+      },
+    }))
+    .map((result) => result.repairSuggestion?.latex ?? result.latex)
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return [...new Set(normalized)];
 }
 
 function inferSlideType(lines: string[], index: number, hasImages: boolean): SlideContentType {
@@ -536,7 +573,10 @@ export async function extractPresentationFromFile(
     const notesXml = await readZipText(zip, notesPath);
     const notesLines = notesXml ? extractTextFromSlideXml(notesXml) : [];
 
-    const extractedFormulas = extractFormulas(rawText);
+    const extractedFormulas = extractFormulas(rawText, xml, {
+      subject: context.textbook?.subject,
+      concept: context.section?.title ?? context.chapter?.name,
+    });
     const visualAssessments = extractedImages.map((assetPath) => ({
       assetPath,
       decision: classifySlideVisualAsset({

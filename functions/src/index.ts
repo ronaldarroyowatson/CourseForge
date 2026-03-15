@@ -26,6 +26,53 @@ interface CallableResult<T> {
   data: T;
 }
 
+type DifficultyLevel = 1 | 2 | 3;
+
+interface TieredQuestionSourceMetadata {
+  sourceType: string;
+  originalFilename: string;
+  variationAllowed: boolean;
+  educationalContext?: {
+    textbookTitle?: string;
+    textbookSubject?: string;
+    gradeLevel?: number;
+    targetReadingLevel?: number;
+  };
+  inferredLocation?: {
+    chapter?: number;
+    section?: number;
+  };
+}
+
+interface TieredVariationGenerationContext {
+  textbookTitle?: string;
+  textbookSubject?: string;
+  gradeLevel?: number;
+  level2TargetReadingGrade?: number;
+  level3TargetReadingGrade?: number;
+}
+
+interface TieredQuestionSeedItem {
+  id: string;
+  contentType: "vocab" | "concept";
+  question: string;
+  correctAnswer: string;
+  sourceMetadata: TieredQuestionSourceMetadata;
+}
+
+interface TieredQuestionItem {
+  id: string;
+  baseItemId: string;
+  contentType: "vocab" | "concept";
+  question: string;
+  correctAnswer: string;
+  distractors: string[];
+  difficultyLevel: DifficultyLevel;
+  isOriginal: boolean;
+  variationOf: string | null;
+  sourceMetadata: TieredQuestionSourceMetadata;
+}
+
 interface AdminUserRecord {
   uid: string;
   displayName: string;
@@ -769,6 +816,9 @@ function sanitizeExtractionContext(value: unknown): DocumentExtractionContext | 
   if (typeof context.textbookSubject === "string") {
     result.textbookSubject = context.textbookSubject.trim();
   }
+  if (typeof context.gradeLevel === "string") {
+    result.gradeLevel = context.gradeLevel.trim();
+  }
   if (typeof context.chapterTitle === "string") {
     result.chapterTitle = context.chapterTitle.trim();
   }
@@ -802,6 +852,180 @@ function buildBlockedExtraction(quality: ExtractionQualityReport): ExtractedDocu
     ...empty,
     quality,
   };
+}
+
+function normalizeTieredText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function resemblesProtectedTestContent(value: string): boolean {
+  const text = value.toLowerCase();
+  const patterns = [
+    /answer\s+key/,
+    /official\s+test/,
+    /released\s+exam/,
+    /practice\s+exam\s+copy/,
+    /sat|act|ap\s+exam|state\s+test/,
+    /question\s+\d+\s+from\s+test/,
+  ];
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+function forceSemanticRewrite(item: TieredQuestionItem): TieredQuestionItem {
+  if (item.difficultyLevel === 2) {
+    return {
+      ...item,
+      question: `In context, which choice best explains ${item.question}?`,
+      correctAnswer: `A rephrased explanation of: ${item.correctAnswer}`,
+    };
+  }
+
+  return {
+    ...item,
+    question: `Which option is NOT consistent with the concept of ${item.question}?`,
+    correctAnswer: `The most defensible answer remains: ${item.correctAnswer}`,
+  };
+}
+
+function buildFallbackDistractors(answer: string, chapterTerms: string[]): string[] {
+  const normalizedAnswer = normalizeTieredText(answer);
+  const fromChapter = chapterTerms
+    .map((term) => term.trim())
+    .filter((term) => term.length > 0 && normalizeTieredText(term) !== normalizedAnswer)
+    .slice(0, 5);
+
+  if (fromChapter.length >= 3) {
+    return fromChapter.slice(0, 3);
+  }
+
+  const seedWord = answer.split(/\s+/).find(Boolean) ?? "idea";
+  return [
+    ...fromChapter,
+    `A common misconception about ${seedWord}`,
+    `A partially correct statement about ${seedWord}`,
+    `A one-word-off definition of ${seedWord}`,
+  ].slice(0, 3);
+}
+
+function inferGradeLevel(value: unknown): number | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const match = value.match(/\d+/);
+  if (!match) {
+    return undefined;
+  }
+
+  const parsed = Number(match[0]);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return Math.max(1, Math.min(16, parsed));
+}
+
+function sanitizeTieredGenerationContext(value: unknown): TieredVariationGenerationContext | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const source = value as Record<string, unknown>;
+  const sanitized: TieredVariationGenerationContext = {};
+
+  if (typeof source.textbookTitle === "string") {
+    sanitized.textbookTitle = source.textbookTitle.trim();
+  }
+
+  if (typeof source.textbookSubject === "string") {
+    sanitized.textbookSubject = source.textbookSubject.trim();
+  }
+
+  const numericGrade = typeof source.gradeLevel === "number" && Number.isFinite(source.gradeLevel)
+    ? source.gradeLevel
+    : undefined;
+  const normalizedGrade = numericGrade ? Math.max(1, Math.min(16, Math.round(numericGrade))) : undefined;
+  sanitized.gradeLevel = normalizedGrade;
+
+  if (typeof source.level2TargetReadingGrade === "number" && Number.isFinite(source.level2TargetReadingGrade)) {
+    sanitized.level2TargetReadingGrade = Math.max(1, Math.min(16, Math.round(source.level2TargetReadingGrade)));
+  }
+
+  if (typeof source.level3TargetReadingGrade === "number" && Number.isFinite(source.level3TargetReadingGrade)) {
+    sanitized.level3TargetReadingGrade = Math.max(1, Math.min(16, Math.round(source.level3TargetReadingGrade)));
+  }
+
+  return Object.values(sanitized).some((entry) => entry !== undefined) ? sanitized : undefined;
+}
+
+function buildFallbackTieredItems(
+  seedItems: TieredQuestionSeedItem[],
+  chapterTerms: string[],
+  generationContext?: TieredVariationGenerationContext
+): TieredQuestionItem[] {
+  const subjectHint = generationContext?.textbookSubject?.trim();
+  const level2ReadingGrade = generationContext?.level2TargetReadingGrade;
+  const level3ReadingGrade = generationContext?.level3TargetReadingGrade;
+
+  const level1 = seedItems.map((item) => ({
+    id: `${item.id}:l1`,
+    baseItemId: item.id,
+    contentType: item.contentType,
+    question: item.question,
+    correctAnswer: item.correctAnswer,
+    distractors: buildFallbackDistractors(item.correctAnswer, chapterTerms),
+    difficultyLevel: 1 as DifficultyLevel,
+    isOriginal: true,
+    variationOf: null,
+    sourceMetadata: item.sourceMetadata,
+  }));
+
+  const level2 = level1.flatMap((item) => [1, 2].map((idx) => ({
+    ...item,
+    id: `${item.baseItemId}:l2:${idx}`,
+    difficultyLevel: 2 as DifficultyLevel,
+    isOriginal: false,
+    variationOf: `${item.baseItemId}:l1`,
+    question: `Which restatement best matches ${item.question}${subjectHint ? ` in ${subjectHint}` : ""}?`,
+    correctAnswer: level2ReadingGrade
+      ? `A reworded explanation of ${item.correctAnswer} written at about grade ${level2ReadingGrade} reading level.`
+      : `A reworded explanation of ${item.correctAnswer}.`,
+  })));
+
+  const level3 = level1.flatMap((item) => [1, 2].map((idx) => ({
+    ...item,
+    id: `${item.baseItemId}:l3:${idx}`,
+    difficultyLevel: 3 as DifficultyLevel,
+    isOriginal: false,
+    variationOf: `${item.baseItemId}:l1`,
+    question: `Which option is NOT an accurate application of ${item.question}${subjectHint ? ` in ${subjectHint}` : ""}?`,
+    correctAnswer: level3ReadingGrade
+      ? `The strongest reasoning-based response aligned with ${item.correctAnswer}, written around grade ${level3ReadingGrade} reading level.`
+      : `The strongest reasoning-based response aligns with ${item.correctAnswer}`,
+  })));
+
+  return [...level1, ...level2, ...level3];
+}
+
+function isTieredQuestionItem(value: unknown): value is TieredQuestionItem {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const item = value as Record<string, unknown>;
+  return (
+    typeof item.id === "string" &&
+    typeof item.baseItemId === "string" &&
+    (item.contentType === "vocab" || item.contentType === "concept") &&
+    typeof item.question === "string" &&
+    typeof item.correctAnswer === "string" &&
+    Array.isArray(item.distractors) &&
+    (item.difficultyLevel === 1 || item.difficultyLevel === 2 || item.difficultyLevel === 3) &&
+    typeof item.isOriginal === "boolean" &&
+    (typeof item.variationOf === "string" || item.variationOf === null) &&
+    typeof item.sourceMetadata === "object" &&
+    item.sourceMetadata !== null
+  );
 }
 
 /**
@@ -1010,6 +1234,175 @@ export const extractDocumentContent = onCall(async (request) => {
     extracted.quality.issues.length > 0 ? "Extraction completed with review notes." : "Extraction complete.",
     extracted
   );
+});
+
+export const generateTieredQuestionVariations = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in to generate tiered question variations.");
+  }
+
+  const payload = request.data as {
+    items?: unknown;
+    chapterTerms?: unknown;
+    generationContext?: unknown;
+  };
+
+  const seedItems = Array.isArray(payload.items)
+    ? payload.items.filter((item): item is TieredQuestionSeedItem => {
+        if (!item || typeof item !== "object") {
+          return false;
+        }
+
+        const candidate = item as Record<string, unknown>;
+        return (
+          typeof candidate.id === "string" &&
+          (candidate.contentType === "vocab" || candidate.contentType === "concept") &&
+          typeof candidate.question === "string" &&
+          typeof candidate.correctAnswer === "string" &&
+          typeof candidate.sourceMetadata === "object" &&
+          candidate.sourceMetadata !== null
+        );
+      })
+    : [];
+
+  if (seedItems.length === 0) {
+    throw new HttpsError("invalid-argument", "At least one seed item is required.");
+  }
+
+  const derivedGradeFromSeeds = inferGradeLevel(
+    seedItems.find((item) => typeof item.sourceMetadata?.educationalContext?.gradeLevel === "number")
+      ?.sourceMetadata?.educationalContext?.gradeLevel?.toString()
+  );
+  const providedGenerationContext = sanitizeTieredGenerationContext(payload.generationContext);
+  const gradeLevel = providedGenerationContext?.gradeLevel ?? derivedGradeFromSeeds;
+  const generationContext: TieredVariationGenerationContext = {
+    textbookTitle: providedGenerationContext?.textbookTitle
+      ?? seedItems.find((item) => item.sourceMetadata?.educationalContext?.textbookTitle)
+        ?.sourceMetadata?.educationalContext?.textbookTitle,
+    textbookSubject: providedGenerationContext?.textbookSubject
+      ?? seedItems.find((item) => item.sourceMetadata?.educationalContext?.textbookSubject)
+        ?.sourceMetadata?.educationalContext?.textbookSubject,
+    gradeLevel,
+    level2TargetReadingGrade: providedGenerationContext?.level2TargetReadingGrade
+      ?? (gradeLevel ? Math.min(16, gradeLevel + 1) : undefined),
+    level3TargetReadingGrade: providedGenerationContext?.level3TargetReadingGrade
+      ?? (gradeLevel ? Math.min(16, gradeLevel + 2) : undefined),
+  };
+
+  const chapterTerms = uniqueTrimmedStrings(payload.chapterTerms);
+  const fallbackItems = buildFallbackTieredItems(seedItems, chapterTerms, generationContext);
+
+  const openaiKey = process.env.OPENAI_API_KEY ?? "";
+  if (!openaiKey) {
+    return success("Tiered variations generated with local fallback.", { items: fallbackItems });
+  }
+
+  const systemPrompt = [
+    "You are an instructional quiz variation generator.",
+    "Return ONLY valid JSON with shape: { \"items\": TieredQuestionItem[] }.",
+    "Every seed item must produce:",
+    "- Level 1 item: exact question text + exact correct answer + 3-5 AI distractors.",
+    "- Level 2 items: 2-3 moderate practice variations with reworded stems/definitions.",
+    "- Level 3 items: 2-3 high-difficulty variations (NOT/inverted/scenario/reasoning).",
+    "For Level 1 distractors: similar length, similar reading level, plausible, include misconceptions, one-word-off when fitting, and chapter-term-based distractors.",
+    "Respect classroom context when available:",
+    "- Use textbook subject and textbook title to keep terms domain-appropriate.",
+    "- Use provided grade-level targets to control reading complexity.",
+    "- Level 2 should be roughly +1 reading level from base grade.",
+    "- Level 3 should be roughly +2 reading levels from base grade.",
+    "Do not copy or reference real test content.",
+    "For Levels 2 and 3 always rewrite enough to avoid verbatim duplication while preserving meaning.",
+    "Set `variationOf` to `<seed-id>:l1` for all Level 2 and Level 3 items.",
+    "Set `isOriginal` true only for Level 1.",
+  ].join("\n");
+
+  const userPrompt = JSON.stringify({
+    seedItems,
+    chapterTerms,
+    generationContext,
+    schema: {
+      items: [
+        {
+          id: "string",
+          baseItemId: "string",
+          contentType: "vocab|concept",
+          question: "string",
+          correctAnswer: "string",
+          distractors: ["string", "string", "string"],
+          difficultyLevel: 1,
+          isOriginal: true,
+          variationOf: null,
+          sourceMetadata: {
+            sourceType: "string",
+            originalFilename: "string",
+            variationAllowed: true,
+            inferredLocation: { chapter: 1, section: 1 },
+          },
+        },
+      ],
+    },
+  });
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${openaiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 2200,
+        temperature: 0.45,
+      }),
+    });
+
+    if (!response.ok) {
+      return success("Tiered variations generated with fallback after AI error.", { items: fallbackItems });
+    }
+
+    const json = await response.json() as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+
+    const content = json.choices?.[0]?.message?.content?.trim() ?? "";
+    const cleaned = content.replace(/^```[a-z]*\n?|```$/gm, "").trim();
+    const parsed = JSON.parse(cleaned) as { items?: unknown };
+    const items = Array.isArray(parsed.items)
+      ? parsed.items.filter(isTieredQuestionItem)
+      : [];
+
+    if (items.length === 0) {
+      return success("Tiered variations generated with fallback due to malformed AI payload.", { items: fallbackItems });
+    }
+
+    const validated = items.map((item) => {
+      const normalizedQuestion = normalizeTieredText(item.question);
+      const normalizedAnswer = normalizeTieredText(item.correctAnswer);
+      const resemblesTest = resemblesProtectedTestContent(item.question) || resemblesProtectedTestContent(item.correctAnswer);
+      const needsRewrite =
+        (item.difficultyLevel === 2 || item.difficultyLevel === 3) &&
+        (resemblesTest || (item.isOriginal === false && normalizedQuestion === normalizeTieredText(item.baseItemId)));
+
+      const withDistractors = {
+        ...item,
+        distractors: item.distractors
+          .map((choice) => choice.trim())
+          .filter((choice) => choice.length > 0 && normalizeTieredText(choice) !== normalizedAnswer)
+          .slice(0, 5),
+      };
+
+      return needsRewrite ? forceSemanticRewrite(withDistractors) : withDistractors;
+    });
+
+    return success("Tiered variations generated.", { items: validated });
+  } catch {
+    return success("Tiered variations generated with fallback.", { items: fallbackItems });
+  }
 });
 
 /**

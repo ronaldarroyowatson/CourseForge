@@ -1,19 +1,47 @@
 import React from "react";
 
 import type { Equation } from "../../../core/models";
+import {
+  type EquationContext,
+  type EquationInputFormat,
+  normalizeEquationInput,
+} from "../../../core/services/equationFormatService";
 import { useRepositories } from "../../hooks/useRepositories";
 
 interface EquationPanelProps {
   selectedSectionId: string | null;
+  equationContext?: EquationContext;
 }
 
-export function EquationPanel({ selectedSectionId }: EquationPanelProps): React.JSX.Element {
+const INPUT_FORMAT_OPTIONS: Array<{ value: EquationInputFormat; label: string }> = [
+  { value: "latex", label: "LaTeX" },
+  { value: "word-linear", label: "Word/Google linear" },
+  { value: "word-omml", label: "Microsoft Word OMML (XML)" },
+  { value: "mathml", label: "MathML / Overleaf export" },
+  { value: "plain", label: "Plain text" },
+];
+
+export function EquationPanel({ selectedSectionId, equationContext }: EquationPanelProps): React.JSX.Element {
   const { createEquation, fetchEquationsBySectionId, removeEquation } = useRepositories();
   const [equations, setEquations] = React.useState<Equation[]>([]);
   const [name, setName] = React.useState("");
-  const [latex, setLatex] = React.useState("");
+  const [rawEquation, setRawEquation] = React.useState("");
+  const [format, setFormat] = React.useState<EquationInputFormat>("latex");
+  const [conceptHint, setConceptHint] = React.useState("");
   const [description, setDescription] = React.useState("");
   const nameInputRef = React.useRef<HTMLInputElement | null>(null);
+  const equationFileRef = React.useRef<HTMLInputElement | null>(null);
+
+  const normalized = React.useMemo(() => {
+    return normalizeEquationInput({
+      raw: rawEquation,
+      format,
+      context: {
+        ...equationContext,
+        conceptName: conceptHint.trim() || equationContext?.conceptName,
+      },
+    });
+  }, [conceptHint, equationContext, format, rawEquation]);
 
   React.useEffect(() => {
     let isMounted = true;
@@ -43,7 +71,7 @@ export function EquationPanel({ selectedSectionId }: EquationPanelProps): React.
     event.preventDefault();
 
     const trimmedName = name.trim();
-    const trimmedLatex = latex.trim();
+    const trimmedLatex = normalized.repairSuggestion?.latex ?? normalized.latex.trim();
     const trimmedDescription = description.trim();
 
     if (!trimmedName || !trimmedLatex || !trimmedDescription || !selectedSectionId) {
@@ -58,12 +86,33 @@ export function EquationPanel({ selectedSectionId }: EquationPanelProps): React.
     });
 
     setName("");
-    setLatex("");
+    setRawEquation("");
+    setFormat("latex");
+    setConceptHint("");
     setDescription("");
     setEquations(await fetchEquationsBySectionId(selectedSectionId));
     window.requestAnimationFrame(() => {
       nameInputRef.current?.focus();
     });
+  }
+
+  async function handleEquationFileSelect(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const text = await file.text();
+    setRawEquation(text);
+    if (/\.mml$/i.test(file.name)) {
+      setFormat("mathml");
+    } else if (/\.omml\.xml$/i.test(file.name) || /<m:oMath/i.test(text)) {
+      setFormat("word-omml");
+    } else if (/\.tex$/i.test(file.name)) {
+      setFormat("latex");
+    }
+
+    event.target.value = "";
   }
 
   async function handleDelete(id: string): Promise<void> {
@@ -80,13 +129,84 @@ export function EquationPanel({ selectedSectionId }: EquationPanelProps): React.
           <input ref={nameInputRef} value={name} onChange={(event) => setName(event.target.value)} required />
         </label>
         <label>
-          LaTeX
-          <input value={latex} onChange={(event) => setLatex(event.target.value)} required />
+          Input Format
+          <select value={format} onChange={(event) => setFormat(event.target.value as EquationInputFormat)}>
+            {INPUT_FORMAT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Equation Input
+          <textarea
+            value={rawEquation}
+            onChange={(event) => setRawEquation(event.target.value)}
+            rows={4}
+            required
+          />
+        </label>
+        <label>
+          Concept Hint (optional)
+          <input
+            value={conceptHint}
+            onChange={(event) => setConceptHint(event.target.value)}
+            placeholder="e.g. quadratic formula"
+          />
+        </label>
+        <label>
+          Load Equation Snippet File
+          <div className="cover-input-row">
+            <button type="button" className="btn-secondary" onClick={() => equationFileRef.current?.click()}>
+              Import .tex/.xml/.mml/.txt
+            </button>
+          </div>
+          <input
+            ref={equationFileRef}
+            type="file"
+            accept=".tex,.xml,.mml,.txt"
+            className="cover-file-input"
+            onChange={(event) => void handleEquationFileSelect(event)}
+            aria-label="Import equation snippet file"
+          />
         </label>
         <label>
           Description
           <input value={description} onChange={(event) => setDescription(event.target.value)} required />
         </label>
+
+        <div className="ingest-review-section">
+          <h4>Equation Preview</h4>
+          <p><strong>Detected format:</strong> {normalized.detectedFormat}</p>
+          <p><strong>Normalized LaTeX:</strong> <span className="mono">{normalized.latex || "(empty)"}</span></p>
+          <p><strong>Word-style linear preview:</strong> <span className="mono">{normalized.wordLinearPreview || "(empty)"}</span></p>
+          {normalized.repairSuggestion ? (
+            <>
+              <p>
+                <strong>Suggested repair ({Math.round(normalized.repairSuggestion.confidence * 100)}%):</strong>
+                {" "}<span className="mono">{normalized.repairSuggestion.latex}</span>
+              </p>
+              <p>{normalized.repairSuggestion.reason}</p>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setRawEquation(normalized.repairSuggestion?.latex ?? rawEquation);
+                  setFormat("latex");
+                }}
+              >
+                Use Suggested Repair
+              </button>
+            </>
+          ) : null}
+          {normalized.warnings.length > 0 ? (
+            <ul className="ingest-issue-list">
+              {normalized.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+
         <button type="submit">Save Equation</button>
       </form>
 

@@ -3,6 +3,7 @@ export type {
   Concept,
   ContentStatus,
   CourseForgeEntityMap,
+  DifficultyLevel,
   DesignSuggestions,
   DocumentIngestFingerprint,
   Equation,
@@ -15,6 +16,8 @@ export type {
   RelatedIsbnType,
   Section,
   SlideContentType,
+  SourceMetadata,
   Textbook,
+  TieredQuestionMetadata,
   VocabTerm,
 } from "./entities";

@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 
-import type { Chapter, Concept, Equation, KeyIdea, RelatedIsbn, Section, Textbook, VocabTerm } from "../../core/models";
+import type { Chapter, Concept, DifficultyLevel, Equation, KeyIdea, RelatedIsbn, Section, SourceMetadata, Textbook, VocabTerm } from "../../core/models";
 import {
   deleteConcept,
   deleteEquation,
@@ -67,6 +67,13 @@ export interface CreateVocabTermInput {
   sectionId: string;
   word: string;
   definition?: string;
+  difficultyLevel?: DifficultyLevel;
+  isOriginal?: boolean;
+  variationOf?: string | null;
+  questionStem?: string;
+  correctAnswer?: string;
+  distractors?: string[];
+  sourceMetadata?: SourceMetadata;
 }
 
 export interface CreateEquationInput {
@@ -80,6 +87,13 @@ export interface CreateConceptInput {
   sectionId: string;
   name: string;
   explanation?: string;
+  difficultyLevel?: DifficultyLevel;
+  isOriginal?: boolean;
+  variationOf?: string | null;
+  questionStem?: string;
+  correctAnswer?: string;
+  distractors?: string[];
+  sourceMetadata?: SourceMetadata;
 }
 
 export interface CreateKeyIdeaInput {
@@ -149,6 +163,13 @@ function buildVocabTermFromInput(input: CreateVocabTermInput, chapterId: string,
     sectionId: input.sectionId,
     word: input.word,
     definition: input.definition,
+    difficultyLevel: input.difficultyLevel ?? 1,
+    isOriginal: input.isOriginal ?? true,
+    variationOf: input.variationOf ?? null,
+    questionStem: input.questionStem,
+    correctAnswer: input.correctAnswer,
+    distractors: input.distractors,
+    sourceMetadata: input.sourceMetadata,
     lastModified: timestamp,
     pendingSync: true,
     source: "local",
@@ -180,6 +201,13 @@ function buildConceptFromInput(input: CreateConceptInput, chapterId: string, tex
     sectionId: input.sectionId,
     name: input.name,
     explanation: input.explanation,
+    difficultyLevel: input.difficultyLevel ?? 1,
+    isOriginal: input.isOriginal ?? true,
+    variationOf: input.variationOf ?? null,
+    questionStem: input.questionStem,
+    correctAnswer: input.correctAnswer,
+    distractors: input.distractors,
+    sourceMetadata: input.sourceMetadata,
     lastModified: timestamp,
     pendingSync: true,
     source: "local",

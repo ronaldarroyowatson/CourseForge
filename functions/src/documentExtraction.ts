@@ -26,6 +26,7 @@ const SUPPORTED_FILE_EXTENSIONS = [".txt", ".pdf", ".docx", ".html", ".htm", ".m
 export interface DocumentExtractionContext {
   textbookTitle?: string;
   textbookSubject?: string;
+  gradeLevel?: string;
   chapterTitle?: string;
   sectionTitle?: string;
 }

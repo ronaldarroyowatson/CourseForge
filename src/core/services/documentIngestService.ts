@@ -8,7 +8,7 @@
  */
 import { httpsCallable } from "firebase/functions";
 
-import type { DocumentIngestFingerprint } from "../models";
+import type { DifficultyLevel, DocumentIngestFingerprint, SourceMetadata } from "../models";
 import { getAll, save, STORE_NAMES } from "./db";
 import { functionsClient } from "../../firebase/functions";
 
@@ -29,6 +29,7 @@ export type ExtractionLanguage = "english" | "unknown";
 export interface DocumentExtractionContext {
   textbookTitle?: string;
   textbookSubject?: string;
+  gradeLevel?: string;
   chapterTitle?: string;
   sectionTitle?: string;
   sectionId?: string;
@@ -57,9 +58,56 @@ export interface ExtractedDocumentData {
   keyIdeas: string[];
   vocabWithDefinitions?: Array<{ word: string; definition?: string }>;
   conceptsWithExplanations?: Array<{ name: string; explanation?: string }>;
+  tieredQuestionBank?: TieredQuestionBank;
   inferredChapterTitle?: string;
   inferredSectionTitle?: string;
   quality: ExtractionQualityReport;
+}
+
+export interface TieredQuestionItem {
+  id: string;
+  baseItemId: string;
+  contentType: "vocab" | "concept";
+  question: string;
+  correctAnswer: string;
+  distractors: string[];
+  difficultyLevel: DifficultyLevel;
+  isOriginal: boolean;
+  variationOf: string | null;
+  sourceMetadata: SourceMetadata;
+}
+
+export interface TieredQuestionBank {
+  level1: TieredQuestionItem[];
+  level2: TieredQuestionItem[];
+  level3: TieredQuestionItem[];
+  all: TieredQuestionItem[];
+}
+
+export interface TieredQuestionVariationRequestItem {
+  id: string;
+  contentType: "vocab" | "concept";
+  question: string;
+  correctAnswer: string;
+  sourceMetadata: SourceMetadata;
+}
+
+export interface TieredVariationGenerationContext {
+  textbookTitle?: string;
+  textbookSubject?: string;
+  gradeLevel?: number;
+  level2TargetReadingGrade?: number;
+  level3TargetReadingGrade?: number;
+}
+
+interface TieredQuestionVariationResponseItem extends TieredQuestionItem {}
+
+interface TieredQuestionVariationResponse {
+  success: boolean;
+  message: string;
+  data: {
+    items: TieredQuestionVariationResponseItem[];
+  };
 }
 
 interface ExtractionResponse {
@@ -209,6 +257,269 @@ export function mergeExtractedDocuments(
   };
 }
 
+function inferNumericLocation(value?: string): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const match = value.match(/\d+(?:\.\d+)?/);
+  if (!match) {
+    return undefined;
+  }
+
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function inferGradeLevel(value?: string): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const match = value.match(/\d+/);
+  if (!match) {
+    return undefined;
+  }
+
+  const parsed = Number(match[0]);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return Math.max(1, Math.min(16, parsed));
+}
+
+function buildSourceMetadata(input: {
+  fileName: string;
+  inferredChapterTitle?: string;
+  inferredSectionTitle?: string;
+  context?: DocumentExtractionContext;
+}): SourceMetadata {
+  const gradeLevel = inferGradeLevel(input.context?.gradeLevel);
+  const textbookTitle = input.context?.textbookTitle?.trim() || undefined;
+  const textbookSubject = input.context?.textbookSubject?.trim() || undefined;
+  const educationalContext = (textbookTitle || textbookSubject || gradeLevel)
+    ? {
+        textbookTitle,
+        textbookSubject,
+        gradeLevel,
+      }
+    : undefined;
+
+  return {
+    sourceType: "document-ingest",
+    originalFilename: input.fileName,
+    variationAllowed: true,
+    educationalContext,
+    inferredLocation: {
+      chapter: inferNumericLocation(input.inferredChapterTitle),
+      section: inferNumericLocation(input.inferredSectionTitle),
+    },
+  };
+}
+
+function buildLevelOneSeedItems(input: {
+  data: ExtractedDocumentData;
+  sourceMetadata: SourceMetadata;
+}): TieredQuestionVariationRequestItem[] {
+  const vocabItems = (input.data.vocabWithDefinitions ?? [])
+    .filter((entry) => entry.word.trim().length > 0 && (entry.definition?.trim().length ?? 0) > 0)
+    .map((entry) => ({
+      id: `vocab:${normalizeForSignature(entry.word)}`,
+      contentType: "vocab" as const,
+      question: entry.word.trim(),
+      correctAnswer: entry.definition!.trim(),
+      sourceMetadata: input.sourceMetadata,
+    }));
+
+  const conceptItems = (input.data.conceptsWithExplanations ?? [])
+    .filter((entry) => entry.name.trim().length > 0 && (entry.explanation?.trim().length ?? 0) > 0)
+    .map((entry) => ({
+      id: `concept:${normalizeForSignature(entry.name)}`,
+      contentType: "concept" as const,
+      question: entry.name.trim(),
+      correctAnswer: entry.explanation!.trim(),
+      sourceMetadata: input.sourceMetadata,
+    }));
+
+  return [...vocabItems, ...conceptItems];
+}
+
+function pickFallbackDistractors(seed: string[], answer: string): string[] {
+  const normalizedAnswer = normalizeForSignature(answer);
+  const alternatives = seed
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0 && normalizeForSignature(value) !== normalizedAnswer)
+    .slice(0, 5);
+
+  if (alternatives.length >= 3) {
+    return alternatives.slice(0, 3);
+  }
+
+  const answerTokens = answer.split(/\s+/).filter(Boolean);
+  const baseline = answerTokens.length > 0 ? answerTokens : [answer];
+  const padded = [
+    `A closely related idea to ${baseline[0]}`,
+    `A common confusion with ${baseline[0]}`,
+    `A partial description of ${baseline[0]}`,
+  ];
+
+  return [...alternatives, ...padded].slice(0, 3);
+}
+
+function buildFallbackTieredQuestionBank(
+  items: TieredQuestionVariationRequestItem[],
+  chapterTerms: string[],
+  generationContext?: TieredVariationGenerationContext
+): TieredQuestionBank {
+  const subjectHint = generationContext?.textbookSubject?.trim();
+  const level2Grade = generationContext?.level2TargetReadingGrade;
+  const level3Grade = generationContext?.level3TargetReadingGrade;
+
+  const level1 = items.map((item) => ({
+    id: `${item.id}:l1`,
+    baseItemId: item.id,
+    contentType: item.contentType,
+    question: item.question,
+    correctAnswer: item.correctAnswer,
+    distractors: pickFallbackDistractors(chapterTerms, item.correctAnswer),
+    difficultyLevel: 1 as DifficultyLevel,
+    isOriginal: true,
+    variationOf: null,
+    sourceMetadata: item.sourceMetadata,
+  }));
+
+  const level2 = level1.flatMap((item) => [1, 2].map((idx) => ({
+    ...item,
+    id: `${item.baseItemId}:l2:${idx}`,
+    difficultyLevel: 2 as DifficultyLevel,
+    isOriginal: false,
+    variationOf: `${item.baseItemId}:l1`,
+    question: `Which statement best matches ${item.question}${subjectHint ? ` in ${subjectHint}` : ""}?`,
+    correctAnswer: level2Grade
+      ? `A clearer explanation of ${item.correctAnswer} written at about grade ${level2Grade} reading level.`
+      : `A clearer explanation of ${item.correctAnswer}.`,
+  })));
+
+  const level3 = level1.flatMap((item) => [1, 2].map((idx) => ({
+    ...item,
+    id: `${item.baseItemId}:l3:${idx}`,
+    difficultyLevel: 3 as DifficultyLevel,
+    isOriginal: false,
+    variationOf: `${item.baseItemId}:l1`,
+    question: `Which option is NOT an accurate description of ${item.question}${subjectHint ? ` in ${subjectHint}` : ""}?`,
+    correctAnswer: level3Grade
+      ? `The strongest reasoning-based explanation of ${item.correctAnswer} at about grade ${level3Grade} reading level.`
+      : `The strongest reasoning-based explanation of ${item.correctAnswer}.`,
+  })));
+
+  return {
+    level1,
+    level2,
+    level3,
+    all: [...level1, ...level2, ...level3],
+  };
+}
+
+function toTieredBank(items: TieredQuestionVariationResponseItem[]): TieredQuestionBank {
+  const level1 = items.filter((item) => item.difficultyLevel === 1);
+  const level2 = items.filter((item) => item.difficultyLevel === 2);
+  const level3 = items.filter((item) => item.difficultyLevel === 3);
+  return { level1, level2, level3, all: items };
+}
+
+function buildTieredGenerationContext(context?: DocumentExtractionContext): TieredVariationGenerationContext {
+  const gradeLevel = inferGradeLevel(context?.gradeLevel);
+  return {
+    textbookTitle: context?.textbookTitle?.trim() || undefined,
+    textbookSubject: context?.textbookSubject?.trim() || undefined,
+    gradeLevel,
+    level2TargetReadingGrade: gradeLevel ? Math.min(16, gradeLevel + 1) : undefined,
+    level3TargetReadingGrade: gradeLevel ? Math.min(16, gradeLevel + 2) : undefined,
+  };
+}
+
+export async function generateTieredQuestionBankFromSeedItems(input: {
+  seedItems: TieredQuestionVariationRequestItem[];
+  chapterTerms: string[];
+  context?: DocumentExtractionContext;
+}): Promise<TieredQuestionBank> {
+  if (input.seedItems.length === 0) {
+    return { level1: [], level2: [], level3: [], all: [] };
+  }
+
+  const generationContext = buildTieredGenerationContext(input.context);
+  const fallback = buildFallbackTieredQuestionBank(input.seedItems, input.chapterTerms, generationContext);
+
+  try {
+    const callable = httpsCallable<
+      { items: TieredQuestionVariationRequestItem[]; chapterTerms: string[]; generationContext?: TieredVariationGenerationContext },
+      TieredQuestionVariationResponse
+    >(functionsClient, "generateTieredQuestionVariations");
+
+    const response = await callable({
+      items: input.seedItems,
+      chapterTerms: input.chapterTerms,
+      generationContext,
+    });
+
+    if (!response.data.success || !Array.isArray(response.data.data?.items)) {
+      return fallback;
+    }
+
+    const validItems = response.data.data.items.filter((item) =>
+      typeof item.id === "string" &&
+      (item.difficultyLevel === 1 || item.difficultyLevel === 2 || item.difficultyLevel === 3) &&
+      typeof item.question === "string" &&
+      typeof item.correctAnswer === "string" &&
+      Array.isArray(item.distractors)
+    );
+
+    if (validItems.length === 0) {
+      return fallback;
+    }
+
+    return toTieredBank(validItems);
+  } catch {
+    return fallback;
+  }
+}
+
+async function generateTieredQuestionBank(input: {
+  data: ExtractedDocumentData;
+  fileName: string;
+  context?: DocumentExtractionContext;
+}): Promise<TieredQuestionBank> {
+  const sourceMetadata = buildSourceMetadata({
+    fileName: input.fileName,
+    inferredChapterTitle: input.data.inferredChapterTitle,
+    inferredSectionTitle: input.data.inferredSectionTitle,
+    context: input.context,
+  });
+
+  const seedItems = buildLevelOneSeedItems({
+    data: input.data,
+    sourceMetadata,
+  });
+
+  if (seedItems.length === 0) {
+    return { level1: [], level2: [], level3: [], all: [] };
+  }
+
+  const chapterTerms = dedupeStrings([
+    ...input.data.vocab,
+    ...input.data.concepts,
+    ...(input.data.vocabWithDefinitions ?? []).map((entry) => entry.word),
+    ...(input.data.conceptsWithExplanations ?? []).map((entry) => entry.name),
+  ]);
+
+  return generateTieredQuestionBankFromSeedItems({
+    seedItems,
+    chapterTerms,
+    context: input.context,
+  });
+}
+
 function createEmptyExtractionData(): ExtractedDocumentData {
   return {
     vocab: [],
@@ -218,6 +529,12 @@ function createEmptyExtractionData(): ExtractedDocumentData {
     keyIdeas: [],
     vocabWithDefinitions: [],
     conceptsWithExplanations: [],
+    tieredQuestionBank: {
+      level1: [],
+      level2: [],
+      level3: [],
+      all: [],
+    },
     quality: {
       accepted: true,
       documentType: "unknown",
@@ -444,6 +761,18 @@ export async function extractFromDocuments(
       )
     );
   }
+
+  const sourceFileName = extractionRows.length === 1
+    ? extractionRows[0].fileName
+    : selectedFiles.length > 1
+      ? "multiple-files"
+      : selectedFiles[0]?.name ?? "document";
+
+  merged.tieredQuestionBank = await generateTieredQuestionBank({
+    data: merged,
+    fileName: sourceFileName,
+    context,
+  });
 
   merged.quality.accepted = !merged.quality.issues.some((issue) => issue.severity === "error");
   return merged;

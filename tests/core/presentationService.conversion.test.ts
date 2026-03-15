@@ -66,12 +66,24 @@ function createMinimalPptxBase64(): Promise<string> {
   zip.file(
     "ppt/slides/slide1.xml",
     `<?xml version="1.0" encoding="UTF-8"?>
-<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
   <p:cSld>
     <p:spTree>
       <p:sp><p:txBody><a:p><a:r><a:t>Cell Overview</a:t></a:r></a:p></p:txBody></p:sp>
       <p:sp><p:txBody><a:p><a:r><a:t>Analyze this visual set.</a:t></a:r></a:p></p:txBody></p:sp>
     </p:spTree>
+    <m:oMath>
+      <m:f>
+        <m:num><m:r><m:t>a+b</m:t></m:r></m:num>
+        <m:den><m:r><m:t>c</m:t></m:r></m:den>
+      </m:f>
+    </m:oMath>
+    <math xmlns="http://www.w3.org/1998/Math/MathML">
+      <mfrac>
+        <mi>x</mi>
+        <mi>y</mi>
+      </mfrac>
+    </math>
   </p:cSld>
 </p:sld>`
   );
@@ -138,7 +150,8 @@ describe("presentationService conversion and persistence", () => {
     expect(extracted.slides[0]?.extractedImages).toContain("ppt/media/graph-1.png");
     expect(extracted.slides[0]?.extractedImages).toContain("ppt/media/icon-1.png");
     expect(extracted.slides[0]?.extractedImages).not.toContain("ppt/media/border-1.png");
-    expect(extracted.slides[0]?.notes ?? "").toContain("Review visual relevance");
+    expect(extracted.slides[0]?.extractedFormulas).toContain("\\frac{a+b}{c}");
+    expect(extracted.slides[0]?.extractedFormulas).toContain("\\frac{x}{y}");
   });
 
   it("surfaces manual-conversion guidance when legacy conversion service is unavailable", async () => {

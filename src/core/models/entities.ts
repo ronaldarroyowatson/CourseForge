@@ -74,7 +74,35 @@ export interface Section {
   isDeleted?: boolean;
 }
 
-export interface VocabTerm {
+export type DifficultyLevel = 1 | 2 | 3;
+
+export interface SourceMetadata {
+  sourceType: string;
+  originalFilename: string;
+  variationAllowed: boolean;
+  educationalContext?: {
+    textbookTitle?: string;
+    textbookSubject?: string;
+    gradeLevel?: number;
+    targetReadingLevel?: number;
+  };
+  inferredLocation?: {
+    chapter?: number;
+    section?: number;
+  };
+}
+
+export interface TieredQuestionMetadata {
+  difficultyLevel?: DifficultyLevel;
+  isOriginal?: boolean;
+  variationOf?: string | null;
+  questionStem?: string;
+  correctAnswer?: string;
+  distractors?: string[];
+  sourceMetadata?: SourceMetadata;
+}
+
+export interface VocabTerm extends TieredQuestionMetadata {
   id: string;
   userId?: string;
   textbookId?: string;
@@ -109,7 +137,7 @@ export interface Equation extends SectionContentEntity {
   description?: string;
 }
 
-export interface Concept extends SectionContentEntity {
+export interface Concept extends SectionContentEntity, TieredQuestionMetadata {
   name: string;
   explanation?: string;
 }

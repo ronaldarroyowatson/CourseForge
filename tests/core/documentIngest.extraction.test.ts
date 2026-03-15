@@ -1,11 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const firebaseFunctionMocks = vi.hoisted(() => {
-  const callableMock = vi.fn();
-  const httpsCallableMock = vi.fn(() => callableMock);
+  const extractCallableMock = vi.fn();
+  const tierCallableMock = vi.fn();
+  const httpsCallableMock = vi.fn((_: unknown, callableName: string) => {
+    if (callableName === "generateTieredQuestionVariations") {
+      return tierCallableMock;
+    }
+
+    return extractCallableMock;
+  });
 
   return {
-    callableMock,
+    extractCallableMock,
+    tierCallableMock,
     httpsCallableMock,
   };
 });
@@ -22,12 +30,13 @@ import { extractFromDocument, extractFromDocuments, isSupportedDocumentType, mer
 
 describe("documentIngestService.extractFromDocument", () => {
   beforeEach(() => {
-    firebaseFunctionMocks.callableMock.mockReset();
+    firebaseFunctionMocks.extractCallableMock.mockReset();
+    firebaseFunctionMocks.tierCallableMock.mockReset();
     firebaseFunctionMocks.httpsCallableMock.mockClear();
   });
 
   it("reads TXT files locally and returns all extracted data groups", async () => {
-    firebaseFunctionMocks.callableMock.mockResolvedValue({
+    firebaseFunctionMocks.extractCallableMock.mockResolvedValue({
       data: {
         success: true,
         message: "ok",
@@ -63,7 +72,7 @@ describe("documentIngestService.extractFromDocument", () => {
       { app: "test-functions-client" },
       "extractDocumentContent"
     );
-    expect(firebaseFunctionMocks.callableMock).toHaveBeenCalledWith({
+    expect(firebaseFunctionMocks.extractCallableMock).toHaveBeenCalledWith({
       fileName: "lesson.txt",
       mimeType: "text/plain",
       text: "Plants use chlorophyll to convert light into stored energy.",
@@ -89,7 +98,7 @@ describe("documentIngestService.extractFromDocument", () => {
   });
 
   it("encodes binary files as base64 before calling the extraction function", async () => {
-    firebaseFunctionMocks.callableMock.mockResolvedValue({
+    firebaseFunctionMocks.extractCallableMock.mockResolvedValue({
       data: {
         success: true,
         message: "ok",
@@ -116,8 +125,8 @@ describe("documentIngestService.extractFromDocument", () => {
 
     await extractFromDocument(file);
 
-    expect(firebaseFunctionMocks.callableMock).toHaveBeenCalledTimes(1);
-    const payload = firebaseFunctionMocks.callableMock.mock.calls[0]?.[0];
+  expect(firebaseFunctionMocks.extractCallableMock).toHaveBeenCalledTimes(1);
+  const payload = firebaseFunctionMocks.extractCallableMock.mock.calls[0]?.[0];
 
     expect(payload).toMatchObject({
       fileName: "worksheet.pdf",
@@ -132,7 +141,8 @@ describe("documentIngestService.extractFromDocument", () => {
     const file = new File(["not supported"], "lesson.csv", { type: "text/csv" });
 
     await expect(extractFromDocument(file)).rejects.toThrow("Unsupported file type");
-    expect(firebaseFunctionMocks.callableMock).not.toHaveBeenCalled();
+    expect(firebaseFunctionMocks.extractCallableMock).not.toHaveBeenCalled();
+    expect(firebaseFunctionMocks.tierCallableMock).not.toHaveBeenCalled();
   });
 
   it("accepts captured webpage and markdown exports as supported document types", () => {
@@ -186,7 +196,7 @@ describe("documentIngestService.extractFromDocument", () => {
   });
 
   it("extracts from a mixed file batch and reports skipped unsupported files", async () => {
-    firebaseFunctionMocks.callableMock
+    firebaseFunctionMocks.extractCallableMock
       .mockResolvedValueOnce({
         data: {
           success: true,
@@ -228,6 +238,16 @@ describe("documentIngestService.extractFromDocument", () => {
         },
       });
 
+    firebaseFunctionMocks.tierCallableMock.mockResolvedValue({
+      data: {
+        success: true,
+        message: "ok",
+        data: {
+          items: [],
+        },
+      },
+    });
+
     const result = await extractFromDocuments([
       new File(["Evidence matters"], "chapter.txt", { type: "text/plain" }),
       new File(["# Hypothesis"], "notes.md", { type: "text/markdown" }),
@@ -236,5 +256,178 @@ describe("documentIngestService.extractFromDocument", () => {
 
     expect(result.vocab).toEqual(["evidence", "hypothesis"]);
     expect(result.quality.issues.some((issue) => issue.message.includes("bad.csv"))).toBe(true);
+  });
+
+  it("sends exact Level 1 seed content to tier variation callable and keeps returned linkage", async () => {
+    firebaseFunctionMocks.extractCallableMock.mockResolvedValue({
+      data: {
+        success: true,
+        message: "ok",
+        data: {
+          vocab: ["photosynthesis"],
+          concepts: ["energy transfer"],
+          equations: [],
+          namesAndDates: [],
+          keyIdeas: [],
+          vocabWithDefinitions: [{ word: "photosynthesis", definition: "Plants convert light into chemical energy." }],
+          conceptsWithExplanations: [{ name: "energy transfer", explanation: "Energy moves between systems by work, heat, or radiation." }],
+          inferredChapterTitle: "Chapter 7",
+          inferredSectionTitle: "Section 2.1",
+          quality: {
+            accepted: true,
+            documentType: "lesson",
+            detectedLanguage: "english",
+            questionAnswerLayouts: [],
+            issues: [],
+          },
+        },
+      },
+    });
+
+    firebaseFunctionMocks.tierCallableMock.mockResolvedValue({
+      data: {
+        success: true,
+        message: "ok",
+        data: {
+          items: [
+            {
+              id: "vocab:photosynthesis:l1",
+              baseItemId: "vocab:photosynthesis",
+              contentType: "vocab",
+              question: "photosynthesis",
+              correctAnswer: "Plants convert light into chemical energy.",
+              distractors: ["Cellular respiration", "Osmosis", "Fermentation"],
+              difficultyLevel: 1,
+              isOriginal: true,
+              variationOf: null,
+              sourceMetadata: {
+                sourceType: "document-ingest",
+                originalFilename: "lesson.txt",
+                variationAllowed: true,
+                inferredLocation: { chapter: 7, section: 2.1 },
+              },
+            },
+            {
+              id: "vocab:photosynthesis:l2:1",
+              baseItemId: "vocab:photosynthesis",
+              contentType: "vocab",
+              question: "Which statement best describes photosynthesis in plants?",
+              correctAnswer: "Plants convert light into chemical energy.",
+              distractors: ["Plants absorb minerals through roots.", "Plants release all absorbed oxygen.", "Plants only store kinetic energy."],
+              difficultyLevel: 2,
+              isOriginal: false,
+              variationOf: "vocab:photosynthesis:l1",
+              sourceMetadata: {
+                sourceType: "document-ingest",
+                originalFilename: "lesson.txt",
+                variationAllowed: true,
+                inferredLocation: { chapter: 7, section: 2.1 },
+              },
+            },
+            {
+              id: "vocab:photosynthesis:l3:1",
+              baseItemId: "vocab:photosynthesis",
+              contentType: "vocab",
+              question: "Which option is NOT a valid description of photosynthesis?",
+              correctAnswer: "Plants convert light into chemical energy.",
+              distractors: ["Plants make sugars using light.", "Photosynthesis supports food chains.", "Chlorophyll helps capture light."],
+              difficultyLevel: 3,
+              isOriginal: false,
+              variationOf: "vocab:photosynthesis:l1",
+              sourceMetadata: {
+                sourceType: "document-ingest",
+                originalFilename: "lesson.txt",
+                variationAllowed: true,
+                inferredLocation: { chapter: 7, section: 2.1 },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await extractFromDocuments([
+      new File(["Plants use light to make sugar."], "lesson.txt", { type: "text/plain" }),
+    ]);
+
+    expect(firebaseFunctionMocks.httpsCallableMock).toHaveBeenCalledWith(
+      { app: "test-functions-client" },
+      "generateTieredQuestionVariations"
+    );
+
+    const tierPayload = firebaseFunctionMocks.tierCallableMock.mock.calls[0]?.[0];
+    expect(tierPayload.items).toEqual([
+      {
+        id: "vocab:photosynthesis",
+        contentType: "vocab",
+        question: "photosynthesis",
+        correctAnswer: "Plants convert light into chemical energy.",
+        sourceMetadata: {
+          sourceType: "document-ingest",
+          originalFilename: "lesson.txt",
+          variationAllowed: true,
+          inferredLocation: { chapter: 7, section: 2.1 },
+        },
+      },
+      {
+        id: "concept:energy transfer",
+        contentType: "concept",
+        question: "energy transfer",
+        correctAnswer: "Energy moves between systems by work, heat, or radiation.",
+        sourceMetadata: {
+          sourceType: "document-ingest",
+          originalFilename: "lesson.txt",
+          variationAllowed: true,
+          inferredLocation: { chapter: 7, section: 2.1 },
+        },
+      },
+    ]);
+
+    expect(result.tieredQuestionBank?.level1[0]?.question).toBe("photosynthesis");
+    expect(result.tieredQuestionBank?.level2[0]?.variationOf).toBe("vocab:photosynthesis:l1");
+    expect(result.tieredQuestionBank?.level3[0]?.variationOf).toBe("vocab:photosynthesis:l1");
+  });
+
+  it("falls back to deterministic tier generation when variation callable fails", async () => {
+    firebaseFunctionMocks.extractCallableMock.mockResolvedValue({
+      data: {
+        success: true,
+        message: "ok",
+        data: {
+          vocab: ["osmosis", "diffusion"],
+          concepts: [],
+          equations: [],
+          namesAndDates: [],
+          keyIdeas: [],
+          vocabWithDefinitions: [{ word: "osmosis", definition: "Movement of water across a semipermeable membrane." }],
+          conceptsWithExplanations: [],
+          quality: {
+            accepted: true,
+            documentType: "lesson",
+            detectedLanguage: "english",
+            questionAnswerLayouts: [],
+            issues: [],
+          },
+        },
+      },
+    });
+
+    firebaseFunctionMocks.tierCallableMock.mockRejectedValue(new Error("network down"));
+
+    const result = await extractFromDocuments([
+      new File(["Osmosis notes"], "bio.txt", { type: "text/plain" }),
+    ]);
+
+    expect(result.tieredQuestionBank?.level1).toHaveLength(1);
+    expect(result.tieredQuestionBank?.level2).toHaveLength(2);
+    expect(result.tieredQuestionBank?.level3).toHaveLength(2);
+
+    const level1 = result.tieredQuestionBank?.level1[0];
+    expect(level1?.question).toBe("osmosis");
+    expect(level1?.correctAnswer).toBe("Movement of water across a semipermeable membrane.");
+
+    const expectedVariationOf = `${level1?.baseItemId}:l1`;
+    expect(result.tieredQuestionBank?.level2.every((item) => item.variationOf === expectedVariationOf)).toBe(true);
+    expect(result.tieredQuestionBank?.level3.every((item) => item.variationOf === expectedVariationOf)).toBe(true);
   });
 });

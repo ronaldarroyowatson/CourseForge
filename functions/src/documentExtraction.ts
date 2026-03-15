@@ -50,6 +50,10 @@ export interface ExtractedDocumentData {
   equations: string[];
   namesAndDates: Array<{ name: string; date?: string }>;
   keyIdeas: string[];
+  vocabWithDefinitions?: Array<{ word: string; definition?: string }>;
+  conceptsWithExplanations?: Array<{ name: string; explanation?: string }>;
+  inferredChapterTitle?: string;
+  inferredSectionTitle?: string;
   quality: ExtractionQualityReport;
 }
 
@@ -346,6 +350,8 @@ export function createEmptyExtractionData(issue?: ExtractionIssue): ExtractedDoc
     equations: [],
     namesAndDates: [],
     keyIdeas: [],
+    vocabWithDefinitions: [],
+    conceptsWithExplanations: [],
     quality: {
       accepted: issues.every((entry) => entry.severity !== "error"),
       documentType: "unknown",
@@ -373,10 +379,14 @@ export function buildExtractionPrompts(input: {
 Return ONLY valid JSON matching this exact shape:
 {
   "vocab": ["term1", "term2"],
+  "vocabWithDefinitions": [{ "word": "term1", "definition": "..." }],
   "concepts": ["concept1"],
+  "conceptsWithExplanations": [{ "name": "concept1", "explanation": "..." }],
   "equations": ["LaTeX or plain equation string"],
   "namesAndDates": [{ "name": "...", "date": "..." }],
   "keyIdeas": ["key idea sentence"],
+  "inferredChapterTitle": "...",
+  "inferredSectionTitle": "...",
   "quality": {
     "documentType": "lesson|worksheet|assessment|reference|code|unknown",
     "detectedLanguage": "english|unknown",
@@ -387,6 +397,9 @@ Handle common worksheet layouts:
 - questions on one page and answers on a later page
 - a question with the answer directly below it
 - a question where the answer is already filled in inside the question in bold
+Also infer likely chapter/section names from headings when possible.
+For vocabulary, include definition text whenever it is available in the source.
+For concepts, include the essential/focus question and attach explanation text when present.
 Notice and report problems such as unreadable or unsupported content, source code instead of curriculum, wrong-subject uploads, and mixed next-chapter content.
 If the document looks unsafe or irrelevant, return empty arrays and explain the issue in quality.issues.
 Be concise. Omit nothing from the required object.`;

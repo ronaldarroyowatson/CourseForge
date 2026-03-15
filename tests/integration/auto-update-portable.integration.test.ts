@@ -23,7 +23,7 @@ describe("portable updater script", () => {
       const releasePath = join(root, "latest.json");
       writeFileSync(
         releasePath,
-        JSON.stringify({ tag_name: "v1.2.0", assets: [] }, null, 2),
+        JSON.stringify({ tag_name: "v1.2.1", assets: [] }, null, 2),
         "utf8"
       );
 
@@ -31,7 +31,7 @@ describe("portable updater script", () => {
         "-PackageRoot",
         root,
         "-CurrentVersion",
-        "1.2.0",
+        "1.2.1",
         "-LatestReleaseJsonPath",
         releasePath,
       ]);
@@ -52,8 +52,8 @@ describe("portable updater script", () => {
         releasePath,
         JSON.stringify(
           {
-            tag_name: "v1.2.1",
-            assets: [{ name: "CourseForge-1.2.1-portable.zip", browser_download_url: "https://example.invalid/file.zip" }],
+            tag_name: "v1.2.2",
+            assets: [{ name: "CourseForge-1.2.2-portable.zip", browser_download_url: "https://example.invalid/file.zip" }],
           },
           null,
           2
@@ -65,7 +65,7 @@ describe("portable updater script", () => {
         "-PackageRoot",
         root,
         "-CurrentVersion",
-        "1.2.0",
+        "1.2.1",
         "-LatestReleaseJsonPath",
         releasePath,
         "-CheckOnly",

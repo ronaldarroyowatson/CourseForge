@@ -792,6 +792,10 @@ function uniqueTrimmedStrings(values: unknown): string[] {
   )];
 }
 
+function normalizeComparisonKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function buildBlockedExtraction(quality: ExtractionQualityReport): ExtractedDocumentData {
   const empty = createEmptyExtractionData();
   return {
@@ -925,18 +929,78 @@ export const extractDocumentContent = onCall(async (request) => {
       : undefined;
     const mergedQuality = mergeQualityReports(heuristicQuality, aiQuality);
 
+    const vocabWithDefinitions = Array.isArray(parsed.vocabWithDefinitions)
+      ? (parsed.vocabWithDefinitions as Array<{ word?: unknown; definition?: unknown }>)
+          .filter((entry) => typeof entry.word === "string" && entry.word.trim().length > 0)
+          .map((entry) => ({
+            word: (entry.word as string).trim(),
+            definition: typeof entry.definition === "string" ? entry.definition.trim() || undefined : undefined,
+          }))
+      : [];
+
+    const conceptsWithExplanations = Array.isArray(parsed.conceptsWithExplanations)
+      ? (parsed.conceptsWithExplanations as Array<{ name?: unknown; explanation?: unknown }>)
+          .filter((entry) => typeof entry.name === "string" && entry.name.trim().length > 0)
+          .map((entry) => ({
+            name: (entry.name as string).trim(),
+            explanation: typeof entry.explanation === "string" ? entry.explanation.trim() || undefined : undefined,
+          }))
+      : [];
+
+    const inferredChapterTitle = typeof parsed.inferredChapterTitle === "string"
+      ? parsed.inferredChapterTitle.trim() || undefined
+      : undefined;
+
+    const inferredSectionTitle = typeof parsed.inferredSectionTitle === "string"
+      ? parsed.inferredSectionTitle.trim() || undefined
+      : undefined;
+
+    const sectionTitleMismatch =
+      context?.sectionTitle &&
+      inferredSectionTitle &&
+      normalizeComparisonKey(context.sectionTitle) !== normalizeComparisonKey(inferredSectionTitle);
+
+    const qualityWithSectionCheck = sectionTitleMismatch
+      ? {
+          ...mergedQuality,
+          issues: [
+            ...mergedQuality.issues,
+            {
+              code: "subject_mismatch" as const,
+              severity: "warning" as const,
+              message: `Inferred section title "${inferredSectionTitle}" may not match selected section "${context?.sectionTitle}".`,
+            },
+          ],
+        }
+      : mergedQuality;
+
     extracted = {
-      vocab: mergedQuality.accepted ? uniqueTrimmedStrings(parsed.vocab) : [],
-      concepts: mergedQuality.accepted ? uniqueTrimmedStrings(parsed.concepts) : [],
-      equations: mergedQuality.accepted ? uniqueTrimmedStrings(parsed.equations) : [],
+      vocab: qualityWithSectionCheck.accepted
+        ? (vocabWithDefinitions.length > 0
+            ? uniqueTrimmedStrings(vocabWithDefinitions.map((entry) => entry.word))
+            : uniqueTrimmedStrings(parsed.vocab))
+        : [],
+      concepts: qualityWithSectionCheck.accepted
+        ? (conceptsWithExplanations.length > 0
+            ? uniqueTrimmedStrings(conceptsWithExplanations.map((entry) => entry.name))
+            : uniqueTrimmedStrings(parsed.concepts))
+        : [],
+      equations: qualityWithSectionCheck.accepted ? uniqueTrimmedStrings(parsed.equations) : [],
       namesAndDates: Array.isArray(parsed.namesAndDates)
         ? (parsed.namesAndDates as Array<{ name?: unknown; date?: unknown }>)
             .filter((entry) => typeof entry.name === "string")
             .map((entry) => ({ name: (entry.name as string).trim(), date: typeof entry.date === "string" ? entry.date.trim() || undefined : undefined }))
-            .filter((entry) => mergedQuality.accepted && entry.name.length > 0)
+            .filter((entry) => qualityWithSectionCheck.accepted && entry.name.length > 0)
         : [],
-      keyIdeas: mergedQuality.accepted ? uniqueTrimmedStrings(parsed.keyIdeas) : [],
-      quality: mergedQuality,
+      keyIdeas: qualityWithSectionCheck.accepted ? uniqueTrimmedStrings(parsed.keyIdeas) : [],
+      vocabWithDefinitions: qualityWithSectionCheck.accepted ? vocabWithDefinitions : [],
+      conceptsWithExplanations: qualityWithSectionCheck.accepted ? conceptsWithExplanations : [],
+      inferredChapterTitle,
+      inferredSectionTitle,
+      quality: {
+        ...qualityWithSectionCheck,
+        accepted: !qualityWithSectionCheck.issues.some((issue) => issue.severity === "error"),
+      },
     };
   } catch {
     throw new HttpsError("internal", "AI returned malformed JSON. Please try again.");

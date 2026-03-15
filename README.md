@@ -2,9 +2,9 @@
 
 CourseForge is a local-first curriculum authoring platform for teachers. It combines a browser extension for quick capture with a full web app for textbook management, sync, moderation, and XML export.
 
-Version `1.2.0` focuses on premium-usage governance, section-content sync parity, and Firestore security hardening, including baseline-derived premium caps, deterministic reset windows, and expanded admin/test coverage.
+Version `1.2.1` focuses on PowerPoint ingestion parity: drag/drop and batch uploads, filename-based chapter/section matching, duplicate skip messaging, and incremental delta-only slide merges.
 
-Quick release note: v1.2.0 is primarily about policy enforcement and reliability hardening across sync, rules, admin tooling, and validation.
+Quick release note: v1.2.1 is primarily about reliable PowerPoint refresh workflows without duplicate content churn.
 
 ## What it does
 
@@ -24,13 +24,13 @@ Quick release note: v1.2.0 is primarily about policy enforcement and reliability
 - Updated textbook action icons and favorite/archive sorting behavior.
 - Vitest integration tests covering login restore, admin route access, claim refresh, and sync bootstrap.
 
-## v1.2.0 highlights
+## v1.2.1 highlights
 
-- Baseline-driven premium usage limits across backend, shared services, and local tracker (`monthlyBaselinePercent = 8.6`, derived daily/weekly defaults).
-- Monthly premium reset policy standardized to local `31st @ 07:00` with end-of-month fallback.
-- New admin Premium Management panel for usage visibility, freeze/unfreeze actions, and manual daily/weekly/monthly resets.
-- Added sync coverage for section-scoped content entities (`equations`, `concepts`, `keyIdeas`) and canonical Firestore ownership fields.
-- Expanded Firestore rules and test harness for canonical hierarchy enforcement and legacy-path blocking.
+- Added drag/drop plus multi-file and folder-based PowerPoint import from the dedicated workspace card.
+- Implemented filename-aware chapter/section matching using name tokens and chapter/section numbering hints.
+- Added SHA-256 duplicate detection with per-file skip messaging for already imported decks.
+- Added source-key and slide-signature based incremental merges so re-imports add only new slides.
+- Added import summaries to report added/skipped content and keep batch behavior transparent.
 
 ## Project structure
 

@@ -3,7 +3,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Chapter,
   DesignSuggestions,
+  ExtractedConceptEntry,
   ExtractedPresentation,
+  ExtractedVocabEntry,
   PresentationSlide,
   Section,
   Textbook,
@@ -21,6 +23,7 @@ import {
   listExtractedPresentationsBySectionId,
   listSectionsByChapterId,
 } from "../../../core/services/repositories";
+import { useRepositories } from "../../hooks/useRepositories";
 
 interface PowerPointWorkspaceCardProps {
   selectedTextbook: Textbook | null;
@@ -63,8 +66,9 @@ async function computeFileHash(file: File): Promise<string> {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function resolveTargetFromFileName(input: {
+function resolveTargetFromSignals(input: {
   fileName: string;
+  titleSignal?: string;
   chapters: Chapter[];
   sectionsByChapter: Map<string, Section[]>;
   selectedChapter: Chapter | null;
@@ -79,6 +83,7 @@ function resolveTargetFromFileName(input: {
   }
 
   const fileKey = normalizeKey(input.fileName);
+  const titleKey = input.titleSignal ? normalizeKey(input.titleSignal) : "";
 
   const chapterMatch = fileKey.match(/\b(?:chapter|ch)\s*[-_]?\s*(\d+)\b/i);
   const sectionMatch = fileKey.match(/\b(?:section|sec|s)\s*[-_]?\s*(\d+)\b/i);
@@ -102,6 +107,12 @@ function resolveTargetFromFileName(input: {
       }
       if (fileKey.includes(chapterKey) || chapterKey.includes(fileKey)) {
         score += 50;
+      }
+      if (titleKey && (titleKey.includes(sectionKey) || sectionKey.includes(titleKey))) {
+        score += 110;
+      }
+      if (titleKey && (titleKey.includes(chapterKey) || chapterKey.includes(titleKey))) {
+        score += 65;
       }
       if (chapterMatch && Number(chapterMatch[1]) === chapter.index) {
         score += 25;
@@ -132,6 +143,13 @@ export function PowerPointWorkspaceCard({
   selectedChapter,
   selectedSection,
 }: PowerPointWorkspaceCardProps): React.JSX.Element {
+  const {
+    createVocabTerm,
+    createConcept,
+    fetchVocabTermsBySectionId,
+    fetchConceptsBySectionId,
+  } = useRepositories();
+
   const [step, setStep] = useState<PowerPointStep>("upload");
   const [isBusy, setIsBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -168,6 +186,56 @@ export function PowerPointWorkspaceCard({
     });
   }, [enableTimer, kahootStyle, presentation, timerSeconds]);
 
+  function mergeExtractedVocab(
+    baseline: ExtractedVocabEntry[] = [],
+    incoming: ExtractedVocabEntry[] = []
+  ): ExtractedVocabEntry[] {
+    const merged = new Map<string, ExtractedVocabEntry>();
+
+    [...baseline, ...incoming].forEach((entry) => {
+      const word = entry.word?.trim();
+      if (!word) {
+        return;
+      }
+
+      const key = normalizeKey(word);
+      const existing = merged.get(key);
+      if (!existing || (!existing.definition && entry.definition)) {
+        merged.set(key, {
+          word,
+          definition: entry.definition?.trim() || undefined,
+        });
+      }
+    });
+
+    return [...merged.values()];
+  }
+
+  function mergeExtractedConcepts(
+    baseline: ExtractedConceptEntry[] = [],
+    incoming: ExtractedConceptEntry[] = []
+  ): ExtractedConceptEntry[] {
+    const merged = new Map<string, ExtractedConceptEntry>();
+
+    [...baseline, ...incoming].forEach((entry) => {
+      const name = entry.name?.trim();
+      if (!name) {
+        return;
+      }
+
+      const key = normalizeKey(name);
+      const existing = merged.get(key);
+      if (!existing || (!existing.explanation && entry.explanation)) {
+        merged.set(key, {
+          name,
+          explanation: entry.explanation?.trim() || undefined,
+        });
+      }
+    });
+
+    return [...merged.values()];
+  }
+
   async function handleImportFiles(files: File[]): Promise<void> {
     const selectedFiles = files.filter(Boolean);
     if (selectedFiles.length === 0 || !selectedTextbook) {
@@ -199,6 +267,69 @@ export function PowerPointWorkspaceCard({
       let noDeltaCount = 0;
       let skippedCount = 0;
       let preview: ExtractedPresentation | null = null;
+      const sectionVocabSeenById = new Map<string, Set<string>>();
+      const sectionConceptSeenById = new Map<string, Set<string>>();
+
+      async function applyStructuredSectionContent(
+        sectionId: string,
+        vocab: ExtractedVocabEntry[] | undefined,
+        concepts: ExtractedConceptEntry[] | undefined,
+        fileLabel: string
+      ): Promise<void> {
+        if (!sectionVocabSeenById.has(sectionId)) {
+          const existingVocab = await fetchVocabTermsBySectionId(sectionId);
+          sectionVocabSeenById.set(sectionId, new Set(existingVocab.map((entry) => normalizeKey(entry.word))));
+        }
+
+        if (!sectionConceptSeenById.has(sectionId)) {
+          const existingConcepts = await fetchConceptsBySectionId(sectionId);
+          sectionConceptSeenById.set(sectionId, new Set(existingConcepts.map((entry) => normalizeKey(entry.name))));
+        }
+
+        const vocabSeen = sectionVocabSeenById.get(sectionId) as Set<string>;
+        const conceptSeen = sectionConceptSeenById.get(sectionId) as Set<string>;
+
+        const newVocab = (vocab ?? [])
+          .map((entry) => ({ word: entry.word.trim(), definition: entry.definition?.trim() || undefined }))
+          .filter((entry) => entry.word.length > 0)
+          .filter((entry) => {
+            const key = normalizeKey(entry.word);
+            if (vocabSeen.has(key)) {
+              return false;
+            }
+            vocabSeen.add(key);
+            return true;
+          });
+
+        const newConcepts = (concepts ?? [])
+          .map((entry) => ({ name: entry.name.trim(), explanation: entry.explanation?.trim() || undefined }))
+          .filter((entry) => entry.name.length > 0)
+          .filter((entry) => {
+            const key = normalizeKey(entry.name);
+            if (conceptSeen.has(key)) {
+              return false;
+            }
+            conceptSeen.add(key);
+            return true;
+          });
+
+        await Promise.all([
+          ...newVocab.map((entry) => createVocabTerm({
+            sectionId,
+            word: entry.word,
+            definition: entry.definition,
+          })),
+          ...newConcepts.map((entry) => createConcept({
+            sectionId,
+            name: entry.name,
+            explanation: entry.explanation,
+          })),
+        ]);
+
+        if (newVocab.length > 0 || newConcepts.length > 0) {
+          reportLines.push(`${fileLabel}: captured ${newVocab.length} vocab and ${newConcepts.length} concepts from slide content.`);
+        }
+      }
 
       for (const file of selectedFiles) {
         if (!isSupportedPresentationType(file)) {
@@ -207,8 +338,19 @@ export function PowerPointWorkspaceCard({
           continue;
         }
 
-        const target = resolveTargetFromFileName({
+        setImportStatusMessage(
+          file.name.toLowerCase().endsWith(".ppt")
+            ? `Converting ${file.name} from .ppt to .pptx...`
+            : `Extracting ${file.name}...`
+        );
+
+        const extracted = await extractPresentationFromFile(file, {
+          textbook: selectedTextbook,
+        });
+
+        const target = resolveTargetFromSignals({
           fileName: file.name,
+          titleSignal: extracted.inferredSectionTitle ?? extracted.presentationTitle,
           chapters,
           sectionsByChapter,
           selectedChapter,
@@ -217,15 +359,9 @@ export function PowerPointWorkspaceCard({
 
         if (!target) {
           skippedCount += 1;
-          reportLines.push(`${file.name}: skipped (could not auto-match chapter/section).`);
+          reportLines.push(`${file.name}: skipped (could not auto-match chapter/section from filename or title slide).`);
           continue;
         }
-
-        setImportStatusMessage(
-          file.name.toLowerCase().endsWith(".ppt")
-            ? `Converting ${file.name} from .ppt to .pptx...`
-            : `Extracting ${file.name}...`
-        );
 
         const fileHash = await computeFileHash(file);
         const existingInSection = await listExtractedPresentationsBySectionId(target.section.id);
@@ -236,11 +372,14 @@ export function PowerPointWorkspaceCard({
           continue;
         }
 
-        const extracted = await extractPresentationFromFile(file, {
-          textbook: selectedTextbook,
-          chapter: target.chapter,
-          section: target.section,
-        });
+        const extractedWithTarget: ExtractedPresentation = {
+          ...extracted,
+          textbookId: selectedTextbook.id,
+          chapterId: target.chapter.id,
+          sectionId: target.section.id,
+          inferredChapterTitle: extracted.inferredChapterTitle ?? target.chapter.name,
+          inferredSectionTitle: extracted.inferredSectionTitle ?? target.section.title,
+        };
 
         const sourceKey = buildSourceKey(file.name);
         const existingBySource = existingInSection.find(
@@ -249,7 +388,7 @@ export function PowerPointWorkspaceCard({
 
         if (existingBySource) {
           const existingSignatures = new Set(existingBySource.slides.map((slide: PresentationSlide) => slideSignature(slide)));
-          const newSlides = extracted.slides.filter((slide: PresentationSlide) => !existingSignatures.has(slideSignature(slide)));
+          const newSlides = extractedWithTarget.slides.filter((slide: PresentationSlide) => !existingSignatures.has(slideSignature(slide)));
 
           if (newSlides.length === 0) {
             noDeltaCount += 1;
@@ -259,17 +398,22 @@ export function PowerPointWorkspaceCard({
 
           const merged: ExtractedPresentation = {
             ...existingBySource,
-            fileName: extracted.fileName,
+            fileName: extractedWithTarget.fileName,
             fileHash,
             sourceKey,
             slides: [...existingBySource.slides, ...newSlides],
-            designSuggestions: extracted.designSuggestions ?? existingBySource.designSuggestions,
+            designSuggestions: extractedWithTarget.designSuggestions ?? existingBySource.designSuggestions,
+            inferredChapterTitle: extractedWithTarget.inferredChapterTitle,
+            inferredSectionTitle: extractedWithTarget.inferredSectionTitle,
+            extractedVocab: mergeExtractedVocab(existingBySource.extractedVocab, extractedWithTarget.extractedVocab),
+            extractedConcepts: mergeExtractedConcepts(existingBySource.extractedConcepts, extractedWithTarget.extractedConcepts),
             updatedAt: new Date().toISOString(),
             pendingSync: true,
             source: "local",
           };
 
           await savePresentationToLocalAndFirestore(merged);
+          await applyStructuredSectionContent(target.section.id, merged.extractedVocab, merged.extractedConcepts, file.name);
           importedCount += 1;
           reportLines.push(
             `${file.name}: merged into ${target.chapter.name} -> ${target.section.title} (+${newSlides.length} new slide(s)). ${target.reason}`
@@ -281,12 +425,13 @@ export function PowerPointWorkspaceCard({
         }
 
         const toSave: ExtractedPresentation = {
-          ...extracted,
+          ...extractedWithTarget,
           fileHash,
           sourceKey,
         };
 
         await savePresentationToLocalAndFirestore(toSave);
+        await applyStructuredSectionContent(target.section.id, toSave.extractedVocab, toSave.extractedConcepts, file.name);
         importedCount += 1;
         reportLines.push(`${file.name}: imported to ${target.chapter.name} -> ${target.section.title}. ${target.reason}`);
         if (!preview) {

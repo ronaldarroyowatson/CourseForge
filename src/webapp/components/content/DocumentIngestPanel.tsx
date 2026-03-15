@@ -12,6 +12,16 @@ interface DocumentIngestPanelProps {
 
 type IngestStep = "upload" | "extracting" | "review" | "saving" | "done";
 
+interface EditableVocabItem {
+  word: string;
+  definition?: string;
+}
+
+interface EditableConceptItem {
+  name: string;
+  explanation?: string;
+}
+
 function EditableList({
   label,
   items,
@@ -36,6 +46,67 @@ function EditableList({
                 onChange={(e) => {
                   const next = [...items];
                   next[index] = e.target.value;
+                  onChange(next);
+                }}
+                className="ingest-item-input"
+              />
+              <button
+                type="button"
+                className="btn-icon btn-danger"
+                onClick={() => onChange(items.filter((_, i) => i !== index))}
+                title="Remove"
+                aria-label="Remove item"
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function EditablePairList({
+  label,
+  nameLabel,
+  detailLabel,
+  items,
+  onChange,
+}: {
+  label: string;
+  nameLabel: string;
+  detailLabel: string;
+  items: Array<{ name: string; detail?: string }>;
+  onChange: (next: Array<{ name: string; detail?: string }>) => void;
+}): React.JSX.Element {
+  return (
+    <div className="ingest-review-section">
+      <h4>{label} ({items.length})</h4>
+      {items.length === 0 ? (
+        <p className="ingest-empty">None found.</p>
+      ) : (
+        <ul className="ingest-item-list">
+          {items.map((item, index) => (
+            <li key={index} className="ingest-item-row">
+              <input
+                value={item.name}
+                aria-label={`${nameLabel} ${index + 1}`}
+                placeholder={nameLabel}
+                onChange={(e) => {
+                  const next = [...items];
+                  next[index] = { ...next[index], name: e.target.value };
+                  onChange(next);
+                }}
+                className="ingest-item-input"
+              />
+              <input
+                value={item.detail ?? ""}
+                aria-label={`${detailLabel} ${index + 1}`}
+                placeholder={detailLabel}
+                onChange={(e) => {
+                  const next = [...items];
+                  next[index] = { ...next[index], detail: e.target.value || undefined };
                   onChange(next);
                 }}
                 className="ingest-item-input"
@@ -83,8 +154,8 @@ export function DocumentIngestPanel({
   const [saveSummaryMessage, setSaveSummaryMessage] = useState<string | null>(null);
 
   // Editable review state (mirrors `extracted` but user can edit before saving)
-  const [reviewVocab, setReviewVocab] = useState<string[]>([]);
-  const [reviewConcepts, setReviewConcepts] = useState<string[]>([]);
+  const [reviewVocabItems, setReviewVocabItems] = useState<EditableVocabItem[]>([]);
+  const [reviewConceptItems, setReviewConceptItems] = useState<EditableConceptItem[]>([]);
   const [reviewEquations, setReviewEquations] = useState<string[]>([]);
   const [reviewKeyIdeas, setReviewKeyIdeas] = useState<string[]>([]);
   const [reviewNamesAndDates, setReviewNamesAndDates] = useState<Array<{ name: string; date?: string }>>([]);
@@ -128,8 +199,26 @@ export function DocumentIngestPanel({
         sectionId: selectedSectionId ?? undefined,
       });
       setExtracted(data);
-      setReviewVocab([...data.vocab]);
-      setReviewConcepts([...data.concepts]);
+      const extractedVocab: EditableVocabItem[] = data.vocabWithDefinitions?.length
+        ? data.vocabWithDefinitions.map((entry) => ({ word: entry.word, definition: entry.definition }))
+        : data.vocab.map((word) => ({ word }));
+
+      const extractedConcepts: EditableConceptItem[] = data.conceptsWithExplanations?.length
+        ? data.conceptsWithExplanations.map((entry) => ({ name: entry.name, explanation: entry.explanation }))
+        : data.concepts.map((name) => ({ name }));
+
+      setReviewVocabItems(
+        extractedVocab.map((entry) => ({
+          word: entry.word,
+          definition: entry.definition,
+        }))
+      );
+      setReviewConceptItems(
+        extractedConcepts.map((entry) => ({
+          name: entry.name,
+          explanation: entry.explanation,
+        }))
+      );
       setReviewEquations([...data.equations]);
       setReviewKeyIdeas([...data.keyIdeas]);
       setReviewNamesAndDates(data.namesAndDates.map((nd) => ({ ...nd })));
@@ -174,11 +263,14 @@ export function DocumentIngestPanel({
       const equationSeen = new Set(existingEquations.map((item) => normalizeForDedupe(item.latex)));
       const keyIdeaSeen = new Set(existingKeyIdeas.map((item) => normalizeForDedupe(item.text)));
 
-      const newVocab = reviewVocab
-        .map((item) => item.trim())
-        .filter(Boolean)
+      const newVocab = reviewVocabItems
+        .map((item) => ({
+          word: item.word.trim(),
+          definition: item.definition?.trim() || undefined,
+        }))
+        .filter((item) => item.word.length > 0)
         .filter((item) => {
-          const normalized = normalizeForDedupe(item);
+          const normalized = normalizeForDedupe(item.word);
           if (vocabSeen.has(normalized)) {
             return false;
           }
@@ -187,11 +279,14 @@ export function DocumentIngestPanel({
           return true;
         });
 
-      const newConcepts = reviewConcepts
-        .map((item) => item.trim())
-        .filter(Boolean)
+      const newConcepts = reviewConceptItems
+        .map((item) => ({
+          name: item.name.trim(),
+          explanation: item.explanation?.trim() || undefined,
+        }))
+        .filter((item) => item.name.length > 0)
         .filter((item) => {
-          const normalized = normalizeForDedupe(item);
+          const normalized = normalizeForDedupe(item.name);
           if (conceptSeen.has(normalized)) {
             return false;
           }
@@ -244,8 +339,16 @@ export function DocumentIngestPanel({
         });
 
       await Promise.all([
-        ...newVocab.map((word) => createVocabTerm({ sectionId: selectedSectionId, word })),
-        ...newConcepts.map((name) => createConcept({ sectionId: selectedSectionId, name })),
+        ...newVocab.map((entry) => createVocabTerm({
+          sectionId: selectedSectionId,
+          word: entry.word,
+          definition: entry.definition,
+        })),
+        ...newConcepts.map((entry) => createConcept({
+          sectionId: selectedSectionId,
+          name: entry.name,
+          explanation: entry.explanation,
+        })),
         ...newEquations.map((latex) => createEquation({ sectionId: selectedSectionId, name: latex, latex })),
         ...newKeyIdeasFromReview.map((text) => createKeyIdea({ sectionId: selectedSectionId, text })),
         ...newKeyIdeasFromNames.map((text) => createKeyIdea({ sectionId: selectedSectionId, text })),
@@ -376,14 +479,34 @@ export function DocumentIngestPanel({
             </div>
           ) : null}
 
+          {extracted.inferredChapterTitle || extracted.inferredSectionTitle ? (
+            <p className="ingest-layout-summary">
+              Inferred destination: {extracted.inferredChapterTitle ? `Chapter ${extracted.inferredChapterTitle}` : "Chapter unknown"}
+              {" · "}
+              {extracted.inferredSectionTitle ? `Section ${extracted.inferredSectionTitle}` : "Section unknown"}
+            </p>
+          ) : null}
+
           {extracted.quality.questionAnswerLayouts.length > 0 ? (
             <p className="ingest-layout-summary">
               Detected worksheet layout: {extracted.quality.questionAnswerLayouts.join(", ")}.
             </p>
           ) : null}
 
-          <EditableList label="Vocab Terms" items={reviewVocab} onChange={setReviewVocab} />
-          <EditableList label="Concepts" items={reviewConcepts} onChange={setReviewConcepts} />
+          <EditablePairList
+            label="Vocab Terms"
+            nameLabel="Word"
+            detailLabel="Definition (optional)"
+            items={reviewVocabItems.map((item) => ({ name: item.word, detail: item.definition }))}
+            onChange={(next) => setReviewVocabItems(next.map((item) => ({ word: item.name, definition: item.detail })))}
+          />
+          <EditablePairList
+            label="Concepts"
+            nameLabel="Concept"
+            detailLabel="Explanation (optional)"
+            items={reviewConceptItems.map((item) => ({ name: item.name, detail: item.explanation }))}
+            onChange={(next) => setReviewConceptItems(next.map((item) => ({ name: item.name, explanation: item.detail })))}
+          />
           <EditableList label="Equations" items={reviewEquations} onChange={setReviewEquations} />
           <EditableList label="Key Ideas" items={reviewKeyIdeas} onChange={setReviewKeyIdeas} />
 

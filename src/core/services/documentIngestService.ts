@@ -55,6 +55,10 @@ export interface ExtractedDocumentData {
   equations: string[];
   namesAndDates: Array<{ name: string; date?: string }>;
   keyIdeas: string[];
+  vocabWithDefinitions?: Array<{ word: string; definition?: string }>;
+  conceptsWithExplanations?: Array<{ name: string; explanation?: string }>;
+  inferredChapterTitle?: string;
+  inferredSectionTitle?: string;
   quality: ExtractionQualityReport;
 }
 
@@ -131,12 +135,70 @@ export function mergeExtractedDocuments(
     ? "english"
     : "unknown";
 
+  const vocabWithDefinitionsMap = new Map<string, { word: string; definition?: string }>();
+  const conceptsWithExplanationsMap = new Map<string, { name: string; explanation?: string }>();
+
+  results.forEach(({ data }) => {
+    data.vocabWithDefinitions?.forEach((entry) => {
+      const word = entry.word?.trim();
+      if (!word) {
+        return;
+      }
+
+      const key = normalizeForSignature(word);
+      const existing = vocabWithDefinitionsMap.get(key);
+      if (!existing || (!existing.definition && entry.definition)) {
+        vocabWithDefinitionsMap.set(key, {
+          word,
+          definition: entry.definition?.trim() || undefined,
+        });
+      }
+    });
+
+    data.conceptsWithExplanations?.forEach((entry) => {
+      const name = entry.name?.trim();
+      if (!name) {
+        return;
+      }
+
+      const key = normalizeForSignature(name);
+      const existing = conceptsWithExplanationsMap.get(key);
+      if (!existing || (!existing.explanation && entry.explanation)) {
+        conceptsWithExplanationsMap.set(key, {
+          name,
+          explanation: entry.explanation?.trim() || undefined,
+        });
+      }
+    });
+  });
+
+  const inferredSectionTitle = results.find(({ data }) => data.inferredSectionTitle?.trim())?.data.inferredSectionTitle?.trim();
+  const inferredChapterTitle = results.find(({ data }) => data.inferredChapterTitle?.trim())?.data.inferredChapterTitle?.trim();
+
+  const fallbackVocabWithDefinitions = dedupeStrings(results.flatMap(({ data }) => data.vocab)).map((word) => ({ word }));
+  const fallbackConceptsWithExplanations = dedupeStrings(results.flatMap(({ data }) => data.concepts)).map((name) => ({ name }));
+
+  const mergedVocabWithDefinitions = [...vocabWithDefinitionsMap.values()];
+  const mergedConceptsWithExplanations = [...conceptsWithExplanationsMap.values()];
+
+  const vocabList = mergedVocabWithDefinitions.length > 0
+    ? mergedVocabWithDefinitions.map((entry) => entry.word)
+    : dedupeStrings(results.flatMap(({ data }) => data.vocab));
+
+  const conceptList = mergedConceptsWithExplanations.length > 0
+    ? mergedConceptsWithExplanations.map((entry) => entry.name)
+    : dedupeStrings(results.flatMap(({ data }) => data.concepts));
+
   return {
-    vocab: dedupeStrings(results.flatMap(({ data }) => data.vocab)),
-    concepts: dedupeStrings(results.flatMap(({ data }) => data.concepts)),
+    vocab: vocabList,
+    concepts: conceptList,
     equations: dedupeStrings(results.flatMap(({ data }) => data.equations)),
     namesAndDates: dedupeNamesAndDates(results.flatMap(({ data }) => data.namesAndDates)),
     keyIdeas: dedupeStrings(results.flatMap(({ data }) => data.keyIdeas)),
+    vocabWithDefinitions: mergedVocabWithDefinitions.length > 0 ? mergedVocabWithDefinitions : fallbackVocabWithDefinitions,
+    conceptsWithExplanations: mergedConceptsWithExplanations.length > 0 ? mergedConceptsWithExplanations : fallbackConceptsWithExplanations,
+    inferredChapterTitle,
+    inferredSectionTitle,
     quality: {
       accepted: !issues.some((issue) => issue.severity === "error"),
       documentType: documentTypes[0] ?? "unknown",
@@ -154,6 +216,8 @@ function createEmptyExtractionData(): ExtractedDocumentData {
     equations: [],
     namesAndDates: [],
     keyIdeas: [],
+    vocabWithDefinitions: [],
+    conceptsWithExplanations: [],
     quality: {
       accepted: true,
       documentType: "unknown",
@@ -173,6 +237,14 @@ function buildExtractedSignature(data: ExtractedDocumentData): string {
   const concepts = dedupeStrings(data.concepts.map(normalizeForSignature));
   const equations = dedupeStrings(data.equations.map(normalizeForSignature));
   const keyIdeas = dedupeStrings(data.keyIdeas.map(normalizeForSignature));
+  const vocabWithDefinitions = (data.vocabWithDefinitions ?? []).map((entry) => ({
+    word: normalizeForSignature(entry.word),
+    definition: entry.definition ? normalizeForSignature(entry.definition) : undefined,
+  }));
+  const conceptsWithExplanations = (data.conceptsWithExplanations ?? []).map((entry) => ({
+    name: normalizeForSignature(entry.name),
+    explanation: entry.explanation ? normalizeForSignature(entry.explanation) : undefined,
+  }));
   const namesAndDates = dedupeNamesAndDates(
     data.namesAndDates.map((value) => ({
       name: normalizeForSignature(value.name),
@@ -180,7 +252,15 @@ function buildExtractedSignature(data: ExtractedDocumentData): string {
     }))
   );
 
-  return JSON.stringify({ vocab, concepts, equations, keyIdeas, namesAndDates });
+  return JSON.stringify({
+    vocab,
+    concepts,
+    equations,
+    keyIdeas,
+    vocabWithDefinitions,
+    conceptsWithExplanations,
+    namesAndDates,
+  });
 }
 
 async function computeFileHash(file: File): Promise<string> {

@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [1.2.1] - 2026-03-15
+
+### Added (1.2.1)
+
+- PowerPoint drag/drop, multi-file browse, and folder-based upload support in the webapp ingestion workflow.
+- Filename-aware chapter/section auto-matching with chapter/section token scoring.
+- Per-file import reporting with explicit duplicate skip and add/merge outcomes.
+
+### Changed (1.2.1)
+
+- Re-imported decks now perform incremental add-only merges based on source key and slide signatures.
+- Duplicate deck detection now uses content hashes and reports skipped files during batch import.
+
+### Verified (1.2.1)
+
+- `npm run typecheck`
+- `npm run test:unit`
+- `npm run test:integration`
+- `npm run test:rules`
+- `npm run check:installer`
+
 ## [1.2.0] - 2026-03-13
 
 ### Added (1.2.0)

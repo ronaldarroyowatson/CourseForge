@@ -150,6 +150,16 @@ export interface DesignSuggestions {
   videoBackgroundSuggestions?: string[];
 }
 
+export interface ExtractedVocabEntry {
+  word: string;
+  definition?: string;
+}
+
+export interface ExtractedConceptEntry {
+  name: string;
+  explanation?: string;
+}
+
 export interface ExtractedPresentation {
   id: string;
   userId?: string;
@@ -158,9 +168,13 @@ export interface ExtractedPresentation {
   sectionId?: string;
   sourceKey?: string;
   fileHash?: string;
+  inferredChapterTitle?: string;
+  inferredSectionTitle?: string;
   presentationTitle: string;
   fileName: string;
   slides: PresentationSlide[];
+  extractedVocab?: ExtractedVocabEntry[];
+  extractedConcepts?: ExtractedConceptEntry[];
   designSuggestions?: DesignSuggestions;
   createdAt: string;
   updatedAt: string;

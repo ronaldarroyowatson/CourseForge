@@ -5,7 +5,9 @@ import PptxGenJS from "pptxgenjs";
 
 import type {
   DesignSuggestions,
+  ExtractedConceptEntry,
   ExtractedPresentation,
+  ExtractedVocabEntry,
   PresentationSlide,
   SlideContentType,
   Textbook,
@@ -213,6 +215,182 @@ function inferSlideType(lines: string[], index: number, hasImages: boolean): Sli
   return "content";
 }
 
+function normalizeEntityKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function cleanSlideLine(value: string): string {
+  return value
+    .replace(/^[\u2022\u25E6\-*\d.)\s]+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function looksLikeVocabularyHeading(value: string): boolean {
+  return /review\s+vocab|vocabulary|key\s+terms?|word\s+bank|terms\s+to\s+know/i.test(value);
+}
+
+function looksLikeTerm(value: string): boolean {
+  if (!value || value.length > 70) {
+    return false;
+  }
+
+  const wordCount = value.split(/\s+/).length;
+  if (wordCount > 6) {
+    return false;
+  }
+
+  return /[a-z]/i.test(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function parseTermDefinitionLine(line: string): { word: string; definition: string } | null {
+  const cleaned = cleanSlideLine(line);
+  const direct = cleaned.match(/^([A-Za-z][A-Za-z0-9 ()'\-/]{1,80})\s*[:\-]\s*(.{4,})$/);
+  if (direct) {
+    const word = direct[1].trim();
+    const definition = direct[2].trim();
+    if (looksLikeTerm(word)) {
+      return { word, definition };
+    }
+  }
+
+  const narrative = cleaned.match(/^([A-Za-z][A-Za-z0-9 ()'\-/]{1,80})\s+(?:is|means|refers to|defined as)\s+(.{4,})$/i);
+  if (narrative) {
+    const word = narrative[1].trim();
+    const definition = narrative[2].trim();
+    if (looksLikeTerm(word)) {
+      return { word, definition };
+    }
+  }
+
+  return null;
+}
+
+function inferHeadingMetadata(
+  slides: PresentationSlide[],
+  fallbackTitle: string
+): { inferredChapterTitle?: string; inferredSectionTitle?: string } {
+  const titleSlide = slides.find((slide) => slide.type === "title") ?? slides[0];
+  const lines: string[] = titleSlide?.rawText
+    ?.map((line: string) => cleanSlideLine(line))
+    .filter(isNonEmptyString) ?? [];
+
+  const chapterLine = lines.find((line) => /\bchapter\b|\bunit\b|\blesson\b/i.test(line));
+  const sectionLine = lines.find((line) => /\bsection\b|\bfocus\b|\btopic\b|\bessential\b/i.test(line));
+
+  const inferredChapterTitle = chapterLine
+    ? chapterLine.replace(/^.*?[:\-]\s*/, "").trim() || chapterLine
+    : undefined;
+
+  const inferredSectionTitle = sectionLine
+    ? sectionLine.replace(/^.*?[:\-]\s*/, "").trim() || sectionLine
+    : lines[0] ?? fallbackTitle;
+
+  return {
+    inferredChapterTitle,
+    inferredSectionTitle,
+  };
+}
+
+function extractStructuredSlideContent(
+  slides: PresentationSlide[]
+): { vocab: ExtractedVocabEntry[]; concepts: ExtractedConceptEntry[] } {
+  const vocabByWord = new Map<string, ExtractedVocabEntry>();
+  const conceptsByName = new Map<string, ExtractedConceptEntry>();
+
+  const allLines = slides.flatMap((slide) =>
+    slide.rawText
+      .map((line: string) => cleanSlideLine(line))
+      .filter(isNonEmptyString)
+  );
+
+  for (const slide of slides) {
+    const lines = slide.rawText
+      .map((line: string) => cleanSlideLine(line))
+      .filter(isNonEmptyString);
+    if (lines.length === 0) {
+      continue;
+    }
+
+    const heading = lines[0];
+    const vocabularySlide = slide.type === "vocab" || looksLikeVocabularyHeading(heading);
+
+    if (vocabularySlide) {
+      for (const line of lines.slice(1)) {
+        const pair = parseTermDefinitionLine(line);
+        if (pair) {
+          const key = normalizeEntityKey(pair.word);
+          const existing = vocabByWord.get(key);
+          if (!existing || (!existing.definition && pair.definition)) {
+            vocabByWord.set(key, { word: pair.word, definition: pair.definition });
+          }
+          continue;
+        }
+
+        line
+          .split(/[;,]/)
+          .map((token: string) => cleanSlideLine(token))
+          .filter(looksLikeTerm)
+          .forEach((term: string) => {
+            const key = normalizeEntityKey(term);
+            if (!vocabByWord.has(key)) {
+              vocabByWord.set(key, { word: term });
+            }
+          });
+      }
+    }
+
+    for (const line of lines) {
+      const essentialQuestion = line.match(/^(?:essential|focus)\s+question[:\-]?\s*(.+)$/i);
+      if (essentialQuestion?.[1]?.trim()) {
+        const name = essentialQuestion[1].trim();
+        conceptsByName.set(normalizeEntityKey(name), {
+          name,
+          explanation: "Essential question for this section.",
+        });
+      }
+
+      if (/steps?\s+in\s+the\s+scientific\s+method/i.test(line)) {
+        conceptsByName.set("scientific method", {
+          name: "Scientific method",
+          explanation: "Process steps students should use for evidence-based investigation.",
+        });
+      }
+
+      const labeledConcept = line.match(/^([A-Za-z][A-Za-z0-9 ()'\-/]{2,80})\s*[:\-]\s*(.{8,})$/);
+      if (labeledConcept) {
+        const name = labeledConcept[1].trim();
+        const explanation = labeledConcept[2].trim();
+        if (/question|method|process|cycle|system|concept/i.test(name)) {
+          conceptsByName.set(normalizeEntityKey(name), { name, explanation });
+        }
+      }
+    }
+  }
+
+  for (const line of allLines) {
+    const pair = parseTermDefinitionLine(line);
+    if (!pair) {
+      continue;
+    }
+
+    const key = normalizeEntityKey(pair.word);
+    const existing = vocabByWord.get(key);
+    if (!existing || (!existing.definition && pair.definition)) {
+      vocabByWord.set(key, { word: pair.word, definition: pair.definition });
+    }
+  }
+
+  return {
+    vocab: [...vocabByWord.values()],
+    concepts: [...conceptsByName.values()],
+  };
+}
+
 async function readZipText(zip: JSZip, path: string): Promise<string> {
   const file = zip.file(path);
   if (!file) {
@@ -405,6 +583,8 @@ export async function extractPresentationFromFile(
   }
 
   const presentationTitle = slides.find((slide) => slide.type === "title")?.rawText[0] ?? sourceFile.name.replace(/\.(ppt|pptx)$/i, "");
+  const inferredHeading = inferHeadingMetadata(slides, presentationTitle);
+  const structured = extractStructuredSlideContent(slides);
   const designSuggestions = await generateDesignSuggestions({ presentationTitle, slides });
 
   const timestamp = new Date().toISOString();
@@ -414,9 +594,13 @@ export async function extractPresentationFromFile(
     textbookId: context.textbook?.id,
     chapterId: context.chapter?.id,
     sectionId: context.section?.id,
+    inferredChapterTitle: inferredHeading.inferredChapterTitle,
+    inferredSectionTitle: inferredHeading.inferredSectionTitle,
     presentationTitle,
     fileName: sourceFile.name,
     slides,
+    extractedVocab: structured.vocab,
+    extractedConcepts: structured.concepts,
     designSuggestions,
     createdAt: timestamp,
     updatedAt: timestamp,

@@ -912,6 +912,138 @@ describe("Cross-surface pipeline communication", () => {
     expect(mocks.setDoc).toHaveBeenCalledTimes(7);
   });
 
+  it("uploads document-ingest records with canonical hierarchy paths so they are ready for cloud sync", async () => {
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-doc-ingest",
+      localByStore: {
+        textbooks: [
+          {
+            id: "tb-doc-ingest",
+            title: "Physical Science with Earth Science",
+            grade: "8",
+            subject: "Physical Science",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "1717171717171",
+            isbnNormalized: "1717171717171",
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+            isFavorite: false,
+            isArchived: false,
+          },
+        ],
+        chapters: [
+          {
+            id: "ch-doc-ingest",
+            textbookId: "tb-doc-ingest",
+            index: 1,
+            name: "The Scientific Method",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+        sections: [
+          {
+            id: "sec-doc-ingest",
+            textbookId: "tb-doc-ingest",
+            chapterId: "ch-doc-ingest",
+            index: 1,
+            title: "Observation and Evidence",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+        vocabTerms: [
+          {
+            id: "v-doc-ingest-1",
+            textbookId: "tb-doc-ingest",
+            chapterId: "ch-doc-ingest",
+            sectionId: "sec-doc-ingest",
+            word: "hypothesis",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+          {
+            id: "v-doc-ingest-2",
+            textbookId: "tb-doc-ingest",
+            chapterId: "ch-doc-ingest",
+            sectionId: "sec-doc-ingest",
+            word: "variable",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+        equations: [
+          {
+            id: "eq-doc-ingest-1",
+            textbookId: "tb-doc-ingest",
+            chapterId: "ch-doc-ingest",
+            sectionId: "sec-doc-ingest",
+            name: "speed",
+            latex: "speed = distance / time",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+        concepts: [
+          {
+            id: "co-doc-ingest-1",
+            textbookId: "tb-doc-ingest",
+            chapterId: "ch-doc-ingest",
+            sectionId: "sec-doc-ingest",
+            name: "controlled experiment",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+        keyIdeas: [
+          {
+            id: "ki-doc-ingest-1",
+            textbookId: "tb-doc-ingest",
+            chapterId: "ch-doc-ingest",
+            sectionId: "sec-doc-ingest",
+            text: "Scientists compare evidence before drawing conclusions.",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+          {
+            id: "ki-doc-ingest-2",
+            textbookId: "tb-doc-ingest",
+            chapterId: "ch-doc-ingest",
+            sectionId: "sec-doc-ingest",
+            text: "Galileo Galilei (1609)",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+          },
+        ],
+      },
+    });
+
+    await syncModule.uploadLocalChanges("teacher-doc-ingest");
+
+    expect(mocks.setDoc).toHaveBeenCalledTimes(9);
+    const docPaths = mocks.setDoc.mock.calls.map((call) => ((call as unknown[])[0] as { path: string }).path);
+    expect(docPaths).toContain("textbooks/tb-doc-ingest/chapters/ch-doc-ingest/sections/sec-doc-ingest/vocab/v-doc-ingest-1");
+    expect(docPaths).toContain("textbooks/tb-doc-ingest/chapters/ch-doc-ingest/sections/sec-doc-ingest/equations/eq-doc-ingest-1");
+    expect(docPaths).toContain("textbooks/tb-doc-ingest/chapters/ch-doc-ingest/sections/sec-doc-ingest/keyIdeas/ki-doc-ingest-2");
+
+    const uploadedPayloads = mocks.setDoc.mock.calls.map((call) => (call as unknown[])[1] as Record<string, unknown>);
+    expect(uploadedPayloads.every((payload) => payload.pendingSync === false)).toBe(true);
+    expect(uploadedPayloads.every((payload) => payload.source === "cloud")).toBe(true);
+    expect(uploadedPayloads.every((payload) => payload.ownerId === "teacher-doc-ingest" && payload.userId === "teacher-doc-ingest")).toBe(true);
+  });
+
   it("minimizes cloud writes by skipping already-synced owned rows (false-negative mutation guard)", async () => {
     const { syncModule, mocks } = await importSyncServiceModule({
       currentUid: "teacher-min-write",

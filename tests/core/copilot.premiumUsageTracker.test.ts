@@ -26,6 +26,57 @@ vi.mock("../../.copilot/usage/auditLogger.mjs", () => ({
 const baselineDailyLimit = Number((8.6 * 0.4).toFixed(1));
 const baselineWeeklyLimit = Number((8.6 * 2.7).toFixed(1));
 
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function getLocalDateKey(now = new Date()): string {
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+
+function getIsoWeekKey(now = new Date()): string {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const utcDate = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  const day = utcDate.getUTCDay() || 7;
+  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
+
+  const isoYear = utcDate.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const week = Math.ceil((((utcDate.getTime() - yearStart.getTime()) / dayMs) + 1) / 7);
+  return `${isoYear}-W${pad2(week)}`;
+}
+
+function getMonthlyResetKey(now = new Date()): string {
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const resetDay = Math.min(31, daysInMonth);
+  const currentAnchor = new Date(now.getFullYear(), now.getMonth(), resetDay, 7, 0, 0, 0);
+
+  if (now.getTime() >= currentAnchor.getTime()) {
+    return `${currentAnchor.getFullYear()}-${pad2(currentAnchor.getMonth() + 1)}-${pad2(currentAnchor.getDate())}@07:00`;
+  }
+
+  const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const previousDaysInMonth = new Date(previousMonth.getFullYear(), previousMonth.getMonth() + 1, 0).getDate();
+  const previousResetDay = Math.min(31, previousDaysInMonth);
+  return `${previousMonth.getFullYear()}-${pad2(previousMonth.getMonth() + 1)}-${pad2(previousResetDay)}@07:00`;
+}
+
+function createCurrentUsageSnapshot(): Record<string, unknown> {
+  const now = new Date();
+  return {
+    premiumRequestsUsedToday: 8.6,
+    premiumRequestsUsedThisWeek: 8.6,
+    premiumRequestsUsedThisMonth: 8.6,
+    dailyLimitPercent: baselineDailyLimit,
+    weeklyLimitPercent: baselineWeeklyLimit,
+    monthlyLimitPercent: 100,
+    freezePremium: false,
+    lastResetDate: getLocalDateKey(now),
+    lastResetWeek: getIsoWeekKey(now),
+    lastResetMonth: getMonthlyResetKey(now),
+  };
+}
+
 describe("copilot premium usage tracker", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -45,18 +96,7 @@ describe("copilot premium usage tracker", () => {
   });
 
   it("normalizes usage and writes incremented premium invocation state", async () => {
-    readFile.mockResolvedValue(JSON.stringify({
-      premiumRequestsUsedToday: 8.6,
-      premiumRequestsUsedThisWeek: 8.6,
-      premiumRequestsUsedThisMonth: 8.6,
-      dailyLimitPercent: baselineDailyLimit,
-      weeklyLimitPercent: baselineWeeklyLimit,
-      monthlyLimitPercent: 100,
-      freezePremium: false,
-      lastResetDate: "2026-03-13",
-      lastResetWeek: "2026-W11",
-      lastResetMonth: "2026-02-28@07:00"
-    }));
+    readFile.mockResolvedValue(JSON.stringify(createCurrentUsageSnapshot()));
 
     const tracker = await import("../../.copilot/usage/premiumUsageTracker.mjs");
     const result = await tracker.recordPremiumInvocation(1.4);
@@ -69,18 +109,7 @@ describe("copilot premium usage tracker", () => {
   });
 
   it("denies escalation and audits when daily limit is exceeded", async () => {
-    readFile.mockResolvedValue(JSON.stringify({
-      premiumRequestsUsedToday: 8.6,
-      premiumRequestsUsedThisWeek: 8.6,
-      premiumRequestsUsedThisMonth: 8.6,
-      dailyLimitPercent: baselineDailyLimit,
-      weeklyLimitPercent: baselineWeeklyLimit,
-      monthlyLimitPercent: 100,
-      freezePremium: false,
-      lastResetDate: "2026-03-13",
-      lastResetWeek: "2026-W11",
-      lastResetMonth: "2026-02-28@07:00"
-    }));
+    readFile.mockResolvedValue(JSON.stringify(createCurrentUsageSnapshot()));
 
     const tracker = await import("../../.copilot/usage/premiumUsageTracker.mjs");
     const result = await tracker.canEscalateToPremium({ freeFailuresForTask: 3, userApproved: true });
@@ -92,18 +121,7 @@ describe("copilot premium usage tracker", () => {
   });
 
   it("toggles freeze state and writes an audit event", async () => {
-    readFile.mockResolvedValue(JSON.stringify({
-      premiumRequestsUsedToday: 8.6,
-      premiumRequestsUsedThisWeek: 8.6,
-      premiumRequestsUsedThisMonth: 8.6,
-      dailyLimitPercent: baselineDailyLimit,
-      weeklyLimitPercent: baselineWeeklyLimit,
-      monthlyLimitPercent: 100,
-      freezePremium: false,
-      lastResetDate: "2026-03-13",
-      lastResetWeek: "2026-W11",
-      lastResetMonth: "2026-02-28@07:00"
-    }));
+    readFile.mockResolvedValue(JSON.stringify(createCurrentUsageSnapshot()));
 
     const tracker = await import("../../.copilot/usage/premiumUsageTracker.mjs");
     const result = await tracker.setPremiumFreeze(true);

@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [1.2.3] - 2026-03-14
+
+### Added (1.2.3)
+
+- Auto vs Manual textbook onboarding entry mode with a guided screenshot-based Auto setup path.
+- Auto capture workflow for cover, title page, and multi-page table of contents with capture-limit enforcement and anti-abuse messaging.
+- New textbook metadata fields for richer extracted details: subtitle, gradeBand, copyrightYear, seriesName,
+  publisher, publisherLocation, authors, additionalIsbns, and tocExtractionConfidence.
+- Auto TOC editor with inline chapter/section correction plus merge/split tools before save.
+- New parser/crop unit tests and Auto flow integration coverage for persistence and Manual switching.
+
+### Changed (1.2.3)
+
+- Textbook save input and repository builders now persist optional Auto-extracted metadata alongside existing fields.
+- Textbook list cards now surface optional subtitle/series/publisher/grade-band metadata when available.
+- Auto save path persists only structured metadata plus cover image while avoiding non-cover page image storage.
+
+### Verified (1.2.3)
+
+- `npm run typecheck`
+- `npm run test:unit -- tests/core/textbookAutoExtractionService.test.ts`
+- `npm run test:integration -- tests/integration/autoTextbookFlow.integration.test.tsx`
+
 ## [1.2.2] - 2026-03-15
 
 ### Added (1.2.2)

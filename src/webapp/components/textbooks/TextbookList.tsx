@@ -132,9 +132,19 @@ export function TextbookList({
 
             <div className="textbook-row__info">
               <strong>{textbook.title}</strong>
+              {textbook.subtitle ? <p className="textbook-row__meta">{textbook.subtitle}</p> : null}
               <p>
                 Grade {textbook.grade} &bull; {textbook.subject} &bull; {textbook.publicationYear}
               </p>
+              {textbook.seriesName || textbook.publisher || textbook.gradeBand ? (
+                <p className="textbook-row__meta">
+                  {textbook.seriesName ? `Series: ${textbook.seriesName}` : ""}
+                  {textbook.seriesName && textbook.publisher ? " • " : ""}
+                  {textbook.publisher ? `Publisher: ${textbook.publisher}` : ""}
+                  {(textbook.seriesName || textbook.publisher) && textbook.gradeBand ? " • " : ""}
+                  {textbook.gradeBand ? `Grade Band: ${textbook.gradeBand}` : ""}
+                </p>
+              ) : null}
               <p className="textbook-row__meta">
                 ISBN: {textbook.isbnRaw?.trim() ? textbook.isbnRaw : "Not set"}
                 {textbook.relatedIsbns && textbook.relatedIsbns.length > 0 ? (

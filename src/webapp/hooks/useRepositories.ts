@@ -34,13 +34,22 @@ import { useUIStore } from "../store/uiStore";
 
 export interface CreateTextbookInput {
   title: string;
+  subtitle?: string;
   grade: string;
+  gradeBand?: string;
   subject: string;
   edition: string;
   publicationYear: number;
+  copyrightYear?: number;
   isbnRaw: string;
   isbnNormalized: string;
+  additionalIsbns?: string[];
   relatedIsbns?: RelatedIsbn[];
+  seriesName?: string;
+  publisher?: string;
+  publisherLocation?: string;
+  authors?: string[];
+  tocExtractionConfidence?: number;
   platformUrl?: string;
   coverImageUrl?: string | null;
   /** Pass a File to have it uploaded during createTextbook. */
@@ -106,13 +115,22 @@ function buildTextbookFromInput(input: CreateTextbookInput, resolvedCoverUrl?: s
   return {
     id: crypto.randomUUID(),
     title: input.title,
+    subtitle: input.subtitle,
     grade: input.grade,
+    gradeBand: input.gradeBand,
     subject: input.subject,
     edition: input.edition,
     publicationYear: input.publicationYear,
+    copyrightYear: input.copyrightYear,
     isbnRaw: input.isbnRaw,
     isbnNormalized: input.isbnNormalized,
+    additionalIsbns: input.additionalIsbns,
     relatedIsbns: input.relatedIsbns,
+    seriesName: input.seriesName,
+    publisher: input.publisher,
+    publisherLocation: input.publisherLocation,
+    authors: input.authors,
+    tocExtractionConfidence: input.tocExtractionConfidence,
     platformUrl: input.platformUrl,
     coverImageUrl: resolvedCoverUrl ?? input.coverImageUrl ?? null,
     createdAt: timestamp,

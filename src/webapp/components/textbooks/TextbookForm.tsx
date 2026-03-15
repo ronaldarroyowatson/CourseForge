@@ -7,6 +7,7 @@ import { findCloudTextbookByISBN } from "../../../core/services/syncService";
 import { getCurrentUser } from "../../../firebase/auth";
 import { useRepositories } from "../../hooks/useRepositories";
 import { useUIStore } from "../../store/uiStore";
+import { AutoTextbookSetupFlow } from "./AutoTextbookSetupFlow";
 
 interface TextbookFormProps {
   onSaved: () => void;
@@ -66,6 +67,7 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
   const [isSaving, setIsSaving] = useState(false);
   const [isLookingUpISBN, setIsLookingUpISBN] = useState(false);
   const [isManualEntryMode, setIsManualEntryMode] = useState(false);
+  const [entryMode, setEntryMode] = useState<"choose" | "manual" | "auto">("choose");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -98,12 +100,14 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
       setErrorMessage(null);
       setSuccessMessage(null);
       setIsManualEntryMode(false);
+      setEntryMode("manual");
     } else {
       setForm(INITIAL_FORM_STATE);
       setRelatedIsbns([]);
       setCoverPreviewUrl(null);
       setCoverFile(null);
       setCoverDataUrl(null);
+      setEntryMode("choose");
     }
   }, [selectedTextbook]);
 
@@ -121,6 +125,7 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
   }, [stopStream]);
 
   const isEditMode = selectedTextbook !== null;
+  const showManualForm = isEditMode || entryMode === "manual";
 
   function updateField<K extends keyof TextbookFormState>(field: K, value: TextbookFormState[K]): void {
     setForm((current) => ({ ...current, [field]: value }));
@@ -334,6 +339,7 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
         setCoverFile(null);
         setCoverDataUrl(null);
         setIsManualEntryMode(false);
+        setEntryMode("choose");
       }
 
       onSaved();
@@ -348,10 +354,51 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
     <section className="panel">
       <h3>{isEditMode ? `Edit: ${selectedTextbook?.title ?? "Textbook"}` : "Add Textbook"}</h3>
 
-      {isManualEntryMode ? (
+      {!isEditMode && entryMode === "choose" ? (
+        <div className="textbook-entry-mode-grid">
+          <button
+            type="button"
+            className="textbook-entry-mode-card"
+            onClick={() => {
+              setEntryMode("auto");
+              setErrorMessage(null);
+              setSuccessMessage(null);
+            }}
+          >
+            <strong>Auto (from screenshots)</strong>
+            <span>Capture cover, title page, and TOC pages with guided extraction.</span>
+          </button>
+          <button
+            type="button"
+            className="textbook-entry-mode-card"
+            onClick={() => {
+              setEntryMode("manual");
+              setErrorMessage(null);
+              setSuccessMessage(null);
+            }}
+          >
+            <strong>Manual (enter details yourself)</strong>
+            <span>Use the existing metadata and textbook details form.</span>
+          </button>
+        </div>
+      ) : null}
+
+      {!isEditMode && entryMode === "auto" ? (
+        <AutoTextbookSetupFlow
+          onSaved={onSaved}
+          onSwitchToManual={() => {
+            setEntryMode("manual");
+            setErrorMessage(null);
+            setSuccessMessage(null);
+          }}
+        />
+      ) : null}
+
+      {showManualForm && isManualEntryMode ? (
         <p className="manual-entry-banner">Manual Entry Mode: Please fill in the textbook details.</p>
       ) : null}
 
+      {showManualForm ? (
       <form onSubmit={handleSubmit} className="form-grid">
 
         {/* ── Cover Image ─────────────────────────────────────────────── */}
@@ -543,6 +590,20 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
           <button type="submit" disabled={isSaving}>
             {isSaving ? "Saving..." : isEditMode ? "Update Textbook" : "Save Textbook"}
           </button>
+          {!isEditMode ? (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setEntryMode("choose");
+                setErrorMessage(null);
+                setSuccessMessage(null);
+              }}
+              disabled={isSaving}
+            >
+              Back
+            </button>
+          ) : null}
           {isEditMode ? (
             <button type="button" onClick={handleCancelEdit} disabled={isSaving} className="btn-secondary">
               Cancel
@@ -550,6 +611,7 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
           ) : null}
         </div>
       </form>
+      ) : null}
     </section>
   );
 }

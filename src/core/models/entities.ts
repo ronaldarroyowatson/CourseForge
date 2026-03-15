@@ -21,14 +21,23 @@ export interface Textbook {
   id: string;
   userId?: string;
   title: string;
+  subtitle?: string;
   grade: string;
+  gradeBand?: string;
   subject: string;
   edition: string;
   publicationYear: number;
+  copyrightYear?: number;
   isbnRaw: string;
   isbnNormalized: string;
+  additionalIsbns?: string[];
   /** Additional related ISBNs (student, teacher, digital, etc.). */
   relatedIsbns?: RelatedIsbn[];
+  seriesName?: string;
+  publisher?: string;
+  publisherLocation?: string;
+  authors?: string[];
+  tocExtractionConfidence?: number;
   platformUrl?: string;
   /** Firebase Storage download URL for the cover image. */
   coverImageUrl?: string | null;

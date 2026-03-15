@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   Chapter,
@@ -16,6 +16,11 @@ import {
   rebuildQuizSlides,
   savePresentationToLocalAndFirestore,
 } from "../../../core/services/presentationService";
+import {
+  listChaptersByTextbookId,
+  listExtractedPresentationsBySectionId,
+  listSectionsByChapterId,
+} from "../../../core/services/repositories";
 
 interface PowerPointWorkspaceCardProps {
   selectedTextbook: Textbook | null;
@@ -24,6 +29,103 @@ interface PowerPointWorkspaceCardProps {
 }
 
 type PowerPointStep = "upload" | "review" | "design" | "quiz" | "done";
+
+interface ResolvedTarget {
+  chapter: Chapter;
+  section: Section;
+  reason: string;
+}
+
+function normalizeKey(value: string): string {
+  return value.toLowerCase().replace(/\.[a-z0-9]+$/i, "").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function buildSourceKey(fileName: string): string {
+  const normalized = normalizeKey(fileName);
+  return normalized
+    .replace(/\b(v|ver|version|rev|revision|draft|final)\s*\d*\b/g, "")
+    .replace(/\b\d{4}[-_]?\d{2}[-_]?\d{2}\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function slideSignature(slide: PresentationSlide): string {
+  const text = slide.rawText.join("|").toLowerCase().replace(/\s+/g, " ").trim();
+  const formulas = (slide.extractedFormulas ?? []).join("|").toLowerCase().replace(/\s+/g, " ").trim();
+  const images = (slide.extractedImages ?? []).join("|").toLowerCase();
+  return `${text}::${formulas}::${images}`;
+}
+
+async function computeFileHash(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  const bytes = new Uint8Array(digest);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function resolveTargetFromFileName(input: {
+  fileName: string;
+  chapters: Chapter[];
+  sectionsByChapter: Map<string, Section[]>;
+  selectedChapter: Chapter | null;
+  selectedSection: Section | null;
+}): ResolvedTarget | null {
+  if (input.selectedChapter && input.selectedSection) {
+    return {
+      chapter: input.selectedChapter,
+      section: input.selectedSection,
+      reason: "Using currently selected chapter and section.",
+    };
+  }
+
+  const fileKey = normalizeKey(input.fileName);
+
+  const chapterMatch = fileKey.match(/\b(?:chapter|ch)\s*[-_]?\s*(\d+)\b/i);
+  const sectionMatch = fileKey.match(/\b(?:section|sec|s)\s*[-_]?\s*(\d+)\b/i);
+
+  let best: { chapter: Chapter; section: Section; score: number } | null = null;
+
+  for (const chapter of input.chapters) {
+    if (input.selectedChapter && chapter.id !== input.selectedChapter.id) {
+      continue;
+    }
+
+    const sections = input.sectionsByChapter.get(chapter.id) ?? [];
+    const chapterKey = normalizeKey(chapter.name);
+
+    for (const section of sections) {
+      const sectionKey = normalizeKey(section.title);
+      let score = 0;
+
+      if (fileKey.includes(sectionKey) || sectionKey.includes(fileKey)) {
+        score += 80;
+      }
+      if (fileKey.includes(chapterKey) || chapterKey.includes(fileKey)) {
+        score += 50;
+      }
+      if (chapterMatch && Number(chapterMatch[1]) === chapter.index) {
+        score += 25;
+      }
+      if (sectionMatch && Number(sectionMatch[1]) === section.index) {
+        score += 25;
+      }
+
+      if (!best || score > best.score) {
+        best = { chapter, section, score };
+      }
+    }
+  }
+
+  if (!best || best.score < 25) {
+    return null;
+  }
+
+  return {
+    chapter: best.chapter,
+    section: best.section,
+    reason: `Auto-matched by filename pattern (score ${best.score}).`,
+  };
+}
 
 export function PowerPointWorkspaceCard({
   selectedTextbook,
@@ -35,11 +137,24 @@ export function PowerPointWorkspaceCard({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [importStatusMessage, setImportStatusMessage] = useState<string | null>(null);
+  const [importReport, setImportReport] = useState<string[]>([]);
   const [presentation, setPresentation] = useState<ExtractedPresentation | null>(null);
   const [designSuggestions, setDesignSuggestions] = useState<DesignSuggestions | null>(null);
   const [kahootStyle, setKahootStyle] = useState(false);
   const [enableTimer, setEnableTimer] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(25);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const folderInput = folderInputRef.current;
+    if (!folderInput) {
+      return;
+    }
+
+    folderInput.setAttribute("webkitdirectory", "");
+    folderInput.setAttribute("directory", "");
+  }, []);
 
   const quizItems = useMemo(() => {
     if (!presentation) {
@@ -53,42 +168,154 @@ export function PowerPointWorkspaceCard({
     });
   }, [enableTimer, kahootStyle, presentation, timerSeconds]);
 
-  async function handleImport(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-
-    if (!file) {
-      return;
-    }
-
-    if (!isSupportedPresentationType(file)) {
-      setErrorMessage("Please upload a .ppt or .pptx file.");
+  async function handleImportFiles(files: File[]): Promise<void> {
+    const selectedFiles = files.filter(Boolean);
+    if (selectedFiles.length === 0 || !selectedTextbook) {
       return;
     }
 
     setIsBusy(true);
     setErrorMessage(null);
     setSuccessMessage(null);
-    setImportStatusMessage(file.name.toLowerCase().endsWith(".ppt")
-      ? "Converting legacy .ppt file to .pptx before extraction..."
-      : "Extracting slide content...");
+    setImportReport([]);
 
     try {
-      const extracted = await extractPresentationFromFile(file, {
-        textbook: selectedTextbook,
-        chapter: selectedChapter,
-        section: selectedSection,
+      const chapters = await listChaptersByTextbookId(selectedTextbook.id);
+      const sectionEntries = await Promise.all(
+        chapters.map(async (chapter) => ({
+          chapterId: chapter.id,
+          sections: await listSectionsByChapterId(chapter.id),
+        }))
+      );
+
+      const sectionsByChapter = new Map<string, Section[]>();
+      sectionEntries.forEach((entry) => {
+        sectionsByChapter.set(entry.chapterId, entry.sections);
       });
 
-      setPresentation(extracted);
-      setDesignSuggestions(extracted.designSuggestions ?? null);
-      setStep("review");
+      const reportLines: string[] = [];
+      let importedCount = 0;
+      let duplicateCount = 0;
+      let noDeltaCount = 0;
+      let skippedCount = 0;
+      let preview: ExtractedPresentation | null = null;
+
+      for (const file of selectedFiles) {
+        if (!isSupportedPresentationType(file)) {
+          skippedCount += 1;
+          reportLines.push(`${file.name}: skipped (unsupported type).`);
+          continue;
+        }
+
+        const target = resolveTargetFromFileName({
+          fileName: file.name,
+          chapters,
+          sectionsByChapter,
+          selectedChapter,
+          selectedSection,
+        });
+
+        if (!target) {
+          skippedCount += 1;
+          reportLines.push(`${file.name}: skipped (could not auto-match chapter/section).`);
+          continue;
+        }
+
+        setImportStatusMessage(
+          file.name.toLowerCase().endsWith(".ppt")
+            ? `Converting ${file.name} from .ppt to .pptx...`
+            : `Extracting ${file.name}...`
+        );
+
+        const fileHash = await computeFileHash(file);
+        const existingInSection = await listExtractedPresentationsBySectionId(target.section.id);
+
+        if (existingInSection.some((row) => row.fileHash && row.fileHash === fileHash)) {
+          duplicateCount += 1;
+          reportLines.push(`${file.name}: skipped (exact duplicate already imported for this section).`);
+          continue;
+        }
+
+        const extracted = await extractPresentationFromFile(file, {
+          textbook: selectedTextbook,
+          chapter: target.chapter,
+          section: target.section,
+        });
+
+        const sourceKey = buildSourceKey(file.name);
+        const existingBySource = existingInSection.find(
+          (row) => (row.sourceKey && row.sourceKey === sourceKey) || buildSourceKey(row.fileName) === sourceKey
+        );
+
+        if (existingBySource) {
+          const existingSignatures = new Set(existingBySource.slides.map((slide: PresentationSlide) => slideSignature(slide)));
+          const newSlides = extracted.slides.filter((slide: PresentationSlide) => !existingSignatures.has(slideSignature(slide)));
+
+          if (newSlides.length === 0) {
+            noDeltaCount += 1;
+            reportLines.push(`${file.name}: no new slide material found; existing deck unchanged.`);
+            continue;
+          }
+
+          const merged: ExtractedPresentation = {
+            ...existingBySource,
+            fileName: extracted.fileName,
+            fileHash,
+            sourceKey,
+            slides: [...existingBySource.slides, ...newSlides],
+            designSuggestions: extracted.designSuggestions ?? existingBySource.designSuggestions,
+            updatedAt: new Date().toISOString(),
+            pendingSync: true,
+            source: "local",
+          };
+
+          await savePresentationToLocalAndFirestore(merged);
+          importedCount += 1;
+          reportLines.push(
+            `${file.name}: merged into ${target.chapter.name} -> ${target.section.title} (+${newSlides.length} new slide(s)). ${target.reason}`
+          );
+          if (!preview) {
+            preview = merged;
+          }
+          continue;
+        }
+
+        const toSave: ExtractedPresentation = {
+          ...extracted,
+          fileHash,
+          sourceKey,
+        };
+
+        await savePresentationToLocalAndFirestore(toSave);
+        importedCount += 1;
+        reportLines.push(`${file.name}: imported to ${target.chapter.name} -> ${target.section.title}. ${target.reason}`);
+        if (!preview) {
+          preview = toSave;
+        }
+      }
+
+      setImportReport(reportLines);
+      if (preview) {
+        setPresentation(preview);
+        setDesignSuggestions(preview.designSuggestions ?? null);
+        setStep("review");
+      }
+
+      setSuccessMessage(
+        `Import complete: ${importedCount} saved, ${duplicateCount} duplicates skipped, ${noDeltaCount} with no new material, ${skippedCount} unmatched/unsupported.`
+      );
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not import this presentation.");
+      setErrorMessage(error instanceof Error ? error.message : "Could not import these presentations.");
     } finally {
       setImportStatusMessage(null);
       setIsBusy(false);
     }
+  }
+
+  async function handleInputSelect(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    await handleImportFiles(files);
   }
 
   async function handleRefreshSuggestions(): Promise<void> {
@@ -159,11 +386,11 @@ export function PowerPointWorkspaceCard({
     }
   }
 
-  if (!selectedTextbook || !selectedChapter || !selectedSection) {
+  if (!selectedTextbook) {
     return (
       <section className="panel">
         <h3>PowerPoints</h3>
-        <p>Select a textbook, chapter, and section before importing a PowerPoint.</p>
+        <p>Select a textbook before importing PowerPoints.</p>
       </section>
     );
   }
@@ -178,25 +405,77 @@ export function PowerPointWorkspaceCard({
 
       <div className="powerpoint-meta">
         <span>Textbook: {selectedTextbook.title}</span>
-        <span>Chapter: {selectedChapter.name}</span>
-        <span>Section: {selectedSection.title}</span>
+        <span>Chapter: {selectedChapter?.name ?? "Auto-match by filename"}</span>
+        <span>Section: {selectedSection?.title ?? "Auto-match by filename"}</span>
       </div>
 
       {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
       {successMessage ? <p className="sync-indicator sync-indicator--synced">{successMessage}</p> : null}
       {importStatusMessage ? <p>{importStatusMessage}</p> : null}
+      {importReport.length > 0 ? (
+        <ul className="textbook-list">
+          {importReport.map((line) => (
+            <li key={line} className="textbook-row">
+              <p>{line}</p>
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       {step === "upload" ? (
         <div className="powerpoint-upload">
-          <label className="cover-file-label">
-            Import PowerPoint
+          <div
+            className="ingest-dropzone"
+            role="button"
+            tabIndex={0}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              void handleImportFiles(Array.from(event.dataTransfer.files ?? []));
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                fileInputRef.current?.click();
+              }
+            }}
+            aria-label="Drag and drop PowerPoint files"
+          >
+            <strong>Drop .ppt/.pptx files here</strong>
+            <p className="ingest-layout-summary">Supports single or batch import. Duplicate files are skipped automatically.</p>
+          </div>
+
+          <div className="cover-input-row">
+            <button type="button" className="cover-file-label ingest-picker-button" onClick={() => fileInputRef.current?.click()}>
+              Browse Files
+            </button>
+            <button type="button" className="cover-file-label ingest-picker-button" onClick={() => folderInputRef.current?.click()}>
+              Scan Folder
+            </button>
+          </div>
+
+          <label className="cover-file-label cover-file-label-hidden">
+            Browse Files
             <input
+              ref={fileInputRef}
               type="file"
+              multiple
               accept=".ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
               className="cover-file-input"
-              onChange={(event) => {
-                void handleImport(event);
-              }}
+              onChange={(event) => void handleInputSelect(event)}
+              aria-label="Browse PowerPoint Files"
+              disabled={isBusy}
+            />
+          </label>
+          <label className="cover-file-label cover-file-label-hidden">
+            Scan Folder
+            <input
+              ref={folderInputRef}
+              type="file"
+              multiple
+              className="cover-file-input"
+              onChange={(event) => void handleInputSelect(event)}
+              aria-label="Scan PowerPoint Folder"
               disabled={isBusy}
             />
           </label>

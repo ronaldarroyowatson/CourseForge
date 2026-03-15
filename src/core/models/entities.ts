@@ -156,6 +156,8 @@ export interface ExtractedPresentation {
   textbookId?: string;
   chapterId?: string;
   sectionId?: string;
+  sourceKey?: string;
+  fileHash?: string;
   presentationTitle: string;
   fileName: string;
   slides: PresentationSlide[];

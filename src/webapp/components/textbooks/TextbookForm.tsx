@@ -11,6 +11,7 @@ import { AutoTextbookSetupFlow } from "./AutoTextbookSetupFlow";
 
 interface TextbookFormProps {
   onSaved: () => void;
+  runtime?: "webapp" | "extension";
 }
 
 interface TextbookFormState {
@@ -58,7 +59,7 @@ const ISBN_TYPES: RelatedIsbnType[] = [
   "other",
 ];
 
-export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element {
+export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps): React.JSX.Element {
   const { createTextbook, editTextbook, findTextbookByISBN } = useRepositories();
   const { selectedTextbook, setSelectedTextbook } = useUIStore();
 
@@ -319,6 +320,7 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
         }
 
         await createTextbook({
+          sourceType: "manual",
           title: form.title.trim(),
           grade: form.grade.trim(),
           subject: form.subject.trim(),
@@ -365,7 +367,7 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
               setSuccessMessage(null);
             }}
           >
-            <strong>Auto (from screenshots)</strong>
+            <strong>Auto (Recommended)</strong>
             <span>Capture cover, title page, and TOC pages with guided extraction.</span>
           </button>
           <button
@@ -377,7 +379,7 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
               setSuccessMessage(null);
             }}
           >
-            <strong>Manual (enter details yourself)</strong>
+            <strong>Manual</strong>
             <span>Use the existing metadata and textbook details form.</span>
           </button>
         </div>
@@ -385,6 +387,7 @@ export function TextbookForm({ onSaved }: TextbookFormProps): React.JSX.Element 
 
       {!isEditMode && entryMode === "auto" ? (
         <AutoTextbookSetupFlow
+          runtime={runtime}
           onSaved={onSaved}
           onSwitchToManual={() => {
             setEntryMode("manual");

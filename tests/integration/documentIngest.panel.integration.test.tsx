@@ -42,6 +42,7 @@ async function clearDatabase(): Promise<void> {
 function buildTextbook(id: string): Textbook {
   return {
     id,
+    sourceType: "manual",
     title: "World History",
     grade: "9",
     subject: "History",
@@ -62,6 +63,7 @@ function buildTextbook(id: string): Textbook {
 function buildChapter(id: string, textbookId: string): Chapter {
   return {
     id,
+    sourceType: "manual",
     textbookId,
     index: 1,
     name: "Industrial Revolution",
@@ -74,6 +76,7 @@ function buildChapter(id: string, textbookId: string): Chapter {
 function buildSection(id: string, textbookId: string, chapterId: string): Section {
   return {
     id,
+    sourceType: "manual",
     textbookId,
     chapterId,
     index: 1,

@@ -13,12 +13,20 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Textbook cloud-hold metadata (`requiresAdminReview`, moderation state/reason/confidence) so flagged books remain local-only until approved.
 - Admin user-management controls to block/unblock a user's cloud content sync access through a new callable backend action.
 - New moderation hold unit coverage for sync gating and expanded Auto extraction/moderation tests.
+- Local-first OCR service abstraction with provider ordering, fallback attempts, and circuit-breaker cooldown handling.
+- Firebase callable `extractScreenshotText` with auth guard, image validation, payload caps, and per-user request throttling.
+- Firebase callables for shared AI provider policy (`getAiProviderPolicy`, `setAiProviderPolicy`) to support org defaults.
+- Debug log service for local troubleshooting capture with explicit upload/clear flow to Firestore `debugReports`.
+- Settings controls for OCR resilience policy load/save and local debug log management.
 
 ### Changed (1.2.4)
 
 - Sync service now blocks cloud upload for textbooks in `pending-admin-review` or `blocked-explicit-content` moderation states.
 - Sync service now blocks all cloud writes for users marked as content-blocked while preserving local-first behavior.
 - Auto setup save flow now stores moderation metadata and surfaces admin-review messaging for educational exceptions.
+- Auto setup capture now runs OCR immediately after each capture and auto-applies metadata/TOC parsing results.
+- Auto/Manual source provenance (`sourceType`) is now persisted for textbooks, chapters, and sections.
+- Node runtime guardrails now enforce engines at install time with repository-level `.npmrc` (`engine-strict=true`).
 
 ### Verified (1.2.4)
 
@@ -26,6 +34,11 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - `npm run test:unit -- tests/core/textbookAutoExtractionService.test.ts tests/core/syncService.moderationHold.test.ts`
 - `npx vitest run tests/integration/autoTextbookFlow.integration.test.tsx`
 - `npm test`
+- `npm run check:node`
+- `npm run check:node:functions`
+- `npm run build`
+- `npm run build:extension`
+- `npm run functions:build:compat`
 
 ## [1.2.3] - 2026-03-14
 

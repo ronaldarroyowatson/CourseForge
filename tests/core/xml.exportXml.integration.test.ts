@@ -40,6 +40,7 @@ function buildTextbook(id: string): Textbook {
     lastModified: "2026-03-10T00:00:00.000Z",
     pendingSync: false,
     source: "local",
+    sourceType: "manual",
       isFavorite: false,
       isArchived: false,
   };
@@ -54,6 +55,7 @@ function buildChapter(id: string, textbookId: string, index: number): Chapter {
     lastModified: "2026-03-10T00:00:00.000Z",
     pendingSync: false,
     source: "local",
+      sourceType: "manual",
   };
 }
 
@@ -66,6 +68,7 @@ function buildSection(id: string, chapterId: string, index: number): Section {
     lastModified: "2026-03-10T00:00:00.000Z",
     pendingSync: false,
     source: "local",
+      sourceType: "manual",
   };
 }
 

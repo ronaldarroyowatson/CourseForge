@@ -1,7 +1,10 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
+import { extractTextFromImageWithFallback } from "../../../core/services/autoOcrService";
+import { appendDebugLogEntry } from "../../../core/services/debugLogService";
 import { persistAutoTextbook } from "../../../core/services/autoTextbookPersistenceService";
 import {
+  AUTO_MODE_SCOPE_MESSAGE,
   createInitialAutoCaptureUsage,
   DEFAULT_AUTO_CAPTURE_LIMITS,
   detectPageBoundaryFromRgba,
@@ -23,6 +26,7 @@ import { useRepositories } from "../../hooks/useRepositories";
 type AutoFlowStep = "cover" | "title" | "toc" | "toc-editor";
 
 interface AutoTextbookSetupFlowProps {
+  runtime?: "webapp" | "extension";
   onSaved: () => void;
   onSwitchToManual: () => void;
 }
@@ -30,6 +34,12 @@ interface AutoTextbookSetupFlowProps {
 interface CaptureDialogState {
   open: boolean;
   imageDataUrl: string;
+}
+
+interface CaptureResult {
+  imageDataUrl: string;
+  ocrText: string;
+  ocrProviderId: string;
 }
 
 interface SelectionRect {
@@ -75,6 +85,113 @@ const INITIAL_TOC_RESULT: ParsedTocResult = {
   chapters: [],
   confidence: 0,
 };
+
+const KNOWN_TEXTBOOK_DOMAINS = [
+  "savvasrealize.com",
+  "my.hrw.com",
+  "clever.com",
+  "pearsonrealize.com",
+  "mydigitalpublication.com",
+  "mcgrawhill.com",
+];
+
+const AUTO_CAPTURE_USAGE_STORAGE_KEY = "courseforge.autoCaptureUsageByDraft";
+
+function createDraftCaptureKey(): string {
+  return `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function readPersistedCaptureUsage(draftKey: string) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem(AUTO_CAPTURE_USAGE_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, { cover: number; title: number; toc: number }>;
+    return parsed[draftKey] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function persistCaptureUsage(draftKey: string, usage: { cover: number; title: number; toc: number }): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const raw = window.localStorage.getItem(AUTO_CAPTURE_USAGE_STORAGE_KEY);
+  let parsed: Record<string, { cover: number; title: number; toc: number }> = {};
+
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw) as Record<string, { cover: number; title: number; toc: number }>;
+    } catch {
+      parsed = {};
+    }
+  }
+
+  parsed[draftKey] = usage;
+
+  const keys = Object.keys(parsed);
+  if (keys.length > 30) {
+    keys.slice(0, keys.length - 30).forEach((key) => {
+      delete parsed[key];
+    });
+  }
+
+  window.localStorage.setItem(AUTO_CAPTURE_USAGE_STORAGE_KEY, JSON.stringify(parsed));
+}
+
+function clearPersistedCaptureUsage(draftKey: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const raw = window.localStorage.getItem(AUTO_CAPTURE_USAGE_STORAGE_KEY);
+  if (!raw) {
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, { cover: number; title: number; toc: number }>;
+    delete parsed[draftKey];
+    window.localStorage.setItem(AUTO_CAPTURE_USAGE_STORAGE_KEY, JSON.stringify(parsed));
+  } catch {
+    // Ignore malformed storage and keep flow functional.
+  }
+}
+
+async function detectExtensionTabReadiness(): Promise<{ hasTabs: boolean; hasKnownTextbookTab: boolean }> {
+  try {
+    const extensionApi = (globalThis as { chrome?: { tabs?: { query?: (queryInfo: Record<string, unknown>) => Promise<Array<{ url?: string }>> } } }).chrome;
+    if (!extensionApi?.tabs?.query) {
+      return { hasTabs: false, hasKnownTextbookTab: false };
+    }
+
+    const tabs = await extensionApi.tabs.query({});
+    const httpTabs = tabs.filter((tab) => typeof tab.url === "string" && /^https?:\/\//i.test(tab.url ?? ""));
+    const hasKnownTextbookTab = httpTabs.some((tab) => {
+      try {
+        const hostname = new URL(tab.url ?? "").hostname.toLowerCase();
+        return KNOWN_TEXTBOOK_DOMAINS.some((domain) => hostname.includes(domain));
+      } catch {
+        return false;
+      }
+    });
+
+    return {
+      hasTabs: httpTabs.length > 0,
+      hasKnownTextbookTab,
+    };
+  } catch {
+    return { hasTabs: false, hasKnownTextbookTab: false };
+  }
+}
 
 function toMetadataFormState(metadata: AutoTextbookMetadata, tocConfidence: number): MetadataFormState {
   const publicationYear = metadata.copyrightYear ?? new Date().getFullYear();
@@ -269,24 +386,68 @@ function createDefaultSelection(image: HTMLImageElement): SelectionRect {
   };
 }
 
-export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextbookSetupFlowProps): React.JSX.Element {
+export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToManual }: AutoTextbookSetupFlowProps): React.JSX.Element {
   const { createTextbook, createChapter, createSection } = useRepositories();
+  const draftKeyRef = useRef<string>(createDraftCaptureKey());
+  const [environmentPreparationMessage, setEnvironmentPreparationMessage] = useState<string>(
+    runtime === "extension"
+      ? "Checking browser tabs for textbook setup readiness..."
+      : "Open your textbook in another window or monitor. Maximize the browser window for best results."
+  );
   const [step, setStep] = useState<AutoFlowStep>("cover");
-  const [usage, setUsage] = useState(createInitialAutoCaptureUsage());
+  const [usage, setUsage] = useState(() => readPersistedCaptureUsage(draftKeyRef.current) ?? createInitialAutoCaptureUsage());
   const [metadataDraft, setMetadataDraft] = useState<AutoTextbookMetadata>({});
   const [metadataForm, setMetadataForm] = useState<MetadataFormState>(() => toMetadataFormState({}, 0));
   const [coverImageDataUrl, setCoverImageDataUrl] = useState<string | null>(null);
   const [ocrDraft, setOcrDraft] = useState("");
   const [tocResult, setTocResult] = useState<ParsedTocResult>(INITIAL_TOC_RESULT);
   const [isBusy, setIsBusy] = useState(false);
+  const [isRunningOcr, setIsRunningOcr] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [ocrProviderStatus, setOcrProviderStatus] = useState<string | null>(null);
   const [moderationAssessment, setModerationAssessment] = useState<ImageModerationAssessment | null>(null);
   const [captureDialog, setCaptureDialog] = useState<CaptureDialogState>({ open: false, imageDataUrl: "" });
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const selectionResolverRef = useRef<((value: SelectionRect | null) => void) | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    if (runtime !== "extension") {
+      setEnvironmentPreparationMessage("Open your textbook in another window or monitor. Maximize the browser window for best results.");
+      return () => {
+        mounted = false;
+      };
+    }
+
+    async function detectEnvironment(): Promise<void> {
+      const readiness = await detectExtensionTabReadiness();
+      if (!mounted) {
+        return;
+      }
+
+      if (readiness.hasKnownTextbookTab) {
+        setEnvironmentPreparationMessage("Navigate to the cover page and click Capture Cover.");
+        return;
+      }
+
+      if (readiness.hasTabs) {
+        setEnvironmentPreparationMessage("Please open your textbook in a browser tab and navigate to the cover page.");
+        return;
+      }
+
+      setEnvironmentPreparationMessage("Please open your textbook in a browser tab and navigate to the cover page.");
+    }
+
+    void detectEnvironment();
+
+    return () => {
+      mounted = false;
+    };
+  }, [runtime]);
 
   const canFinishToc = tocResult.chapters.length > 0;
 
@@ -299,7 +460,7 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
 
   const stepPrompt = useMemo(() => {
     if (step === "cover") {
-      return "Open your textbook (web or app), navigate to the cover, then click 'Capture Cover'.";
+      return environmentPreparationMessage;
     }
 
     if (step === "title") {
@@ -311,7 +472,7 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
     }
 
     return "Review the detected chapters and sections, then confirm to save.";
-  }, [step]);
+  }, [environmentPreparationMessage, step]);
 
   function updateMetadataForm<K extends keyof MetadataFormState>(field: K, value: MetadataFormState[K]): void {
     setMetadataForm((current) => ({ ...current, [field]: value }));
@@ -391,10 +552,81 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
     };
   }
 
-  async function captureForStep(targetStep: "cover" | "title" | "toc"): Promise<string | null> {
+  function applyMetadataFromText(rawText: string, sourceStep: "cover" | "title"): void {
+    const safety = evaluateAutoCaptureSafety(rawText, sourceStep);
+    if (!safety.allowed) {
+      setErrorMessage(safety.message ?? "Capture blocked by safety checks.");
+      appendDebugLogEntry({
+        eventType: "safety",
+        message: "Metadata extraction blocked by safety checks.",
+        autoModeStep: sourceStep,
+        context: { reason: safety.reason ?? "unknown" },
+      });
+      return;
+    }
+
+    const parsed = extractMetadataFromOcrText(rawText);
+    const merged = mergeAutoMetadata(metadataDraft, parsed);
+    applyMetadataDraft(merged);
+    setErrorMessage(null);
+    setInfoMessage("Metadata extracted automatically. Review and edit fields before accepting.");
+    appendDebugLogEntry({
+      eventType: "ocr",
+      message: "Metadata extracted from OCR draft.",
+      autoModeStep: sourceStep,
+      context: { hasTitle: Boolean(merged.title), hasIsbn: Boolean(merged.isbn), hasAuthors: Boolean(merged.authors?.length) },
+    });
+  }
+
+  function applyTocFromText(rawText: string): void {
+    const safety = evaluateAutoCaptureSafety(rawText, "toc");
+    if (!safety.allowed) {
+      setErrorMessage(safety.message ?? "Capture blocked by safety checks.");
+      appendDebugLogEntry({
+        eventType: "safety",
+        message: "TOC extraction blocked by safety checks.",
+        autoModeStep: "toc",
+        context: { reason: safety.reason ?? "unknown" },
+      });
+      return;
+    }
+
+    const parsed = parseTocFromOcrText(rawText);
+
+    if (!isLikelyTocText(rawText) && parsed.chapters.length === 0) {
+      setErrorMessage(AUTO_MODE_SCOPE_MESSAGE);
+      return;
+    }
+
+    const merged = mergeParsedToc(tocResult, parsed);
+    setTocResult(merged);
+    setErrorMessage(null);
+    setMetadataForm((current) => ({
+      ...current,
+      tocExtractionConfidence: merged.confidence > 0 ? merged.confidence.toFixed(2) : current.tocExtractionConfidence,
+    }));
+    setInfoMessage(`TOC capture added. ${merged.chapters.length} chapter entries recognized so far.`);
+    appendDebugLogEntry({
+      eventType: "toc",
+      message: "TOC entries parsed and merged.",
+      autoModeStep: "toc",
+      context: {
+        chapters: merged.chapters.length,
+        confidence: merged.confidence,
+      },
+    });
+  }
+
+  async function captureForStep(targetStep: "cover" | "title" | "toc"): Promise<CaptureResult | null> {
     const limitResult = enforceAutoCaptureLimit(usage, targetStep, DEFAULT_AUTO_CAPTURE_LIMITS);
     if (!limitResult.allowed) {
       setErrorMessage(limitResult.message ?? "Capture limit reached.");
+      appendDebugLogEntry({
+        eventType: "capture",
+        message: "Capture blocked by limit guard.",
+        autoModeStep: targetStep,
+        context: { usage, limits: DEFAULT_AUTO_CAPTURE_LIMITS },
+      });
       return null;
     }
 
@@ -403,6 +635,12 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
     setIsBusy(true);
 
     try {
+      appendDebugLogEntry({
+        eventType: "capture",
+        message: "Capture started.",
+        autoModeStep: targetStep,
+      });
+
       const rawImage = await captureDisplayFrame();
       const image = await loadImage(rawImage);
       const defaultSelection = createDefaultSelection(image);
@@ -417,9 +655,35 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
 
       const cropped = await cropToSelectionAndAutoBoundary(rawImage, selection);
       setUsage(limitResult.nextUsage);
-      return cropped;
+      persistCaptureUsage(draftKeyRef.current, limitResult.nextUsage);
+      setIsRunningOcr(true);
+      const ocr = await extractTextFromImageWithFallback(cropped);
+      setIsRunningOcr(false);
+      setOcrProviderStatus(`OCR provider: ${ocr.providerId}`);
+      appendDebugLogEntry({
+        eventType: "capture",
+        message: "Capture completed.",
+        autoModeStep: targetStep,
+        captureMetadata: {
+          usageAfterCapture: limitResult.nextUsage,
+          selectedWidth: selection.width,
+          selectedHeight: selection.height,
+          ocrProvider: ocr.providerId,
+        },
+      });
+      return {
+        imageDataUrl: cropped,
+        ocrText: ocr.text,
+        ocrProviderId: ocr.providerId,
+      };
     } catch {
+      setIsRunningOcr(false);
       setErrorMessage("Unable to capture screen. Make sure screen sharing is allowed and try again.");
+      appendDebugLogEntry({
+        eventType: "error",
+        message: "Display capture failed.",
+        autoModeStep: targetStep,
+      });
       return null;
     } finally {
       setIsBusy(false);
@@ -427,41 +691,11 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
   }
 
   function runMetadataExtraction(): void {
-    const safety = evaluateAutoCaptureSafety(ocrDraft, step === "title" ? "title" : "cover");
-    if (!safety.allowed) {
-      setErrorMessage(safety.message ?? "Capture blocked by safety checks.");
-      return;
-    }
-
-    const parsed = extractMetadataFromOcrText(ocrDraft);
-    const merged = mergeAutoMetadata(metadataDraft, parsed);
-    applyMetadataDraft(merged);
-    setErrorMessage(null);
-    setInfoMessage("Extraction preview updated. Edit fields as needed before accepting.");
+    applyMetadataFromText(ocrDraft, step === "title" ? "title" : "cover");
   }
 
   function runTocExtraction(): void {
-    const safety = evaluateAutoCaptureSafety(ocrDraft, "toc");
-    if (!safety.allowed) {
-      setErrorMessage(safety.message ?? "Capture blocked by safety checks.");
-      return;
-    }
-
-    const parsed = parseTocFromOcrText(ocrDraft);
-
-    if (!isLikelyTocText(ocrDraft) && parsed.chapters.length === 0) {
-      setErrorMessage("This Auto tool is only for metadata and table of contents, not full content capture.");
-      return;
-    }
-
-    const merged = mergeParsedToc(tocResult, parsed);
-    setTocResult(merged);
-    setErrorMessage(null);
-    setMetadataForm((current) => ({
-      ...current,
-      tocExtractionConfidence: merged.confidence > 0 ? merged.confidence.toFixed(2) : current.tocExtractionConfidence,
-    }));
-    setInfoMessage(`TOC capture added. ${merged.chapters.length} chapter entries recognized so far.`);
+    applyTocFromText(ocrDraft);
   }
 
   async function handleCaptureCover(): Promise<void> {
@@ -470,10 +704,12 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
       return;
     }
 
-    setCoverImageDataUrl(captured);
+    setCoverImageDataUrl(captured.imageDataUrl);
+    setOcrDraft(captured.ocrText);
     setModerationAssessment(null);
     setStep("cover");
-    setInfoMessage("Cover captured. Run extraction and review the metadata fields.");
+    applyMetadataFromText(captured.ocrText, "cover");
+    setInfoMessage(`Cover captured and parsed. Review the metadata fields before accepting. (OCR: ${captured.ocrProviderId})`);
   }
 
   async function handleCaptureTitle(): Promise<void> {
@@ -482,8 +718,10 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
       return;
     }
 
+    setOcrDraft(captured.ocrText);
     setStep("title");
-    setInfoMessage("Title page captured. Run extraction to merge additional metadata.");
+    applyMetadataFromText(captured.ocrText, "title");
+    setInfoMessage(`Title page captured and parsed. Review merged metadata. (OCR: ${captured.ocrProviderId})`);
   }
 
   async function handleCaptureToc(): Promise<void> {
@@ -492,8 +730,10 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
       return;
     }
 
+    setOcrDraft(captured.ocrText);
     setStep("toc");
-    setInfoMessage("TOC page captured. Run extraction to append chapters and sections.");
+    applyTocFromText(captured.ocrText);
+    setInfoMessage(`TOC page captured and parsed. Continue capturing or finish TOC. (OCR: ${captured.ocrProviderId})`);
   }
 
   function updateChapter(index: number, update: Partial<TocChapter>): void {
@@ -639,6 +879,7 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
       await persistAutoTextbook(
         {
           metadata: {
+            sourceType: "auto",
             title: metadataForm.title.trim(),
             subtitle: metadata.subtitle,
             grade: metadataForm.grade,
@@ -671,6 +912,17 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
         }
       );
 
+      clearPersistedCaptureUsage(draftKeyRef.current);
+      appendDebugLogEntry({
+        eventType: "auto_mode",
+        message: "Auto textbook setup saved.",
+        autoModeStep: "toc-editor",
+        context: {
+          chapterCount: tocResult.chapters.length,
+          requiresAdminReview,
+        },
+      });
+
       if (requiresAdminReview) {
         setInfoMessage(
           "Saved locally with admin review required. Cloud sync is blocked until this textbook is approved by an admin."
@@ -680,6 +932,11 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
       onSaved();
     } catch {
       setErrorMessage("Unable to save Auto setup. Please verify metadata and try again.");
+      appendDebugLogEntry({
+        eventType: "error",
+        message: "Auto textbook setup save failed.",
+        autoModeStep: "toc-editor",
+      });
     } finally {
       setIsBusy(false);
     }
@@ -690,7 +947,7 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
       <h3>{stepTitle}</h3>
 
       <p className="form-hint">
-        This Auto tool only supports textbook metadata and table of contents capture. It is not for full content extraction.
+        {AUTO_MODE_SCOPE_MESSAGE}
       </p>
 
       <p className="form-hint">{stepPrompt}</p>
@@ -704,6 +961,8 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
       {moderationAssessment?.decision === "review" ? (
         <p className="form-hint">Image safety review triggered: {moderationAssessment.reason}</p>
       ) : null}
+      {ocrProviderStatus ? <p className="form-hint">{ocrProviderStatus}</p> : null}
+      {isRunningOcr ? <p className="form-hint">Running OCR...</p> : null}
 
       <div className="form-actions">
         {step === "cover" ? (

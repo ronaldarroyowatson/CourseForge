@@ -42,13 +42,34 @@ describe("auto textbook flow integration", () => {
   it("switches from Auto setup back to Manual entry", () => {
     render(<TextbookForm onSaved={() => undefined} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Auto \(from screenshots\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Auto \(Recommended\)/i }));
 
     expect(screen.getByRole("button", { name: "Switch to Manual" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Switch to Manual" }));
 
     expect(screen.getByRole("button", { name: "Save Textbook" })).toBeInTheDocument();
+  });
+
+  it("propagates manual sourceType when saving textbook in manual mode", () => {
+    render(<TextbookForm onSaved={() => undefined} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Manual/i }));
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Manual Algebra" } });
+    fireEvent.change(screen.getByLabelText("Grade"), { target: { value: "8" } });
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "Math" } });
+    fireEvent.change(screen.getByLabelText("Edition"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Publication Year"), { target: { value: "2025" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook" }));
+
+    expect(repositoryMocks.createTextbook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceType: "manual",
+        title: "Manual Algebra",
+      })
+    );
   });
 
   it("persists textbook, chapters, and sections while only storing cover image data", async () => {
@@ -94,6 +115,7 @@ describe("auto textbook flow integration", () => {
     expect(repositoryMocks.createTextbook).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Foundations of Algebra",
+        sourceType: "auto",
         coverDataUrl: "data:image/jpeg;base64,AAAA",
       })
     );
@@ -106,13 +128,21 @@ describe("auto textbook flow integration", () => {
     expect(savedTextbookPayload).not.toHaveProperty("rawOcrText");
 
     expect(repositoryMocks.createChapter).toHaveBeenCalledTimes(2);
+    expect(repositoryMocks.createChapter).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ sourceType: "auto" })
+    );
     expect(repositoryMocks.createSection).toHaveBeenCalledTimes(3);
+    expect(repositoryMocks.createSection).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ sourceType: "auto" })
+    );
   });
 
   it("blocks explicit language in Auto OCR parsing", () => {
     render(<TextbookForm onSaved={() => undefined} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Auto \(from screenshots\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Auto \(Recommended\)/i }));
 
     const ocrInput = screen.getByLabelText(/OCR text/i);
     fireEvent.change(ocrInput, { target: { value: "This is fucking explicit text" } });

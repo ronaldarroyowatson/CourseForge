@@ -10,6 +10,7 @@ import { ChapterSelector } from "./components/selectors/ChapterSelector";
 import { SectionSelector } from "./components/selectors/SectionSelector";
 import { TextbookSelector } from "./components/selectors/TextbookSelector";
 import { useRepositories } from "./hooks/useRepositories";
+import { TextbookForm } from "../webapp/components/textbooks/TextbookForm";
 
 const SidebarSectionIcon = React.memo(function SidebarSectionIcon({ kind }: { kind: "library" | "capture" | "export" }): React.JSX.Element {
   if (kind === "library") {
@@ -57,6 +58,8 @@ export function SidebarApp(): React.JSX.Element {
   const [selectedSectionId, setSelectedSectionId] = React.useState<string | undefined>();
   const [quickAddMode, setQuickAddMode] = React.useState<QuickAddMode>("vocab");
   const [quickSaveCount, setQuickSaveCount] = React.useState(0);
+  const [showTextbookSetup, setShowTextbookSetup] = React.useState(false);
+  const [textbookSetupMessage, setTextbookSetupMessage] = React.useState<string | null>(null);
   const [selectedTextbookTitle, setSelectedTextbookTitle] = React.useState("None");
   const [selectedChapterName, setSelectedChapterName] = React.useState("None");
   const [selectedSectionTitle, setSelectedSectionTitle] = React.useState("None");
@@ -238,6 +241,27 @@ export function SidebarApp(): React.JSX.Element {
             onSelectSection={setSelectedSectionId}
           />
         </div>
+      </section>
+
+      <section>
+        <h2 className="sidebar-section-title">Add Textbook</h2>
+        <p className="sidebar-section-copy">Use Auto (Recommended) for guided screenshot extraction or Manual for direct entry.</p>
+        <div className="sidebar-header-actions">
+          <button type="button" className="btn-secondary" onClick={() => setShowTextbookSetup((current) => !current)}>
+            {showTextbookSetup ? "Hide Setup" : "Open Setup"}
+          </button>
+        </div>
+        {textbookSetupMessage ? <p className="sidebar-success">{textbookSetupMessage}</p> : null}
+        {showTextbookSetup ? (
+          <div className="sidebar-textbook-setup">
+            <TextbookForm
+              runtime="extension"
+              onSaved={() => {
+                setTextbookSetupMessage("Textbook saved. Select it in Library Scope to continue.");
+              }}
+            />
+          </div>
+        ) : null}
       </section>
 
       <section ref={quickCaptureSectionRef}>

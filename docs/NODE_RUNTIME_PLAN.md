@@ -17,6 +17,7 @@
 - Root check: `npm run check:node`
 - Strict Functions check: `npm run check:node:functions`
 - Node 24 canary check: `npm run check:node:next24`
+- npm engine enforcement: `.npmrc` sets `engine-strict=true` so unsupported Node versions fail fast during install.
 - Functions build/serve/deploy scripts now require a successful strict runtime check first.
 
 ## Active implementation status

@@ -80,6 +80,8 @@ export interface ImageModerationAssessment {
   skinToneRatio: number;
 }
 
+export const AUTO_MODE_SCOPE_MESSAGE = "This tool only extracts metadata and table of contents. For vocab or concept extraction, use the dedicated capture tool.";
+
 const PROFANITY_TERMS = [
   "f***",
   "f**k",
@@ -121,7 +123,7 @@ const EDUCATIONAL_EXCEPTION_TERMS = [
 export const DEFAULT_AUTO_CAPTURE_LIMITS: AutoCaptureLimits = {
   maxCoverCaptures: 1,
   maxTitleCaptures: 2,
-  maxTocCaptures: 8,
+  maxTocCaptures: 10,
 };
 
 export function createInitialAutoCaptureUsage(): AutoCaptureUsage {
@@ -139,7 +141,7 @@ export function enforceAutoCaptureLimit(
     if (next.cover >= limits.maxCoverCaptures) {
       return {
         allowed: false,
-        message: "This Auto tool is only for metadata and table of contents, not full content capture.",
+        message: AUTO_MODE_SCOPE_MESSAGE,
         nextUsage: next,
       };
     }
@@ -151,7 +153,7 @@ export function enforceAutoCaptureLimit(
     if (next.title >= limits.maxTitleCaptures) {
       return {
         allowed: false,
-        message: "This Auto tool is only for metadata and table of contents, not full content capture.",
+        message: AUTO_MODE_SCOPE_MESSAGE,
         nextUsage: next,
       };
     }
@@ -162,7 +164,7 @@ export function enforceAutoCaptureLimit(
   if (next.toc >= limits.maxTocCaptures) {
     return {
       allowed: false,
-      message: "This Auto tool is only for metadata and table of contents, not full content capture.",
+      message: AUTO_MODE_SCOPE_MESSAGE,
       nextUsage: next,
     };
   }
@@ -522,7 +524,7 @@ export function evaluateAutoCaptureSafety(rawText: string, step: AutoCaptureStep
     return {
       allowed: false,
       reason: "non-book",
-      message: "This Auto tool is only for metadata and table of contents, not full content capture.",
+      message: AUTO_MODE_SCOPE_MESSAGE,
     };
   }
 

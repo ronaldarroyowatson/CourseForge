@@ -135,6 +135,14 @@ interface AdminContentRecord {
   lastModified: string | null;
 }
 
+type AutoOcrProviderId = "local_tesseract" | "cloud_openai_vision";
+
+interface AiProviderPolicyRecord {
+  providerOrder: AutoOcrProviderId[];
+  updatedBy: string;
+  updatedAt: string;
+}
+
 function success<T>(message: string, data: T): CallableResult<T> {
   return { success: true, message, data };
 }
@@ -165,9 +173,72 @@ const MONTHLY_BASELINE_PERCENT = 8.6;
 const DAILY_BASELINE_MULTIPLIER = 0.4;
 const WEEKLY_BASELINE_MULTIPLIER = 2.7;
 const MONTHLY_LIMIT_PERCENT = 100;
+const AI_PROVIDER_POLICY_DOC_PATH = "config/aiProviderPolicy";
+const DEFAULT_AUTO_OCR_PROVIDER_ORDER: AutoOcrProviderId[] = ["local_tesseract", "cloud_openai_vision"];
+const OCR_RATE_LIMIT_WINDOW_MS = 60_000;
+const OCR_RATE_LIMIT_MAX_REQUESTS = 30;
+const MAX_OCR_IMAGE_DATA_URL_BYTES = 8 * 1024 * 1024;
 
 function roundToOneDecimal(value: number): number {
   return Number(value.toFixed(1));
+}
+
+function normalizeAutoOcrProviderOrder(value: unknown): AutoOcrProviderId[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_AUTO_OCR_PROVIDER_ORDER;
+  }
+
+  const accepted = value
+    .filter((entry): entry is AutoOcrProviderId => entry === "local_tesseract" || entry === "cloud_openai_vision")
+    .filter((entry, index, array) => array.indexOf(entry) === index);
+
+  if (!accepted.length) {
+    return DEFAULT_AUTO_OCR_PROVIDER_ORDER;
+  }
+
+  for (const provider of DEFAULT_AUTO_OCR_PROVIDER_ORDER) {
+    if (!accepted.includes(provider)) {
+      accepted.push(provider);
+    }
+  }
+
+  return accepted;
+}
+
+function inferImageMimeType(imageDataUrl: string): string {
+  const match = imageDataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+  const mimeType = match?.[1]?.toLowerCase() ?? "";
+  if (["image/png", "image/jpeg", "image/jpg", "image/webp"].includes(mimeType)) {
+    return mimeType === "image/jpg" ? "image/jpeg" : mimeType;
+  }
+
+  throw new HttpsError("invalid-argument", "Unsupported screenshot format. Use PNG, JPEG, or WEBP.");
+}
+
+async function consumeOcrRequestQuota(uid: string): Promise<void> {
+  const usageRef = firestore.doc(`users/${uid}/ocrUsage/current`);
+
+  await firestore.runTransaction(async (transaction) => {
+    const now = Date.now();
+    const snapshot = await transaction.get(usageRef);
+    const data = snapshot.exists ? snapshot.data() ?? {} : {};
+    const windowStartMs = typeof data.windowStartMs === "number" ? data.windowStartMs : now;
+    const usedCount = typeof data.usedCount === "number" ? data.usedCount : 0;
+    const withinWindow = now - windowStartMs < OCR_RATE_LIMIT_WINDOW_MS;
+
+    const nextWindowStart = withinWindow ? windowStartMs : now;
+    const nextCount = withinWindow ? usedCount + 1 : 1;
+
+    if (withinWindow && usedCount >= OCR_RATE_LIMIT_MAX_REQUESTS) {
+      throw new HttpsError("resource-exhausted", "OCR request limit reached. Please wait a minute and try again.");
+    }
+
+    transaction.set(usageRef, {
+      windowStartMs: nextWindowStart,
+      usedCount: nextCount,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  });
 }
 
 function getDefaultDailyLimitPercent(): number {
@@ -831,6 +902,103 @@ export const getCurrentPremiumUsage = onCall(async (request) => {
 
   const usage = await getOrCreatePremiumUsage(request.auth.uid);
   return success("Loaded premium usage.", usage);
+});
+
+export const getAiProviderPolicy = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const snapshot = await firestore.doc(AI_PROVIDER_POLICY_DOC_PATH).get();
+  const data = snapshot.data() ?? {};
+  const normalized: AiProviderPolicyRecord = {
+    providerOrder: normalizeAutoOcrProviderOrder(data.providerOrder),
+    updatedBy: typeof data.updatedBy === "string" ? data.updatedBy : "system",
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date(0).toISOString(),
+  };
+
+  return success("Loaded AI provider policy.", normalized);
+});
+
+export const setAiProviderPolicy = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const data = request.data as { providerOrder?: unknown };
+  const providerOrder = normalizeAutoOcrProviderOrder(data.providerOrder);
+  const nextPolicy: AiProviderPolicyRecord = {
+    providerOrder,
+    updatedBy: request.auth?.uid ?? "unknown",
+    updatedAt: new Date().toISOString(),
+  };
+
+  await firestore.doc(AI_PROVIDER_POLICY_DOC_PATH).set(nextPolicy, { merge: true });
+  return success("Updated AI provider policy.", nextPolicy);
+});
+
+export const extractScreenshotText = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in to extract screenshot text.");
+  }
+
+  const payload = request.data as { imageDataUrl?: unknown };
+  const imageDataUrl = typeof payload.imageDataUrl === "string" ? payload.imageDataUrl.trim() : "";
+
+  if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
+    throw new HttpsError("invalid-argument", "A valid image data URL is required.");
+  }
+
+  if (Buffer.byteLength(imageDataUrl, "utf8") > MAX_OCR_IMAGE_DATA_URL_BYTES) {
+    throw new HttpsError("invalid-argument", "Screenshot payload is too large. Please crop before retrying.");
+  }
+
+  const openaiKey = process.env.OPENAI_API_KEY ?? "";
+  if (!openaiKey) {
+    throw new HttpsError("failed-precondition", "Cloud OCR is unavailable because OPENAI_API_KEY is not configured.");
+  }
+
+  await consumeOcrRequestQuota(request.auth.uid);
+  inferImageMimeType(imageDataUrl);
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openaiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You perform OCR from educational screenshots. Return only the extracted text with original line breaks, no commentary.",
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Extract all readable text from this screenshot. Return plain text only." },
+            { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
+          ],
+        },
+      ],
+      max_tokens: 1800,
+      temperature: 0,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new HttpsError("internal", `Cloud OCR provider error: ${response.status} ${response.statusText}`);
+  }
+
+  const json = await response.json() as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const extractedText = json.choices?.[0]?.message?.content?.trim() ?? "";
+
+  if (!extractedText) {
+    throw new HttpsError("internal", "Cloud OCR provider returned empty text.");
+  }
+
+  return success("Screenshot text extracted.", { text: extractedText });
 });
 
 // ---------------------------------------------------------------------------

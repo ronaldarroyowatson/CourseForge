@@ -98,6 +98,7 @@ export function SectionForm({ selectedChapterId, refreshKey, onSaved }: SectionF
     try {
       setIsSaving(true);
       const createdSectionId = await createSection({
+        sourceType: "manual",
         chapterId: selectedChapterId,
         index: parsedIndex,
         title: form.title.trim(),

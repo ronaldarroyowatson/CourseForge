@@ -98,6 +98,7 @@ export function ChapterForm({ selectedTextbookId, refreshKey, onSaved }: Chapter
     try {
       setIsSaving(true);
       const createdChapterId = await createChapter({
+        sourceType: "manual",
         textbookId: selectedTextbookId,
         index: parsedIndex,
         name: form.name.trim(),

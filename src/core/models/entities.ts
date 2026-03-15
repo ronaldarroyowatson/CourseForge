@@ -19,6 +19,7 @@ export interface RelatedIsbn {
 
 export interface Textbook {
   id: string;
+  sourceType: "auto" | "manual";
   userId?: string;
   title: string;
   subtitle?: string;
@@ -61,6 +62,7 @@ export interface Textbook {
 
 export interface Chapter {
   id: string;
+  sourceType: "auto" | "manual";
   userId?: string;
   textbookId: string;
   index: number;
@@ -75,6 +77,7 @@ export interface Chapter {
 
 export interface Section {
   id: string;
+  sourceType: "auto" | "manual";
   userId?: string;
   textbookId?: string;
   chapterId: string;

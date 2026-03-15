@@ -30,6 +30,7 @@ function buildSampleExportNode(): TextbookExportNode {
       lastModified: "2026-03-10T00:00:00.000Z",
       pendingSync: false,
       source: "local",
+        sourceType: "manual",
         isFavorite: false,
         isArchived: false,
     },
@@ -44,6 +45,7 @@ function buildSampleExportNode(): TextbookExportNode {
           lastModified: "2026-03-10T00:00:00.000Z",
           pendingSync: false,
           source: "local",
+           sourceType: "manual",
         },
         sections: [
           {
@@ -56,6 +58,7 @@ function buildSampleExportNode(): TextbookExportNode {
               lastModified: "2026-03-10T00:00:00.000Z",
               pendingSync: false,
               source: "local",
+                 sourceType: "manual",
             },
             concepts: [
               {

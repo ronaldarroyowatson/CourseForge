@@ -99,10 +99,10 @@ describe("textbookAutoExtractionService", () => {
 
     const secondCover = enforceAutoCaptureLimit(usage, "cover");
     expect(secondCover.allowed).toBe(false);
-    expect(secondCover.message).toContain("metadata and table of contents");
+    expect(secondCover.message).toContain("dedicated capture tool");
 
     usage = createInitialAutoCaptureUsage();
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 10; index += 1) {
       const result = enforceAutoCaptureLimit(usage, "toc");
       expect(result.allowed).toBe(true);
       usage = result.nextUsage;

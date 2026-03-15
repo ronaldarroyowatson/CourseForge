@@ -6,6 +6,7 @@ describe("syncService moderation cloud hold", () => {
   it("blocks cloud sync while admin review is pending", () => {
     const blocked = isTextbookCloudSyncBlocked({
       id: "tb-1",
+      sourceType: "auto",
       title: "Grey's Anatomy",
       grade: "College",
       subject: "Science",
@@ -32,6 +33,7 @@ describe("syncService moderation cloud hold", () => {
   it("allows cloud sync after admin approval", () => {
     const allowed = isTextbookCloudSyncBlocked({
       id: "tb-2",
+      sourceType: "auto",
       title: "Grey's Anatomy",
       grade: "College",
       subject: "Science",

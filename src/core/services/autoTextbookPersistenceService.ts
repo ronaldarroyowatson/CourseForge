@@ -2,6 +2,7 @@ import { normalizeISBN } from "./isbnService";
 import type { TocChapter } from "./textbookAutoExtractionService";
 
 interface AutoCreateTextbookInput {
+  sourceType: "auto" | "manual";
   title: string;
   subtitle?: string;
   grade: string;
@@ -28,6 +29,7 @@ interface AutoCreateTextbookInput {
 }
 
 export interface AutoPersistenceMetadata {
+  sourceType?: "auto" | "manual";
   title: string;
   subtitle?: string;
   grade: string;
@@ -59,8 +61,8 @@ export interface PersistAutoTextbookInput {
 
 export interface PersistAutoTextbookDependencies {
   createTextbook: (input: AutoCreateTextbookInput) => Promise<string>;
-  createChapter: (input: { textbookId: string; index: number; name: string; description?: string }) => Promise<string>;
-  createSection: (input: { chapterId: string; index: number; title: string; notes?: string }) => Promise<string>;
+  createChapter: (input: { sourceType?: "auto" | "manual"; textbookId: string; index: number; name: string; description?: string }) => Promise<string>;
+  createSection: (input: { sourceType?: "auto" | "manual"; chapterId: string; index: number; title: string; notes?: string }) => Promise<string>;
 }
 
 export async function persistAutoTextbook(
@@ -68,6 +70,7 @@ export async function persistAutoTextbook(
   deps: PersistAutoTextbookDependencies
 ): Promise<string> {
   const textbookId = await deps.createTextbook({
+    sourceType: input.metadata.sourceType ?? "auto",
     title: input.metadata.title.trim(),
     subtitle: input.metadata.subtitle,
     grade: input.metadata.grade.trim() || input.metadata.gradeBand?.trim() || "Unspecified",
@@ -97,6 +100,7 @@ export async function persistAutoTextbook(
     const chapter = input.tocChapters[chapterIndex];
     const chapterOrder = Number.parseInt(chapter.chapterNumber, 10);
     const createdChapterId = await deps.createChapter({
+      sourceType: "auto",
       textbookId,
       index: Number.isInteger(chapterOrder) ? chapterOrder : chapterIndex + 1,
       name: chapter.title,
@@ -107,6 +111,7 @@ export async function persistAutoTextbook(
       const section = chapter.sections[sectionIndex];
       const sectionOrder = Number.parseInt(section.sectionNumber.split(".").at(-1) ?? "", 10);
       await deps.createSection({
+        sourceType: "auto",
         chapterId: createdChapterId,
         index: Number.isInteger(sectionOrder) ? sectionOrder : sectionIndex + 1,
         title: section.title,

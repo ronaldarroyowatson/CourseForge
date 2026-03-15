@@ -33,6 +33,7 @@ import { uploadTextbookCoverFromDataUrl, uploadTextbookCoverImage } from "../../
 import { useUIStore } from "../store/uiStore";
 
 export interface CreateTextbookInput {
+  sourceType: "auto" | "manual";
   title: string;
   subtitle?: string;
   grade: string;
@@ -64,6 +65,7 @@ export interface CreateTextbookInput {
 }
 
 export interface CreateChapterInput {
+  sourceType?: "auto" | "manual";
   textbookId: string;
   index: number;
   name: string;
@@ -71,6 +73,7 @@ export interface CreateChapterInput {
 }
 
 export interface CreateSectionInput {
+  sourceType?: "auto" | "manual";
   chapterId: string;
   index: number;
   title: string;
@@ -119,6 +122,7 @@ function buildTextbookFromInput(input: CreateTextbookInput, resolvedCoverUrl?: s
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    sourceType: input.sourceType,
     title: input.title,
     subtitle: input.subtitle,
     grade: input.grade,
@@ -157,6 +161,7 @@ function buildChapterFromInput(input: CreateChapterInput): Chapter {
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    sourceType: input.sourceType ?? "manual",
     textbookId: input.textbookId,
     index: input.index,
     name: input.name,
@@ -171,6 +176,7 @@ function buildSectionFromInput(input: CreateSectionInput, textbookId: string): S
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    sourceType: input.sourceType ?? "manual",
     textbookId,
     chapterId: input.chapterId,
     index: input.index,

@@ -185,6 +185,22 @@ npm run test:rules
 - Admin write override uses the custom auth claim: `request.auth.token.admin == true`.
 - Read access for content documents is scoped to owner-or-admin to prevent cross-tenant reads.
 
+### Legacy PowerPoint conversion setup (.ppt -> .pptx)
+
+CourseForge can import legacy .ppt files by calling the Firebase callable function convertPresentationFile, which forwards to a configured conversion API.
+
+Required Functions environment variables:
+
+- CONVERSION_API_URL: primary HTTPS endpoint that accepts JSON `{ fileName, base64 }` and returns JSON with converted `base64` data.
+- CONVERSION_API_KEY: bearer token sent to the conversion endpoint.
+- CONVERSION_FALLBACK_API_URL: optional backup endpoint used when the primary endpoint fails.
+
+Behavior and safety fallback:
+
+- If conversion config is missing, the app shows a manual-conversion message and asks the teacher to convert to .pptx manually.
+- If conversion retries fail on both primary and fallback endpoints, the callable returns an unavailable error with retry/manual guidance.
+- The frontend only sends legacy .ppt files to conversion; .pptx imports bypass conversion.
+
 ## Documentation
 
 - `docs/ARCHITECTURE.md`

@@ -34,6 +34,16 @@ export interface AutoTextbookMetadata {
   copyrightYear?: number;
 }
 
+export interface MetadataField<T> {
+  value: T;
+  confidence: number;
+  sourceType: "auto" | "manual";
+}
+
+export type AutoMetadataFieldKey = keyof AutoTextbookMetadata;
+
+export type AutoMetadataConfidenceMap = Partial<Record<AutoMetadataFieldKey, MetadataField<unknown>>>;
+
 export interface TocSection {
   sectionNumber: string;
   title: string;
@@ -53,6 +63,17 @@ export interface TocChapter {
 export interface ParsedTocResult {
   chapters: TocChapter[];
   confidence: number;
+}
+
+export interface TocPage {
+  pageIndex: number;
+  chapters: TocChapter[];
+  confidence?: number;
+}
+
+export interface TocStructure {
+  chapters: TocChapter[];
+  stitchingConfidence: number;
 }
 
 export interface ExtractionLimitsResult {
@@ -487,6 +508,231 @@ export function mergeParsedToc(base: ParsedTocResult, incoming: ParsedTocResult)
   };
 }
 
+export function stitchTocPages(pages: TocPage[]): TocStructure {
+  if (!pages.length) {
+    return {
+      chapters: [],
+      stitchingConfidence: 0,
+    };
+  }
+
+  const sortedPages = [...pages].sort((left, right) => left.pageIndex - right.pageIndex);
+  const chapterOrder: string[] = [];
+  const chapterMap = new Map<string, TocChapter>();
+  let duplicateHits = 0;
+  let conflictHits = 0;
+  let totalSections = 0;
+
+  for (const page of sortedPages) {
+    for (const chapter of page.chapters) {
+      const normalizedChapterNumber = normalizeChapterNumber(chapter.chapterNumber);
+      const normalizedChapterTitle = normalizeToken(chapter.title);
+      const key = `${normalizedChapterNumber}|${normalizedChapterTitle}`;
+
+      if (!chapterMap.has(key)) {
+        chapterOrder.push(key);
+        chapterMap.set(key, {
+          ...chapter,
+          chapterNumber: normalizedChapterNumber,
+          sections: chapter.sections.map((section) => ({
+            ...section,
+            sectionNumber: normalizeSectionNumber(section.sectionNumber),
+          })),
+        });
+        totalSections += chapter.sections.length;
+        continue;
+      }
+
+      const existing = chapterMap.get(key)!;
+      const sectionMap = new Map<string, TocSection>();
+
+      for (const section of existing.sections) {
+        sectionMap.set(sectionMergeKey(section), section);
+      }
+
+      for (const section of chapter.sections) {
+        const normalizedSection: TocSection = {
+          ...section,
+          sectionNumber: normalizeSectionNumber(section.sectionNumber),
+        };
+        totalSections += 1;
+        const sectionKey = sectionMergeKey(normalizedSection);
+        const prior = sectionMap.get(sectionKey);
+
+        if (!prior) {
+          sectionMap.set(sectionKey, normalizedSection);
+          continue;
+        }
+
+        duplicateHits += 1;
+
+        if (
+          prior.pageStart !== normalizedSection.pageStart
+          || prior.pageEnd !== normalizedSection.pageEnd
+        ) {
+          conflictHits += 1;
+        }
+
+        sectionMap.set(sectionKey, {
+          ...prior,
+          pageStart: prior.pageStart ?? normalizedSection.pageStart,
+          pageEnd: prior.pageEnd ?? normalizedSection.pageEnd,
+        });
+      }
+
+      chapterMap.set(key, {
+        ...existing,
+        unitName: existing.unitName ?? chapter.unitName,
+        pageStart: existing.pageStart ?? chapter.pageStart,
+        pageEnd: existing.pageEnd ?? chapter.pageEnd,
+        sections: Array.from(sectionMap.values()),
+      });
+    }
+  }
+
+  const chapters = chapterOrder
+    .map((key) => chapterMap.get(key))
+    .filter((chapter): chapter is TocChapter => Boolean(chapter))
+    .sort((left, right) => {
+      const leftNum = Number.parseFloat(left.chapterNumber);
+      const rightNum = Number.parseFloat(right.chapterNumber);
+      if (Number.isFinite(leftNum) && Number.isFinite(rightNum)) {
+        return leftNum - rightNum;
+      }
+      return left.chapterNumber.localeCompare(right.chapterNumber, undefined, { numeric: true, sensitivity: "base" });
+    })
+    .map((chapter) => ({
+      ...chapter,
+      sections: [...chapter.sections].sort((left, right) => {
+        const leftNum = parseSectionOrder(left.sectionNumber);
+        const rightNum = parseSectionOrder(right.sectionNumber);
+        if (Number.isFinite(leftNum) && Number.isFinite(rightNum)) {
+          return leftNum - rightNum;
+        }
+        return left.sectionNumber.localeCompare(right.sectionNumber, undefined, { numeric: true, sensitivity: "base" });
+      }),
+    }));
+
+  const averagePageConfidence = sortedPages.reduce((sum, page) => sum + clamp01(page.confidence ?? 0.55), 0) / sortedPages.length;
+  const duplicatePenalty = totalSections > 0 ? (duplicateHits / totalSections) * 0.2 : 0;
+  const conflictPenalty = totalSections > 0 ? (conflictHits / totalSections) * 0.3 : 0;
+  const chapterBonus = chapters.length > 0 ? 0.08 : 0;
+  const stitchingConfidence = clamp01(averagePageConfidence + chapterBonus - duplicatePenalty - conflictPenalty);
+
+  return {
+    chapters,
+    stitchingConfidence,
+  };
+}
+
+export function scoreMetadataConfidence(rawText: string, metadata: AutoTextbookMetadata): AutoMetadataConfidenceMap {
+  const normalizedText = rawText.trim();
+  const ocrSignalScore = computeOcrSignalScore(normalizedText);
+  const fieldMap: AutoMetadataConfidenceMap = {};
+
+  const setField = <K extends AutoMetadataFieldKey>(
+    key: K,
+    value: AutoTextbookMetadata[K],
+    confidence: number
+  ): void => {
+    if (value === undefined || value === null || value === "") {
+      return;
+    }
+
+    fieldMap[key] = {
+      value,
+      confidence: clamp01(confidence),
+      sourceType: "auto",
+    };
+  };
+
+  const editionConfidence = confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: /edition/i.test(normalizedText) ? 0.9 : 0.6,
+    consistencyScore: metadata.edition ? 0.75 : 0.45,
+    ambiguityPenalty: metadata.edition && /revised|special/i.test(metadata.edition) ? 0.08 : 0,
+  });
+
+  const isbnConfidence = confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: /isbn/i.test(normalizedText) ? 0.95 : 0.45,
+    consistencyScore: isValidIsbn(metadata.isbn) ? 0.98 : 0.35,
+    ambiguityPenalty: metadata.additionalIsbns && metadata.additionalIsbns.length > 4 ? 0.12 : 0,
+  });
+
+  const authorAmbiguityPenalty = metadata.authors && metadata.authors.some((author) => author.length < 3) ? 0.1 : 0;
+  const authorConfidence = confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: /^by\b/im.test(normalizedText) ? 0.87 : 0.58,
+    consistencyScore: metadata.authors && metadata.authors.length > 0 ? 0.83 : 0.4,
+    ambiguityPenalty: authorAmbiguityPenalty,
+  });
+
+  const subjectConfidence = confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: metadata.subject && metadata.subject !== "Other" ? 0.88 : 0.52,
+    consistencyScore: hasSubjectSignal(normalizedText, metadata.subject) ? 0.86 : 0.5,
+    ambiguityPenalty: metadata.subject === "Other" ? 0.12 : 0,
+  });
+
+  const seriesConfidence = confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: /series/i.test(normalizedText) ? 0.86 : 0.48,
+    consistencyScore: metadata.seriesName ? 0.78 : 0.4,
+    ambiguityPenalty: metadata.seriesName && metadata.seriesName.toLowerCase().includes("unknown") ? 0.12 : 0,
+  });
+
+  setField("title", metadata.title, confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: metadata.title && metadata.title.length > 4 ? 0.9 : 0.45,
+    consistencyScore: metadata.title && !/^chapter\s+\d+/i.test(metadata.title) ? 0.85 : 0.5,
+    ambiguityPenalty: metadata.title && metadata.title.length < 5 ? 0.12 : 0,
+  }));
+  setField("subtitle", metadata.subtitle, confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: metadata.subtitle ? 0.8 : 0.4,
+    consistencyScore: metadata.subtitle && metadata.subtitle.length >= 8 ? 0.75 : 0.5,
+    ambiguityPenalty: metadata.subtitle && metadata.subtitle.length < 8 ? 0.1 : 0,
+  }));
+  setField("edition", metadata.edition, editionConfidence);
+  setField("authors", metadata.authors, authorConfidence);
+  setField("publisher", metadata.publisher, confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: /publisher|press|publications?/i.test(normalizedText) ? 0.84 : 0.5,
+    consistencyScore: metadata.publisher ? 0.8 : 0.5,
+    ambiguityPenalty: 0,
+  }));
+  setField("subject", metadata.subject, subjectConfidence);
+  setField("gradeBand", metadata.gradeBand, confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: /grade/i.test(normalizedText) ? 0.86 : 0.45,
+    consistencyScore: metadata.gradeBand ? 0.8 : 0.5,
+    ambiguityPenalty: metadata.gradeBand && metadata.gradeBand.length < 2 ? 0.08 : 0,
+  }));
+  setField("isbn", metadata.isbn, isbnConfidence);
+  setField("seriesName", metadata.seriesName, seriesConfidence);
+  setField("copyrightYear", metadata.copyrightYear, confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: /copyright/i.test(normalizedText) ? 0.9 : 0.58,
+    consistencyScore: metadata.copyrightYear && metadata.copyrightYear >= 1900 && metadata.copyrightYear <= 2100 ? 0.88 : 0.4,
+    ambiguityPenalty: metadata.copyrightYear && metadata.copyrightYear < 1900 ? 0.2 : 0,
+  }));
+  setField("publisherLocation", metadata.publisherLocation, confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: /,\s*[A-Z]{2}\b/.test(normalizedText) ? 0.78 : 0.48,
+    consistencyScore: metadata.publisherLocation ? 0.75 : 0.5,
+    ambiguityPenalty: 0,
+  }));
+  setField("additionalIsbns", metadata.additionalIsbns, confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: metadata.additionalIsbns && metadata.additionalIsbns.length > 0 ? 0.82 : 0.45,
+    consistencyScore: metadata.additionalIsbns?.every((value) => isValidIsbn(value)) ? 0.86 : 0.42,
+    ambiguityPenalty: metadata.additionalIsbns && metadata.additionalIsbns.some((value) => !isValidIsbn(value)) ? 0.15 : 0,
+  }));
+
+  return fieldMap;
+}
+
 export function isLikelyTocText(rawText: string): boolean {
   const text = rawText.toLowerCase();
   return (
@@ -637,4 +883,151 @@ function toTitleCase(value: string): string {
   return value
     .toLowerCase()
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function sectionMergeKey(section: TocSection): string {
+  return `${normalizeSectionNumber(section.sectionNumber)}|${normalizeToken(section.title)}`;
+}
+
+function normalizeChapterNumber(chapterNumber: string): string {
+  const trimmed = chapterNumber.trim();
+  const asInt = Number.parseInt(trimmed, 10);
+  if (Number.isInteger(asInt)) {
+    return String(asInt);
+  }
+  return trimmed.toUpperCase();
+}
+
+function normalizeSectionNumber(sectionNumber: string): string {
+  const parts = sectionNumber
+    .trim()
+    .split(".")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!parts.length) {
+    return sectionNumber.trim();
+  }
+
+  return parts
+    .map((part) => {
+      const parsed = Number.parseInt(part, 10);
+      return Number.isInteger(parsed) ? String(parsed) : part;
+    })
+    .join(".");
+}
+
+function parseSectionOrder(sectionNumber: string): number {
+  const parts = normalizeSectionNumber(sectionNumber)
+    .split(".")
+    .map((part) => Number.parseInt(part, 10));
+  if (!parts.every((part) => Number.isFinite(part))) {
+    return Number.NaN;
+  }
+
+  return parts.reduce((acc, value, index) => acc + value / Math.pow(100, index), 0);
+}
+
+function normalizeToken(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function computeOcrSignalScore(rawText: string): number {
+  if (!rawText.trim()) {
+    return 0.2;
+  }
+
+  const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const words = rawText.match(/[A-Za-z]{2,}/g) ?? [];
+  const numericTokens = rawText.match(/\b\d+\b/g) ?? [];
+
+  const lineScore = Math.min(1, lines.length / 10);
+  const wordScore = Math.min(1, words.length / 40);
+  const numericScore = Math.min(1, numericTokens.length / 18);
+
+  return clamp01((lineScore * 0.35) + (wordScore * 0.45) + (numericScore * 0.2));
+}
+
+function confidenceFromSignals(input: {
+  ocrSignalScore: number;
+  classifierScore: number;
+  consistencyScore: number;
+  ambiguityPenalty: number;
+}): number {
+  const weighted = (input.ocrSignalScore * 0.3) + (input.classifierScore * 0.35) + (input.consistencyScore * 0.35);
+  return clamp01(weighted - input.ambiguityPenalty);
+}
+
+function hasSubjectSignal(rawText: string, subject?: string): boolean {
+  if (!subject) {
+    return false;
+  }
+
+  const normalized = subject.toLowerCase();
+  if (normalized === "math") {
+    return /algebra|geometry|math|mathematics|calculus/.test(rawText.toLowerCase());
+  }
+  if (normalized === "science") {
+    return /science|biology|chemistry|physics|earth/.test(rawText.toLowerCase());
+  }
+  if (normalized === "social studies") {
+    return /history|social studies|government|civics/.test(rawText.toLowerCase());
+  }
+  if (normalized === "ela") {
+    return /language arts|literature|reading|grammar|english/.test(rawText.toLowerCase());
+  }
+  if (normalized === "computer science") {
+    return /computer science|coding|programming/.test(rawText.toLowerCase());
+  }
+  return true;
+}
+
+function isValidIsbn(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.replace(/[^0-9Xx]/g, "").toUpperCase();
+  if (normalized.length === 10) {
+    let total = 0;
+    for (let index = 0; index < 9; index += 1) {
+      const digit = Number.parseInt(normalized[index], 10);
+      if (!Number.isFinite(digit)) {
+        return false;
+      }
+      total += (10 - index) * digit;
+    }
+
+    const checksum = normalized[9] === "X" ? 10 : Number.parseInt(normalized[9], 10);
+    if (!Number.isFinite(checksum)) {
+      return false;
+    }
+
+    return ((total + checksum) % 11) === 0;
+  }
+
+  if (normalized.length === 13) {
+    let total = 0;
+    for (let index = 0; index < 12; index += 1) {
+      const digit = Number.parseInt(normalized[index], 10);
+      if (!Number.isFinite(digit)) {
+        return false;
+      }
+      total += digit * (index % 2 === 0 ? 1 : 3);
+    }
+
+    const checkDigit = (10 - (total % 10)) % 10;
+    const lastDigit = Number.parseInt(normalized[12], 10);
+    return Number.isFinite(lastDigit) && checkDigit === lastDigit;
+  }
+
+  return false;
 }

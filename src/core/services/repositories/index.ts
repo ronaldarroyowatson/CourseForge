@@ -4,7 +4,9 @@ export {
   listChapters,
   listChaptersByTextbookId,
   saveChapter,
+  updateChapter,
 } from "./chapterRepository";
+
 export {
   deleteConcept,
   getConceptById,
@@ -12,6 +14,7 @@ export {
   listConceptsBySectionId,
   saveConcept,
 } from "./conceptRepository";
+
 export {
   deleteEquation,
   getEquationById,
@@ -19,6 +22,7 @@ export {
   listEquationsBySectionId,
   saveEquation,
 } from "./equationRepository";
+
 export {
   deleteKeyIdea,
   getKeyIdeaById,
@@ -26,13 +30,16 @@ export {
   listKeyIdeasBySectionId,
   saveKeyIdea,
 } from "./keyIdeaRepository";
+
 export {
   deleteSection,
   getSectionById,
   listSections,
   listSectionsByChapterId,
   saveSection,
+  updateSection,
 } from "./sectionRepository";
+
 export {
   deleteTextbook,
   findTextbookByIsbn,
@@ -43,6 +50,7 @@ export {
   updateTextbook,
   updateTextbookFlags,
 } from "./textbookRepository";
+
 export {
   deleteVocabTerm,
   getVocabTermById,
@@ -50,6 +58,7 @@ export {
   listVocabTermsBySectionId,
   saveVocabTerm,
 } from "./vocabRepository";
+
 export {
   deleteExtractedPresentation,
   getExtractedPresentationById,

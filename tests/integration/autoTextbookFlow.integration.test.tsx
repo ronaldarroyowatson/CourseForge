@@ -1,18 +1,42 @@
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { persistAutoTextbook } from "../../src/core/services/autoTextbookPersistenceService";
 import type { TocChapter } from "../../src/core/services/textbookAutoExtractionService";
+import { AutoTextbookSetupFlow } from "../../src/webapp/components/textbooks/AutoTextbookSetupFlow";
 import { TextbookForm } from "../../src/webapp/components/textbooks/TextbookForm";
 import { useUIStore } from "../../src/webapp/store/uiStore";
 
 const repositoryMocks = vi.hoisted(() => ({
   createTextbook: vi.fn<(input: any) => Promise<string>>(async () => "textbook-1"),
   editTextbook: vi.fn<(id: string, changes: Record<string, unknown>) => Promise<{ id: string }>>(async () => ({ id: "textbook-1" })),
-  findTextbookByISBN: vi.fn<(isbn: string) => Promise<undefined>>(async () => undefined),
+  findTextbookByISBN: vi.fn<(isbn: string) => Promise<any>>(async () => undefined),
   createChapter: vi.fn<(input: { textbookId: string; index: number; name: string; description?: string }) => Promise<string>>(async ({ index }) => `chapter-${index}`),
   createSection: vi.fn<(input: { chapterId: string; index: number; title: string; notes?: string }) => Promise<string>>(async () => "section-1"),
+  editChapter: vi.fn<(id: string, changes: Record<string, unknown>) => Promise<{ id: string }>>(async (id) => ({ id })),
+  editSection: vi.fn<(id: string, changes: Record<string, unknown>) => Promise<{ id: string }>>(async (id) => ({ id })),
+  fetchChaptersByTextbookId: vi.fn<(textbookId: string) => Promise<any[]>>(async () => []),
+  fetchSectionsByChapterId: vi.fn<(chapterId: string) => Promise<any[]>>(async () => []),
+  fetchVocabTermsBySectionId: vi.fn<(sectionId: string) => Promise<any[]>>(async () => []),
+  fetchEquationsBySectionId: vi.fn<(sectionId: string) => Promise<any[]>>(async () => []),
+  fetchConceptsBySectionId: vi.fn<(sectionId: string) => Promise<any[]>>(async () => []),
+  fetchKeyIdeasBySectionId: vi.fn<(sectionId: string) => Promise<any[]>>(async () => []),
+  removeVocabTerm: vi.fn<(id: string) => Promise<void>>(async () => undefined),
+  removeEquation: vi.fn<(id: string) => Promise<void>>(async () => undefined),
+  removeConcept: vi.fn<(id: string) => Promise<void>>(async () => undefined),
+  removeKeyIdea: vi.fn<(id: string) => Promise<void>>(async () => undefined),
+  removeSection: vi.fn<(id: string) => Promise<void>>(async () => undefined),
+  removeChapter: vi.fn<(id: string) => Promise<void>>(async () => undefined),
+}));
+
+const coverServiceMocks = vi.hoisted(() => ({
+  uploadTextbookCoverFromDataUrl: vi.fn<(textbookId: string, dataUrl: string) => Promise<string>>(async (textbookId) => `cover://${textbookId}`),
+}));
+
+vi.mock("../../src/core/services/coverImageService", () => ({
+  uploadTextbookCoverFromDataUrl: (textbookId: string, dataUrl: string) => coverServiceMocks.uploadTextbookCoverFromDataUrl(textbookId, dataUrl),
+  uploadTextbookCoverImage: vi.fn(async () => "cover://mock"),
 }));
 
 vi.mock("../../src/webapp/hooks/useRepositories", () => ({
@@ -22,6 +46,20 @@ vi.mock("../../src/webapp/hooks/useRepositories", () => ({
     findTextbookByISBN: repositoryMocks.findTextbookByISBN,
     createChapter: repositoryMocks.createChapter,
     createSection: repositoryMocks.createSection,
+    editChapter: repositoryMocks.editChapter,
+    editSection: repositoryMocks.editSection,
+    fetchChaptersByTextbookId: repositoryMocks.fetchChaptersByTextbookId,
+    fetchSectionsByChapterId: repositoryMocks.fetchSectionsByChapterId,
+    fetchVocabTermsBySectionId: repositoryMocks.fetchVocabTermsBySectionId,
+    fetchEquationsBySectionId: repositoryMocks.fetchEquationsBySectionId,
+    fetchConceptsBySectionId: repositoryMocks.fetchConceptsBySectionId,
+    fetchKeyIdeasBySectionId: repositoryMocks.fetchKeyIdeasBySectionId,
+    removeVocabTerm: repositoryMocks.removeVocabTerm,
+    removeEquation: repositoryMocks.removeEquation,
+    removeConcept: repositoryMocks.removeConcept,
+    removeKeyIdea: repositoryMocks.removeKeyIdea,
+    removeSection: repositoryMocks.removeSection,
+    removeChapter: repositoryMocks.removeChapter,
   }),
 }));
 
@@ -32,6 +70,21 @@ describe("auto textbook flow integration", () => {
     repositoryMocks.findTextbookByISBN.mockClear();
     repositoryMocks.createChapter.mockClear();
     repositoryMocks.createSection.mockClear();
+    repositoryMocks.editChapter.mockClear();
+    repositoryMocks.editSection.mockClear();
+    repositoryMocks.fetchChaptersByTextbookId.mockClear();
+    repositoryMocks.fetchSectionsByChapterId.mockClear();
+    repositoryMocks.fetchVocabTermsBySectionId.mockClear();
+    repositoryMocks.fetchEquationsBySectionId.mockClear();
+    repositoryMocks.fetchConceptsBySectionId.mockClear();
+    repositoryMocks.fetchKeyIdeasBySectionId.mockClear();
+    repositoryMocks.removeVocabTerm.mockClear();
+    repositoryMocks.removeEquation.mockClear();
+    repositoryMocks.removeConcept.mockClear();
+    repositoryMocks.removeKeyIdea.mockClear();
+    repositoryMocks.removeSection.mockClear();
+    repositoryMocks.removeChapter.mockClear();
+    coverServiceMocks.uploadTextbookCoverFromDataUrl.mockClear();
 
     useUIStore.setState({
       selectedTextbook: null,
@@ -49,6 +102,35 @@ describe("auto textbook flow integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Switch to Manual" }));
 
     expect(screen.getByRole("button", { name: "Save Textbook" })).toBeInTheDocument();
+  });
+
+  it("marks metadata confidence source as manual after user edits", () => {
+    const { container } = render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "cover",
+          metadataDraft: {
+            title: "Auto Algebra",
+            edition: "2nd Edition",
+          },
+          metadataConfidence: {
+            title: {
+              value: "Auto Algebra",
+              confidence: 0.82,
+              sourceType: "auto",
+            },
+          },
+          coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+        }}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Manual Title Override" } });
+
+    const manualDot = container.querySelector("[title*='(manual)']");
+    expect(manualDot).toBeTruthy();
   });
 
   it("propagates manual sourceType when saving textbook in manual mode", () => {
@@ -185,5 +267,231 @@ describe("auto textbook flow integration", () => {
         cloudSyncBlockedReason: "pending_admin_review",
       })
     );
+  });
+
+  it("prompts for duplicate resolution and applies merge/dedupe choice in auto flow", async () => {
+    const onSaved = vi.fn();
+    const validCoverDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=";
+
+    repositoryMocks.findTextbookByISBN.mockResolvedValue({
+      id: "tb-existing",
+      title: "Manual Algebra",
+      isbnRaw: "9781402894626",
+    });
+
+    repositoryMocks.fetchChaptersByTextbookId.mockResolvedValue([
+      {
+        id: "ch-existing",
+        sourceType: "manual",
+        textbookId: "tb-existing",
+        index: 1,
+        name: "Integers",
+        lastModified: "2026-03-15T00:00:00.000Z",
+        pendingSync: true,
+        source: "local",
+      },
+    ]);
+
+    repositoryMocks.fetchSectionsByChapterId.mockResolvedValue([
+      {
+        id: "sec-existing",
+        sourceType: "manual",
+        textbookId: "tb-existing",
+        chapterId: "ch-existing",
+        index: 1,
+        title: "Absolute Value",
+        lastModified: "2026-03-15T00:00:00.000Z",
+        pendingSync: true,
+        source: "local",
+      },
+    ]);
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={onSaved}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: validCoverDataUrl,
+          tocResult: {
+            confidence: 0.9,
+            chapters: [
+              {
+                chapterNumber: "1",
+                title: "Integers",
+                sections: [{ sectionNumber: "1.1", title: "Absolute Value" }],
+              },
+            ],
+          },
+          bypassImageModeration: true,
+          metadataForm: {
+            title: "Auto Algebra",
+            grade: "8",
+            gradeBand: "7-9",
+            subject: "Math",
+            edition: "2",
+            publicationYear: "2026",
+            isbnRaw: "9781402894626",
+          },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+
+    expect(await screen.findByText(/Existing textbook found:/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Confirm and Save Textbook" })).not.toBeDisabled();
+    });
+
+    fireEvent.change(screen.getByLabelText("Resolution mode"), { target: { value: "merge_dedupe" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+
+    await waitFor(() => {
+      expect(repositoryMocks.editTextbook).toHaveBeenCalledWith(
+        "tb-existing",
+        expect.objectContaining({
+          title: "Auto Algebra",
+          sourceType: "auto",
+        })
+      );
+    });
+    expect(repositoryMocks.editChapter).toHaveBeenCalledWith(
+      "ch-existing",
+      expect.objectContaining({
+        sourceType: "auto",
+        name: "Integers",
+      })
+    );
+    expect(repositoryMocks.editSection).toHaveBeenCalledWith(
+      "sec-existing",
+      expect.objectContaining({
+        sourceType: "auto",
+        title: "Absolute Value",
+      })
+    );
+    expect(repositoryMocks.removeChapter).not.toHaveBeenCalled();
+    expect(repositoryMocks.removeSection).not.toHaveBeenCalled();
+    expect(coverServiceMocks.uploadTextbookCoverFromDataUrl).toHaveBeenCalledWith("tb-existing", validCoverDataUrl);
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies overwrite_auto choice by clearing old hierarchy and rebuilding from auto TOC", async () => {
+    const onSaved = vi.fn();
+    const validCoverDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=";
+
+    repositoryMocks.findTextbookByISBN.mockResolvedValue({
+      id: "tb-existing-overwrite",
+      title: "Manual Precalculus",
+      isbnRaw: "9781402894000",
+    });
+
+    repositoryMocks.fetchChaptersByTextbookId.mockResolvedValue([
+      {
+        id: "ch-legacy",
+        sourceType: "manual",
+        textbookId: "tb-existing-overwrite",
+        index: 1,
+        name: "Legacy Chapter",
+        lastModified: "2026-03-15T00:00:00.000Z",
+        pendingSync: true,
+        source: "local",
+      },
+    ]);
+
+    repositoryMocks.fetchSectionsByChapterId.mockResolvedValue([
+      {
+        id: "sec-legacy",
+        sourceType: "manual",
+        textbookId: "tb-existing-overwrite",
+        chapterId: "ch-legacy",
+        index: 1,
+        title: "Legacy Section",
+        lastModified: "2026-03-15T00:00:00.000Z",
+        pendingSync: true,
+        source: "local",
+      },
+    ]);
+
+    repositoryMocks.fetchVocabTermsBySectionId.mockResolvedValue([{ id: "v-legacy" }]);
+    repositoryMocks.fetchEquationsBySectionId.mockResolvedValue([{ id: "eq-legacy" }]);
+    repositoryMocks.fetchConceptsBySectionId.mockResolvedValue([{ id: "co-legacy" }]);
+    repositoryMocks.fetchKeyIdeasBySectionId.mockResolvedValue([{ id: "ki-legacy" }]);
+
+    repositoryMocks.createChapter.mockImplementation(async ({ index }) => `chapter-overwrite-${index}`);
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={onSaved}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: validCoverDataUrl,
+          tocResult: {
+            confidence: 0.92,
+            chapters: [
+              {
+                chapterNumber: "1",
+                title: "Functions",
+                sections: [
+                  { sectionNumber: "1.1", title: "Linear Functions" },
+                  { sectionNumber: "1.2", title: "Quadratic Functions" },
+                ],
+              },
+            ],
+          },
+          bypassImageModeration: true,
+          metadataForm: {
+            title: "Auto Precalculus",
+            grade: "11",
+            gradeBand: "10-12",
+            subject: "Math",
+            edition: "4",
+            publicationYear: "2026",
+            isbnRaw: "9781402894000",
+          },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+
+    expect(await screen.findByText(/Existing textbook found:/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Confirm and Save Textbook" })).not.toBeDisabled();
+    });
+
+    fireEvent.change(screen.getByLabelText("Resolution mode"), { target: { value: "overwrite_auto" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+
+    await waitFor(() => {
+      expect(repositoryMocks.removeSection).toHaveBeenCalledWith("sec-legacy");
+    });
+
+    expect(repositoryMocks.removeVocabTerm).toHaveBeenCalledWith("v-legacy");
+    expect(repositoryMocks.removeEquation).toHaveBeenCalledWith("eq-legacy");
+    expect(repositoryMocks.removeConcept).toHaveBeenCalledWith("co-legacy");
+    expect(repositoryMocks.removeKeyIdea).toHaveBeenCalledWith("ki-legacy");
+    expect(repositoryMocks.removeChapter).toHaveBeenCalledWith("ch-legacy");
+
+    expect(repositoryMocks.createChapter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        textbookId: "tb-existing-overwrite",
+        sourceType: "auto",
+        name: "Functions",
+      })
+    );
+    expect(repositoryMocks.createSection).toHaveBeenCalledTimes(2);
+    expect(repositoryMocks.createSection).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        chapterId: "chapter-overwrite-1",
+        sourceType: "auto",
+        title: "Linear Functions",
+      })
+    );
+    expect(repositoryMocks.editChapter).not.toHaveBeenCalled();
+    expect(repositoryMocks.editSection).not.toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalledTimes(1);
   });
 });

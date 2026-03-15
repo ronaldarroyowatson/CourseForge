@@ -335,6 +335,41 @@ body,
   margin: 0;
 }
 
+.sidebar-textbook-setup .auto-textbook-flow .form-grid label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 0.3rem;
+}
+
+.sidebar-textbook-setup .auto-textbook-flow .form-grid label input,
+.sidebar-textbook-setup .auto-textbook-flow .form-grid label select {
+  grid-column: 1 / -1;
+}
+
+.sidebar-textbook-setup .metadata-confidence-dot {
+  width: 0.58rem;
+  height: 0.58rem;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.sidebar-textbook-setup .metadata-confidence-dot--high {
+  background: #2f855a;
+}
+
+.sidebar-textbook-setup .metadata-confidence-dot--medium {
+  background: #b7791f;
+}
+
+.sidebar-textbook-setup .metadata-confidence-dot--low {
+  background: #c53030;
+}
+
+.sidebar-textbook-setup .metadata-confidence-dot--unknown {
+  background: #718096;
+}
+
 .sidebar-textbook-setup .error-text {
   color: var(--cf-danger);
   margin: 0;

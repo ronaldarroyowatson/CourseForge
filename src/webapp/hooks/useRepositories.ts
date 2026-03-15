@@ -9,6 +9,8 @@ import {
   deleteSection,
   deleteTextbook,
   deleteVocabTerm,
+  updateChapter,
+  updateSection,
   findTextbookByIsbn,
   getChapterById,
   getSectionById,
@@ -330,6 +332,12 @@ export function useRepositories() {
     markLocalChange();
   }, [markLocalChange]);
 
+  const editChapter = useCallback(async (id: string, changes: Partial<Chapter>): Promise<Chapter> => {
+    const updated = await updateChapter(id, changes);
+    markLocalChange();
+    return updated;
+  }, [markLocalChange]);
+
   const fetchSectionsByChapterId = useCallback(async (chapterId: string): Promise<Section[]> => {
     return listSectionsByChapterId(chapterId);
   }, []);
@@ -349,6 +357,12 @@ export function useRepositories() {
   const removeSection = useCallback(async (id: string): Promise<void> => {
     await deleteSection(id);
     markLocalChange();
+  }, [markLocalChange]);
+
+  const editSection = useCallback(async (id: string, changes: Partial<Section>): Promise<Section> => {
+    const updated = await updateSection(id, changes);
+    markLocalChange();
+    return updated;
   }, [markLocalChange]);
 
   const fetchVocabTermsBySectionId = useCallback(async (sectionId: string): Promise<VocabTerm[]> => {
@@ -446,9 +460,11 @@ export function useRepositories() {
     fetchChaptersByTextbookId,
     createChapter,
     removeChapter,
+    editChapter,
     fetchSectionsByChapterId,
     createSection,
     removeSection,
+    editSection,
     fetchVocabTermsBySectionId,
     createVocabTerm,
     removeVocabTerm,

@@ -1,8 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  type AutoConflictResolutionMode,
+  buildAutoConflictResolutionPlan,
+} from "../../../core/services/autoTextbookConflictService";
 import { extractTextFromImageWithFallback } from "../../../core/services/autoOcrService";
-import { appendDebugLogEntry } from "../../../core/services/debugLogService";
+import { appendDebugLogEntry } from "../../../core/services";
 import { persistAutoTextbook } from "../../../core/services/autoTextbookPersistenceService";
+import { uploadTextbookCoverFromDataUrl } from "../../../core/services/coverImageService";
 import {
   AUTO_MODE_SCOPE_MESSAGE,
   createInitialAutoCaptureUsage,
@@ -14,11 +19,15 @@ import {
   extractMetadataFromOcrText,
   isLikelyTocText,
   mergeAutoMetadata,
-  mergeParsedToc,
   parseTocFromOcrText,
+  scoreMetadataConfidence,
+  stitchTocPages,
+  type AutoMetadataConfidenceMap,
+  type AutoMetadataFieldKey,
   type AutoTextbookMetadata,
   type ImageModerationAssessment,
   type ParsedTocResult,
+  type TocPage,
   type TocChapter,
 } from "../../../core/services/textbookAutoExtractionService";
 import { useRepositories } from "../../hooks/useRepositories";
@@ -29,6 +38,18 @@ interface AutoTextbookSetupFlowProps {
   runtime?: "webapp" | "extension";
   onSaved: () => void;
   onSwitchToManual: () => void;
+  testingSeedState?: {
+    step?: AutoFlowStep;
+    usage?: { cover: number; title: number; toc: number };
+    metadataDraft?: AutoTextbookMetadata;
+    metadataConfidence?: AutoMetadataConfidenceMap;
+    metadataForm?: Partial<MetadataFormState>;
+    coverImageDataUrl?: string | null;
+    ocrDraft?: string;
+    tocResult?: ParsedTocResult;
+    tocPages?: TocPage[];
+    bypassImageModeration?: boolean;
+  };
 }
 
 interface CaptureDialogState {
@@ -40,6 +61,12 @@ interface CaptureResult {
   imageDataUrl: string;
   ocrText: string;
   ocrProviderId: string;
+}
+
+interface DuplicateTextbookMatch {
+  id: string;
+  title: string;
+  isbnRaw: string;
 }
 
 interface SelectionRect {
@@ -84,6 +111,21 @@ const SUBJECTS = [
 const INITIAL_TOC_RESULT: ParsedTocResult = {
   chapters: [],
   confidence: 0,
+};
+
+const FORM_TO_METADATA_FIELD: Partial<Record<keyof MetadataFormState, AutoMetadataFieldKey>> = {
+  title: "title",
+  subtitle: "subtitle",
+  gradeBand: "gradeBand",
+  subject: "subject",
+  edition: "edition",
+  copyrightYear: "copyrightYear",
+  isbnRaw: "isbn",
+  additionalIsbnsCsv: "additionalIsbns",
+  seriesName: "seriesName",
+  publisher: "publisher",
+  publisherLocation: "publisherLocation",
+  authorsCsv: "authors",
 };
 
 const KNOWN_TEXTBOOK_DOMAINS = [
@@ -386,26 +428,57 @@ function createDefaultSelection(image: HTMLImageElement): SelectionRect {
   };
 }
 
-export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToManual }: AutoTextbookSetupFlowProps): React.JSX.Element {
-  const { createTextbook, createChapter, createSection } = useRepositories();
+export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToManual, testingSeedState }: AutoTextbookSetupFlowProps): React.JSX.Element {
+  const {
+    createTextbook,
+    createChapter,
+    createSection,
+    editTextbook,
+    editChapter,
+    editSection,
+    findTextbookByISBN,
+    fetchChaptersByTextbookId,
+    fetchSectionsByChapterId,
+    fetchVocabTermsBySectionId,
+    fetchEquationsBySectionId,
+    fetchConceptsBySectionId,
+    fetchKeyIdeasBySectionId,
+    removeVocabTerm,
+    removeEquation,
+    removeConcept,
+    removeKeyIdea,
+    removeSection,
+    removeChapter,
+  } = useRepositories();
   const draftKeyRef = useRef<string>(createDraftCaptureKey());
   const [environmentPreparationMessage, setEnvironmentPreparationMessage] = useState<string>(
     runtime === "extension"
       ? "Checking browser tabs for textbook setup readiness..."
       : "Open your textbook in another window or monitor. Maximize the browser window for best results."
   );
-  const [step, setStep] = useState<AutoFlowStep>("cover");
-  const [usage, setUsage] = useState(() => readPersistedCaptureUsage(draftKeyRef.current) ?? createInitialAutoCaptureUsage());
-  const [metadataDraft, setMetadataDraft] = useState<AutoTextbookMetadata>({});
-  const [metadataForm, setMetadataForm] = useState<MetadataFormState>(() => toMetadataFormState({}, 0));
-  const [coverImageDataUrl, setCoverImageDataUrl] = useState<string | null>(null);
-  const [ocrDraft, setOcrDraft] = useState("");
-  const [tocResult, setTocResult] = useState<ParsedTocResult>(INITIAL_TOC_RESULT);
+  const [step, setStep] = useState<AutoFlowStep>(testingSeedState?.step ?? "cover");
+  const [usage, setUsage] = useState(() => testingSeedState?.usage ?? readPersistedCaptureUsage(draftKeyRef.current) ?? createInitialAutoCaptureUsage());
+  const [metadataDraft, setMetadataDraft] = useState<AutoTextbookMetadata>(testingSeedState?.metadataDraft ?? {});
+  const [metadataConfidence, setMetadataConfidence] = useState<AutoMetadataConfidenceMap>(testingSeedState?.metadataConfidence ?? {});
+  const [metadataForm, setMetadataForm] = useState<MetadataFormState>(() => ({
+    ...toMetadataFormState(testingSeedState?.metadataDraft ?? {}, testingSeedState?.tocResult?.confidence ?? 0),
+    ...(testingSeedState?.metadataForm ?? {}),
+  }));
+  const [coverImageDataUrl, setCoverImageDataUrl] = useState<string | null>(testingSeedState?.coverImageDataUrl ?? null);
+  const [ocrDraft, setOcrDraft] = useState(testingSeedState?.ocrDraft ?? "");
+  const [tocResult, setTocResult] = useState<ParsedTocResult>(testingSeedState?.tocResult ?? INITIAL_TOC_RESULT);
+  const [tocPages, setTocPages] = useState<TocPage[]>(testingSeedState?.tocPages ?? (testingSeedState?.tocResult ? [{
+    pageIndex: 0,
+    chapters: testingSeedState.tocResult.chapters,
+    confidence: testingSeedState.tocResult.confidence,
+  }] : []));
   const [isBusy, setIsBusy] = useState(false);
   const [isRunningOcr, setIsRunningOcr] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [ocrProviderStatus, setOcrProviderStatus] = useState<string | null>(null);
+  const [duplicateMatch, setDuplicateMatch] = useState<DuplicateTextbookMatch | null>(null);
+  const [conflictResolutionMode, setConflictResolutionMode] = useState<AutoConflictResolutionMode>("overwrite_auto");
   const [moderationAssessment, setModerationAssessment] = useState<ImageModerationAssessment | null>(null);
   const [captureDialog, setCaptureDialog] = useState<CaptureDialogState>({ open: false, imageDataUrl: "" });
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
@@ -449,6 +522,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     };
   }, [runtime]);
 
+  useEffect(() => {
+    setDuplicateMatch(null);
+  }, [metadataForm.isbnRaw]);
+
   const canFinishToc = tocResult.chapters.length > 0;
 
   const stepTitle = useMemo(() => {
@@ -476,11 +553,85 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   function updateMetadataForm<K extends keyof MetadataFormState>(field: K, value: MetadataFormState[K]): void {
     setMetadataForm((current) => ({ ...current, [field]: value }));
+
+    const metadataField = FORM_TO_METADATA_FIELD[field];
+    if (!metadataField) {
+      return;
+    }
+
+    setMetadataConfidence((current) => ({
+      ...current,
+      [metadataField]: {
+        value,
+        confidence: 1,
+        sourceType: "manual",
+      },
+    }));
   }
 
   function applyMetadataDraft(nextMetadata: AutoTextbookMetadata, tocConfidence = tocResult.confidence): void {
     setMetadataDraft(nextMetadata);
     setMetadataForm(toMetadataFormState(nextMetadata, tocConfidence));
+  }
+
+  function upsertAutoMetadataConfidence(incoming: AutoMetadataConfidenceMap): void {
+    setMetadataConfidence((current) => {
+      const next: AutoMetadataConfidenceMap = { ...current };
+      for (const [fieldKey, fieldValue] of Object.entries(incoming)) {
+        const typedKey = fieldKey as AutoMetadataFieldKey;
+        const prior = next[typedKey];
+        if (prior?.sourceType === "manual") {
+          continue;
+        }
+
+        if (!fieldValue) {
+          continue;
+        }
+
+        next[typedKey] = fieldValue;
+      }
+      return next;
+    });
+  }
+
+  function getFieldConfidence(field: AutoMetadataFieldKey): number | null {
+    return typeof metadataConfidence[field]?.confidence === "number"
+      ? metadataConfidence[field]!.confidence
+      : null;
+  }
+
+  function getFieldConfidenceClass(confidence: number | null): string {
+    if (confidence === null) {
+      return "metadata-confidence-dot metadata-confidence-dot--unknown";
+    }
+
+    if (confidence >= 0.8) {
+      return "metadata-confidence-dot metadata-confidence-dot--high";
+    }
+
+    if (confidence >= 0.55) {
+      return "metadata-confidence-dot metadata-confidence-dot--medium";
+    }
+
+    return "metadata-confidence-dot metadata-confidence-dot--low";
+  }
+
+  function renderConfidenceDot(field: AutoMetadataFieldKey): React.JSX.Element {
+    const confidence = getFieldConfidence(field);
+    const rounded = Math.round((confidence ?? 0) * 100);
+    const sourceType = metadataConfidence[field]?.sourceType ?? "auto";
+
+    return (
+      <span
+        className={getFieldConfidenceClass(confidence)}
+        title={confidence === null
+          ? "Confidence: unavailable"
+          : `Confidence: ${rounded}% (${sourceType})`}
+        aria-label={confidence === null
+          ? "Confidence unavailable"
+          : `Confidence ${rounded} percent from ${sourceType}`}
+      />
+    );
   }
 
   async function requestSelection(imageDataUrl: string): Promise<SelectionRect | null> {
@@ -557,7 +708,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     if (!safety.allowed) {
       setErrorMessage(safety.message ?? "Capture blocked by safety checks.");
       appendDebugLogEntry({
-        eventType: "safety",
+        eventType: "warning",
         message: "Metadata extraction blocked by safety checks.",
         autoModeStep: sourceStep,
         context: { reason: safety.reason ?? "unknown" },
@@ -567,11 +718,12 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
     const parsed = extractMetadataFromOcrText(rawText);
     const merged = mergeAutoMetadata(metadataDraft, parsed);
+    upsertAutoMetadataConfidence(scoreMetadataConfidence(rawText, parsed));
     applyMetadataDraft(merged);
     setErrorMessage(null);
     setInfoMessage("Metadata extracted automatically. Review and edit fields before accepting.");
     appendDebugLogEntry({
-      eventType: "ocr",
+      eventType: "metadata_extracted",
       message: "Metadata extracted from OCR draft.",
       autoModeStep: sourceStep,
       context: { hasTitle: Boolean(merged.title), hasIsbn: Boolean(merged.isbn), hasAuthors: Boolean(merged.authors?.length) },
@@ -583,7 +735,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     if (!safety.allowed) {
       setErrorMessage(safety.message ?? "Capture blocked by safety checks.");
       appendDebugLogEntry({
-        eventType: "safety",
+        eventType: "warning",
         message: "TOC extraction blocked by safety checks.",
         autoModeStep: "toc",
         context: { reason: safety.reason ?? "unknown" },
@@ -598,22 +750,38 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       return;
     }
 
-    const merged = mergeParsedToc(tocResult, parsed);
-    setTocResult(merged);
-    setErrorMessage(null);
-    setMetadataForm((current) => ({
-      ...current,
-      tocExtractionConfidence: merged.confidence > 0 ? merged.confidence.toFixed(2) : current.tocExtractionConfidence,
-    }));
-    setInfoMessage(`TOC capture added. ${merged.chapters.length} chapter entries recognized so far.`);
-    appendDebugLogEntry({
-      eventType: "toc",
-      message: "TOC entries parsed and merged.",
-      autoModeStep: "toc",
-      context: {
-        chapters: merged.chapters.length,
-        confidence: merged.confidence,
-      },
+    setTocPages((current) => {
+      const nextPages = [...current, {
+        pageIndex: current.length,
+        chapters: parsed.chapters,
+        confidence: parsed.confidence,
+      }];
+
+      const stitched = stitchTocPages(nextPages);
+      const stitchedResult: ParsedTocResult = {
+        chapters: stitched.chapters,
+        confidence: stitched.stitchingConfidence,
+      };
+
+      setTocResult(stitchedResult);
+      setMetadataForm((currentForm) => ({
+        ...currentForm,
+        tocExtractionConfidence: stitchedResult.confidence > 0 ? stitchedResult.confidence.toFixed(2) : currentForm.tocExtractionConfidence,
+      }));
+      setErrorMessage(null);
+      setInfoMessage(`TOC capture added. ${stitchedResult.chapters.length} chapter entries recognized so far.`);
+      appendDebugLogEntry({
+        eventType: "toc_stitch",
+        message: "TOC pages stitched.",
+        autoModeStep: "toc",
+        context: {
+          chapters: stitchedResult.chapters.length,
+          confidence: stitchedResult.confidence,
+          pages: nextPages.length,
+        },
+      });
+
+      return nextPages;
     });
   }
 
@@ -622,7 +790,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     if (!limitResult.allowed) {
       setErrorMessage(limitResult.message ?? "Capture limit reached.");
       appendDebugLogEntry({
-        eventType: "capture",
+        eventType: "warning",
         message: "Capture blocked by limit guard.",
         autoModeStep: targetStep,
         context: { usage, limits: DEFAULT_AUTO_CAPTURE_LIMITS },
@@ -636,7 +804,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
     try {
       appendDebugLogEntry({
-        eventType: "capture",
+        eventType: "auto_capture_start",
         message: "Capture started.",
         autoModeStep: targetStep,
       });
@@ -661,13 +829,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       setIsRunningOcr(false);
       setOcrProviderStatus(`OCR provider: ${ocr.providerId}`);
       appendDebugLogEntry({
-        eventType: "capture",
+        eventType: "auto_capture_complete",
         message: "Capture completed.",
         autoModeStep: targetStep,
         captureMetadata: {
+          width: selection.width,
+          height: selection.height,
+          fileSizeBytes: Math.round((cropped.length * 3) / 4),
+        },
+        context: {
           usageAfterCapture: limitResult.nextUsage,
-          selectedWidth: selection.width,
-          selectedHeight: selection.height,
           ocrProvider: ocr.providerId,
         },
       });
@@ -850,7 +1021,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     try {
       setIsBusy(true);
 
-      const imageSkinToneRatio = await estimateSkinToneRatio(coverImageDataUrl);
       const moderationContext = [
         metadataForm.title,
         metadataForm.subtitle,
@@ -861,10 +1031,18 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         ocrDraft,
       ].filter(Boolean).join("\n");
 
-      const imageModeration = assessImageModerationSignal({
-        skinToneRatio: imageSkinToneRatio,
-        contextText: moderationContext,
-      });
+      const imageModeration = testingSeedState?.bypassImageModeration
+        ? {
+            decision: "allow" as const,
+            confidence: 0,
+            reason: "Bypassed in integration test mode.",
+            educationalContextDetected: true,
+            skinToneRatio: 0,
+          }
+        : assessImageModerationSignal({
+            skinToneRatio: await estimateSkinToneRatio(coverImageDataUrl),
+            contextText: moderationContext,
+          });
       setModerationAssessment(imageModeration);
 
       if (imageModeration.decision === "block") {
@@ -876,47 +1054,177 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       const requiresAdminReview = imageModeration.decision === "review";
 
-      await persistAutoTextbook(
-        {
-          metadata: {
-            sourceType: "auto",
-            title: metadataForm.title.trim(),
-            subtitle: metadata.subtitle,
-            grade: metadataForm.grade,
-            gradeBand: metadata.gradeBand,
-            subject: metadataForm.subject,
-            edition: metadataForm.edition,
-            publicationYear: parsedYear,
-            copyrightYear: metadata.copyrightYear,
-            isbnRaw: metadataForm.isbnRaw,
-            additionalIsbns: metadata.additionalIsbns,
-            seriesName: metadata.seriesName,
-            publisher: metadata.publisher,
-            publisherLocation: metadata.publisherLocation,
-            authors: metadata.authors,
-            tocExtractionConfidence: Number(metadataForm.tocExtractionConfidence) || tocResult.confidence,
-            imageModerationState: requiresAdminReview ? "pending_admin_review" : "clear",
-            imageModerationReason: requiresAdminReview ? imageModeration.reason : undefined,
-            imageModerationConfidence: imageModeration.confidence,
-            cloudSyncBlockedReason: requiresAdminReview ? "pending_admin_review" : undefined,
-            requiresAdminReview,
-            status: requiresAdminReview ? "submitted" : "draft",
-          },
-          coverDataUrl: coverImageDataUrl,
-          tocChapters: tocResult.chapters,
-        },
-        {
-          createTextbook,
-          createChapter,
-          createSection,
+      const trimmedIsbn = metadataForm.isbnRaw.trim();
+      const existingDuplicate = trimmedIsbn
+        ? await findTextbookByISBN(trimmedIsbn)
+        : undefined;
+
+      if (existingDuplicate && duplicateMatch?.id !== existingDuplicate.id) {
+        setDuplicateMatch({
+          id: existingDuplicate.id,
+          title: existingDuplicate.title,
+          isbnRaw: existingDuplicate.isbnRaw,
+        });
+        setInfoMessage("A textbook with this ISBN already exists. Choose how to apply Auto data, then save again.");
+        return;
+      }
+
+      const nextTextbookChanges = {
+        sourceType: "auto" as const,
+        title: metadataForm.title.trim(),
+        subtitle: metadata.subtitle,
+        grade: metadataForm.grade,
+        gradeBand: metadata.gradeBand,
+        subject: metadataForm.subject,
+        edition: metadataForm.edition,
+        publicationYear: parsedYear,
+        copyrightYear: metadata.copyrightYear,
+        isbnRaw: metadataForm.isbnRaw,
+        additionalIsbns: metadata.additionalIsbns,
+        seriesName: metadata.seriesName,
+        publisher: metadata.publisher,
+        publisherLocation: metadata.publisherLocation,
+        authors: metadata.authors,
+        tocExtractionConfidence: Number(metadataForm.tocExtractionConfidence) || tocResult.confidence,
+        imageModerationState: requiresAdminReview ? "pending_admin_review" as const : "clear" as const,
+        imageModerationReason: requiresAdminReview ? imageModeration.reason : undefined,
+        imageModerationConfidence: imageModeration.confidence,
+        cloudSyncBlockedReason: requiresAdminReview ? "pending_admin_review" as const : undefined,
+        requiresAdminReview,
+        status: requiresAdminReview ? "submitted" as const : "draft" as const,
+      };
+
+      if (duplicateMatch) {
+        const chapters = await fetchChaptersByTextbookId(duplicateMatch.id);
+        const sectionsByChapterId: Record<string, Array<{ id: string; chapterId: string; index: number; title: string }>> = {};
+
+        for (const chapter of chapters) {
+          const sections = await fetchSectionsByChapterId(chapter.id);
+          sectionsByChapterId[chapter.id] = sections.map((section) => ({
+            id: section.id,
+            chapterId: chapter.id,
+            index: section.index,
+            title: section.title,
+          }));
         }
-      );
+
+        const plan = buildAutoConflictResolutionPlan({
+          mode: conflictResolutionMode,
+          autoTocChapters: tocResult.chapters,
+          existingChapters: chapters.map((chapter) => ({
+            id: chapter.id,
+            index: chapter.index,
+            name: chapter.name,
+          })),
+          existingSectionsByChapterId: sectionsByChapterId,
+        });
+
+        if (coverImageDataUrl) {
+          const coverImageUrl = await uploadTextbookCoverFromDataUrl(duplicateMatch.id, coverImageDataUrl);
+          await editTextbook(duplicateMatch.id, {
+            ...nextTextbookChanges,
+            coverImageUrl,
+          });
+        } else {
+          await editTextbook(duplicateMatch.id, nextTextbookChanges);
+        }
+
+        for (const sectionId of plan.sectionIdsToDelete) {
+          const vocabTerms = await fetchVocabTermsBySectionId(sectionId);
+          for (const term of vocabTerms) {
+            await removeVocabTerm(term.id);
+          }
+
+          const equations = await fetchEquationsBySectionId(sectionId);
+          for (const equation of equations) {
+            await removeEquation(equation.id);
+          }
+
+          const concepts = await fetchConceptsBySectionId(sectionId);
+          for (const concept of concepts) {
+            await removeConcept(concept.id);
+          }
+
+          const keyIdeas = await fetchKeyIdeasBySectionId(sectionId);
+          for (const keyIdea of keyIdeas) {
+            await removeKeyIdea(keyIdea.id);
+          }
+
+          await removeSection(sectionId);
+        }
+
+        for (const chapterId of plan.chapterIdsToDelete) {
+          await removeChapter(chapterId);
+        }
+
+        const chapterIdByIndex = new Map<number, string>();
+
+        for (const chapterInstruction of plan.chapterUpserts) {
+          const chapterIndexValue = Number.parseInt(chapterInstruction.autoChapter.chapterNumber, 10);
+          const chapterPayload = {
+            sourceType: "auto" as const,
+            index: Number.isInteger(chapterIndexValue) ? chapterIndexValue : chapterInstruction.chapterIndex + 1,
+            name: chapterInstruction.autoChapter.title,
+            description: chapterInstruction.autoChapter.unitName,
+          };
+
+          if (chapterInstruction.existingChapterId) {
+            await editChapter(chapterInstruction.existingChapterId, chapterPayload);
+            chapterIdByIndex.set(chapterInstruction.chapterIndex, chapterInstruction.existingChapterId);
+            continue;
+          }
+
+          const createdId = await createChapter({
+            textbookId: duplicateMatch.id,
+            ...chapterPayload,
+          });
+          chapterIdByIndex.set(chapterInstruction.chapterIndex, createdId);
+        }
+
+        for (const sectionInstruction of plan.sectionUpserts) {
+          const chapterId = chapterIdByIndex.get(sectionInstruction.chapterRef.chapterIndex);
+          if (!chapterId) {
+            continue;
+          }
+
+          const sectionPayload = {
+            sourceType: "auto" as const,
+            index: sectionInstruction.sectionIndex + 1,
+            title: sectionInstruction.sectionTitle,
+          };
+
+          if (sectionInstruction.existingSectionId) {
+            await editSection(sectionInstruction.existingSectionId, sectionPayload);
+            continue;
+          }
+
+          await createSection({
+            chapterId,
+            ...sectionPayload,
+          });
+        }
+      } else {
+        await persistAutoTextbook(
+          {
+            metadata: {
+              ...nextTextbookChanges,
+            },
+            coverDataUrl: coverImageDataUrl,
+            tocChapters: tocResult.chapters,
+          },
+          {
+            createTextbook,
+            createChapter,
+            createSection,
+          }
+        );
+      }
 
       clearPersistedCaptureUsage(draftKeyRef.current);
       appendDebugLogEntry({
-        eventType: "auto_mode",
+        eventType: "user_action",
         message: "Auto textbook setup saved.",
-        autoModeStep: "toc-editor",
+        autoModeStep: "toc",
         context: {
           chapterCount: tocResult.chapters.length,
           requiresAdminReview,
@@ -929,13 +1237,22 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         );
       }
 
+      if (duplicateMatch) {
+        setInfoMessage(
+          conflictResolutionMode === "overwrite_auto"
+            ? "Existing textbook replaced with Auto metadata and hierarchy."
+            : "Existing textbook merged with Auto metadata and TOC. Duplicates were avoided."
+        );
+        setDuplicateMatch(null);
+      }
+
       onSaved();
     } catch {
       setErrorMessage("Unable to save Auto setup. Please verify metadata and try again.");
       appendDebugLogEntry({
         eventType: "error",
         message: "Auto textbook setup save failed.",
-        autoModeStep: "toc-editor",
+        autoModeStep: "toc",
       });
     } finally {
       setIsBusy(false);
@@ -963,6 +1280,26 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       ) : null}
       {ocrProviderStatus ? <p className="form-hint">{ocrProviderStatus}</p> : null}
       {isRunningOcr ? <p className="form-hint">Running OCR...</p> : null}
+      {duplicateMatch ? (
+        <div className="panel" role="group" aria-label="Duplicate textbook resolution">
+          <p className="form-hint">
+            Existing textbook found: {duplicateMatch.title} (ISBN: {duplicateMatch.isbnRaw || "n/a"}).
+          </p>
+          <label>
+            Resolution mode
+            <select
+              value={conflictResolutionMode}
+              onChange={(event) => setConflictResolutionMode(event.target.value as AutoConflictResolutionMode)}
+            >
+              <option value="overwrite_auto">Prefer Auto: overwrite existing manual hierarchy</option>
+              <option value="merge_dedupe">Merge and dedupe: keep unique manual differences</option>
+            </select>
+          </label>
+          <p className="form-hint">
+            Save again to apply this choice.
+          </p>
+        </div>
+      ) : null}
 
       <div className="form-actions">
         {step === "cover" ? (
@@ -1028,11 +1365,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         <div className="form-grid">
           <label>
             Title
+            {renderConfidenceDot("title")}
             <input value={metadataForm.title} onChange={(event) => updateMetadataForm("title", event.target.value)} />
           </label>
 
           <label>
             Subtitle
+            {renderConfidenceDot("subtitle")}
             <input value={metadataForm.subtitle} onChange={(event) => updateMetadataForm("subtitle", event.target.value)} />
           </label>
 
@@ -1043,11 +1382,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
           <label>
             Grade Band
+            {renderConfidenceDot("gradeBand")}
             <input value={metadataForm.gradeBand} onChange={(event) => updateMetadataForm("gradeBand", event.target.value)} />
           </label>
 
           <label>
             Subject
+            {renderConfidenceDot("subject")}
             <select value={metadataForm.subject} onChange={(event) => updateMetadataForm("subject", event.target.value)}>
               {SUBJECTS.map((subject) => (
                 <option key={subject} value={subject}>{subject}</option>
@@ -1057,6 +1398,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
           <label>
             Edition
+            {renderConfidenceDot("edition")}
             <input value={metadataForm.edition} onChange={(event) => updateMetadataForm("edition", event.target.value)} />
           </label>
 
@@ -1067,36 +1409,43 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
           <label>
             Copyright Year
+            {renderConfidenceDot("copyrightYear")}
             <input type="number" value={metadataForm.copyrightYear} onChange={(event) => updateMetadataForm("copyrightYear", event.target.value)} />
           </label>
 
           <label>
             ISBN
+            {renderConfidenceDot("isbn")}
             <input value={metadataForm.isbnRaw} onChange={(event) => updateMetadataForm("isbnRaw", event.target.value)} />
           </label>
 
           <label>
             Additional ISBNs (comma separated)
+            {renderConfidenceDot("additionalIsbns")}
             <input value={metadataForm.additionalIsbnsCsv} onChange={(event) => updateMetadataForm("additionalIsbnsCsv", event.target.value)} />
           </label>
 
           <label>
             Authors (comma separated)
+            {renderConfidenceDot("authors")}
             <input value={metadataForm.authorsCsv} onChange={(event) => updateMetadataForm("authorsCsv", event.target.value)} />
           </label>
 
           <label>
             Publisher
+            {renderConfidenceDot("publisher")}
             <input value={metadataForm.publisher} onChange={(event) => updateMetadataForm("publisher", event.target.value)} />
           </label>
 
           <label>
             Publisher Location
+            {renderConfidenceDot("publisherLocation")}
             <input value={metadataForm.publisherLocation} onChange={(event) => updateMetadataForm("publisherLocation", event.target.value)} />
           </label>
 
           <label>
             Series Name
+            {renderConfidenceDot("seriesName")}
             <input value={metadataForm.seriesName} onChange={(event) => updateMetadataForm("seriesName", event.target.value)} />
           </label>
         </div>

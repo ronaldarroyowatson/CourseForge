@@ -23,3 +23,22 @@ export async function listChaptersByTextbookId(textbookId: string): Promise<Chap
 export async function deleteChapter(id: string): Promise<void> {
   await deleteRecord(STORE_NAMES.chapters, id);
 }
+
+export async function updateChapter(id: string, changes: Partial<Chapter>): Promise<Chapter> {
+  const existing = await getChapterById(id);
+  if (!existing) {
+    throw new Error(`Chapter with id ${id} not found.`);
+  }
+
+  const updated: Chapter = {
+    ...existing,
+    ...changes,
+    id: existing.id,
+    textbookId: existing.textbookId,
+    lastModified: new Date().toISOString(),
+    pendingSync: true,
+  };
+
+  await saveChapter(updated);
+  return updated;
+}

@@ -41,4 +41,12 @@ describe("Firestore rules static contract", () => {
     expect(rules).toMatch(/allow read:\s*if false;/);
     expect(rules).toMatch(/allow write:\s*if false;/);
   });
+
+  it("keeps debug reports read-only for clients", () => {
+    const rules = readRulesText();
+
+    expect(rules).toMatch(/match \/debugReports\/\{userId\}/);
+    expect(rules).toMatch(/match \/reports\/\{reportId\}/);
+    expect(rules).toMatch(/allow write:\s*if false;/);
+  });
 });

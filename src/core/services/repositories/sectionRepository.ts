@@ -23,3 +23,23 @@ export async function listSectionsByChapterId(chapterId: string): Promise<Sectio
 export async function deleteSection(id: string): Promise<void> {
   await deleteRecord(STORE_NAMES.sections, id);
 }
+
+export async function updateSection(id: string, changes: Partial<Section>): Promise<Section> {
+  const existing = await getSectionById(id);
+  if (!existing) {
+    throw new Error(`Section with id ${id} not found.`);
+  }
+
+  const updated: Section = {
+    ...existing,
+    ...changes,
+    id: existing.id,
+    chapterId: existing.chapterId,
+    textbookId: existing.textbookId,
+    lastModified: new Date().toISOString(),
+    pendingSync: true,
+  };
+
+  await saveSection(updated);
+  return updated;
+}

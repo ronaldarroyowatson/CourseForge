@@ -9,6 +9,8 @@ import {
   extractMetadataFromOcrText,
   mergeParsedToc,
   parseTocFromOcrText,
+  scoreMetadataConfidence,
+  stitchTocPages,
 } from "../../src/core/services/textbookAutoExtractionService";
 
 describe("textbookAutoExtractionService", () => {
@@ -88,6 +90,66 @@ describe("textbookAutoExtractionService", () => {
 
     expect(merged.chapters).toHaveLength(1);
     expect(merged.chapters[0].sections).toHaveLength(2);
+  });
+
+  it("stitches TOC pages in order, dedupes entries, and returns confidence", () => {
+    const stitched = stitchTocPages([
+      {
+        pageIndex: 2,
+        confidence: 0.7,
+        chapters: [
+          {
+            chapterNumber: "2",
+            title: "Expressions",
+            sections: [{ sectionNumber: "2.01", title: "Variables" }],
+          },
+        ],
+      },
+      {
+        pageIndex: 1,
+        confidence: 0.82,
+        chapters: [
+          {
+            chapterNumber: "1",
+            title: "Integers",
+            sections: [{ sectionNumber: "1.1", title: "Absolute Value" }],
+          },
+          {
+            chapterNumber: "2",
+            title: "Expressions",
+            sections: [{ sectionNumber: "2.1", title: "Variables" }],
+          },
+        ],
+      },
+    ]);
+
+    expect(stitched.chapters).toHaveLength(2);
+    expect(stitched.chapters[0].chapterNumber).toBe("1");
+    expect(stitched.chapters[1].sections).toHaveLength(1);
+    expect(stitched.chapters[1].sections[0].sectionNumber).toBe("2.1");
+    expect(stitched.stitchingConfidence).toBeGreaterThan(0.5);
+  });
+
+  it("scores metadata confidence and marks extracted fields as auto", () => {
+    const metadata = extractMetadataFromOcrText([
+      "Foundations of Algebra",
+      "By Maria Chen",
+      "3rd Edition",
+      "ISBN 978-1-4028-9462-6",
+      "Copyright 2024",
+    ].join("\n"));
+
+    const scored = scoreMetadataConfidence([
+      "Foundations of Algebra",
+      "By Maria Chen",
+      "3rd Edition",
+      "ISBN 978-1-4028-9462-6",
+      "Copyright 2024",
+    ].join("\n"), metadata);
+
+    expect(scored.title?.sourceType).toBe("auto");
+    expect(scored.title?.confidence).toBeGreaterThan(0.5);
+    expect(scored.isbn?.confidence).toBeGreaterThan(0.7);
   });
 
   it("enforces hard capture limits", () => {

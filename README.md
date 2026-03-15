@@ -58,6 +58,18 @@ Quick release note: v1.2.4 focuses on safer textbook image ingestion with local-
 - `tests/integration` auth and admin integration tests.
 - `docs` product, architecture, and schema references.
 
+## Developer documentation
+
+| Document | Description |
+| --- | --- |
+| [Developer Onboarding Guide](docs/developer-onboarding.md) | Setup, architecture overview, key modules, coding standards, and testing strategy for new contributors |
+| [Auto Mode Pipeline Flowchart](docs/auto-mode-flowchart.md) | Mermaid flowchart of the full Auto Mode capture → extract → stitch → save pipeline |
+| [Firestore Debug Rules](docs/firestore-debug-rules.md) | Firestore security rules for debug log protection: access model, helper functions, testing and deploy guide |
+| [Architecture Overview](docs/ARCHITECTURE.md) | High-level layers, data flow, and Firestore structure |
+| [DB Schema](docs/DB_SCHEMA.md) | Entity definitions for all local and cloud-synced data |
+| [Code Style](docs/CODE_STYLE.md) | File organization, naming, spacing, and comment conventions |
+| [XML Schema](docs/XML_SCHEMA.md) | Canonical export format for game engines and AI tutors |
+
 ## Local development
 
 ### Prerequisites

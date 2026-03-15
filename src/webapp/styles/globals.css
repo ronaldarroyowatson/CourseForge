@@ -1020,6 +1020,42 @@ body {
   gap: 0.75rem;
 }
 
+.auto-textbook-flow .form-grid label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 0.35rem;
+}
+
+.auto-textbook-flow .form-grid label input,
+.auto-textbook-flow .form-grid label select {
+  grid-column: 1 / -1;
+}
+
+.metadata-confidence-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1px solid transparent;
+}
+
+.metadata-confidence-dot--high {
+  background: #2e7d32;
+}
+
+.metadata-confidence-dot--medium {
+  background: #b7791f;
+}
+
+.metadata-confidence-dot--low {
+  background: #c53030;
+}
+
+.metadata-confidence-dot--unknown {
+  background: #718096;
+}
+
 .auto-toc-editor {
   display: grid;
   gap: 0.75rem;

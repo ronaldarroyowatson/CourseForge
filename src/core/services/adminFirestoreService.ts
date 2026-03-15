@@ -67,6 +67,25 @@ export interface AdminContentRecord {
   lastModified: string | null;
 }
 
+export interface DebugLoggingPolicyRecord {
+  enabledGlobally: boolean;
+  disabledUserIds: string[];
+  maxUploadBytes: number;
+  maxLocalLogBytes: number;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface DebugUploadSummary {
+  reportPath: string;
+  userId: string;
+  createdAt: string;
+  uploadedAtMs: number;
+  totalSizeBytes: number;
+  entriesCount: number;
+  appVersion?: string;
+}
+
 interface CallableResponse<T> {
   success: boolean;
   message?: string;
@@ -208,4 +227,16 @@ export async function managePremiumUser(
 
 export async function getCurrentPremiumUsage(): Promise<PremiumUsageRecord> {
   return callAdminFunction<Record<string, never>, PremiumUsageRecord>("getCurrentPremiumUsage", {});
+}
+
+export async function getDebugLoggingPolicyAdmin(): Promise<DebugLoggingPolicyRecord> {
+  return callAdminFunction<Record<string, never>, DebugLoggingPolicyRecord>("getDebugLoggingPolicy", {});
+}
+
+export async function setDebugLoggingPolicyAdmin(policy: Partial<DebugLoggingPolicyRecord>): Promise<DebugLoggingPolicyRecord> {
+  return callAdminFunction<Partial<DebugLoggingPolicyRecord>, DebugLoggingPolicyRecord>("setDebugLoggingPolicy", policy);
+}
+
+export async function listRecentDebugUploadsAdmin(): Promise<DebugUploadSummary[]> {
+  return callAdminFunction<Record<string, never>, DebugUploadSummary[]>("listRecentDebugUploads", {});
 }

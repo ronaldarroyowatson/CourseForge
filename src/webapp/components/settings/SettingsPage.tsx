@@ -11,11 +11,12 @@ import {
 } from "../../../core/services/autoOcrService";
 import {
   clearDebugLogEntries,
+  getDebugLoggingPolicy,
   getDebugLogStorageStats,
   isDebugLoggingEnabled,
   setDebugLoggingEnabled,
   uploadAndClearDebugLogs,
-} from "../../../core/services/debugLogService";
+} from "../../../core/services";
 import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
@@ -41,9 +42,10 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   const pendingChangesCount = useUIStore((state) => state.pendingChangesCount);
   const syncStatus = useUIStore((state) => state.syncStatus);
   const [debugEnabled, setDebugEnabled] = React.useState<boolean>(() => isDebugLoggingEnabled());
-  const [debugStats, setDebugStats] = React.useState(() => getDebugLogStorageStats());
+  const [debugStats, setDebugStats] = React.useState({ entries: 0, totalBytes: 0, maxTotalBytes: 1_500_000, maxUploadBytes: 500 * 1024, lastUploadTimestamp: null as number | null });
   const [debugStatus, setDebugStatus] = React.useState<string | null>(null);
   const [isUploadingDebugLog, setIsUploadingDebugLog] = React.useState(false);
+  const [debugPolicyStatus, setDebugPolicyStatus] = React.useState<string | null>(null);
   const [ocrProviderOrder, setOcrProviderOrderState] = React.useState<AutoOcrProviderId[]>(["local_tesseract", "cloud_openai_vision"]);
   const [ocrProviderHealth, setOcrProviderHealth] = React.useState<Array<{ id: AutoOcrProviderId; label: string; available: boolean }>>([]);
   const [ocrProviderStatus, setOcrProviderStatus] = React.useState<string | null>(null);
@@ -66,21 +68,23 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
     }
   }
 
-  function refreshDebugStats(): void {
-    setDebugStats(getDebugLogStorageStats());
+  async function refreshDebugStats(): Promise<void> {
+    setDebugStats(await getDebugLogStorageStats());
   }
 
   function handleDebugToggle(enabled: boolean): void {
     setDebugLoggingEnabled(enabled);
     setDebugEnabled(enabled);
-    refreshDebugStats();
+    void refreshDebugStats();
     setDebugStatus(enabled ? "Debug logging enabled." : "Debug logging disabled.");
   }
 
   function handleClearDebugLog(): void {
-    clearDebugLogEntries();
-    refreshDebugStats();
-    setDebugStatus("Local debug log cleared.");
+    void (async () => {
+      await clearDebugLogEntries();
+      await refreshDebugStats();
+      setDebugStatus("Local debug log cleared.");
+    })();
   }
 
   async function refreshOcrProviderHealth(): Promise<void> {
@@ -106,6 +110,11 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       const effectiveOrder = await getEffectiveAutoOcrProviderOrder();
       setOcrProviderOrderState(effectiveOrder);
       await refreshOcrProviderHealth();
+      await refreshDebugStats();
+      const policy = await getDebugLoggingPolicy();
+      setDebugPolicyStatus(policy.enabledGlobally
+        ? "Global debug logging is enabled."
+        : "Global debug logging is currently disabled by an admin.");
     })();
   }, []);
 
@@ -154,7 +163,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
         userId,
       });
 
-      refreshDebugStats();
+      await refreshDebugStats();
       setDebugStatus(result.uploadedCount > 0
         ? `Uploaded ${result.uploadedCount} debug log entr${result.uploadedCount === 1 ? "y" : "ies"} to cloud and cleared local logs.`
         : "No local debug logs to upload.");
@@ -271,6 +280,9 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
           </label>
           <p className="settings-meta">Stored entries: {debugStats.entries}</p>
           <p className="settings-meta">Local log size: {Math.round(debugStats.totalBytes / 1024)} KB / {Math.round(debugStats.maxTotalBytes / 1024)} KB</p>
+          <p className="settings-meta">Upload limit: {Math.round(debugStats.maxUploadBytes / 1024)} KB</p>
+          <p className="settings-meta">Last upload: {debugStats.lastUploadTimestamp ? new Date(debugStats.lastUploadTimestamp).toLocaleString() : "Never"}</p>
+          {debugPolicyStatus ? <p className="settings-meta">{debugPolicyStatus}</p> : null}
           <div className="form-actions">
             <button type="button" className="btn-secondary" onClick={handleClearDebugLog}>
               Clear Debug Log

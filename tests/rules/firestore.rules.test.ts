@@ -360,6 +360,37 @@ describe("Firestore rules: users + canonical hierarchy", () => {
     }
   });
 
+  it("blocks direct client writes to debug reports and scopes reads to owner/admin", async () => {
+    const ownerDb = rulesEnv.authenticatedContext(OWNER_UID).firestore();
+    const otherDb = rulesEnv.authenticatedContext(OTHER_UID).firestore();
+    const adminDb = rulesEnv.authenticatedContext("admin-user", { admin: true }).firestore();
+
+    const debugReportPath = `debugReports/${OWNER_UID}/reports/1710500000000`;
+
+    await assertFails(
+      setDoc(doc(ownerDb, debugReportPath), {
+        userId: OWNER_UID,
+        entriesCount: 1,
+        totalSizeBytes: 256,
+      })
+    );
+
+    await rulesEnv.withSecurityRulesDisabled(async (context) => {
+      const unrestricted = context.firestore();
+      await setDoc(doc(unrestricted, debugReportPath), {
+        userId: OWNER_UID,
+        createdAt: nowIso(),
+        uploadedAtMs: 1_710_500_000_000,
+        entriesCount: 1,
+        totalSizeBytes: 256,
+      });
+    });
+
+    await assertSucceeds(getDoc(doc(ownerDb, debugReportPath)));
+    await assertFails(getDoc(doc(otherDb, debugReportPath)));
+    await assertSucceeds(getDoc(doc(adminDb, debugReportPath)));
+  });
+
   it("blocks legacy nested vocab path under /users and allows canonical vocab path", async () => {
     const ownerDb = rulesEnv.authenticatedContext(OWNER_UID).firestore();
 

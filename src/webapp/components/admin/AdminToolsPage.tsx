@@ -12,9 +12,9 @@
  */
 import React, { useState } from "react";
 
-import { ContentBrowser, ModerationQueue, PremiumUsagePanel, UserManagement } from "./index";
+import { ContentBrowser, DebugLoggingPanel, ModerationQueue, PremiumUsagePanel, UserManagement } from "./index";
 
-type AdminTab = "users" | "moderation" | "browser" | "premium";
+type AdminTab = "users" | "moderation" | "browser" | "premium" | "debug";
 
 interface AdminToolsPageProps {
   currentUserEmail: string | null;
@@ -34,6 +34,8 @@ export function AdminToolsPage({ currentUserEmail, onBack }: AdminToolsPageProps
         return <ContentBrowser />;
       case "premium":
         return <PremiumUsagePanel />;
+      case "debug":
+        return <DebugLoggingPanel />;
     }
   }
 
@@ -58,6 +60,7 @@ export function AdminToolsPage({ currentUserEmail, onBack }: AdminToolsPageProps
             { id: "moderation", label: "Moderation Queue" },
             { id: "browser", label: "Content Browser" },
             { id: "premium", label: "Premium Management" },
+            { id: "debug", label: "Debug Logging" },
           ] as { id: AdminTab; label: string }[]
         ).map(({ id, label }) => (
           <button

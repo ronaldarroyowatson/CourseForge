@@ -143,6 +143,42 @@ interface AiProviderPolicyRecord {
   updatedAt: string;
 }
 
+interface DebugLoggingPolicyRecord {
+  enabledGlobally: boolean;
+  disabledUserIds: string[];
+  maxUploadBytes: number;
+  maxLocalLogBytes: number;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+interface DebugLogEntryRecord {
+  id: string;
+  timestamp: number;
+  eventType: string;
+  message: string;
+  context?: Record<string, unknown>;
+  errorStack?: string;
+  autoModeStep?: string;
+  captureMetadata?: {
+    width?: number;
+    height?: number;
+    dpi?: number;
+    fileSizeBytes?: number;
+  };
+  sizeBytes: number;
+}
+
+interface DebugUploadSummary {
+  reportPath: string;
+  userId: string;
+  createdAt: string;
+  uploadedAtMs: number;
+  totalSizeBytes: number;
+  entriesCount: number;
+  appVersion?: string;
+}
+
 function success<T>(message: string, data: T): CallableResult<T> {
   return { success: true, message, data };
 }
@@ -174,7 +210,16 @@ const DAILY_BASELINE_MULTIPLIER = 0.4;
 const WEEKLY_BASELINE_MULTIPLIER = 2.7;
 const MONTHLY_LIMIT_PERCENT = 100;
 const AI_PROVIDER_POLICY_DOC_PATH = "config/aiProviderPolicy";
+const DEBUG_POLICY_DOC_PATH = "config/debugLoggingPolicy";
 const DEFAULT_AUTO_OCR_PROVIDER_ORDER: AutoOcrProviderId[] = ["local_tesseract", "cloud_openai_vision"];
+const DEFAULT_DEBUG_POLICY: DebugLoggingPolicyRecord = {
+  enabledGlobally: true,
+  disabledUserIds: [],
+  maxUploadBytes: 500 * 1024,
+  maxLocalLogBytes: 1_500_000,
+  updatedBy: "system",
+  updatedAt: new Date(0).toISOString(),
+};
 const OCR_RATE_LIMIT_WINDOW_MS = 60_000;
 const OCR_RATE_LIMIT_MAX_REQUESTS = 30;
 const MAX_OCR_IMAGE_DATA_URL_BYTES = 8 * 1024 * 1024;
@@ -203,6 +248,73 @@ function normalizeAutoOcrProviderOrder(value: unknown): AutoOcrProviderId[] {
   }
 
   return accepted;
+}
+
+function normalizeDebugLoggingPolicy(value: unknown): DebugLoggingPolicyRecord {
+  const data = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  const disabledUserIds = Array.isArray(data.disabledUserIds)
+    ? data.disabledUserIds.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+
+  const maxUploadBytesRaw = typeof data.maxUploadBytes === "number" ? data.maxUploadBytes : DEFAULT_DEBUG_POLICY.maxUploadBytes;
+  const maxLocalLogBytesRaw = typeof data.maxLocalLogBytes === "number" ? data.maxLocalLogBytes : DEFAULT_DEBUG_POLICY.maxLocalLogBytes;
+
+  return {
+    enabledGlobally: data.enabledGlobally !== false,
+    disabledUserIds: disabledUserIds.slice(0, 500),
+    maxUploadBytes: Math.max(64 * 1024, Math.min(2 * 1024 * 1024, Math.round(maxUploadBytesRaw))),
+    maxLocalLogBytes: Math.max(256 * 1024, Math.min(4 * 1024 * 1024, Math.round(maxLocalLogBytesRaw))),
+    updatedBy: typeof data.updatedBy === "string" ? data.updatedBy : DEFAULT_DEBUG_POLICY.updatedBy,
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : DEFAULT_DEBUG_POLICY.updatedAt,
+  };
+}
+
+async function getDebugLoggingPolicyRecord(): Promise<DebugLoggingPolicyRecord> {
+  const snapshot = await firestore.doc(DEBUG_POLICY_DOC_PATH).get();
+  if (!snapshot.exists) {
+    return DEFAULT_DEBUG_POLICY;
+  }
+
+  return normalizeDebugLoggingPolicy(snapshot.data());
+}
+
+function sanitizeDebugLogEntries(value: unknown): DebugLogEntryRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry): DebugLogEntryRecord | null => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const record = entry as Record<string, unknown>;
+      const id = typeof record.id === "string" ? record.id : "";
+      const timestamp = typeof record.timestamp === "number" ? record.timestamp : 0;
+      const eventType = typeof record.eventType === "string" ? record.eventType : "info";
+      const message = typeof record.message === "string" ? record.message : "";
+      const sizeBytes = typeof record.sizeBytes === "number" ? record.sizeBytes : 0;
+
+      if (!id || !message || timestamp <= 0 || sizeBytes <= 0) {
+        return null;
+      }
+
+      return {
+        id,
+        timestamp,
+        eventType,
+        message,
+        context: typeof record.context === "object" && record.context !== null ? record.context as Record<string, unknown> : undefined,
+        errorStack: typeof record.errorStack === "string" ? record.errorStack : undefined,
+        autoModeStep: typeof record.autoModeStep === "string" ? record.autoModeStep : undefined,
+        captureMetadata: typeof record.captureMetadata === "object" && record.captureMetadata !== null
+          ? record.captureMetadata as DebugLogEntryRecord["captureMetadata"]
+          : undefined,
+        sizeBytes,
+      };
+    })
+    .filter((entry): entry is DebugLogEntryRecord => entry !== null);
 }
 
 function inferImageMimeType(imageDataUrl: string): string {
@@ -933,6 +1045,120 @@ export const setAiProviderPolicy = onCall(async (request) => {
 
   await firestore.doc(AI_PROVIDER_POLICY_DOC_PATH).set(nextPolicy, { merge: true });
   return success("Updated AI provider policy.", nextPolicy);
+});
+
+export const getDebugLoggingPolicy = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const policy = await getDebugLoggingPolicyRecord();
+  return success("Loaded debug logging policy.", policy);
+});
+
+export const setDebugLoggingPolicy = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const payload = request.data as Partial<DebugLoggingPolicyRecord>;
+  const current = await getDebugLoggingPolicyRecord();
+  const next = normalizeDebugLoggingPolicy({
+    ...current,
+    ...payload,
+    updatedBy: request.auth?.uid ?? "unknown",
+    updatedAt: new Date().toISOString(),
+  });
+
+  await firestore.doc(DEBUG_POLICY_DOC_PATH).set(next, { merge: true });
+  return success("Updated debug logging policy.", next);
+});
+
+export const uploadDebugLogReport = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const payload = request.data as {
+    userId?: unknown;
+    entries?: unknown;
+    totalSizeBytes?: unknown;
+    appVersion?: unknown;
+    browserInfo?: unknown;
+    extensionVersion?: unknown;
+    osInfo?: unknown;
+  };
+
+  const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
+  if (!userId || userId !== request.auth.uid) {
+    throw new HttpsError("permission-denied", "Debug upload user mismatch.");
+  }
+
+  const policy = await getDebugLoggingPolicyRecord();
+  if (!policy.enabledGlobally || policy.disabledUserIds.includes(userId)) {
+    throw new HttpsError("failed-precondition", "Debug logging is disabled for this account.");
+  }
+
+  const entries = sanitizeDebugLogEntries(payload.entries);
+  if (!entries.length) {
+    throw new HttpsError("invalid-argument", "Debug log entries are required.");
+  }
+
+  const calculatedTotalSize = entries.reduce((sum, entry) => sum + entry.sizeBytes, 0);
+  const declaredTotalSize = typeof payload.totalSizeBytes === "number" ? Math.round(payload.totalSizeBytes) : calculatedTotalSize;
+  const totalSizeBytes = Math.max(calculatedTotalSize, declaredTotalSize);
+
+  if (totalSizeBytes > policy.maxUploadBytes) {
+    throw new HttpsError("invalid-argument", "Debug log too large to upload. Please clear or reduce logging.");
+  }
+
+  const uploadedAtMs = Date.now();
+  const reportId = `${uploadedAtMs}`;
+  const docPath = `debugReports/${userId}/reports/${reportId}`;
+
+  await firestore.doc(docPath).set({
+    userId,
+    uploadedAtMs,
+    createdAt: new Date(uploadedAtMs).toISOString(),
+    entries,
+    entriesCount: entries.length,
+    totalSizeBytes,
+    appVersion: typeof payload.appVersion === "string" ? payload.appVersion : undefined,
+    browserInfo: typeof payload.browserInfo === "string" ? payload.browserInfo : undefined,
+    extensionVersion: typeof payload.extensionVersion === "string" ? payload.extensionVersion : null,
+    osInfo: typeof payload.osInfo === "string" ? payload.osInfo : undefined,
+  }, { merge: false });
+
+  return success("Debug log uploaded.", {
+    reportId,
+    uploadedCount: entries.length,
+    uploadedAt: uploadedAtMs,
+  });
+});
+
+export const listRecentDebugUploads = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const snapshot = await firestore
+    .collectionGroup("reports")
+    .orderBy("uploadedAtMs", "desc")
+    .limit(50)
+    .get();
+
+  const rows: DebugUploadSummary[] = snapshot.docs
+    .filter((docSnapshot) => docSnapshot.ref.parent.parent?.parent?.id === "debugReports")
+    .map((docSnapshot) => {
+      const data = docSnapshot.data();
+      return {
+        reportPath: docSnapshot.ref.path,
+        userId: typeof data.userId === "string" ? data.userId : "",
+        createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date(0).toISOString(),
+        uploadedAtMs: typeof data.uploadedAtMs === "number" ? data.uploadedAtMs : 0,
+        totalSizeBytes: typeof data.totalSizeBytes === "number" ? data.totalSizeBytes : 0,
+        entriesCount: typeof data.entriesCount === "number" ? data.entriesCount : 0,
+        appVersion: typeof data.appVersion === "string" ? data.appVersion : undefined,
+      };
+    });
+
+  return success("Loaded recent debug uploads.", rows);
 });
 
 export const extractScreenshotText = onCall(async (request) => {

@@ -27,8 +27,10 @@ CourseForge consists of three main layers:
 
 1. Teacher uses web app or sidebar to enter data.
 2. Data is persisted via the core database service.
-3. When requested, the XML exporter reads from the database and generates a schema‑compliant XML document.
-4. The game engine and AI tutor consume the XML.
+3. Auto textbook capture applies text/image moderation; flagged educational content is marked `pending-admin-review` and remains local-only.
+4. Sync service uploads only content allowed by textbook moderation state and user cloud-access policy.
+5. When requested, the XML exporter reads from the database and generates a schema‑compliant XML document.
+6. The game engine and AI tutor consume the XML.
 
 ---
 
@@ -50,11 +52,19 @@ CourseForge consists of three main layers:
   - `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}`
   - `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}`
 - User profile docs stored at `/users/{uid}` for auth bootstrap and admin user management.
+- User profile docs also store cloud content policy state (`isContentBlocked`, reason/updatedBy metadata).
 - Firestore security model:
   - Authenticated users can read canonical curriculum docs.
   - Users can only write docs they own (`userId` / `ownerId` match).
   - Admin claim (`request.auth.token.admin == true`) bypasses ownership checks.
   - Legacy user-scoped content subcollections under `/users/{uid}` are explicitly denied.
+
+### Moderation and policy gates
+
+- Auto textbook setup performs image-level moderation on capture output.
+- Textbooks marked `pending-admin-review` or `blocked-explicit-content` are excluded from cloud upload.
+- Users marked content-blocked by admin cannot upload any curriculum entities to cloud until unblocked.
+- Local-first persistence remains available even when cloud upload is blocked.
 
 See `DB_SCHEMA.md` for details.
 

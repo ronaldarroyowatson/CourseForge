@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createInitialAutoCaptureUsage,
+  assessImageModerationSignal,
   detectPageBoundaryFromRgba,
   enforceAutoCaptureLimit,
   evaluateAutoCaptureSafety,
@@ -140,5 +141,26 @@ describe("textbookAutoExtractionService", () => {
 
     const toc = evaluateAutoCaptureSafety("Table of Contents\nChapter 1 Integers\n1.1 Absolute Value", "toc");
     expect(toc.allowed).toBe(true);
+  });
+
+  it("uses image-level moderation with educational context exception", () => {
+    const blocked = assessImageModerationSignal({
+      skinToneRatio: 0.81,
+      contextText: "summer beach magazine",
+    });
+    expect(blocked.decision).toBe("block");
+
+    const review = assessImageModerationSignal({
+      skinToneRatio: 0.78,
+      contextText: "Grey's Anatomy textbook for medical students",
+    });
+    expect(review.decision).toBe("review");
+    expect(review.educationalContextDetected).toBe(true);
+
+    const clear = assessImageModerationSignal({
+      skinToneRatio: 0.18,
+      contextText: "Algebra student edition",
+    });
+    expect(clear.decision).toBe("allow");
   });
 });

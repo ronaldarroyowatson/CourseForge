@@ -39,6 +39,11 @@ Core entities:
 - `isArchived` (boolean)
 - `status` (draft | submitted | approved | rejected, optional)
 - `isDeleted` (boolean, optional)
+- `requiresAdminReview` (boolean, optional)
+- `imageModerationState` (`allow` | `pending-admin-review` | `blocked-explicit-content`, optional)
+- `imageModerationReason` (string, optional)
+- `imageModerationConfidence` (number, optional)
+- `cloudSyncBlockedReason` (string, optional)
 
 ### 2.2 Chapter
 
@@ -118,5 +123,15 @@ Core entities:
   - `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}`
 - Firestore security ownership checks accept either `userId` (current) or `ownerId` (compatibility).
 - Legacy user-scoped subcollections are blocked (`/users/{uid}/textbooks|chapters|sections|vocabTerms`).
+- Sync upload also enforces moderation and policy gates in app logic:
+  - Textbooks with moderation hold/block states are skipped for cloud writes.
+  - Users marked content-blocked in `/users/{uid}` are skipped for cloud writes.
 - All entities should be easily serializable to XML.
 - Foreign keys are logical (enforced in code, not necessarily by the storage engine).
+
+### 3.1 User policy fields (`/users/{uid}`)
+
+- `isContentBlocked` (boolean, optional)
+- `contentBlockedAt` (timestamp/string, optional)
+- `contentBlockedReason` (string, optional)
+- `contentBlockedBy` (string uid/email, optional)

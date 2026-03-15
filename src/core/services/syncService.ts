@@ -10,6 +10,7 @@ import { useUIStore } from "../../webapp/store/uiStore";
 type SyncStoreName = "textbooks" | "chapters" | "sections" | "vocabTerms" | "equations" | "concepts" | "keyIdeas";
 type SyncEntity = CourseForgeEntityMap[SyncStoreName];
 type HierarchyIndexes = {
+  textbookById: Map<string, CourseForgeEntityMap["textbooks"]>;
   chapterById: Map<string, CourseForgeEntityMap["chapters"]>;
   sectionById: Map<string, CourseForgeEntityMap["sections"]>;
 };
@@ -38,6 +39,11 @@ let writeLoopTriggered = false;
 let writeBudgetExceeded = false;
 let sessionWriteCount = 0;
 let syncContext: { uid: string | null; isAdmin: boolean | null } = { uid: null, isAdmin: null };
+
+interface UserCloudSyncPolicy {
+  isBlocked: boolean;
+  reason: string | null;
+}
 
 interface SyncErrorLike {
   code?: string;
@@ -757,15 +763,82 @@ async function migrateLocalHierarchyData(): Promise<void> {
 }
 
 async function buildHierarchyIndexes(): Promise<HierarchyIndexes> {
-  const [chapters, sections] = await Promise.all([
+  const [textbooks, chapters, sections] = await Promise.all([
+    fetchLocalStore(STORE_NAMES.textbooks),
     fetchLocalStore(STORE_NAMES.chapters),
     fetchLocalStore(STORE_NAMES.sections),
   ]);
 
   return {
+    textbookById: new Map(textbooks.map((textbook) => [textbook.id, textbook])),
     chapterById: new Map(chapters.map((chapter) => [chapter.id, chapter])),
     sectionById: new Map(sections.map((section) => [section.id, section])),
   };
+}
+
+function resolveTextbookForEntity(
+  storeName: SyncStoreName,
+  item: SyncEntity,
+  indexes: HierarchyIndexes
+): CourseForgeEntityMap["textbooks"] | null {
+  if (storeName === STORE_NAMES.textbooks) {
+    return item as CourseForgeEntityMap["textbooks"];
+  }
+
+  if (storeName === STORE_NAMES.chapters) {
+    const chapter = item as CourseForgeEntityMap["chapters"];
+    return chapter.textbookId ? indexes.textbookById.get(chapter.textbookId) ?? null : null;
+  }
+
+  if (storeName === STORE_NAMES.sections) {
+    const section = item as CourseForgeEntityMap["sections"];
+    const chapter = indexes.chapterById.get(section.chapterId);
+    const textbookId = section.textbookId ?? chapter?.textbookId;
+    return textbookId ? indexes.textbookById.get(textbookId) ?? null : null;
+  }
+
+  const sectionScoped = item as CourseForgeEntityMap["vocabTerms"];
+  const section = indexes.sectionById.get(sectionScoped.sectionId);
+  const textbookId = sectionScoped.textbookId ?? section?.textbookId;
+  return textbookId ? indexes.textbookById.get(textbookId) ?? null : null;
+}
+
+export function isTextbookCloudSyncBlocked(textbook: CourseForgeEntityMap["textbooks"] | null | undefined): boolean {
+  if (!textbook) {
+    return false;
+  }
+
+  if (textbook.cloudSyncBlockedReason === "blocked_content") {
+    return true;
+  }
+
+  if (textbook.requiresAdminReview === true && textbook.status !== "approved") {
+    return true;
+  }
+
+  if (textbook.imageModerationState === "pending_admin_review") {
+    return true;
+  }
+
+  return false;
+}
+
+async function getUserCloudSyncPolicy(userId: string): Promise<UserCloudSyncPolicy> {
+  try {
+    const snapshot = await getDocs(query(collection(firestoreDb, "users"), where("uid", "==", userId)));
+    const userDoc = snapshot.docs[0];
+    if (!userDoc) {
+      return { isBlocked: false, reason: null };
+    }
+
+    const data = userDoc.data() as Record<string, unknown>;
+    return {
+      isBlocked: data.isContentBlocked === true,
+      reason: typeof data.contentBlockReason === "string" ? data.contentBlockReason : null,
+    };
+  } catch {
+    return { isBlocked: false, reason: null };
+  }
 }
 
 async function saveLocalStoreItem<T extends SyncStoreName>(
@@ -779,8 +852,28 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
   storeName: T,
   userId: string,
   item: CourseForgeEntityMap[T],
-  indexes: HierarchyIndexes
+  indexes: HierarchyIndexes,
+  userPolicy?: UserCloudSyncPolicy
 ): Promise<boolean> {
+  if (userPolicy?.isBlocked) {
+    logSyncEvent("write:blocked-user-policy", `cloud/${storeName}/${item.id}`, {
+      userId,
+      reason: userPolicy.reason ?? "User is blocked from cloud sync.",
+    });
+    return false;
+  }
+
+  const textbook = resolveTextbookForEntity(storeName, item, indexes);
+  if (isTextbookCloudSyncBlocked(textbook)) {
+    logSyncEvent("write:blocked-textbook-review", `cloud/${storeName}/${item.id}`, {
+      textbookId: textbook?.id ?? null,
+      status: textbook?.status ?? null,
+      moderationState: textbook?.imageModerationState ?? null,
+      reason: textbook?.cloudSyncBlockedReason ?? "pending_admin_review",
+    });
+    return false;
+  }
+
   const resolved = getDocPathFromStoreItem(storeName, item, indexes);
   if (!resolved) {
     return false;
@@ -832,6 +925,14 @@ export async function uploadLocalChanges(userId: string): Promise<void> {
 
   try {
     await logSyncIdentity(userId);
+    const userPolicy = await getUserCloudSyncPolicy(userId);
+    if (userPolicy.isBlocked) {
+      throw {
+        code: "permission-denied",
+        message: userPolicy.reason ?? "Cloud sync is blocked for this user.",
+      };
+    }
+
     await migrateLocalHierarchyData();
     const indexes = await buildHierarchyIndexes();
 
@@ -852,7 +953,7 @@ export async function uploadLocalChanges(userId: string): Promise<void> {
               lastModified: item.lastModified ?? toIsoNow(),
             } as CourseForgeEntityMap[typeof storeName];
 
-            const wroteToCloud = await saveCloudStoreItem(storeName, userId, synced, indexes);
+            const wroteToCloud = await saveCloudStoreItem(storeName, userId, synced, indexes, userPolicy);
             if (wroteToCloud) {
               await saveLocalStoreItem(storeName, synced);
             }
@@ -912,6 +1013,14 @@ export async function syncUserData(userId: string): Promise<void> {
   try {
     resetCanonicalReadCache();
     await logSyncIdentity(userId);
+    const userPolicy = await getUserCloudSyncPolicy(userId);
+    if (userPolicy.isBlocked) {
+      throw {
+        code: "permission-denied",
+        message: userPolicy.reason ?? "Cloud sync is blocked for this user.",
+      };
+    }
+
     await migrateLocalHierarchyData();
     const indexes = await buildHierarchyIndexes();
 
@@ -969,7 +1078,7 @@ export async function syncUserData(userId: string): Promise<void> {
                 false
               ) as CourseForgeEntityMap[typeof storeName];
 
-              const wroteToCloud = await saveCloudStoreItem(storeName, userId, localWinner, indexes);
+              const wroteToCloud = await saveCloudStoreItem(storeName, userId, localWinner, indexes, userPolicy);
               if (wroteToCloud) {
                 await saveLocalStoreItem(storeName, localWinner);
               }
@@ -988,7 +1097,7 @@ export async function syncUserData(userId: string): Promise<void> {
                 false
               ) as CourseForgeEntityMap[typeof storeName];
 
-              const wroteToCloud = await saveCloudStoreItem(storeName, userId, localOnly, indexes);
+              const wroteToCloud = await saveCloudStoreItem(storeName, userId, localOnly, indexes, userPolicy);
               if (wroteToCloud) {
                 await saveLocalStoreItem(storeName, localOnly);
               }

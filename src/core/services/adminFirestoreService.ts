@@ -12,6 +12,8 @@ export interface AdminUserRecord {
   createdAt: string | null;
   lastLoginAt: string | null;
   isAdmin: boolean;
+  isContentBlocked?: boolean;
+  contentBlockReason?: string | null;
 }
 
 export interface PremiumUsageRecord {
@@ -121,6 +123,17 @@ export async function getAllUsers(): Promise<AdminUserRecord[]> {
 
 export async function setUserAdminStatus(uid: string, isAdmin: boolean): Promise<string> {
   return callAdminFunction<{ uid: string; isAdmin: boolean }, string>("setUserAdminStatus", { uid, isAdmin });
+}
+
+export async function setUserContentBlockStatus(
+  uid: string,
+  isContentBlocked: boolean,
+  contentBlockReason?: string
+): Promise<string> {
+  return callAdminFunction<{ uid: string; isContentBlocked: boolean; contentBlockReason?: string }, string>(
+    "setUserContentBlockStatus",
+    { uid, isContentBlocked, contentBlockReason }
+  );
 }
 
 export async function getSubmittedContent(): Promise<ModerationItem[]> {

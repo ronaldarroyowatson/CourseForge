@@ -80,6 +80,8 @@ interface AdminUserRecord {
   createdAt: string | null;
   lastLoginAt: string | null;
   isAdmin: boolean;
+  isContentBlocked?: boolean;
+  contentBlockReason?: string | null;
 }
 
 interface PremiumUsageState {
@@ -418,6 +420,8 @@ function toAdminUserRecord(snapshot: FirebaseFirestore.QueryDocumentSnapshot): A
     createdAt: toIsoString(data.createdAt),
     lastLoginAt: toIsoString(data.lastLoginAt),
     isAdmin: data.isAdmin === true,
+    isContentBlocked: data.isContentBlocked === true,
+    contentBlockReason: typeof data.contentBlockReason === "string" ? data.contentBlockReason : null,
   };
 }
 
@@ -512,6 +516,37 @@ export const setUserAdminStatus = onCall(async (request) => {
   const message = isAdmin
     ? `Granted admin access to ${uid}.`
     : `Removed admin access from ${uid}.`;
+
+  return success(message, message);
+});
+
+export const setUserContentBlockStatus = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const data = request.data;
+  const uid = typeof data?.uid === "string" ? data.uid.trim() : "";
+  const isContentBlocked = data?.isContentBlocked === true;
+  const contentBlockReason = typeof data?.contentBlockReason === "string"
+    ? data.contentBlockReason.trim()
+    : "";
+
+  if (!uid) {
+    throw new HttpsError("invalid-argument", "A user id is required.");
+  }
+
+  await firestore.doc(`users/${uid}`).set(
+    {
+      uid,
+      isContentBlocked,
+      contentBlockReason: isContentBlocked ? (contentBlockReason || "Blocked by admin moderation decision.") : null,
+      lastContentBlockUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  const message = isContentBlocked
+    ? `Blocked cloud sync for user ${uid}.`
+    : `Unblocked cloud sync for user ${uid}.`;
 
   return success(message, message);
 });

@@ -2,9 +2,9 @@
 
 CourseForge is a local-first curriculum authoring platform for teachers. It combines a browser extension for quick capture with a full web app for textbook management, sync, moderation, and XML export.
 
-Version `1.2.2` adds optional AI augmentation of previously uploaded Level 1 content and expanded equation normalization/repair across document and presentation ingestion flows.
+Version `1.2.4` hardens Auto textbook onboarding with image-level moderation, educational review holds, and admin cloud-sync blocking controls.
 
-Quick release note: v1.2.2 focuses on filling missing harder-tier coverage and improving cross-format equation reliability.
+Quick release note: v1.2.4 focuses on safer textbook image ingestion with local-only hold behavior until admin review.
 
 ## What it does
 
@@ -23,6 +23,14 @@ Quick release note: v1.2.2 focuses on filling missing harder-tier coverage and i
 - Server-authoritative custom claim promotion through `setUserAdminStatus`.
 - Updated textbook action icons and favorite/archive sorting behavior.
 - Vitest integration tests covering login restore, admin route access, claim refresh, and sync bootstrap.
+
+## v1.2.4 highlights
+
+- Adds image-level explicit-content scoring during Auto textbook setup (cover/title/TOC capture flow).
+- Routes ambiguous educationally-graphic content to admin review instead of auto-blocking when educational context is detected.
+- Keeps flagged textbooks local-only by setting moderation hold metadata and preventing cloud writes until admin approval.
+- Adds admin user controls to block or restore cloud content sync access for specific users.
+- Expands tests for moderation decisions and sync hold enforcement.
 
 ## v1.2.2 highlights
 
@@ -191,6 +199,15 @@ npm run test:rules
 - Ownership checks accept `userId` (current schema) and `ownerId` (forward compatibility).
 - Admin write override uses the custom auth claim: `request.auth.token.admin == true`.
 - Read access for content documents is scoped to owner-or-admin to prevent cross-tenant reads.
+
+### Moderation and hold behavior (v1.2.4)
+
+- Auto textbook setup applies image-level moderation before persistence.
+- Moderation outcomes:
+  - `allow`: textbook can sync normally.
+  - `pending-admin-review`: textbook is saved locally and blocked from cloud sync until admin approval.
+  - `blocked-explicit-content`: textbook is blocked from cloud sync and requires admin intervention.
+- Admins can block a user from cloud content sync access without deleting local data on that user's machine.
 
 ### Legacy PowerPoint conversion setup (.ppt -> .pptx)
 

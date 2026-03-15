@@ -18,6 +18,12 @@ interface AutoCreateTextbookInput {
   publisherLocation?: string;
   authors?: string[];
   tocExtractionConfidence?: number;
+  imageModerationState?: "clear" | "pending_admin_review" | "blocked";
+  imageModerationReason?: string;
+  imageModerationConfidence?: number;
+  cloudSyncBlockedReason?: "pending_admin_review" | "user_blocked" | "blocked_content";
+  requiresAdminReview?: boolean;
+  status?: "draft" | "submitted" | "approved" | "rejected";
   coverDataUrl?: string;
 }
 
@@ -37,6 +43,12 @@ export interface AutoPersistenceMetadata {
   publisherLocation?: string;
   authors?: string[];
   tocExtractionConfidence?: number;
+  imageModerationState?: "clear" | "pending_admin_review" | "blocked";
+  imageModerationReason?: string;
+  imageModerationConfidence?: number;
+  cloudSyncBlockedReason?: "pending_admin_review" | "user_blocked" | "blocked_content";
+  requiresAdminReview?: boolean;
+  status?: "draft" | "submitted" | "approved" | "rejected";
 }
 
 export interface PersistAutoTextbookInput {
@@ -72,6 +84,12 @@ export async function persistAutoTextbook(
     publisherLocation: input.metadata.publisherLocation,
     authors: input.metadata.authors,
     tocExtractionConfidence: input.metadata.tocExtractionConfidence,
+    imageModerationState: input.metadata.imageModerationState,
+    imageModerationReason: input.metadata.imageModerationReason,
+    imageModerationConfidence: input.metadata.imageModerationConfidence,
+    cloudSyncBlockedReason: input.metadata.cloudSyncBlockedReason,
+    requiresAdminReview: input.metadata.requiresAdminReview,
+    status: input.metadata.status,
     coverDataUrl: input.coverDataUrl,
   });
 

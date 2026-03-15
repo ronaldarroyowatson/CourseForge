@@ -38,6 +38,11 @@ export interface Textbook {
   publisherLocation?: string;
   authors?: string[];
   tocExtractionConfidence?: number;
+  imageModerationState?: "clear" | "pending_admin_review" | "blocked";
+  imageModerationReason?: string;
+  imageModerationConfidence?: number;
+  cloudSyncBlockedReason?: "pending_admin_review" | "user_blocked" | "blocked_content";
+  requiresAdminReview?: boolean;
   platformUrl?: string;
   /** Firebase Storage download URL for the cover image. */
   coverImageUrl?: string | null;

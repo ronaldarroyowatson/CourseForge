@@ -67,6 +67,19 @@ export interface AutoContentSafetyResult {
   reason?: "profanity" | "adult" | "non-book";
 }
 
+export interface ImageModerationSignal {
+  skinToneRatio: number;
+  contextText?: string;
+}
+
+export interface ImageModerationAssessment {
+  decision: "allow" | "review" | "block";
+  confidence: number;
+  reason: string;
+  educationalContextDetected: boolean;
+  skinToneRatio: number;
+}
+
 const PROFANITY_TERMS = [
   "f***",
   "f**k",
@@ -89,6 +102,20 @@ const ADULT_TERMS = [
   "explicit",
   "onlyfans",
   "hentai",
+];
+
+const EDUCATIONAL_EXCEPTION_TERMS = [
+  "anatomy",
+  "grey's anatomy",
+  "grays anatomy",
+  "medical",
+  "medicine",
+  "biology",
+  "health science",
+  "nursing",
+  "physiology",
+  "surgical",
+  "textbook",
 ];
 
 export const DEFAULT_AUTO_CAPTURE_LIMITS: AutoCaptureLimits = {
@@ -508,6 +535,52 @@ export function evaluateAutoCaptureSafety(rawText: string, step: AutoCaptureStep
   }
 
   return { allowed: true };
+}
+
+export function assessImageModerationSignal(signal: ImageModerationSignal): ImageModerationAssessment {
+  const normalizedContext = normalizeContent(signal.contextText ?? "");
+  const educationalContextDetected = containsAny(normalizedContext, EDUCATIONAL_EXCEPTION_TERMS);
+  const ratio = Math.max(0, Math.min(1, signal.skinToneRatio));
+
+  if (ratio >= 0.72) {
+    if (educationalContextDetected) {
+      return {
+        decision: "review",
+        confidence: 0.9,
+        reason: "High explicit-image signal with educational context. Requires admin approval.",
+        educationalContextDetected,
+        skinToneRatio: ratio,
+      };
+    }
+
+    return {
+      decision: "block",
+      confidence: 0.95,
+      reason: "High explicit-image signal detected without educational context.",
+      educationalContextDetected,
+      skinToneRatio: ratio,
+    };
+  }
+
+  if (ratio >= 0.52) {
+    return {
+      decision: "review",
+      confidence: educationalContextDetected ? 0.82 : 0.72,
+      reason: educationalContextDetected
+        ? "Potentially graphic educational imagery. Requires admin approval."
+        : "Potential explicit-image signal. Requires admin approval.",
+      educationalContextDetected,
+      skinToneRatio: ratio,
+    };
+  }
+
+  return {
+    decision: "allow",
+    confidence: 0.9,
+    reason: "Image-level screening passed.",
+    educationalContextDetected,
+    skinToneRatio: ratio,
+  };
 }
 
 function isLikelyBookPageText(rawText: string): boolean {

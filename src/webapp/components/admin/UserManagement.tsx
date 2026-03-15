@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 
 import type { AdminUserRecord } from "../../../core/services";
-import { getAllUsers, setUserAdminStatus } from "../../../core/services";
+import { getAllUsers, setUserAdminStatus, setUserContentBlockStatus } from "../../../core/services";
 import { refreshCurrentUserClaims } from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
 
@@ -58,6 +58,36 @@ export function UserManagement(): React.JSX.Element {
     }
   }
 
+  async function handleSetContentBlockStatus(uid: string, isContentBlocked: boolean): Promise<void> {
+    setPendingUids((prev) => new Set(prev).add(uid));
+    try {
+      await setUserContentBlockStatus(
+        uid,
+        isContentBlocked,
+        isContentBlocked ? "Blocked after textbook image moderation review." : undefined
+      );
+      setUsers((prev) => prev.map((u) => {
+        if (u.uid !== uid) {
+          return u;
+        }
+
+        return {
+          ...u,
+          isContentBlocked,
+          contentBlockReason: isContentBlocked ? "Blocked after textbook image moderation review." : null,
+        };
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update content block status.");
+    } finally {
+      setPendingUids((prev) => {
+        const next = new Set(prev);
+        next.delete(uid);
+        return next;
+      });
+    }
+  }
+
   return (
     <section className="admin-section">
       <div className="admin-section__header">
@@ -84,6 +114,7 @@ export function UserManagement(): React.JSX.Element {
             <th>Display Name</th>
             <th>Last Login</th>
             <th>Admin</th>
+            <th>Cloud Sync Access</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -95,25 +126,52 @@ export function UserManagement(): React.JSX.Element {
               <td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : <em>—</em>}</td>
               <td>{user.isAdmin ? "✅ Admin" : "—"}</td>
               <td>
-                {user.isAdmin ? (
-                  <button
-                    type="button"
-                    onClick={() => void handleSetAdminStatus(user.uid, false)}
-                    disabled={pendingUids.has(user.uid)}
-                    className="btn-danger-sm"
-                  >
-                    Revoke Admin
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => void handleSetAdminStatus(user.uid, true)}
-                    disabled={pendingUids.has(user.uid)}
-                    className="btn-primary-sm"
-                  >
-                    Promote to Admin
-                  </button>
-                )}
+                {user.isContentBlocked
+                  ? `Blocked${user.contentBlockReason ? `: ${user.contentBlockReason}` : ""}`
+                  : "Allowed"}
+              </td>
+              <td>
+                <div className="admin-premium-actions">
+                  {user.isAdmin ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleSetAdminStatus(user.uid, false)}
+                      disabled={pendingUids.has(user.uid)}
+                      className="btn-danger-sm"
+                    >
+                      Revoke Admin
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleSetAdminStatus(user.uid, true)}
+                      disabled={pendingUids.has(user.uid)}
+                      className="btn-primary-sm"
+                    >
+                      Promote to Admin
+                    </button>
+                  )}
+
+                  {user.isContentBlocked ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleSetContentBlockStatus(user.uid, false)}
+                      disabled={pendingUids.has(user.uid)}
+                      className="btn-secondary"
+                    >
+                      Unblock Cloud Sync
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleSetContentBlockStatus(user.uid, true)}
+                      disabled={pendingUids.has(user.uid)}
+                      className="btn-danger-sm"
+                    >
+                      Block Cloud Sync
+                    </button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}

@@ -50,6 +50,11 @@ export interface CreateTextbookInput {
   publisherLocation?: string;
   authors?: string[];
   tocExtractionConfidence?: number;
+  imageModerationState?: "clear" | "pending_admin_review" | "blocked";
+  imageModerationReason?: string;
+  imageModerationConfidence?: number;
+  cloudSyncBlockedReason?: "pending_admin_review" | "user_blocked" | "blocked_content";
+  requiresAdminReview?: boolean;
   platformUrl?: string;
   coverImageUrl?: string | null;
   /** Pass a File to have it uploaded during createTextbook. */
@@ -131,6 +136,11 @@ function buildTextbookFromInput(input: CreateTextbookInput, resolvedCoverUrl?: s
     publisherLocation: input.publisherLocation,
     authors: input.authors,
     tocExtractionConfidence: input.tocExtractionConfidence,
+    imageModerationState: input.imageModerationState,
+    imageModerationReason: input.imageModerationReason,
+    imageModerationConfidence: input.imageModerationConfidence,
+    cloudSyncBlockedReason: input.cloudSyncBlockedReason,
+    requiresAdminReview: input.requiresAdminReview,
     platformUrl: input.platformUrl,
     coverImageUrl: resolvedCoverUrl ?? input.coverImageUrl ?? null,
     createdAt: timestamp,

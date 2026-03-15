@@ -6,6 +6,7 @@ import {
   DEFAULT_AUTO_CAPTURE_LIMITS,
   detectPageBoundaryFromRgba,
   enforceAutoCaptureLimit,
+  assessImageModerationSignal,
   evaluateAutoCaptureSafety,
   extractMetadataFromOcrText,
   isLikelyTocText,
@@ -13,6 +14,7 @@ import {
   mergeParsedToc,
   parseTocFromOcrText,
   type AutoTextbookMetadata,
+  type ImageModerationAssessment,
   type ParsedTocResult,
   type TocChapter,
 } from "../../../core/services/textbookAutoExtractionService";
@@ -210,6 +212,54 @@ async function loadImage(dataUrl: string): Promise<HTMLImageElement> {
   });
 }
 
+async function estimateSkinToneRatio(dataUrl: string): Promise<number> {
+  const image = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  const targetWidth = Math.min(420, Math.max(120, image.naturalWidth));
+  const aspectRatio = image.naturalHeight / Math.max(1, image.naturalWidth);
+  const targetHeight = Math.max(120, Math.round(targetWidth * aspectRatio));
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return 0;
+  }
+
+  context.drawImage(image, 0, 0, targetWidth, targetHeight);
+  const data = context.getImageData(0, 0, targetWidth, targetHeight).data;
+  let skinPixels = 0;
+  let totalPixels = 0;
+
+  for (let index = 0; index < data.length; index += 4) {
+    const red = data[index];
+    const green = data[index + 1];
+    const blue = data[index + 2];
+    const alpha = data[index + 3];
+
+    if (alpha < 20) {
+      continue;
+    }
+
+    totalPixels += 1;
+    const max = Math.max(red, green, blue);
+    const min = Math.min(red, green, blue);
+    const skinToneLike = red > 95
+      && green > 40
+      && blue > 20
+      && (max - min) > 15
+      && Math.abs(red - green) > 12
+      && red > green
+      && red > blue;
+
+    if (skinToneLike) {
+      skinPixels += 1;
+    }
+  }
+
+  return totalPixels > 0 ? skinPixels / totalPixels : 0;
+}
+
 function createDefaultSelection(image: HTMLImageElement): SelectionRect {
   return {
     x: 0,
@@ -231,6 +281,7 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
   const [isBusy, setIsBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [moderationAssessment, setModerationAssessment] = useState<ImageModerationAssessment | null>(null);
   const [captureDialog, setCaptureDialog] = useState<CaptureDialogState>({ open: false, imageDataUrl: "" });
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
@@ -420,6 +471,7 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
     }
 
     setCoverImageDataUrl(captured);
+    setModerationAssessment(null);
     setStep("cover");
     setInfoMessage("Cover captured. Run extraction and review the metadata fields.");
   }
@@ -557,6 +609,33 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
 
     try {
       setIsBusy(true);
+
+      const imageSkinToneRatio = await estimateSkinToneRatio(coverImageDataUrl);
+      const moderationContext = [
+        metadataForm.title,
+        metadataForm.subtitle,
+        metadataForm.subject,
+        metadataForm.seriesName,
+        metadataForm.publisher,
+        metadataForm.authorsCsv,
+        ocrDraft,
+      ].filter(Boolean).join("\n");
+
+      const imageModeration = assessImageModerationSignal({
+        skinToneRatio: imageSkinToneRatio,
+        contextText: moderationContext,
+      });
+      setModerationAssessment(imageModeration);
+
+      if (imageModeration.decision === "block") {
+        setErrorMessage(
+          "Capture blocked by image safety checks. This appears to contain explicit imagery without educational context."
+        );
+        return;
+      }
+
+      const requiresAdminReview = imageModeration.decision === "review";
+
       await persistAutoTextbook(
         {
           metadata: {
@@ -575,6 +654,12 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
             publisherLocation: metadata.publisherLocation,
             authors: metadata.authors,
             tocExtractionConfidence: Number(metadataForm.tocExtractionConfidence) || tocResult.confidence,
+            imageModerationState: requiresAdminReview ? "pending_admin_review" : "clear",
+            imageModerationReason: requiresAdminReview ? imageModeration.reason : undefined,
+            imageModerationConfidence: imageModeration.confidence,
+            cloudSyncBlockedReason: requiresAdminReview ? "pending_admin_review" : undefined,
+            requiresAdminReview,
+            status: requiresAdminReview ? "submitted" : "draft",
           },
           coverDataUrl: coverImageDataUrl,
           tocChapters: tocResult.chapters,
@@ -585,6 +670,12 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
           createSection,
         }
       );
+
+      if (requiresAdminReview) {
+        setInfoMessage(
+          "Saved locally with admin review required. Cloud sync is blocked until this textbook is approved by an admin."
+        );
+      }
 
       onSaved();
     } catch {
@@ -610,6 +701,9 @@ export function AutoTextbookSetupFlow({ onSaved, onSwitchToManual }: AutoTextboo
 
       {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
       {infoMessage ? <p className="success-text">{infoMessage}</p> : null}
+      {moderationAssessment?.decision === "review" ? (
+        <p className="form-hint">Image safety review triggered: {moderationAssessment.reason}</p>
+      ) : null}
 
       <div className="form-actions">
         {step === "cover" ? (

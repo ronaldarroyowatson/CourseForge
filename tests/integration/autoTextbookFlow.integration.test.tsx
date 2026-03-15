@@ -120,4 +120,40 @@ describe("auto textbook flow integration", () => {
 
     expect(screen.getByText(/Capture blocked: detected inappropriate language/i)).toBeInTheDocument();
   });
+
+  it("marks flagged educationally-graphic textbooks for admin approval and cloud hold", async () => {
+    await persistAutoTextbook(
+      {
+        metadata: {
+          title: "Grey's Anatomy",
+          grade: "College",
+          subject: "Science",
+          edition: "1",
+          publicationYear: 2026,
+          isbnRaw: "",
+          imageModerationState: "pending_admin_review",
+          imageModerationReason: "Potentially graphic educational imagery. Requires admin approval.",
+          imageModerationConfidence: 0.88,
+          requiresAdminReview: true,
+          cloudSyncBlockedReason: "pending_admin_review",
+          status: "submitted",
+        },
+        coverDataUrl: "data:image/jpeg;base64,AAAA",
+        tocChapters: [],
+      },
+      {
+        createTextbook: repositoryMocks.createTextbook,
+        createChapter: repositoryMocks.createChapter,
+        createSection: repositoryMocks.createSection,
+      }
+    );
+
+    expect(repositoryMocks.createTextbook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "submitted",
+        requiresAdminReview: true,
+        cloudSyncBlockedReason: "pending_admin_review",
+      })
+    );
+  });
 });

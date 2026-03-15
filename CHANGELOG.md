@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [1.2.4] - 2026-03-15
+
+### Added (1.2.4)
+
+- Image-level moderation assessment in Auto textbook setup to detect likely explicit cover imagery.
+- Educational-context exception routing that marks uncertain but instructional content for admin review instead of immediate rejection.
+- Textbook cloud-hold metadata (`requiresAdminReview`, moderation state/reason/confidence) so flagged books remain local-only until approved.
+- Admin user-management controls to block/unblock a user's cloud content sync access through a new callable backend action.
+- New moderation hold unit coverage for sync gating and expanded Auto extraction/moderation tests.
+
+### Changed (1.2.4)
+
+- Sync service now blocks cloud upload for textbooks in `pending-admin-review` or `blocked-explicit-content` moderation states.
+- Sync service now blocks all cloud writes for users marked as content-blocked while preserving local-first behavior.
+- Auto setup save flow now stores moderation metadata and surfaces admin-review messaging for educational exceptions.
+
+### Verified (1.2.4)
+
+- `npm run typecheck`
+- `npm run test:unit -- tests/core/textbookAutoExtractionService.test.ts tests/core/syncService.moderationHold.test.ts`
+- `npx vitest run tests/integration/autoTextbookFlow.integration.test.tsx`
+- `npm test`
+
 ## [1.2.3] - 2026-03-14
 
 ### Added (1.2.3)

@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { persistAutoTextbook } from "../../src/core/services/autoTextbookPersistenceService";
@@ -133,25 +133,33 @@ describe("auto textbook flow integration", () => {
     expect(manualDot).toBeTruthy();
   });
 
-  it("propagates manual sourceType when saving textbook in manual mode", () => {
+  it("propagates manual sourceType when saving textbook in manual mode", async () => {
     render(<TextbookForm onSaved={() => undefined} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /^Manual/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^Manual/i }));
+    });
 
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Manual Algebra" } });
-    fireEvent.change(screen.getByLabelText("Grade"), { target: { value: "8" } });
-    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "Math" } });
-    fireEvent.change(screen.getByLabelText("Edition"), { target: { value: "2" } });
-    fireEvent.change(screen.getByLabelText("Publication Year"), { target: { value: "2025" } });
+    await screen.findByLabelText("Title");
 
-    fireEvent.click(screen.getByRole("button", { name: "Save Textbook" }));
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Manual Algebra" } });
+      fireEvent.change(screen.getByLabelText("Grade"), { target: { value: "8" } });
+      fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "Math" } });
+      fireEvent.change(screen.getByLabelText("Edition"), { target: { value: "2" } });
+      fireEvent.change(screen.getByLabelText("Publication Year"), { target: { value: "2025" } });
 
-    expect(repositoryMocks.createTextbook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sourceType: "manual",
-        title: "Manual Algebra",
-      })
-    );
+      fireEvent.click(screen.getByRole("button", { name: "Save Textbook" }));
+    });
+
+    await waitFor(() => {
+      expect(repositoryMocks.createTextbook).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceType: "manual",
+          title: "Manual Algebra",
+        })
+      );
+    });
   });
 
   it("persists textbook, chapters, and sections while only storing cover image data", async () => {

@@ -78,49 +78,20 @@ exit /b 1
 "@
 Set-Content -Path (Join-Path $packageDir "Check-For-CourseForge-Updates.cmd") -Value $checkUpdatesCmd -Encoding ASCII
 
-$installerPs1 = @"
-param(
-  [string]`$InstallPath = "`$env:LOCALAPPDATA\CourseForge",
-  [switch]`$CreateDesktopShortcut
-)
-
-`$ErrorActionPreference = "Stop"
-
-`$sourceRoot = Split-Path -Parent `$PSCommandPath
-`$resolvedInstall = [System.IO.Path]::GetFullPath(`$InstallPath)
-
-if (-not (Test-Path `$resolvedInstall)) {
-  New-Item -Path `$resolvedInstall -ItemType Directory -Force | Out-Null
+$installerTemplatePath = Join-Path $repoRoot "scripts/installer/windows-installer-template.ps1"
+if (-not (Test-Path $installerTemplatePath)) {
+  throw "Installer template not found: $installerTemplatePath"
 }
 
-`$null = robocopy `$sourceRoot `$resolvedInstall /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XF updater.log Install-CourseForge-Windows.ps1 Install-CourseForge-Windows.cmd
-if (`$LASTEXITCODE -gt 7) {
-  throw "Installer copy failed with robocopy exit code `$LASTEXITCODE"
-}
-
-if (`$CreateDesktopShortcut) {
-  `$desktopPath = [Environment]::GetFolderPath("Desktop")
-  `$shortcutPath = Join-Path `$desktopPath "CourseForge.lnk"
-  `$targetPath = Join-Path `$resolvedInstall "Start-CourseForge.cmd"
-
-  `$shell = New-Object -ComObject WScript.Shell
-  `$shortcut = `$shell.CreateShortcut(`$shortcutPath)
-  `$shortcut.TargetPath = `$targetPath
-  `$shortcut.WorkingDirectory = `$resolvedInstall
-  `$shortcut.IconLocation = "$env:SystemRoot\System32\SHELL32.dll,220"
-  `$shortcut.Save()
-}
-
-Write-Host "CourseForge installed to `$resolvedInstall"
-Write-Host "Run Start-CourseForge.cmd to launch."
-"@
+$installerPs1 = Get-Content -Path $installerTemplatePath -Raw
+$installerPs1 = $installerPs1.Replace("__COURSEFORGE_VERSION__", $Version)
 Set-Content -Path (Join-Path $packageDir "Install-CourseForge-Windows.ps1") -Value $installerPs1 -Encoding ASCII
 
 $installerCmd = @"
 @echo off
 setlocal
 set ROOT=%~dp0
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%Install-CourseForge-Windows.ps1" -CreateDesktopShortcut
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%Install-CourseForge-Windows.ps1" %*
 set EXITCODE=%ERRORLEVEL%
 if not "%EXITCODE%"=="0" (
   echo [CourseForge] Installation failed with code %EXITCODE%.
@@ -130,6 +101,21 @@ echo [CourseForge] Installation completed.
 exit /b 0
 "@
 Set-Content -Path (Join-Path $packageDir "Install-CourseForge-Windows.cmd") -Value $installerCmd -Encoding ASCII
+
+$uninstallerCmd = @"
+@echo off
+setlocal
+set ROOT=%~dp0
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%Install-CourseForge-Windows.ps1" -Uninstall %*
+set EXITCODE=%ERRORLEVEL%
+if not "%EXITCODE%"=="0" (
+  echo [CourseForge] Uninstall failed with code %EXITCODE%.
+  exit /b %EXITCODE%
+)
+echo [CourseForge] Uninstall completed.
+exit /b 0
+"@
+Set-Content -Path (Join-Path $packageDir "Uninstall-CourseForge-Windows.cmd") -Value $uninstallerCmd -Encoding ASCII
 
 $manifestPath = Join-Path $packageDir "package-manifest.json"
 $manifest = Get-Content -Path $manifestPath -Raw | ConvertFrom-Json
@@ -143,12 +129,49 @@ $manifest.includes = @(
   "CourseForge-Start.url",
   "Install-CourseForge-Windows.ps1",
   "Install-CourseForge-Windows.cmd",
+  "Uninstall-CourseForge-Windows.cmd",
+  "installer-integrity.json",
   "README.md",
   "CHANGELOG.md",
   "LICENSE"
 )
 $manifest.updates.assetTemplate = "CourseForge-{version}-windows.zip"
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $manifestPath -Encoding ASCII
+
+$integrityFiles = @(
+  "AutoUpdate-CourseForge.ps1",
+  "Check-For-CourseForge-Updates.cmd",
+  "Start-CourseForge.cmd",
+  "Install-CourseForge-Windows.ps1",
+  "Install-CourseForge-Windows.cmd",
+  "Uninstall-CourseForge-Windows.cmd",
+  "README.md",
+  "CHANGELOG.md",
+  "LICENSE",
+  "package-manifest.json",
+  "webapp/index.html",
+  "extension/manifest.json"
+)
+
+$integrityEntries = @()
+foreach ($relative in $integrityFiles) {
+  $targetPath = Join-Path $packageDir $relative
+  if (Test-Path $targetPath) {
+    $hash = (Get-FileHash -Path $targetPath -Algorithm SHA256).Hash
+    $integrityEntries += [ordered]@{
+      path = $relative
+      hash = $hash
+    }
+  }
+}
+
+$integrityManifest = [ordered]@{
+  generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
+  version = $Version
+  files = $integrityEntries
+}
+
+$integrityManifest | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $packageDir "installer-integrity.json") -Encoding ASCII
 
 $zipSucceeded = $false
 for ($attempt = 1; $attempt -le 3; $attempt++) {

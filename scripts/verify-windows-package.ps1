@@ -25,6 +25,8 @@ $required = @(
   "Start-CourseForge.cmd",
   "Install-CourseForge-Windows.ps1",
   "Install-CourseForge-Windows.cmd",
+  "Uninstall-CourseForge-Windows.cmd",
+  "installer-integrity.json",
   "package-manifest.json",
   "README.md",
   "CHANGELOG.md",

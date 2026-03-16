@@ -7,6 +7,7 @@ describe("syncService moderation cloud hold", () => {
     const blocked = isTextbookCloudSyncBlocked({
       id: "tb-1",
       sourceType: "auto",
+      originalLanguage: "en",
       title: "Grey's Anatomy",
       grade: "College",
       subject: "Science",
@@ -34,6 +35,7 @@ describe("syncService moderation cloud hold", () => {
     const allowed = isTextbookCloudSyncBlocked({
       id: "tb-2",
       sourceType: "auto",
+      originalLanguage: "en",
       title: "Grey's Anatomy",
       grade: "College",
       subject: "Science",

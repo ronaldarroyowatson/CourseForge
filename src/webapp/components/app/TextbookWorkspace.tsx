@@ -8,6 +8,7 @@ import { signOutCurrentUser } from "../../../firebase/auth";
 import { useRepositories } from "../../hooks/useRepositories";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
+import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
 import { ChapterForm } from "../chapters/ChapterForm";
 import { ChapterList } from "../chapters/ChapterList";
 import { PowerPointWorkspaceCard } from "../content/PowerPointWorkspaceCard";
@@ -60,6 +61,13 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
   const [activeWorkflowTab, setActiveWorkflowTab] = React.useState<WorkflowTab>("textbook");
   const [expandedTile, setExpandedTile] = React.useState<WorkflowTab | null>("textbook");
   const sectionPanelRef = React.useRef<HTMLDivElement | null>(null);
+
+  useGlobalShortcuts({
+    onGoTextbooks: () => navigate("/textbooks"),
+    onGoSettings: () => navigate("/settings"),
+    onGoAdmin: isAdmin ? () => navigate("/admin") : undefined,
+    onQuickSyncHint: () => setWorkflowNotice("Keyboard shortcuts: Alt+1 Textbooks, Alt+2 Settings, Alt+3 Admin, Alt+S Sync hint."),
+  });
 
   const selectedChapter = React.useMemo(
     () => chapters.find((chapter) => chapter.id === selectedChapterId) ?? null,

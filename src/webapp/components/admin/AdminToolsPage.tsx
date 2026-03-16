@@ -12,9 +12,18 @@
  */
 import React, { useState } from "react";
 
-import { ContentBrowser, DebugLoggingPanel, ModerationQueue, PremiumUsagePanel, UserManagement } from "./index";
+import {
+  ContentBrowser,
+  DebugLoggingPanel,
+  GlossaryManagementPanel,
+  ModerationQueue,
+  PremiumUsagePanel,
+  TranslationMemoryPanel,
+  TranslationReviewPanel,
+  UserManagement,
+} from "./index";
 
-type AdminTab = "users" | "moderation" | "browser" | "premium" | "debug";
+type AdminTab = "users" | "moderation" | "browser" | "premium" | "translations" | "translationReview" | "glossaries" | "debug";
 
 interface AdminToolsPageProps {
   currentUserEmail: string | null;
@@ -34,6 +43,12 @@ export function AdminToolsPage({ currentUserEmail, onBack }: AdminToolsPageProps
         return <ContentBrowser />;
       case "premium":
         return <PremiumUsagePanel />;
+      case "translations":
+        return <TranslationMemoryPanel />;
+      case "translationReview":
+        return <TranslationReviewPanel />;
+      case "glossaries":
+        return <GlossaryManagementPanel />;
       case "debug":
         return <DebugLoggingPanel />;
     }
@@ -60,6 +75,9 @@ export function AdminToolsPage({ currentUserEmail, onBack }: AdminToolsPageProps
             { id: "moderation", label: "Moderation Queue" },
             { id: "browser", label: "Content Browser" },
             { id: "premium", label: "Premium Management" },
+            { id: "translations", label: "Translation Memory" },
+            { id: "translationReview", label: "Translation Review" },
+            { id: "glossaries", label: "Glossaries" },
             { id: "debug", label: "Debug Logging" },
           ] as { id: AdminTab; label: string }[]
         ).map(({ id, label }) => (

@@ -1,0 +1,13 @@
+{
+  "title": "Setting",
+  "languageLabel": "App pau",
+  "languageHint": "Na duh pau tel in.",
+  "accessibilityTitle": "Accessibility",
+  "colorBlindMode": "Color blind mode",
+  "dyslexiaMode": "Enable Dyslexia Mode",
+  "dyscalculiaMode": "Enable Dyscalculia Support",
+  "highContrastMode": "Enable High Contrast",
+  "fontScale": "Font scale",
+  "uiScale": "UI scale",
+  "saved": "Preferencete kikem zo."
+}

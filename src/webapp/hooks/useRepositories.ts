@@ -36,6 +36,8 @@ import { useUIStore } from "../store/uiStore";
 
 export interface CreateTextbookInput {
   sourceType: "auto" | "manual";
+  originalLanguage?: string;
+  translatedFields?: Record<string, { title?: string; subtitle?: string; chapters?: string[]; sections?: string[] }>;
   title: string;
   subtitle?: string;
   grade: string;
@@ -86,6 +88,7 @@ export interface CreateVocabTermInput {
   sectionId: string;
   word: string;
   definition?: string;
+  languageTag?: string;
   difficultyLevel?: DifficultyLevel;
   isOriginal?: boolean;
   variationOf?: string | null;
@@ -106,6 +109,7 @@ export interface CreateConceptInput {
   sectionId: string;
   name: string;
   explanation?: string;
+  languageTag?: string;
   difficultyLevel?: DifficultyLevel;
   isOriginal?: boolean;
   variationOf?: string | null;
@@ -125,6 +129,8 @@ function buildTextbookFromInput(input: CreateTextbookInput, resolvedCoverUrl?: s
   return {
     id: crypto.randomUUID(),
     sourceType: input.sourceType,
+    originalLanguage: input.originalLanguage ?? "en",
+    translatedFields: input.translatedFields,
     title: input.title,
     subtitle: input.subtitle,
     grade: input.grade,
@@ -199,6 +205,7 @@ function buildVocabTermFromInput(input: CreateVocabTermInput, chapterId: string,
     sectionId: input.sectionId,
     word: input.word,
     definition: input.definition,
+    languageTag: input.languageTag,
     difficultyLevel: input.difficultyLevel ?? 1,
     isOriginal: input.isOriginal ?? true,
     variationOf: input.variationOf ?? null,
@@ -237,6 +244,7 @@ function buildConceptFromInput(input: CreateConceptInput, chapterId: string, tex
     sectionId: input.sectionId,
     name: input.name,
     explanation: input.explanation,
+    languageTag: input.languageTag,
     difficultyLevel: input.difficultyLevel ?? 1,
     isOriginal: input.isOriginal ?? true,
     variationOf: input.variationOf ?? null,

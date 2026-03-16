@@ -9,6 +9,7 @@ import {
   setCloudAutoOcrProviderPolicy,
   setAutoOcrProviderOrder,
 } from "../../../core/services/autoOcrService";
+import { fetchLanguageRegistryFromUrl } from "../../../core/services/translationWorkflowService";
 import {
   clearDebugLogEntries,
   getDebugLoggingPolicy,
@@ -17,6 +18,7 @@ import {
   setDebugLoggingEnabled,
   uploadAndClearDebugLogs,
 } from "../../../core/services";
+import { getSupportedLanguages, t as translate } from "../../../core/services/i18nService";
 import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
@@ -31,6 +33,10 @@ interface SettingsPageProps {
 export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   const userId = useAuthStore((state) => state.userId);
   const theme = useUIStore((state) => state.theme);
+  const language = useUIStore((state) => state.language);
+  const setLanguage = useUIStore((state) => state.setLanguage);
+  const accessibility = useUIStore((state) => state.accessibility);
+  const patchAccessibility = useUIStore((state) => state.patchAccessibility);
   const toggleTheme = useUIStore((state) => state.toggleTheme);
   const automaticRetriesEnabled = useUIStore((state) => state.automaticRetriesEnabled);
   const setAutomaticRetriesEnabled = useUIStore((state) => state.setAutomaticRetriesEnabled);
@@ -50,6 +56,52 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   const [ocrProviderHealth, setOcrProviderHealth] = React.useState<Array<{ id: AutoOcrProviderId; label: string; available: boolean }>>([]);
   const [ocrProviderStatus, setOcrProviderStatus] = React.useState<string | null>(null);
   const [isUpdatingOcrPolicy, setIsUpdatingOcrPolicy] = React.useState(false);
+  const [preferenceStatus, setPreferenceStatus] = React.useState<string | null>(null);
+  const [languageRegistryStatus, setLanguageRegistryStatus] = React.useState<string | null>(null);
+  const [languageRoadmapPreview, setLanguageRoadmapPreview] = React.useState<string[]>([]);
+  const languageOptions = React.useMemo(() => getSupportedLanguages(), []);
+
+  async function persistPreferences(nextLanguage: string, nextAccessibility = accessibility): Promise<void> {
+    if (!userId) {
+      return;
+    }
+
+    await setDoc(
+      doc(firestoreDb, "users", userId),
+      {
+        preferences: {
+          language: nextLanguage,
+          accessibility: nextAccessibility,
+        },
+      },
+      { merge: true }
+    );
+  }
+
+  async function handleLanguageChange(nextLanguage: string): Promise<void> {
+    setLanguage(nextLanguage as "en" | "es" | "pt" | "zm" | "fr" | "de");
+    try {
+      await persistPreferences(nextLanguage);
+      setPreferenceStatus(translate(nextLanguage as "en" | "es" | "pt" | "zm" | "fr" | "de", "settings", "saved"));
+    } catch {
+      setPreferenceStatus("Unable to save language preference right now.");
+    }
+  }
+
+  async function handleAccessibilityPatch(partial: Parameters<typeof patchAccessibility>[0]): Promise<void> {
+    const nextAccessibility = {
+      ...accessibility,
+      ...partial,
+    };
+    patchAccessibility(partial);
+
+    try {
+      await persistPreferences(language, nextAccessibility);
+      setPreferenceStatus(translate(language, "settings", "saved"));
+    } catch {
+      setPreferenceStatus("Unable to save accessibility preferences right now.");
+    }
+  }
 
   async function handleThemeToggle(): Promise<void> {
     toggleTheme();
@@ -174,6 +226,21 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
     }
   }
 
+  async function handleCheckLanguageUpdates(): Promise<void> {
+    try {
+      const registry = await fetchLanguageRegistryFromUrl();
+      const newSupported = registry.supported.filter((item) => !languageOptions.includes(item as typeof languageOptions[number]));
+      setLanguageRoadmapPreview(registry.roadmap.slice(0, 8));
+      setLanguageRegistryStatus(
+        newSupported.length > 0
+          ? `Detected ${newSupported.length} new language pack candidate(s): ${newSupported.join(", ")}.`
+          : `Language packs are up to date. Roadmap candidates: ${registry.roadmap.length}.`
+      );
+    } catch {
+      setLanguageRegistryStatus("Unable to check for language updates right now.");
+    }
+  }
+
   return (
     <section className="settings-page placeholder-panel">
       <div className="settings-page__header">
@@ -213,6 +280,93 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
           <button type="button" className="btn-secondary" onClick={() => { void handleThemeToggle(); }}>
             Theme: {theme === "dark" ? "Dark" : "Light"}
           </button>
+        </article>
+
+        <article className="settings-card">
+          <h3>{translate(language, "settings", "title")}</h3>
+          <label>
+            {translate(language, "settings", "languageLabel")}
+            <select value={language} onChange={(event) => { void handleLanguageChange(event.target.value); }}>
+              {languageOptions.map((option) => (
+                <option key={option} value={option}>{option.toUpperCase()}</option>
+              ))}
+            </select>
+          </label>
+          <p className="settings-meta">{translate(language, "settings", "languageHint")}</p>
+          <button type="button" className="btn-secondary" onClick={() => { void handleCheckLanguageUpdates(); }}>
+            Check For New Languages
+          </button>
+          {languageRegistryStatus ? <p className="settings-meta">{languageRegistryStatus}</p> : null}
+          {languageRoadmapPreview.length > 0 ? (
+            <p className="settings-meta">Roadmap preview: {languageRoadmapPreview.join(", ")}</p>
+          ) : null}
+        </article>
+
+        <article className="settings-card" aria-live="polite">
+          <h3>{translate(language, "settings", "accessibilityTitle")}</h3>
+          <label>
+            {translate(language, "settings", "colorBlindMode")}
+            <select
+              value={accessibility.colorBlindMode ?? "none"}
+              onChange={(event) => {
+                void handleAccessibilityPatch({
+                  colorBlindMode: event.target.value as "protanopia" | "deuteranopia" | "tritanopia" | "none",
+                });
+              }}
+            >
+              <option value="none">None</option>
+              <option value="protanopia">Protanopia</option>
+              <option value="deuteranopia">Deuteranopia</option>
+              <option value="tritanopia">Tritanopia</option>
+            </select>
+          </label>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(accessibility.dyslexiaMode)}
+              onChange={(event) => { void handleAccessibilityPatch({ dyslexiaMode: event.target.checked }); }}
+            />
+            {translate(language, "settings", "dyslexiaMode")}
+          </label>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(accessibility.dyscalculiaMode)}
+              onChange={(event) => { void handleAccessibilityPatch({ dyscalculiaMode: event.target.checked }); }}
+            />
+            {translate(language, "settings", "dyscalculiaMode")}
+          </label>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(accessibility.highContrastMode)}
+              onChange={(event) => { void handleAccessibilityPatch({ highContrastMode: event.target.checked }); }}
+            />
+            {translate(language, "settings", "highContrastMode")}
+          </label>
+          <label>
+            {translate(language, "settings", "fontScale")}: {(accessibility.fontScale ?? 1).toFixed(2)}
+            <input
+              type="range"
+              min={0.8}
+              max={1.8}
+              step={0.05}
+              value={accessibility.fontScale ?? 1}
+              onChange={(event) => { void handleAccessibilityPatch({ fontScale: Number(event.target.value) }); }}
+            />
+          </label>
+          <label>
+            {translate(language, "settings", "uiScale")}: {(accessibility.uiScale ?? 1).toFixed(2)}
+            <input
+              type="range"
+              min={0.85}
+              max={1.3}
+              step={0.05}
+              value={accessibility.uiScale ?? 1}
+              onChange={(event) => { void handleAccessibilityPatch({ uiScale: Number(event.target.value) }); }}
+            />
+          </label>
+          {preferenceStatus ? <p className="settings-meta">{preferenceStatus}</p> : null}
         </article>
 
         <article className="settings-card">

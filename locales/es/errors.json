@@ -1,0 +1,5 @@
+{
+  "unknown": "Something went wrong.",
+  "unsupportedLanguage": "Language is not supported yet. Falling back to English.",
+  "captureFailed": "Unable to capture the current page."
+}

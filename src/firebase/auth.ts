@@ -43,6 +43,15 @@ function isExtensionRuntime(): boolean {
   return typeof runtimeId === "string";
 }
 
+function detectBrowserLanguageTag(): string {
+  if (typeof navigator === "undefined") {
+    return "en";
+  }
+
+  const first = navigator.languages?.[0] ?? navigator.language ?? "en";
+  return first.split(/[-_]/)[0]?.toLowerCase() || "en";
+}
+
 let cachedAuth: Auth | null = null;
 let persistenceReady = false;
 
@@ -237,6 +246,17 @@ export async function saveUserProfileToFirestore(user: User): Promise<void> {
     displayName: user.displayName ?? "",
     email: user.email ?? "",
     isAdmin,
+    preferences: {
+      language: detectBrowserLanguageTag(),
+      accessibility: {
+        colorBlindMode: "none",
+        dyslexiaMode: false,
+        dyscalculiaMode: false,
+        highContrastMode: false,
+        fontScale: 1,
+        uiScale: 1,
+      },
+    },
   };
 
   logAuthSyncEvent("write:start", `users/${user.uid}`, payload);

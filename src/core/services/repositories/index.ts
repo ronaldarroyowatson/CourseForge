@@ -66,3 +66,25 @@ export {
   listExtractedPresentationsBySectionId,
   saveExtractedPresentation,
 } from "./presentationRepository";
+
+export {
+  findTranslationMemoryBySourceText,
+  getTranslationMemoryEntry,
+  listTranslationMemoryEntries,
+  saveTranslationMemoryEntry,
+} from "./translationMemoryRepository";
+
+export {
+  deleteGameTextEntry,
+  getGameTextEntry,
+  listGameTextEntries,
+  saveGameTextEntry,
+} from "./gameTextRepository";
+
+export {
+  deleteGlossaryEntry,
+  findGlossaryMatch,
+  getGlossaryEntry,
+  listGlossaryEntries,
+  saveGlossaryEntry,
+} from "./glossaryRepository";

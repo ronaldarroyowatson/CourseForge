@@ -28,6 +28,7 @@ async function assertRejects(
 function buildTextbook(id: string): Textbook {
   return {
     id,
+    originalLanguage: "en",
     title: "Chemistry Basics",
     grade: "10",
     subject: "Chemistry",

@@ -3,6 +3,8 @@ import type { TocChapter } from "./textbookAutoExtractionService";
 
 interface AutoCreateTextbookInput {
   sourceType: "auto" | "manual";
+  originalLanguage?: string;
+  translatedFields?: Record<string, { title?: string; subtitle?: string; chapters?: string[]; sections?: string[] }>;
   title: string;
   subtitle?: string;
   grade: string;
@@ -30,6 +32,8 @@ interface AutoCreateTextbookInput {
 
 export interface AutoPersistenceMetadata {
   sourceType?: "auto" | "manual";
+  originalLanguage?: string;
+  translatedFields?: Record<string, { title?: string; subtitle?: string; chapters?: string[]; sections?: string[] }>;
   title: string;
   subtitle?: string;
   grade: string;
@@ -71,6 +75,8 @@ export async function persistAutoTextbook(
 ): Promise<string> {
   const textbookId = await deps.createTextbook({
     sourceType: input.metadata.sourceType ?? "auto",
+    originalLanguage: input.metadata.originalLanguage ?? "en",
+    translatedFields: input.metadata.translatedFields,
     title: input.metadata.title.trim(),
     subtitle: input.metadata.subtitle,
     grade: input.metadata.grade.trim() || input.metadata.gradeBand?.trim() || "Unspecified",

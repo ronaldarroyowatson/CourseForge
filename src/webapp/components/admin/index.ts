@@ -1,5 +1,8 @@
 export { ContentBrowser } from "./ContentBrowser";
 export { DebugLoggingPanel } from "./DebugLoggingPanel";
+export { GlossaryManagementPanel } from "./GlossaryManagementPanel";
 export { ModerationQueue } from "./ModerationQueue";
 export { PremiumUsagePanel } from "./PremiumUsagePanel";
+export { TranslationMemoryPanel } from "./TranslationMemoryPanel";
+export { TranslationReviewPanel } from "./TranslationReviewPanel";
 export { UserManagement } from "./UserManagement";

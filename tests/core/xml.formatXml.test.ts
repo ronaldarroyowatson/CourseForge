@@ -17,6 +17,7 @@ function buildSampleExportNode(): TextbookExportNode {
   return {
     textbook: {
       id: "tb-1",
+      originalLanguage: "en",
       title: "Physics & Motion",
       grade: "11",
       subject: "Physics",

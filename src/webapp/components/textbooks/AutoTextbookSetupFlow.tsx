@@ -31,6 +31,9 @@ import {
   type TocChapter,
 } from "../../../core/services/textbookAutoExtractionService";
 import { useRepositories } from "../../hooks/useRepositories";
+import { useUIStore } from "../../store/uiStore";
+import { t as translate } from "../../../core/services/i18nService";
+import { captureVisibleChromeTab, isChromeOSRuntime, isSmallChromebookViewport } from "../../utils/platform";
 
 type AutoFlowStep = "cover" | "title" | "toc" | "toc-editor";
 
@@ -282,7 +285,14 @@ function fromMetadataFormState(form: MetadataFormState): AutoTextbookMetadata {
   };
 }
 
-async function captureDisplayFrame(): Promise<string> {
+async function captureDisplayFrame(input?: { preferChromeTabCapture?: boolean }): Promise<string> {
+  if (input?.preferChromeTabCapture) {
+    const chromeCapture = await captureVisibleChromeTab();
+    if (chromeCapture) {
+      return chromeCapture;
+    }
+  }
+
   const media = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
 
   try {
@@ -429,6 +439,9 @@ function createDefaultSelection(image: HTMLImageElement): SelectionRect {
 }
 
 export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToManual, testingSeedState }: AutoTextbookSetupFlowProps): React.JSX.Element {
+  const language = useUIStore((state) => state.language);
+  const chromeOs = useMemo(() => runtime === "extension" && isChromeOSRuntime(), [runtime]);
+  const compactChromeLayout = useMemo(() => chromeOs && isSmallChromebookViewport(), [chromeOs]);
   const {
     createTextbook,
     createChapter,
@@ -809,7 +822,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         autoModeStep: targetStep,
       });
 
-      const rawImage = await captureDisplayFrame();
+      const rawImage = await captureDisplayFrame({ preferChromeTabCapture: chromeOs });
       const image = await loadImage(rawImage);
       const defaultSelection = createDefaultSelection(image);
       const selectedRectDisplay = await requestSelection(rawImage);
@@ -1070,6 +1083,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       }
 
       const nextTextbookChanges = {
+        originalLanguage: language,
         sourceType: "auto" as const,
         title: metadataForm.title.trim(),
         subtitle: metadata.subtitle,
@@ -1260,8 +1274,12 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   return (
-    <section className="panel auto-textbook-flow">
+    <section className={`panel auto-textbook-flow${compactChromeLayout ? " auto-textbook-flow--chromeos-compact" : ""}`}>
       <h3>{stepTitle}</h3>
+
+      {chromeOs ? (
+        <p className="form-hint">{translate(language, "autoMode", "chromeOsBanner")}</p>
+      ) : null}
 
       <p className="form-hint">
         {AUTO_MODE_SCOPE_MESSAGE}

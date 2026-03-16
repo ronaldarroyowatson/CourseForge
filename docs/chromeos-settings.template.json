@@ -1,0 +1,32 @@
+{
+  "courseforge": {
+    "deployment": {
+      "target": "chromeos",
+      "managedBy": "google-admin-console",
+      "webappUrl": "https://your-courseforge-url.example",
+      "pinWebapp": true,
+      "forceInstallExtension": true,
+      "extensionBuildPath": "dist/extension-chrome"
+    },
+    "defaultPreferences": {
+      "language": "en",
+      "accessibility": {
+        "colorBlindMode": "none",
+        "dyslexiaMode": false,
+        "dyscalculiaMode": false,
+        "highContrastMode": false,
+        "fontScale": 1,
+        "uiScale": 1
+      }
+    },
+    "autoMode": {
+      "preferChromeTabCapture": true,
+      "fallbackToDisplayMedia": true,
+      "compactLayoutForSmallScreens": true
+    },
+    "offline": {
+      "enableServiceWorkerCaching": true,
+      "cacheStrategy": "cache-first-with-network-fallback"
+    }
+  }
+}

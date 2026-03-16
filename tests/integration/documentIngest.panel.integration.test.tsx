@@ -43,6 +43,7 @@ function buildTextbook(id: string): Textbook {
   return {
     id,
     sourceType: "manual",
+    originalLanguage: "en",
     title: "World History",
     grade: "9",
     subject: "History",

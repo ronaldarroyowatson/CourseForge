@@ -1,0 +1,5 @@
+{
+  "chromeOsBanner": "ChromeOS mode active: capture and layout are optimized for Chromebook screens.",
+  "captureWithChrome": "Capture with Chrome tab API",
+  "captureFallback": "Capture using display media"
+}

@@ -69,6 +69,11 @@ Quick release note: v1.2.4 focuses on safer textbook image ingestion with local-
 | [DB Schema](docs/DB_SCHEMA.md) | Entity definitions for all local and cloud-synced data |
 | [Code Style](docs/CODE_STYLE.md) | File organization, naming, spacing, and comment conventions |
 | [XML Schema](docs/XML_SCHEMA.md) | Canonical export format for game engines and AI tutors |
+| [Windows File Layout](docs/windows-file-layout.md) | Windows install paths, shortcut layout, and registry map |
+| [Installer Flowchart](docs/installer-flowchart.md) | Mermaid flowcharts for install/repair/uninstall/rollback lifecycle |
+| [ChromeOS Deployment](docs/chromeos-deployment.md) | Chrome extension/webapp deployment guidance for managed Chromebooks |
+| [i18n Architecture](docs/i18n-architecture.md) | Language detection, fallback strategy, and localization data model |
+| [Accessibility Plan](docs/accessibility-plan.md) | Foundational accessibility features, settings, and roadmap |
 
 ## Local development
 
@@ -138,6 +143,16 @@ See `docs/NODE_RUNTIME_PLAN.md` for the staged adoption plan and release gates.
 npm run check:installer
 ```
 
+Installer test and quality commands:
+
+```bash
+npm run test:installer
+npm run quality:installer
+```
+
+- `test:installer` runs installer lifecycle logic tests and Windows installer template guardrail tests.
+- `quality:installer` runs `test:installer` and then performs full package generation + verification (`check:installer`).
+
 This now validates both single-file installer-style artifacts:
 
 - `release/CourseForge-<version>-portable.zip`
@@ -157,12 +172,17 @@ Windows package additions include:
 
 - `Install-CourseForge-Windows.ps1`
 - `Install-CourseForge-Windows.cmd`
+- `Uninstall-CourseForge-Windows.cmd`
+- `installer-integrity.json`
 
 Windows install flow:
 
 - Unzip `CourseForge-<version>-windows.zip`
 - Run `Install-CourseForge-Windows.cmd`
-- It installs to `%LOCALAPPDATA%\CourseForge` by default (or custom path) and can create a desktop shortcut.
+- Default install path is `C:\Program Files\CourseForge` (requires admin for registry mapping under HKLM).
+- Supports full lifecycle modes: Install, Modify, Repair, Uninstall, Silent Install, and Full Auto Install.
+- Supports component flags and icon flags for IT automation: `/SILENT`, `/FULLAUTO`, `/INSTALL_WEBAPP`, `/INSTALL_EXTENSION`, `/INSTALL_BOTH`, `/NO_DESKTOP_ICON`, `/NO_STARTMENU_ICON`, `/REPAIR`, `/UNINSTALL`.
+- Writes structured logs to `%LOCALAPPDATA%\CourseForge\logs\` including `installer.log`, `silent-install.log`, `auto-install.log`, `repair.log`, `uninstaller.log`, and `rollback.log`.
 
 Auto-update behavior:
 

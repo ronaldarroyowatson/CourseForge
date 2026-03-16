@@ -1,0 +1,15 @@
+{
+  "supported": ["en", "es", "pt", "zm", "fr", "de"],
+  "roadmap": [
+    "Chinese (Simplified)",
+    "Chinese (Traditional)",
+    "Hindi",
+    "Arabic",
+    "Bengali",
+    "Russian",
+    "Japanese",
+    "Korean",
+    "Italian",
+    "Dutch"
+  ]
+}

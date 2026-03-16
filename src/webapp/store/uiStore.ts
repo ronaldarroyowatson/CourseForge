@@ -2,9 +2,96 @@ import { create } from "zustand";
 import type { Textbook } from "../../core/models";
 
 export type ThemeMode = "light" | "dark";
+export type SupportedLanguage = "en" | "es" | "pt" | "zm" | "fr" | "de";
+export type ColorBlindMode = "protanopia" | "deuteranopia" | "tritanopia" | "none";
+
+export interface AccessibilityPreferences {
+  colorBlindMode?: ColorBlindMode;
+  dyslexiaMode?: boolean;
+  dyscalculiaMode?: boolean;
+  highContrastMode?: boolean;
+  fontScale?: number;
+  uiScale?: number;
+}
 
 const THEME_STORAGE_KEY = "courseforge.theme";
 const AUTO_RETRIES_STORAGE_KEY = "courseforge.automaticRetriesEnabled";
+const LANGUAGE_STORAGE_KEY = "courseforge.language";
+const ACCESSIBILITY_STORAGE_KEY = "courseforge.accessibility";
+
+const SUPPORTED_LANGUAGES: SupportedLanguage[] = ["en", "es", "pt", "zm", "fr", "de"];
+
+function normalizeLanguageTag(input: string | null | undefined): SupportedLanguage {
+  const trimmed = (input ?? "").trim().toLowerCase();
+  if (!trimmed) {
+    return "en";
+  }
+
+  const primary = trimmed.split(/[-_]/)[0];
+  return SUPPORTED_LANGUAGES.includes(primary as SupportedLanguage)
+    ? (primary as SupportedLanguage)
+    : "en";
+}
+
+function detectInitialLanguage(): SupportedLanguage {
+  if (typeof window === "undefined") {
+    return "en";
+  }
+
+  const saved = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  if (saved) {
+    return normalizeLanguageTag(saved);
+  }
+
+  const browserPreferred = window.navigator.languages?.[0] ?? window.navigator.language;
+  return normalizeLanguageTag(browserPreferred);
+}
+
+function getInitialAccessibilityPreferences(): AccessibilityPreferences {
+  if (typeof window === "undefined") {
+    return {
+      colorBlindMode: "none",
+      dyslexiaMode: false,
+      dyscalculiaMode: false,
+      highContrastMode: false,
+      fontScale: 1,
+      uiScale: 1,
+    };
+  }
+
+  const raw = window.localStorage.getItem(ACCESSIBILITY_STORAGE_KEY);
+  if (!raw) {
+    return {
+      colorBlindMode: "none",
+      dyslexiaMode: false,
+      dyscalculiaMode: false,
+      highContrastMode: false,
+      fontScale: 1,
+      uiScale: 1,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as AccessibilityPreferences;
+    return {
+      colorBlindMode: parsed.colorBlindMode ?? "none",
+      dyslexiaMode: Boolean(parsed.dyslexiaMode),
+      dyscalculiaMode: Boolean(parsed.dyscalculiaMode),
+      highContrastMode: Boolean(parsed.highContrastMode),
+      fontScale: typeof parsed.fontScale === "number" ? Math.min(1.8, Math.max(0.8, parsed.fontScale)) : 1,
+      uiScale: typeof parsed.uiScale === "number" ? Math.min(1.3, Math.max(0.85, parsed.uiScale)) : 1,
+    };
+  } catch {
+    return {
+      colorBlindMode: "none",
+      dyslexiaMode: false,
+      dyscalculiaMode: false,
+      highContrastMode: false,
+      fontScale: 1,
+      uiScale: 1,
+    };
+  }
+}
 
 function getInitialTheme(): ThemeMode {
   if (typeof window === "undefined") {
@@ -29,6 +116,28 @@ function applyTheme(theme: ThemeMode): void {
   }
 
   document.documentElement.setAttribute("data-theme", theme);
+}
+
+function applyLanguage(language: SupportedLanguage): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  document.documentElement.setAttribute("lang", language);
+}
+
+function applyAccessibilityPreferences(preferences: AccessibilityPreferences): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const root = document.documentElement;
+  root.setAttribute("data-colorblind-mode", preferences.colorBlindMode ?? "none");
+  root.setAttribute("data-dyslexia-mode", preferences.dyslexiaMode ? "enabled" : "disabled");
+  root.setAttribute("data-dyscalculia-mode", preferences.dyscalculiaMode ? "enabled" : "disabled");
+  root.setAttribute("data-high-contrast", preferences.highContrastMode ? "enabled" : "disabled");
+  root.style.setProperty("--cf-font-scale", String(preferences.fontScale ?? 1));
+  root.style.setProperty("--cf-ui-scale", String(preferences.uiScale ?? 1));
 }
 
 function getInitialAutomaticRetriesEnabled(): boolean {
@@ -82,6 +191,11 @@ interface UIStore {
   theme: ThemeMode;
   setTheme: (theme: ThemeMode) => void;
   toggleTheme: () => void;
+  language: SupportedLanguage;
+  setLanguage: (language: SupportedLanguage) => void;
+  accessibility: AccessibilityPreferences;
+  setAccessibility: (next: AccessibilityPreferences) => void;
+  patchAccessibility: (partial: Partial<AccessibilityPreferences>) => void;
 
   // Selected textbook for editing
   selectedTextbookId: string | null;
@@ -182,6 +296,43 @@ export const useUIStore = create<UIStore>((set) => ({
       }
       return { theme: nextTheme };
     }),
+  language: detectInitialLanguage(),
+  setLanguage: (language: SupportedLanguage) => {
+    const normalized = normalizeLanguageTag(language);
+    applyLanguage(normalized);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, normalized);
+    }
+    set({ language: normalized });
+  },
+  accessibility: getInitialAccessibilityPreferences(),
+  setAccessibility: (next: AccessibilityPreferences) => {
+    const normalized: AccessibilityPreferences = {
+      colorBlindMode: next.colorBlindMode ?? "none",
+      dyslexiaMode: Boolean(next.dyslexiaMode),
+      dyscalculiaMode: Boolean(next.dyscalculiaMode),
+      highContrastMode: Boolean(next.highContrastMode),
+      fontScale: typeof next.fontScale === "number" ? Math.min(1.8, Math.max(0.8, next.fontScale)) : 1,
+      uiScale: typeof next.uiScale === "number" ? Math.min(1.3, Math.max(0.85, next.uiScale)) : 1,
+    };
+    applyAccessibilityPreferences(normalized);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(ACCESSIBILITY_STORAGE_KEY, JSON.stringify(normalized));
+    }
+    set({ accessibility: normalized });
+  },
+  patchAccessibility: (partial: Partial<AccessibilityPreferences>) =>
+    set((state) => {
+      const next: AccessibilityPreferences = {
+        ...state.accessibility,
+        ...partial,
+      };
+      applyAccessibilityPreferences(next);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(ACCESSIBILITY_STORAGE_KEY, JSON.stringify(next));
+      }
+      return { accessibility: next };
+    }),
 
   // Selected textbook defaults
   selectedTextbookId: null,
@@ -211,3 +362,5 @@ export const useUIStore = create<UIStore>((set) => ({
 
 // Ensure startup render uses the stored theme even before any user interaction.
 applyTheme(getInitialTheme());
+applyLanguage(detectInitialLanguage());
+applyAccessibilityPreferences(getInitialAccessibilityPreferences());

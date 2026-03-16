@@ -9,6 +9,7 @@ export {
 } from "./db";
 
 export * from "./adminFirestoreService";
+export * from "./accessibilityService";
 export * from "./autoOcrService";
 export * from "./coverImageService";
 export * from "./debugLogService";
@@ -29,3 +30,10 @@ export * from "./presentationService";
 export * from "./repositories";
 export * from "./syncService";
 export * from "./xml";
+export * from "./installer";
+export * from "./i18nService";
+export * from "./translationMemoryCloudService";
+export * from "./translationWorkflowService";
+export * from "./translationReviewService";
+export * from "./glossaryService";
+export * from "./gameTextService";

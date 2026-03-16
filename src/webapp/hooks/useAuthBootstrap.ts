@@ -13,6 +13,21 @@ import { firestoreDb } from "../../firebase/firestore";
 import { useAuthStore } from "../store/authStore";
 import { useUIStore } from "../store/uiStore";
 
+function toSupportedLanguage(value: string): "en" | "es" | "pt" | "zm" | "fr" | "de" {
+  const primary = value.trim().toLowerCase().split(/[-_]/)[0];
+  switch (primary) {
+    case "es":
+    case "pt":
+    case "zm":
+    case "fr":
+    case "de":
+    case "en":
+      return primary;
+    default:
+      return "en";
+  }
+}
+
 function getSyncMessage(error: unknown): string {
   return error instanceof Error
     ? error.message
@@ -65,8 +80,23 @@ export function useAuthBootstrap(): void {
           try {
             const profileSnapshot = await getDoc(doc(firestoreDb, "users", user.uid));
             const theme = profileSnapshot.get("theme");
+            const language = profileSnapshot.get("preferences.language") ?? profileSnapshot.get("language");
+            const accessibility = profileSnapshot.get("preferences.accessibility") ?? profileSnapshot.get("accessibility");
             if (theme === "dark" || theme === "light") {
               useUIStore.getState().setTheme(theme);
+            }
+            if (typeof language === "string") {
+              useUIStore.getState().setLanguage(toSupportedLanguage(language));
+            }
+            if (accessibility && typeof accessibility === "object") {
+              useUIStore.getState().setAccessibility(accessibility as {
+                colorBlindMode?: "protanopia" | "deuteranopia" | "tritanopia" | "none";
+                dyslexiaMode?: boolean;
+                dyscalculiaMode?: boolean;
+                highContrastMode?: boolean;
+                fontScale?: number;
+                uiScale?: number;
+              });
             }
           } catch {
             // Theme loading is non-blocking and should not break auth bootstrap.

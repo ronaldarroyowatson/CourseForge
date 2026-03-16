@@ -62,6 +62,7 @@ const ISBN_TYPES: RelatedIsbnType[] = [
 export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps): React.JSX.Element {
   const { createTextbook, editTextbook, findTextbookByISBN } = useRepositories();
   const { selectedTextbook, setSelectedTextbook } = useUIStore();
+  const language = useUIStore((state) => state.language);
 
   const [form, setForm] = useState<TextbookFormState>(INITIAL_FORM_STATE);
   const [relatedIsbns, setRelatedIsbns] = useState<RelatedIsbn[]>([]);
@@ -321,6 +322,7 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
 
         await createTextbook({
           sourceType: "manual",
+          originalLanguage: language,
           title: form.title.trim(),
           grade: form.grade.trim(),
           subject: form.subject.trim(),

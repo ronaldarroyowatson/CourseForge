@@ -4,7 +4,7 @@ import type { DBSchema, IDBPDatabase, IDBPObjectStore, IDBPTransaction } from "i
 import type { CourseForgeEntityMap } from "../models";
 
 const DB_NAME = "courseforge";
-const DB_VERSION = 3;
+const DB_VERSION = 5;
 
 // Store names follow the domain entities in docs/DB_SCHEMA.md.
 export const STORE_NAMES = {
@@ -15,6 +15,9 @@ export const STORE_NAMES = {
   equations: "equations",
   concepts: "concepts",
   keyIdeas: "keyIdeas",
+  translationMemory: "translationMemory",
+  gameText: "gameText",
+  glossaries: "glossaries",
   ingestFingerprints: "ingestFingerprints",
   extractedPresentations: "extractedPresentations",
 } as const;
@@ -29,6 +32,9 @@ interface CourseForgeDBSchema extends DBSchema {
   equations: { key: string; value: CourseForgeEntityMap["equations"] };
   concepts: { key: string; value: CourseForgeEntityMap["concepts"] };
   keyIdeas: { key: string; value: CourseForgeEntityMap["keyIdeas"] };
+  translationMemory: { key: string; value: CourseForgeEntityMap["translationMemory"] };
+  gameText: { key: string; value: CourseForgeEntityMap["gameText"] };
+  glossaries: { key: string; value: CourseForgeEntityMap["glossaries"] };
   ingestFingerprints: { key: string; value: CourseForgeEntityMap["ingestFingerprints"] };
   extractedPresentations: { key: string; value: CourseForgeEntityMap["extractedPresentations"] };
 }

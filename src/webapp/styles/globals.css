@@ -1,5 +1,7 @@
 :root {
   color-scheme: light;
+  --cf-font-scale: 1;
+  --cf-ui-scale: 1;
   --cf-text-strong: #11253a;
   --cf-text: #1d3247;
   --cf-text-muted: #4b6178;
@@ -75,6 +77,72 @@ body {
   margin: 0;
   background: var(--cf-bg);
   color: var(--cf-text);
+  font-size: calc(16px * var(--cf-font-scale));
+  line-height: calc(1.4 + (var(--cf-font-scale) - 1) * 0.45);
+}
+
+#root {
+  transform: scale(var(--cf-ui-scale));
+  transform-origin: top center;
+}
+
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--cf-accent) 70%, white);
+  outline-offset: 2px;
+}
+
+:root[data-high-contrast="enabled"] {
+  --cf-text-strong: #000000;
+  --cf-text: #101010;
+  --cf-text-muted: #1a1a1a;
+  --cf-bg: #ffffff;
+  --cf-surface: #ffffff;
+  --cf-surface-strong: #f2f2f2;
+  --cf-surface-muted: #ececec;
+  --cf-border: #000000;
+  --cf-border-strong: #000000;
+  --cf-accent: #0033a0;
+  --cf-accent-strong: #001f6a;
+}
+
+:root[data-colorblind-mode="protanopia"] {
+  --cf-accent: #0072b2;
+  --cf-accent-strong: #005a8f;
+  --cf-success: #009e73;
+}
+
+:root[data-colorblind-mode="deuteranopia"] {
+  --cf-accent: #0072b2;
+  --cf-accent-strong: #085f8d;
+  --cf-success: #e69f00;
+}
+
+:root[data-colorblind-mode="tritanopia"] {
+  --cf-accent: #6c63ff;
+  --cf-accent-strong: #5147d4;
+  --cf-success: #2f8f5b;
+}
+
+:root[data-dyslexia-mode="enabled"] body,
+:root[data-dyslexia-mode="enabled"] input,
+:root[data-dyslexia-mode="enabled"] textarea,
+:root[data-dyslexia-mode="enabled"] select,
+:root[data-dyslexia-mode="enabled"] button {
+  font-family: "OpenDyslexic", "Comic Sans MS", "Trebuchet MS", sans-serif;
+  letter-spacing: 0.03em;
+  word-spacing: 0.1em;
+  line-height: 1.75;
+}
+
+:root[data-dyscalculia-mode="enabled"] {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+:root[data-dyscalculia-mode="enabled"] .equation-panel,
+:root[data-dyscalculia-mode="enabled"] .equation-list,
+:root[data-dyscalculia-mode="enabled"] [class*="equation"] {
+  letter-spacing: 0.04em;
+  word-spacing: 0.09em;
 }
 
 .app-shell {
@@ -264,6 +332,25 @@ body {
   .form-group-isbn {
     grid-template-columns: 1fr;
   }
+}
+
+@media (max-width: 1366px) and (max-height: 900px) {
+  .app-main {
+    padding: 0.8rem 0.9rem 1.35rem;
+    gap: 0.8rem;
+  }
+
+  .workflow-card-stack {
+    min-height: 500px;
+  }
+
+  .settings-grid {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+}
+
+.auto-textbook-flow--chromeos-compact .form-grid {
+  grid-template-columns: 1fr;
 }
 
 .btn-lookup-isbn {
@@ -676,6 +763,10 @@ body {
   margin-bottom: 0.75rem;
 }
 
+.admin-filter-bar--compact {
+  grid-template-columns: minmax(0, 180px) auto;
+}
+
 .admin-filter-bar label {
   display: grid;
   gap: 0.25rem;
@@ -826,6 +917,27 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+}
+
+.admin-subsection {
+  margin-top: 1rem;
+}
+
+.admin-subsection-title {
+  margin: 0 0 0.4rem;
+}
+
+.admin-history {
+  margin-top: 0.35rem;
+  padding: 0.45rem;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  background: var(--bg-panel-alt);
 }
 
 .btn-primary-sm,

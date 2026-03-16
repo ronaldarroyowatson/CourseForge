@@ -17,10 +17,102 @@ export interface RelatedIsbn {
   note?: string;
 }
 
+export interface UserPreferences {
+  language: string;
+  accessibility: {
+    colorBlindMode?: "protanopia" | "deuteranopia" | "tritanopia" | "none";
+    dyslexiaMode?: boolean;
+    dyscalculiaMode?: boolean;
+    highContrastMode?: boolean;
+    fontScale?: number;
+    uiScale?: number;
+  };
+}
+
+export interface TextbookTranslatedFields {
+  title?: string;
+  subtitle?: string;
+  chapters?: string[];
+  sections?: string[];
+}
+
+export interface TranslationHistoryEntry {
+  timestamp: number;
+  oldValue: string;
+  newValue: string;
+  updatedBy: string;
+}
+
+export interface TranslationMemoryEntry {
+  id: string;
+  termId: string;
+  sourceText: string;
+  translatedText: string;
+  language: string;
+  partOfSpeech?: string;
+  contextTags?: string[];
+  lastUpdated: number;
+  updatedBy: "ai" | "teacher" | "admin";
+  confidence: number;
+  locked?: boolean;
+  literalTranslation?: string;
+  contextualTranslation?: string;
+  academicTranslation?: string;
+  history?: TranslationHistoryEntry[];
+}
+
+export interface TranslationReviewItem {
+  id: string;
+  termId: string;
+  sourceText: string;
+  translatedText: string;
+  language: string;
+  confidence: number;
+  updatedBy: "ai" | "teacher" | "admin";
+  contextTags: string[];
+  lastUpdated: number;
+  reason: "new-ai" | "low-confidence" | "recently-changed";
+}
+
+export interface GameTextEntry {
+  id: string;
+  gameId: string;
+  key: string;
+  defaultLanguage: string;
+  texts: Record<string, string>;
+  contextTags?: string[];
+  lastUpdated: number;
+  updatedBy: "ai" | "teacher" | "admin" | "system";
+}
+
+export interface GlossaryEntry {
+  id: string;
+  subject: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  sourceTerm: string;
+  preferredTranslation: string;
+  notes?: string;
+  usageRefs?: string[];
+  createdAt: number;
+  updatedAt: number;
+  updatedBy: "teacher" | "admin" | "system";
+}
+
+export interface LanguagePack {
+  language: string;
+  uiTranslationsPath: string;
+  glossaryPath: string;
+  accessibilityFontFamily?: string;
+  culturalLocalizationRules?: string[];
+}
+
 export interface Textbook {
   id: string;
   sourceType: "auto" | "manual";
   userId?: string;
+  originalLanguage: string;
+  translatedFields?: Record<string, TextbookTranslatedFields>;
   title: string;
   subtitle?: string;
   grade: string;
@@ -127,6 +219,7 @@ export interface VocabTerm extends TieredQuestionMetadata {
   sectionId: string;
   word: string;
   definition?: string;
+  languageTag?: string;
   altDefinitions?: string[];
   lastModified: string;
   pendingSync: boolean;
@@ -157,6 +250,7 @@ export interface Equation extends SectionContentEntity {
 export interface Concept extends SectionContentEntity, TieredQuestionMetadata {
   name: string;
   explanation?: string;
+  languageTag?: string;
 }
 
 export interface KeyIdea extends SectionContentEntity {
@@ -235,6 +329,9 @@ export interface CourseForgeEntityMap {
   equations: Equation;
   concepts: Concept;
   keyIdeas: KeyIdea;
+  translationMemory: TranslationMemoryEntry;
+  gameText: GameTextEntry;
+  glossaries: GlossaryEntry;
   ingestFingerprints: DocumentIngestFingerprint;
   extractedPresentations: ExtractedPresentation;
 }

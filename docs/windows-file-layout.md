@@ -4,17 +4,19 @@ This document defines the CourseForge installation and runtime paths used by the
 
 ## Canonical Windows Locations
 
-- Webapp install path: `C:\Program Files\CourseForge\webapp\`
-- Extension install path: `C:\Program Files\CourseForge\extension\`
+- Default webapp install path: `%LOCALAPPDATA%\Programs\CourseForge\webapp\`
+- Default extension install path: `%LOCALAPPDATA%\Programs\CourseForge\extension\`
 - User data path: `%LOCALAPPDATA%\CourseForge\data\`
 - Installer/runtime logs path: `%LOCALAPPDATA%\CourseForge\logs\`
+
+The installer can still target a custom path, but the out-of-box default is user-scoped so it works on locked-down Windows machines without requiring elevation.
 
 ## Installer Metadata and Integrity Files
 
 The installer writes metadata inside the install root:
 
-- `C:\Program Files\CourseForge\installer-metadata.json`
-- `C:\Program Files\CourseForge\installer-integrity.json`
+- `%LOCALAPPDATA%\Programs\CourseForge\installer-metadata.json`
+- `%LOCALAPPDATA%\Programs\CourseForge\installer-integrity.json`
 
 These files are used for modify, repair, uninstall verification, and rollback workflows.
 
@@ -38,7 +40,7 @@ Start menu entries:
 
 Registry root:
 
-- `HKEY_LOCAL_MACHINE\Software\CourseForge`
+- `HKEY_CURRENT_USER\Software\CourseForge`
 
 Values maintained by installer lifecycle:
 
@@ -67,3 +69,8 @@ Windows packages add lifecycle executables/scripts:
 - `Install-CourseForge-Windows.cmd`
 - `Uninstall-CourseForge-Windows.cmd`
 - `installer-integrity.json`
+
+Release artifacts for Windows now include:
+
+- `release/CourseForge-<version>-installer.exe` for one-file interactive installation
+- `release/CourseForge-<version>-windows.zip` for advanced/manual deployment and updater payloads

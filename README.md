@@ -174,12 +174,14 @@ Windows package additions include:
 - `Install-CourseForge-Windows.cmd`
 - `Uninstall-CourseForge-Windows.cmd`
 - `installer-integrity.json`
+- `release/CourseForge-<version>-installer.exe` self-extracting bootstrap installer for first-time setup
 
 Windows install flow:
 
-- Unzip `CourseForge-<version>-windows.zip`
-- Run `Install-CourseForge-Windows.cmd`
-- Default install path is `C:\Program Files\CourseForge` (requires admin for registry mapping under HKLM).
+- Download `CourseForge-<version>-installer.exe`
+- Double-click the installer and follow the prompts.
+- Default install path is `%LOCALAPPDATA%\Programs\CourseForge`, so first-time setup works without admin rights on standard Windows PCs.
+- The `CourseForge-<version>-windows.zip` artifact remains available for advanced/manual deployments and update payloads.
 - Supports full lifecycle modes: Install, Modify, Repair, Uninstall, Silent Install, and Full Auto Install.
 - Supports component flags and icon flags for IT automation: `/SILENT`, `/FULLAUTO`, `/INSTALL_WEBAPP`, `/INSTALL_EXTENSION`, `/INSTALL_BOTH`, `/NO_DESKTOP_ICON`, `/NO_STARTMENU_ICON`, `/REPAIR`, `/UNINSTALL`.
 - Writes structured logs to `%LOCALAPPDATA%\CourseForge\logs\` including `installer.log`, `silent-install.log`, `auto-install.log`, `repair.log`, `uninstaller.log`, and `rollback.log`.

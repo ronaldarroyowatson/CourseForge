@@ -25,6 +25,7 @@
     "test:core": "tsx tests/core/runCoreTests.ts",
     "test:unit": "vitest run tests/core",
     "test:integration": "vitest run tests/integration",
+    "test:real-sync": "tsx tests/realSyncTest.ts",
     "test:installer:guardrails": "vitest run tests/integration/windows.installer.template.integration.test.ts",
     "test:installer:lifecycle": "vitest run tests/core/installerLifecycle.test.ts tests/core/installerLifecycle.matrix.test.ts",
     "test:installer": "npm run test:installer:lifecycle && npm run test:installer:guardrails",
@@ -42,6 +43,7 @@
     "test": "npm run test:core && npm run test:unit && npm run test:integration && npm run test:rules"
   },
   "dependencies": {
+    "@azure/cosmos": "^4.9.1",
     "firebase": "^12.10.0",
     "idb": "^8.0.0",
     "jszip": "^3.10.1",
@@ -53,7 +55,9 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@dillip285/mcp-terminal": "^1.0.1",
     "@firebase/rules-unit-testing": "^5.0.0",
+    "@modelcontextprotocol/server-filesystem": "^2026.1.14",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^18.3.12",

@@ -25,12 +25,26 @@ if (-not (Test-Path $portableDir)) {
 $packageName = "CourseForge-$Version-windows"
 $packageDir = Join-Path $releaseRoot $packageName
 $zipPath = Join-Path $releaseRoot "$packageName.zip"
+$installerExePath = Join-Path $releaseRoot "CourseForge-$Version-installer.exe"
+$bootstrapDir = Join-Path $releaseRoot ".windows-installer-bootstrap-$Version"
+$bootstrapZipName = "CourseForge-windows-payload.zip"
+$bootstrapLauncherName = "Launch-CourseForge-Installer.cmd"
+$iexpressSedPath = Join-Path $releaseRoot ".windows-installer-$Version.sed"
 
 if (Test-Path $packageDir) {
   Remove-Item $packageDir -Recurse -Force
 }
 if (Test-Path $zipPath) {
   Remove-Item $zipPath -Force
+}
+if (Test-Path $installerExePath) {
+  Remove-Item $installerExePath -Force
+}
+if (Test-Path $bootstrapDir) {
+  Remove-Item $bootstrapDir -Recurse -Force
+}
+if (Test-Path $iexpressSedPath) {
+  Remove-Item $iexpressSedPath -Force
 }
 
 Copy-Item -Path $portableDir -Destination $packageDir -Recurse -Force
@@ -196,5 +210,94 @@ if (-not $zipSucceeded) {
   throw "Failed to create Windows package zip: $zipPath"
 }
 
+New-Item -ItemType Directory -Path $bootstrapDir | Out-Null
+Copy-Item -Path $zipPath -Destination (Join-Path $bootstrapDir $bootstrapZipName) -Force
+
+$bootstrapLauncher = @"
+@echo off
+setlocal
+set ROOT=%~dp0
+set PAYLOAD=%ROOT%$bootstrapZipName
+set WORK=%TEMP%\CourseForge-Installer-%RANDOM%%RANDOM%
+set EXTRACT=%WORK%\payload
+set INSTALLER=%EXTRACT%\Install-CourseForge-Windows.ps1
+if exist "%WORK%" rmdir /s /q "%WORK%" >nul 2>&1
+mkdir "%EXTRACT%" >nul 2>&1
+if not exist "%PAYLOAD%" (
+  echo [CourseForge] Missing installer payload archive.
+  endlocal
+  exit /b 1
+)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '%PAYLOAD%' -DestinationPath '%EXTRACT%' -Force"
+if errorlevel 1 (
+  echo [CourseForge] Failed to extract installer payload.
+  rmdir /s /q "%WORK%" >nul 2>&1
+  endlocal
+  exit /b 1
+)
+if not exist "%INSTALLER%" (
+  echo [CourseForge] Missing extracted installer script.
+  rmdir /s /q "%WORK%" >nul 2>&1
+  endlocal
+  exit /b 1
+)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER%" %*
+set EXITCODE=%ERRORLEVEL%
+rmdir /s /q "%WORK%" >nul 2>&1
+endlocal & exit /b %EXITCODE%
+"@
+Set-Content -Path (Join-Path $bootstrapDir $bootstrapLauncherName) -Value $bootstrapLauncher -Encoding ASCII
+
+$iexpressSed = @"
+[Version]
+Class=IEXPRESS
+SEDVersion=3
+[Options]
+PackagePurpose=InstallApp
+ShowInstallProgramWindow=1
+HideExtractAnimation=1
+UseLongFileName=1
+InsideCompressed=0
+CAB_FixedSize=0
+CAB_ResvCodeSigning=0
+RebootMode=N
+InstallPrompt=
+DisplayLicense=
+FinishMessage=
+TargetName=%TargetName%
+FriendlyName=%FriendlyName%
+AppLaunched=%AppLaunched%
+PostInstallCmd=<None>
+AdminQuietInstCmd=%AdminQuietInstCmd%
+UserQuietInstCmd=%UserQuietInstCmd%
+SourceFiles=SourceFiles
+
+[SourceFiles]
+SourceFiles0=$bootstrapDir
+
+[SourceFiles0]
+%FILE0%=
+%FILE1%=
+
+[Strings]
+TargetName=$installerExePath
+FriendlyName=CourseForge Setup
+AppLaunched=cmd.exe /c $bootstrapLauncherName
+AdminQuietInstCmd=cmd.exe /c $bootstrapLauncherName -Silent -InstallBoth
+UserQuietInstCmd=cmd.exe /c $bootstrapLauncherName -Silent -InstallBoth
+FILE0=$bootstrapZipName
+FILE1=$bootstrapLauncherName
+"@
+Set-Content -Path $iexpressSedPath -Value $iexpressSed -Encoding ASCII
+
+& iexpress.exe /N $iexpressSedPath | Out-Host
+if ($LASTEXITCODE -ne 0) {
+  throw "IExpress failed to create the Windows installer executable (exit code $LASTEXITCODE)."
+}
+
+Remove-Item $bootstrapDir -Recurse -Force
+Remove-Item $iexpressSedPath -Force
+
 Write-Host "[package] Windows package created: $zipPath"
+Write-Host "[package] Windows installer created: $installerExePath"
 Write-Host "[package] Installer file: $packageDir\Install-CourseForge-Windows.cmd"

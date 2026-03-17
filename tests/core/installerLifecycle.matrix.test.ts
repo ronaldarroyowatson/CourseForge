@@ -8,8 +8,8 @@ import {
   validateComponentSelection,
 } from "../../src/core/services/installer";
 
-const detectionFresh = { isInstalled: false, metadataExists: false, installPath: "C:/Program Files/CourseForge" };
-const detectionInstalled = { isInstalled: true, metadataExists: true, installPath: "C:/Program Files/CourseForge" };
+const detectionFresh = { isInstalled: false, metadataExists: false, installPath: "C:/Users/test/AppData/Local/Programs/CourseForge" };
+const detectionInstalled = { isInstalled: true, metadataExists: true, installPath: "C:/Users/test/AppData/Local/Programs/CourseForge" };
 
 describe("installer lifecycle matrix", () => {
   it("install webapp only", () => {

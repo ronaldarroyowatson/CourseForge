@@ -17,8 +17,15 @@ import { firebaseApp } from "./firebaseApp";
 import { getFirebaseConfigError } from "./firebaseConfig";
 import { firestoreDb } from "./firestore";
 
+type ViteEnvLike = {
+  DEV?: boolean;
+};
+
+const viteEnv = (import.meta as ImportMeta & { env?: ViteEnvLike } | undefined)?.env;
+const isDevRuntime = Boolean(viteEnv?.DEV);
+
 function logAuthSyncEvent(type: string, path: string, payload: unknown, error?: unknown): void {
-  if (!import.meta.env.DEV) {
+  if (!isDevRuntime) {
     return;
   }
 

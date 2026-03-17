@@ -7,6 +7,14 @@ import { firestoreDb } from "../../firebase/firestore";
 import { getAdminClaim, getCurrentUser } from "../../firebase/auth";
 import { useUIStore } from "../../webapp/store/uiStore";
 
+type ViteEnvLike = {
+  DEV?: boolean;
+  VITE_SYNC_WRITE_BUDGET?: string;
+};
+
+const viteEnv = (import.meta as ImportMeta & { env?: ViteEnvLike } | undefined)?.env;
+const isDevRuntime = Boolean(viteEnv?.DEV);
+
 type SyncStoreName = "textbooks" | "chapters" | "sections" | "vocabTerms" | "equations" | "concepts" | "keyIdeas";
 type SyncEntity = CourseForgeEntityMap[SyncStoreName];
 type HierarchyIndexes = {
@@ -29,7 +37,7 @@ const WRITE_LOOP_WINDOW_MS = 500;
 // Prevent back-to-back sync invocations from flooding Firestore writes.
 const SYNC_THROTTLE_MS = 5000;
 // Session budget guardrail to avoid runaway browser-side sync writes.
-const DEFAULT_WRITE_BUDGET_LIMIT = Number(import.meta.env.VITE_SYNC_WRITE_BUDGET ?? "500");
+const DEFAULT_WRITE_BUDGET_LIMIT = Number(viteEnv?.VITE_SYNC_WRITE_BUDGET ?? "500");
 const DEFAULT_RETRY_LIMIT = 3;
 const WRITE_BUDGET_WARNING = "Cloud sync paused to prevent excessive writes. Please review your data or try again later.";
 
@@ -104,7 +112,7 @@ function wrapSyncError(error: unknown): Error {
 }
 
 export function logSyncEvent(type: string, path: string, payload: unknown, error?: unknown): void {
-  if (!import.meta.env.DEV) {
+  if (!isDevRuntime) {
     return;
   }
 
@@ -206,7 +214,7 @@ export async function getPendingSyncDiagnostics(): Promise<{ pendingCount: numbe
 }
 
 async function logSyncIdentity(userId: string): Promise<void> {
-  if (!import.meta.env.DEV) {
+  if (!isDevRuntime) {
     return;
   }
 

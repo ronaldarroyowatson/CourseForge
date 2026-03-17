@@ -15,6 +15,7 @@ $releaseRoot = Join-Path $repoRoot "release"
 $packageName = "CourseForge-$Version-windows"
 $packageDir = Join-Path $releaseRoot $packageName
 $zipPath = Join-Path $releaseRoot "$packageName.zip"
+$installerExePath = Join-Path $releaseRoot "CourseForge-$Version-installer.exe"
 
 $required = @(
   "webapp/index.html",
@@ -41,6 +42,10 @@ if (-not (Test-Path $zipPath)) {
   throw "Package zip not found: $zipPath"
 }
 
+if (-not (Test-Path $installerExePath)) {
+  throw "Installer executable not found: $installerExePath"
+}
+
 foreach ($relative in $required) {
   $target = Join-Path $packageDir $relative
   if (-not (Test-Path $target)) {
@@ -55,6 +60,11 @@ foreach ($relative in $required) {
 $zipSize = (Get-Item $zipPath).Length
 if ($zipSize -le 0) {
   throw "Zip artifact is empty: $zipPath"
+}
+
+$installerExeSize = (Get-Item $installerExePath).Length
+if ($installerExeSize -le 0) {
+  throw "Installer executable is empty: $installerExePath"
 }
 
 $manifestPath = Join-Path $packageDir "package-manifest.json"
@@ -74,3 +84,4 @@ if ($manifest.updates.assetTemplate -ne "CourseForge-{version}-windows.zip") {
 Write-Host "[verify] Windows package looks complete."
 Write-Host "[verify] Checked files: $($required.Count)"
 Write-Host "[verify] Zip size (bytes): $zipSize"
+Write-Host "[verify] Installer exe size (bytes): $installerExeSize"

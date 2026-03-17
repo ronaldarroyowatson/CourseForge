@@ -16,6 +16,9 @@ describe("windows installer template guardrails", () => {
     expect(generatorScript).toContain("__COURSEFORGE_VERSION__");
     expect(generatorScript).toContain("Uninstall-CourseForge-Windows.cmd");
     expect(generatorScript).toContain("installer-integrity.json");
+    expect(generatorScript).toContain("iexpress.exe");
+    expect(generatorScript).toContain("CourseForge-windows-payload.zip");
+    expect(generatorScript).toContain("Launch-CourseForge-Installer.cmd");
   });
 
   it("keeps advanced installer lifecycle features in the template", () => {
@@ -25,7 +28,7 @@ describe("windows installer template guardrails", () => {
     expect(template).toContain("function Invoke-WithRollback");
     expect(template).toContain("function Repair-Installation");
     expect(template).toContain("function Uninstall-CourseForge");
-    expect(template).toContain("HKLM:\\Software\\CourseForge");
+    expect(template).toContain("HKCU:\\Software\\CourseForge");
     expect(template).toContain("/SILENT");
     expect(template).toContain("/FULLAUTO");
     expect(template).toContain("/REPAIR");

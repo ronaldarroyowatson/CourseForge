@@ -17,12 +17,12 @@ $ErrorActionPreference = "Stop"
 
 $script:ProductName = "CourseForge"
 $script:ProductVersion = "1.2.5"
-$script:RegistryPath = "HKLM:\Software\CourseForge"
+$script:RegistryPath = "HKCU:\Software\CourseForge"
 $script:UserRoot = Join-Path $env:LOCALAPPDATA "CourseForge"
 $script:LogsRoot = Join-Path $script:UserRoot "logs"
 $script:DataRoot = Join-Path $script:UserRoot "data"
 $script:RollbackRoot = Join-Path $script:UserRoot "rollback"
-$script:DefaultInstallPath = Join-Path $env:ProgramFiles "CourseForge"
+$script:DefaultInstallPath = Join-Path (Join-Path $env:LOCALAPPDATA "Programs") "CourseForge"
 $script:InstallerMetadataFileName = "installer-metadata.json"
 $script:IntegrityManifestFileName = "installer-integrity.json"
 $script:RollingSnapshotFileName = "installer-rollback-snapshot.json"
@@ -159,10 +159,6 @@ function Write-RegistryState {
     [string]$LastRepairTimestamp,
     [bool]$SilentInstallAllowed = $true
   )
-
-  if (-not (Test-IsAdmin)) {
-    throw "Administrator rights are required to write HKLM:\Software\CourseForge."
-  }
 
   if (-not (Test-Path $script:RegistryPath)) {
     New-Item -Path $script:RegistryPath -Force | Out-Null
@@ -431,7 +427,7 @@ function Resolve-ComponentSelection {
     throw "At least one component must be selected before continuing."
   }
 
-  Write-InstallerLog "Resolved component selection for $Mode: webapp=$webapp extension=$extension"
+  Write-InstallerLog "Resolved component selection for ${Mode}: webapp=$webapp extension=$extension"
 
   return [ordered]@{ webapp = $webapp; extension = $extension }
 }
@@ -850,6 +846,14 @@ function Uninstall-CourseForge {
     Write-InstallerLog "Removed registry map."
 
     $metaFiles = @(
+      "AutoUpdate-CourseForge.ps1",
+      "Check-For-CourseForge-Updates.cmd",
+      "Start-CourseForge.cmd",
+      "CourseForge-Start.url",
+      "README.md",
+      "CHANGELOG.md",
+      "LICENSE",
+      "package-manifest.json",
       $script:InstallerMetadataFileName,
       $script:IntegrityManifestFileName,
       $script:RollingSnapshotFileName,
@@ -878,6 +882,7 @@ function Uninstall-CourseForge {
     Write-InstallerLog "Removed local user data."
   }
 
+
   $verificationIssues = New-Object System.Collections.Generic.List[string]
   if ($removeSelection.webapp -and (Test-Path (Join-Path $ResolvedInstallPath "webapp"))) {
     $verificationIssues.Add("Webapp directory still exists.")
@@ -891,6 +896,9 @@ function Uninstall-CourseForge {
   if (Test-Path (Get-StartMenuFolder)) {
     $verificationIssues.Add("Start menu folder still exists.")
   }
+  if ($removeSelection.removeUserData -and (Test-Path $script:DataRoot)) {
+    $verificationIssues.Add("User data directory still exists.")
+  }
   if (-not $remainingWebapp -and -not $remainingExtension -and (Test-Path $script:RegistryPath)) {
     $verificationIssues.Add("Registry map still exists.")
   }
@@ -900,6 +908,22 @@ function Uninstall-CourseForge {
   }
 
   Write-InstallerLog "Uninstall completed successfully."
+
+  if (Test-Path $script:LogsRoot) {
+    Remove-Item -Path $script:LogsRoot -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  if (Test-Path $script:RollbackRoot) {
+    Remove-Item -Path $script:RollbackRoot -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  if ((-not $removeSelection.removeUserData) -and (Test-Path $script:DataRoot) -and ((Get-ChildItem -Path $script:DataRoot -Force | Measure-Object).Count -eq 0)) {
+    Remove-Item -Path $script:DataRoot -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  if ((Test-Path $script:UserRoot) -and ((Get-ChildItem -Path $script:UserRoot -Force | Measure-Object).Count -eq 0)) {
+    Remove-Item -Path $script:UserRoot -Recurse -Force -ErrorAction SilentlyContinue
+  }
 }
 
 function Invoke-WithRollback {
@@ -988,7 +1012,8 @@ try {
     [ordered]@{ webapp = $true; extension = $true }
   }
 
-  $selection = Resolve-ComponentSelection -DefaultWebapp ([bool]$defaultSelection.webapp) -DefaultExtension ([bool]$defaultSelection.extension) -Mode (if ($Modify) { "modify" } elseif ($Repair) { "repair" } else { "install" })
+  $selectionMode = if ($Modify) { "modify" } elseif ($Repair) { "repair" } else { "install" }
+  $selection = Resolve-ComponentSelection -DefaultWebapp ([bool]$defaultSelection.webapp) -DefaultExtension ([bool]$defaultSelection.extension) -Mode $selectionMode
   $icons = if ($Repair) {
     $registry = Read-RegistryState
     [ordered]@{
@@ -1001,6 +1026,7 @@ try {
   }
 
   $installPathSource = if ([string]::IsNullOrWhiteSpace($InstallPath)) { "default" } else { "cli-argument" }
+  $operationMode = if ($Modify) { "modify" } elseif ($FullAuto) { "fullauto" } elseif ($Silent) { "silent" } else { "install" }
 
   if ($Repair) {
     Invoke-WithRollback -ResolvedInstallPath $resolvedInstallPath -CurrentSelection $defaultSelection -CurrentIcons $icons -Operation {
@@ -1012,7 +1038,7 @@ try {
       Copy-ComponentFiles -SourceRoot $sourceRoot -ResolvedInstallPath $resolvedInstallPath -Selection $selection
       Set-Shortcuts -ResolvedInstallPath $resolvedInstallPath -CreateDesktop ([bool]$icons.desktop) -CreateStartMenu ([bool]$icons.startMenu)
       Write-IntegrityManifest -RootPath $resolvedInstallPath -Selection $selection
-      Write-InstallerMetadata -ResolvedInstallPath $resolvedInstallPath -Selection $selection -Icons $icons -InstallPathSource $installPathSource -Mode (if ($Modify) { "modify" } elseif ($FullAuto) { "fullauto" } elseif ($Silent) { "silent" } else { "install" })
+      Write-InstallerMetadata -ResolvedInstallPath $resolvedInstallPath -Selection $selection -Icons $icons -InstallPathSource $installPathSource -Mode $operationMode
       Write-RegistryState -InstallPath $resolvedInstallPath -WebappInstalled ([bool]$selection.webapp) -ExtensionInstalled ([bool]$selection.extension) -DesktopIconInstalled ([bool]$icons.desktop) -StartMenuIconInstalled ([bool]$icons.startMenu) -LastRepairTimestamp ""
 
       $verification = Verify-Install -ResolvedInstallPath $resolvedInstallPath -Selection $selection -Icons $icons

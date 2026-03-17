@@ -1,3 +1,4 @@
+import dotenv from "dotenv";
 import * as admin from "firebase-admin";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import {
@@ -10,6 +11,8 @@ import {
   type ExtractedDocumentData,
   type ExtractionQualityReport,
 } from "./documentExtraction";
+
+dotenv.config();
 
 admin.initializeApp();
 

@@ -1,5 +1,5 @@
 {
-    "generatedAtUtc":  "2026-03-19T01:01:27.4350062Z",
+    "generatedAtUtc":  "2026-03-19T21:06:07.8614301Z",
     "version":  "1.2.5",
     "files":  [
                   {
@@ -16,7 +16,7 @@
                   },
                   {
                       "path":  "Install-CourseForge-Windows.ps1",
-                      "hash":  "52019C58E008278D5194979FCBD0B2407411C10BECE720BDF74A543640681603"
+                      "hash":  "5224D5F23E0B414F6A58C4537F3CD5D57C6B0475B922646D9609A6079C240686"
                   },
                   {
                       "path":  "Install-CourseForge-Windows.cmd",
@@ -40,7 +40,7 @@
                   },
                   {
                       "path":  "package-manifest.json",
-                      "hash":  "801031BDBB74E2CFAC45F03632DBF2E6A340B42677FF5F5B7C520D2B0DB8C772"
+                      "hash":  "C511A1A9542A0DC1FAD835138373380917057FB8413585819BA870349265FBAE"
                   },
                   {
                       "path":  "webapp/index.html",

@@ -27,6 +27,9 @@ describe("windows installer template guardrails", () => {
     const template = readWorkspaceFile("scripts/installer/windows-installer-template.ps1");
 
     expect(template).toContain("function Show-InitialDetectionMenu");
+    expect(template).toContain("function Find-ExistingInstallations");
+    expect(template).toContain("function Invoke-PreInstallCleanup");
+    expect(template).toContain("function Remove-CourseForgeArtifactsFromPath");
     expect(template).toContain("function Invoke-WithRollback");
     expect(template).toContain("function Repair-Installation");
     expect(template).toContain("function Uninstall-CourseForge");

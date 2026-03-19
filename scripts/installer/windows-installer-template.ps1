@@ -240,6 +240,254 @@ function Get-ShortcutState {
   }
 }
 
+function Read-UninstallRegistryState {
+  if (-not (Test-Path $script:UninstallRegistryPath)) {
+    return $null
+  }
+
+  try {
+    $props = Get-ItemProperty -Path $script:UninstallRegistryPath
+    return [ordered]@{
+      InstallLocation = [string]$props.InstallLocation
+      UninstallString = [string]$props.UninstallString
+      QuietUninstallString = [string]$props.QuietUninstallString
+      DisplayIcon = [string]$props.DisplayIcon
+      DisplayVersion = [string]$props.DisplayVersion
+    }
+  }
+  catch {
+    Write-InstallerLog "Failed to read uninstall registry map: $($_.Exception.Message)"
+    return $null
+  }
+}
+
+function Get-ShortcutTargetPath {
+  param([string]$ShortcutPath)
+
+  if ([string]::IsNullOrWhiteSpace($ShortcutPath) -or -not (Test-Path $ShortcutPath)) {
+    return $null
+  }
+
+  try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($ShortcutPath)
+    if ([string]::IsNullOrWhiteSpace($shortcut.TargetPath)) {
+      return $null
+    }
+
+    return [string]$shortcut.TargetPath
+  }
+  catch {
+    Write-InstallerLog "Could not read shortcut target for ${ShortcutPath}: $($_.Exception.Message)"
+    return $null
+  }
+}
+
+function Resolve-InstallRootFromShortcutTarget {
+  param([string]$TargetPath)
+
+  if ([string]::IsNullOrWhiteSpace($TargetPath)) {
+    return $null
+  }
+
+  try {
+    $resolved = [System.IO.Path]::GetFullPath($TargetPath)
+  }
+  catch {
+    return $null
+  }
+
+  if (Test-Path $resolved -PathType Container) {
+    if ([System.StringComparer]::OrdinalIgnoreCase.Equals([System.IO.Path]::GetFileName($resolved), "extension")) {
+      return (Split-Path $resolved -Parent)
+    }
+
+    return $resolved
+  }
+
+  $leaf = [System.IO.Path]::GetFileName($resolved)
+  if ($leaf -match '^(Start-CourseForge\.cmd|Install-CourseForge-Windows\.ps1|Install-CourseForge-Windows\.cmd|Uninstall-CourseForge-Windows\.cmd|CourseForge-Start\.url)$') {
+    return (Split-Path $resolved -Parent)
+  }
+
+  return $null
+}
+
+function Get-InstallPathFromCommandLine {
+  param([string]$CommandLine)
+
+  if ([string]::IsNullOrWhiteSpace($CommandLine)) {
+    return $null
+  }
+
+  $quotedMatch = [regex]::Match($CommandLine, '(?i)"([^"]+\\(?:Install-CourseForge-Windows\.ps1|Install-CourseForge-Windows\.cmd|Uninstall-CourseForge-Windows\.cmd|Start-CourseForge\.cmd))"')
+  if ($quotedMatch.Success) {
+    return (Split-Path $quotedMatch.Groups[1].Value -Parent)
+  }
+
+  $bareMatch = [regex]::Match($CommandLine, '(?i)([A-Z]:\\\S*?(?:Install-CourseForge-Windows\.ps1|Install-CourseForge-Windows\.cmd|Uninstall-CourseForge-Windows\.cmd|Start-CourseForge\.cmd))')
+  if ($bareMatch.Success) {
+    return (Split-Path $bareMatch.Groups[1].Value -Parent)
+  }
+
+  return $null
+}
+
+function Add-UniqueCandidatePath {
+  param(
+    [System.Collections.Generic.List[string]]$Candidates,
+    [string]$Path
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    return
+  }
+
+  try {
+    $resolved = [System.IO.Path]::GetFullPath($Path)
+  }
+  catch {
+    return
+  }
+
+  if (-not $Candidates.Contains($resolved)) {
+    $Candidates.Add($resolved)
+  }
+}
+
+function Get-InstallCandidateReport {
+  param([string]$CandidatePath)
+
+  if ([string]::IsNullOrWhiteSpace($CandidatePath)) {
+    return $null
+  }
+
+  try {
+    $resolved = [System.IO.Path]::GetFullPath($CandidatePath)
+  }
+  catch {
+    return $null
+  }
+
+  $metadataPath = Join-Path $resolved $script:InstallerMetadataFileName
+  $webappIndexPath = Join-Path $resolved "webapp\index.html"
+  $extensionManifestPath = Join-Path $resolved "extension\manifest.json"
+  $startCmdPath = Join-Path $resolved "Start-CourseForge.cmd"
+  $uninstallCmdPath = Join-Path $resolved "Uninstall-CourseForge-Windows.cmd"
+  $packageManifestPath = Join-Path $resolved "package-manifest.json"
+  $iconPath = Join-Path $resolved "CourseForge.ico"
+
+  $markers = New-Object System.Collections.Generic.List[string]
+  if (Test-Path $metadataPath) { $markers.Add("metadata") }
+  if (Test-Path $webappIndexPath) { $markers.Add("webapp") }
+  if (Test-Path $extensionManifestPath) { $markers.Add("extension") }
+  if (Test-Path $startCmdPath) { $markers.Add("start-cmd") }
+  if (Test-Path $uninstallCmdPath) { $markers.Add("uninstall-cmd") }
+  if (Test-Path $packageManifestPath) { $markers.Add("package-manifest") }
+  if (Test-Path $iconPath) { $markers.Add("icon") }
+
+  return [ordered]@{
+    path = $resolved
+    exists = (Test-Path $resolved)
+    isDetected = ($markers.Count -gt 0)
+    markerCount = $markers.Count
+    markers = @($markers)
+    metadataPath = $metadataPath
+    webappInstalled = (Test-Path (Join-Path $resolved "webapp"))
+    extensionInstalled = (Test-Path (Join-Path $resolved "extension"))
+  }
+}
+
+function Find-ExistingInstallations {
+  param([string]$RequestedPath)
+
+  $registry = Read-RegistryState
+  $uninstall = Read-UninstallRegistryState
+  $candidates = New-Object System.Collections.Generic.List[string]
+
+  Add-UniqueCandidatePath -Candidates $candidates -Path $RequestedPath
+  Add-UniqueCandidatePath -Candidates $candidates -Path $script:DefaultInstallPath
+
+  if ($null -ne $registry) {
+    Add-UniqueCandidatePath -Candidates $candidates -Path ([string]$registry.InstallPath)
+  }
+
+  if ($null -ne $uninstall) {
+    Add-UniqueCandidatePath -Candidates $candidates -Path ([string]$uninstall.InstallLocation)
+    Add-UniqueCandidatePath -Candidates $candidates -Path (Get-InstallPathFromCommandLine -CommandLine ([string]$uninstall.UninstallString))
+    Add-UniqueCandidatePath -Candidates $candidates -Path (Get-InstallPathFromCommandLine -CommandLine ([string]$uninstall.QuietUninstallString))
+    Add-UniqueCandidatePath -Candidates $candidates -Path (Resolve-InstallRootFromShortcutTarget -TargetPath ([string]$uninstall.DisplayIcon))
+  }
+
+  Add-UniqueCandidatePath -Candidates $candidates -Path (Get-InstallPathFromMetadata -CandidatePath $script:DefaultInstallPath)
+  Add-UniqueCandidatePath -Candidates $candidates -Path (Resolve-InstallRootFromShortcutTarget -TargetPath (Get-ShortcutTargetPath -ShortcutPath (Get-DesktopShortcutPath)))
+  Add-UniqueCandidatePath -Candidates $candidates -Path (Resolve-InstallRootFromShortcutTarget -TargetPath (Get-ShortcutTargetPath -ShortcutPath (Get-StartMenuAppShortcutPath)))
+  Add-UniqueCandidatePath -Candidates $candidates -Path (Resolve-InstallRootFromShortcutTarget -TargetPath (Get-ShortcutTargetPath -ShortcutPath (Join-Path (Get-StartMenuFolder) "CourseForge Extension.lnk")))
+
+  Add-UniqueCandidatePath -Candidates $candidates -Path (Join-Path $env:ProgramFiles "CourseForge")
+  Add-UniqueCandidatePath -Candidates $candidates -Path (Join-Path ${env:ProgramFiles(x86)} "CourseForge")
+
+  $reports = @()
+  foreach ($candidate in $candidates) {
+    $report = Get-InstallCandidateReport -CandidatePath $candidate
+    if ($null -ne $report) {
+      $reports += $report
+    }
+  }
+
+  $detectedInstallations = @($reports | Where-Object { $_.isDetected } | Sort-Object @{ Expression = 'markerCount'; Descending = $true }, @{ Expression = 'path'; Descending = $false })
+
+  $preferredInstallPath = $null
+  if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+    try {
+      $preferredInstallPath = [System.IO.Path]::GetFullPath($RequestedPath)
+    }
+    catch {
+      $preferredInstallPath = $RequestedPath
+    }
+  }
+
+  if ([string]::IsNullOrWhiteSpace($preferredInstallPath) -and $null -ne $registry -and -not [string]::IsNullOrWhiteSpace($registry.InstallPath)) {
+    $registryPath = [System.IO.Path]::GetFullPath([string]$registry.InstallPath)
+    $registryInstall = $detectedInstallations | Where-Object { $_.path -eq $registryPath } | Select-Object -First 1
+    if ($null -ne $registryInstall) {
+      $preferredInstallPath = $registryInstall.path
+    }
+  }
+
+  if ([string]::IsNullOrWhiteSpace($preferredInstallPath) -and $null -ne $uninstall -and -not [string]::IsNullOrWhiteSpace($uninstall.InstallLocation)) {
+    $uninstallPath = [System.IO.Path]::GetFullPath([string]$uninstall.InstallLocation)
+    $uninstallInstall = $detectedInstallations | Where-Object { $_.path -eq $uninstallPath } | Select-Object -First 1
+    if ($null -ne $uninstallInstall) {
+      $preferredInstallPath = $uninstallInstall.path
+    }
+  }
+
+  if ([string]::IsNullOrWhiteSpace($preferredInstallPath) -and $detectedInstallations.Count -gt 0) {
+    $preferredInstallPath = [string]$detectedInstallations[0].path
+  }
+
+  if ([string]::IsNullOrWhiteSpace($preferredInstallPath)) {
+    $preferredInstallPath = [System.IO.Path]::GetFullPath($script:DefaultInstallPath)
+  }
+
+  $primaryInstallation = $reports | Where-Object { $_.path -eq $preferredInstallPath } | Select-Object -First 1
+  if ($null -eq $primaryInstallation) {
+    $primaryInstallation = Get-InstallCandidateReport -CandidatePath $preferredInstallPath
+  }
+
+  $legacyInstallations = @($detectedInstallations | Where-Object { $_.path -ne $preferredInstallPath })
+
+  return [ordered]@{
+    preferredInstallPath = $preferredInstallPath
+    primaryInstallation = $primaryInstallation
+    detectedInstallations = $detectedInstallations
+    legacyInstallations = $legacyInstallations
+    registryState = $registry
+    uninstallState = $uninstall
+  }
+}
+
 function New-Shortcut {
   param(
     [string]$ShortcutPath,
@@ -307,6 +555,153 @@ function Remove-Shortcuts {
   }
 }
 
+function Get-KnownInstallArtifactNames {
+  param([string]$ResolvedInstallPath)
+
+  $artifacts = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+  foreach ($name in @(
+    "webapp",
+    "extension",
+    "AutoUpdate-CourseForge.ps1",
+    "Check-For-CourseForge-Updates.cmd",
+    "Start-CourseForge.cmd",
+    "CourseForge-Start.url",
+    "CourseForge.ico",
+    "Install-CourseForge-Windows.ps1",
+    "Install-CourseForge-Windows.cmd",
+    "Uninstall-CourseForge-Windows.cmd",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "package-manifest.json",
+    $script:InstallerMetadataFileName,
+    $script:IntegrityManifestFileName,
+    $script:RollingSnapshotFileName
+  )) {
+    [void]$artifacts.Add($name)
+  }
+
+  $manifestPath = Join-Path $ResolvedInstallPath "package-manifest.json"
+  if (Test-Path $manifestPath) {
+    try {
+      $manifest = Get-Content -Path $manifestPath -Raw | ConvertFrom-Json
+      foreach ($include in @($manifest.includes)) {
+        if ([string]::IsNullOrWhiteSpace([string]$include)) {
+          continue
+        }
+
+        $topLevel = ([string]$include).TrimStart('.','\\','/').Split('/','\\')[0]
+        if (-not [string]::IsNullOrWhiteSpace($topLevel)) {
+          [void]$artifacts.Add($topLevel)
+        }
+      }
+    }
+    catch {
+      Write-InstallerLog "Could not parse package manifest for artifact cleanup at ${ResolvedInstallPath}: $($_.Exception.Message)"
+    }
+  }
+
+  return @($artifacts)
+}
+
+function Remove-CourseForgeArtifactsFromPath {
+  param([string]$ResolvedInstallPath)
+
+  if ([string]::IsNullOrWhiteSpace($ResolvedInstallPath) -or -not (Test-Path $ResolvedInstallPath)) {
+    return
+  }
+
+  $artifactNames = Get-KnownInstallArtifactNames -ResolvedInstallPath $ResolvedInstallPath
+  foreach ($artifactName in $artifactNames) {
+    $target = Join-Path $ResolvedInstallPath $artifactName
+    if (-not (Test-Path $target)) {
+      continue
+    }
+
+    try {
+      Remove-Item -Path $target -Recurse -Force -ErrorAction Stop
+      Write-InstallerLog "Removed install artifact: $target"
+    }
+    catch {
+      Write-InstallerLog "Failed removing install artifact ${target}: $($_.Exception.Message)"
+    }
+  }
+
+  foreach ($entry in @(Get-ChildItem -Path $ResolvedInstallPath -Force -ErrorAction SilentlyContinue)) {
+    if ($artifactNames -contains $entry.Name) {
+      continue
+    }
+
+    $looksCourseForgeOwned = (
+      $entry.Name -like 'CourseForge*' -or
+      $entry.Name -like '*CourseForge*' -or
+      $entry.Name -like 'Install-CourseForge*' -or
+      $entry.Name -like 'Uninstall-CourseForge*' -or
+      $entry.Name -like 'Start-CourseForge*' -or
+      $entry.Name -like 'Check-For-CourseForge-Updates*' -or
+      $entry.Name -like 'AutoUpdate-CourseForge*'
+    )
+
+    if (-not $looksCourseForgeOwned) {
+      continue
+    }
+
+    try {
+      Remove-Item -Path $entry.FullName -Recurse -Force -ErrorAction Stop
+      Write-InstallerLog "Removed orphan CourseForge artifact: $($entry.FullName)"
+    }
+    catch {
+      Write-InstallerLog "Failed removing orphan CourseForge artifact $($entry.FullName): $($_.Exception.Message)"
+    }
+  }
+
+  if ((Test-Path $ResolvedInstallPath) -and ((Get-ChildItem -Path $ResolvedInstallPath -Force | Measure-Object).Count -eq 0)) {
+    Remove-Item -Path $ResolvedInstallPath -Recurse -Force -ErrorAction SilentlyContinue
+    Write-InstallerLog "Removed empty install directory: $ResolvedInstallPath"
+  }
+}
+
+function Invoke-PreInstallCleanup {
+  param(
+    [string]$ResolvedInstallPath,
+    [hashtable]$Discovery
+  )
+
+  if ($null -eq $Discovery) {
+    return
+  }
+
+  foreach ($legacyInstall in @($Discovery.legacyInstallations)) {
+    Write-InstallerLog "Cleaning legacy install root: $($legacyInstall.path) markers=$($legacyInstall.markers -join ',')"
+    Remove-CourseForgeArtifactsFromPath -ResolvedInstallPath ([string]$legacyInstall.path)
+  }
+
+  $registry = $Discovery.registryState
+  if ($null -ne $registry -and -not [string]::IsNullOrWhiteSpace([string]$registry.InstallPath)) {
+    $registryPath = [System.IO.Path]::GetFullPath([string]$registry.InstallPath)
+    if ($registryPath -ne $ResolvedInstallPath -or -not (Test-Path $registryPath)) {
+      Remove-RegistryState
+      Write-InstallerLog "Removed stale registry install map for $registryPath"
+    }
+  }
+
+  $uninstall = $Discovery.uninstallState
+  if ($null -ne $uninstall -and -not [string]::IsNullOrWhiteSpace([string]$uninstall.InstallLocation)) {
+    $uninstallPath = [System.IO.Path]::GetFullPath([string]$uninstall.InstallLocation)
+    if ($uninstallPath -ne $ResolvedInstallPath -or -not (Test-Path $uninstallPath)) {
+      Remove-UninstallRegistration
+      Write-InstallerLog "Removed stale uninstall registration for $uninstallPath"
+    }
+  }
+
+  if ($Discovery.legacyInstallations.Count -gt 0) {
+    Remove-Shortcuts
+    Write-InstallerLog "Removed shortcuts before rebuilding install state."
+  }
+
+  Remove-CourseForgeArtifactsFromPath -ResolvedInstallPath $ResolvedInstallPath
+}
+
 function Get-InstallPathFromMetadata {
   param([string]$CandidatePath)
 
@@ -329,10 +724,17 @@ function Get-InstallPathFromMetadata {
 }
 
 function Get-EffectiveInstallPath {
-  param([string]$RequestedPath)
+  param(
+    [string]$RequestedPath,
+    [hashtable]$Discovery
+  )
 
   if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
     return [System.IO.Path]::GetFullPath($RequestedPath)
+  }
+
+  if ($null -ne $Discovery -and -not [string]::IsNullOrWhiteSpace($Discovery.preferredInstallPath)) {
+    return [System.IO.Path]::GetFullPath([string]$Discovery.preferredInstallPath)
   }
 
   $registry = Read-RegistryState
@@ -832,6 +1234,7 @@ function Repair-Installation {
   param(
     [string]$SourceRoot,
     [string]$ResolvedInstallPath,
+    [hashtable]$Discovery,
     [hashtable]$Selection,
     [hashtable]$Icons
   )
@@ -845,6 +1248,8 @@ function Repair-Installation {
       Write-InstallerLog "Repair issue detected: $issue"
     }
   }
+
+  Invoke-PreInstallCleanup -ResolvedInstallPath $ResolvedInstallPath -Discovery $Discovery
 
   Copy-ComponentFiles -SourceRoot $SourceRoot -ResolvedInstallPath $ResolvedInstallPath -Selection $Selection
 
@@ -1049,8 +1454,12 @@ try {
   Ensure-Directory -Path $script:RollbackRoot
 
   $sourceRoot = Split-Path -Parent $PSCommandPath
-  $resolvedInstallPath = Get-EffectiveInstallPath -RequestedPath $InstallPath
+  $installDiscovery = Find-ExistingInstallations -RequestedPath $InstallPath
+  $resolvedInstallPath = Get-EffectiveInstallPath -RequestedPath $InstallPath -Discovery $installDiscovery
   $detection = Detect-Installation -ResolvedInstallPath $resolvedInstallPath
+  if ($installDiscovery.detectedInstallations.Count -gt 0) {
+    $detection.isInstalled = $true
+  }
 
   $menuChoice = Show-InitialDetectionMenu -IsInstalled ([bool]$detection.isInstalled)
 
@@ -1070,7 +1479,12 @@ try {
   if ($menuChoice -eq "uninstall") { $Uninstall = $true }
 
   $resolvedInstallPath = Resolve-InstallPathSelection -CurrentPath $resolvedInstallPath -IsInstalled ([bool]$detection.isInstalled)
+  $installDiscovery = Find-ExistingInstallations -RequestedPath $resolvedInstallPath
+  $resolvedInstallPath = Get-EffectiveInstallPath -RequestedPath $resolvedInstallPath -Discovery $installDiscovery
   $detection = Detect-Installation -ResolvedInstallPath $resolvedInstallPath
+  if ($installDiscovery.detectedInstallations.Count -gt 0) {
+    $detection.isInstalled = $true
+  }
 
   if ($Uninstall) {
     $installedSelection = [ordered]@{
@@ -1118,11 +1532,12 @@ try {
 
   if ($Repair) {
     Invoke-WithRollback -ResolvedInstallPath $resolvedInstallPath -CurrentSelection $defaultSelection -CurrentIcons $icons -Operation {
-      Repair-Installation -SourceRoot $sourceRoot -ResolvedInstallPath $resolvedInstallPath -Selection $selection -Icons $icons
+      Repair-Installation -SourceRoot $sourceRoot -ResolvedInstallPath $resolvedInstallPath -Discovery $installDiscovery -Selection $selection -Icons $icons
     }
   }
   else {
     Invoke-WithRollback -ResolvedInstallPath $resolvedInstallPath -CurrentSelection $defaultSelection -CurrentIcons $icons -Operation {
+      Invoke-PreInstallCleanup -ResolvedInstallPath $resolvedInstallPath -Discovery $installDiscovery
       Copy-ComponentFiles -SourceRoot $sourceRoot -ResolvedInstallPath $resolvedInstallPath -Selection $selection
       Set-Shortcuts -ResolvedInstallPath $resolvedInstallPath -Selection $selection -CreateDesktop ([bool]$icons.desktop) -CreateStartMenu ([bool]$icons.startMenu)
       Write-IntegrityManifest -RootPath $resolvedInstallPath -Selection $selection

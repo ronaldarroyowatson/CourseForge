@@ -18,6 +18,73 @@ $defaultRepoName = "CourseForge"
 $repoOwner = if ($env:COURSEFORGE_UPDATE_REPO_OWNER) { $env:COURSEFORGE_UPDATE_REPO_OWNER } else { $defaultRepoOwner }
 $repoName = if ($env:COURSEFORGE_UPDATE_REPO_NAME) { $env:COURSEFORGE_UPDATE_REPO_NAME } else { $defaultRepoName }
 
+function New-CourseForgeIcon {
+  param([string]$OutputPath)
+
+  Add-Type -AssemblyName System.Drawing
+
+  $bitmap = New-Object System.Drawing.Bitmap 256, 256
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $graphics.Clear([System.Drawing.Color]::Transparent)
+
+  $navy = [System.Drawing.Color]::FromArgb(255, 24, 44, 72)
+  $paper = [System.Drawing.Color]::FromArgb(255, 247, 239, 220)
+  $gold = [System.Drawing.Color]::FromArgb(255, 199, 142, 63)
+  $steel = [System.Drawing.Color]::FromArgb(255, 91, 103, 118)
+  $ember = [System.Drawing.Color]::FromArgb(255, 192, 88, 44)
+
+  $bookBrush = New-Object System.Drawing.SolidBrush $navy
+  $pageBrush = New-Object System.Drawing.SolidBrush $paper
+  $goldBrush = New-Object System.Drawing.SolidBrush $gold
+  $steelBrush = New-Object System.Drawing.SolidBrush $steel
+  $emberBrush = New-Object System.Drawing.SolidBrush $ember
+  $outlinePen = New-Object System.Drawing.Pen $navy, 8
+  $pagePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 214, 196, 154)), 4
+  $steelPen = New-Object System.Drawing.Pen $steel, 14
+
+  $graphics.FillRectangle($bookBrush, 30, 54, 196, 148)
+  $graphics.FillRectangle($pageBrush, 52, 72, 152, 112)
+  $graphics.DrawLine($pagePen, 128, 70, 128, 184)
+  $graphics.DrawLine($pagePen, 72, 100, 108, 100)
+  $graphics.DrawLine($pagePen, 72, 128, 108, 128)
+  $graphics.DrawLine($pagePen, 72, 156, 108, 156)
+  $graphics.DrawLine($pagePen, 148, 100, 184, 100)
+  $graphics.DrawLine($pagePen, 148, 128, 184, 128)
+  $graphics.DrawLine($pagePen, 148, 156, 184, 156)
+  $graphics.FillRectangle($goldBrush, 118, 48, 20, 162)
+  $graphics.FillRectangle($steelBrush, 144, 84, 62, 18)
+  $graphics.FillRectangle($steelBrush, 170, 58, 12, 72)
+  $graphics.FillRectangle($emberBrush, 118, 132, 104, 16)
+  $graphics.FillPolygon($steelBrush, [System.Drawing.Point[]]@(
+    (New-Object System.Drawing.Point(108, 178)),
+    (New-Object System.Drawing.Point(222, 178)),
+    (New-Object System.Drawing.Point(202, 204)),
+    (New-Object System.Drawing.Point(128, 204))
+  ))
+  $graphics.DrawLine($steelPen, 160, 148, 160, 178)
+
+  $icon = [System.Drawing.Icon]::FromHandle($bitmap.GetHicon())
+  $stream = [System.IO.File]::Open($OutputPath, [System.IO.FileMode]::Create)
+  try {
+    $icon.Save($stream)
+  }
+  finally {
+    $stream.Dispose()
+    $graphics.Dispose()
+    $bookBrush.Dispose()
+    $pageBrush.Dispose()
+    $goldBrush.Dispose()
+    $steelBrush.Dispose()
+    $emberBrush.Dispose()
+    $outlinePen.Dispose()
+    $pagePen.Dispose()
+    $steelPen.Dispose()
+    $icon.Dispose()
+    $bitmap.Dispose()
+  }
+}
+
 Write-Host "[package] Building webapp..."
 npm run build | Out-Host
 
@@ -46,6 +113,9 @@ Copy-Item (Join-Path $repoRoot "dist/extension/*") (Join-Path $packageDir "exten
 Copy-Item (Join-Path $repoRoot "README.md") $packageDir -Force
 Copy-Item (Join-Path $repoRoot "LICENSE") $packageDir -Force
 Copy-Item (Join-Path $repoRoot "CHANGELOG.md") $packageDir -Force
+
+$iconPath = Join-Path $packageDir "CourseForge.ico"
+New-CourseForgeIcon -OutputPath $iconPath
 
 $updaterTemplatePath = Join-Path $PSScriptRoot "auto-update-portable.ps1"
 if (-not (Test-Path $updaterTemplatePath)) {
@@ -99,8 +169,8 @@ Set-Content -Path (Join-Path $packageDir "Check-For-CourseForge-Updates.cmd") -V
 $shortcutUrl = @"
 [InternetShortcut]
 URL=Start-CourseForge.cmd
-IconFile=%SystemRoot%\System32\SHELL32.dll
-IconIndex=220
+IconFile=CourseForge.ico
+IconIndex=0
 "@
 Set-Content -Path (Join-Path $packageDir "CourseForge-Start.url") -Value $shortcutUrl -Encoding ASCII
 
@@ -116,6 +186,7 @@ $manifest = [ordered]@{
     "Check-For-CourseForge-Updates.cmd",
     "Start-CourseForge.cmd",
     "CourseForge-Start.url",
+    "CourseForge.ico",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

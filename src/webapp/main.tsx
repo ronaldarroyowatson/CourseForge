@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter, HashRouter } from "react-router-dom";
 
 import { initDB } from "../core/services/db";
 import { App } from "./App";
@@ -15,9 +15,12 @@ if (!rootElement) {
 // Warm the shared DB connection at startup so onboarding data can load immediately.
 void initDB();
 
-if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+const useHashRouter = typeof window !== "undefined" && window.location.protocol === "file:";
+const Router = useHashRouter ? HashRouter : BrowserRouter;
+
+if (typeof window !== "undefined" && window.location.protocol !== "file:" && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("/sw.js").catch(() => {
+    void navigator.serviceWorker.register("./sw.js").catch(() => {
       // Offline cache registration is best-effort.
     });
   });
@@ -25,8 +28,8 @@ if (typeof window !== "undefined" && "serviceWorker" in navigator) {
 
 createRoot(rootElement).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <Router>
       <App />
-    </BrowserRouter>
+    </Router>
   </React.StrictMode>
 );

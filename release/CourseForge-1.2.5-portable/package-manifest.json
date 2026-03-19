@@ -2,7 +2,7 @@
     "name":  "CourseForge",
     "version":  "1.2.5",
     "packageType":  "portable",
-    "createdAtUtc":  "2026-03-16T21:01:59.6562298Z",
+    "createdAtUtc":  "2026-03-19T01:01:26.5873332Z",
     "includes":  [
                      "webapp/",
                      "extension/",
@@ -10,6 +10,7 @@
                      "Check-For-CourseForge-Updates.cmd",
                      "Start-CourseForge.cmd",
                      "CourseForge-Start.url",
+                     "CourseForge.ico",
                      "README.md",
                      "CHANGELOG.md",
                      "LICENSE"

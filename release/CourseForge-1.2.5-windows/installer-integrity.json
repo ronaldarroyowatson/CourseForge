@@ -1,5 +1,5 @@
 {
-    "generatedAtUtc":  "2026-03-19T00:45:30.2267705Z",
+    "generatedAtUtc":  "2026-03-19T01:01:27.4350062Z",
     "version":  "1.2.5",
     "files":  [
                   {
@@ -16,7 +16,7 @@
                   },
                   {
                       "path":  "Install-CourseForge-Windows.ps1",
-                      "hash":  "EA55B09270BD19CE82C5EA642FFE12C71E9A35EEA90B062746D1139B1194DF24"
+                      "hash":  "52019C58E008278D5194979FCBD0B2407411C10BECE720BDF74A543640681603"
                   },
                   {
                       "path":  "Install-CourseForge-Windows.cmd",
@@ -28,11 +28,11 @@
                   },
                   {
                       "path":  "README.md",
-                      "hash":  "264248E9643C15CAB848147DDC9C22DBCDDB5BB9F3B963FF52C7985E82BF2722"
+                      "hash":  "D56110E54457D7C001F3891561CC159F863E49B322906FB69CBDFB05D7A59435"
                   },
                   {
                       "path":  "CHANGELOG.md",
-                      "hash":  "31909091B833944C77A848FE6D391F48A6C40CC3B761F36613C8E7E99E851BBE"
+                      "hash":  "3B29A5FB76A99A8E3CBDFFA3A536ED10DAF0C86DBB53E62B236EF62158ABAC5B"
                   },
                   {
                       "path":  "LICENSE",
@@ -40,11 +40,11 @@
                   },
                   {
                       "path":  "package-manifest.json",
-                      "hash":  "035494221EB1BE763C12E7E56816CEF014BB025A69CF8CA3669E94697F58C87E"
+                      "hash":  "801031BDBB74E2CFAC45F03632DBF2E6A340B42677FF5F5B7C520D2B0DB8C772"
                   },
                   {
                       "path":  "webapp/index.html",
-                      "hash":  "50ED72FA60FC428F7865A2EFAAED20DB662FD51C45BC085406712A0F24C99695"
+                      "hash":  "FF24C25A92F3255D4CDD8D63111F9057DA8D2F19E238796F9DE04E90D749CC09"
                   },
                   {
                       "path":  "extension/manifest.json",

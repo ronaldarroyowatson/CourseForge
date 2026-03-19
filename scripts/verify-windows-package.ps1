@@ -24,6 +24,7 @@ $required = @(
   "AutoUpdate-CourseForge.ps1",
   "Check-For-CourseForge-Updates.cmd",
   "Start-CourseForge.cmd",
+  "CourseForge.ico",
   "Install-CourseForge-Windows.ps1",
   "Install-CourseForge-Windows.cmd",
   "Uninstall-CourseForge-Windows.cmd",
@@ -79,6 +80,11 @@ if (-not $manifest.updates) {
 
 if ($manifest.updates.assetTemplate -ne "CourseForge-{version}-windows.zip") {
   throw "Unexpected updates.assetTemplate value: $($manifest.updates.assetTemplate)"
+}
+
+$webappIndex = Get-Content -Path (Join-Path $packageDir "webapp/index.html") -Raw
+if ($webappIndex -match 'src="/assets/' -or $webappIndex -match 'href="/assets/') {
+  throw "Packaged webapp/index.html still references absolute /assets paths and will not launch correctly from disk."
 }
 
 Write-Host "[verify] Windows package looks complete."

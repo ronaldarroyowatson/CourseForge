@@ -17,10 +17,8 @@ $releaseRoot = Join-Path $repoRoot "release"
 $portableName = "CourseForge-$Version-portable"
 $portableDir = Join-Path $releaseRoot $portableName
 
-if (-not (Test-Path $portableDir)) {
-  Write-Host "[package] Portable package missing; generating first..."
-  & (Join-Path $PSScriptRoot "create-portable-package.ps1") -Version $Version
-}
+Write-Host "[package] Refreshing portable package..."
+& (Join-Path $PSScriptRoot "create-portable-package.ps1") -Version $Version
 
 $packageName = "CourseForge-$Version-windows"
 $packageDir = Join-Path $releaseRoot $packageName
@@ -247,7 +245,6 @@ if not exist "%INSTALLER%" (
   exit /b 1
 )
 set INSTALL_ARGS=%*
-if "%INSTALL_ARGS%"=="" set INSTALL_ARGS=-FullAuto
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER%" %INSTALL_ARGS%
 set EXITCODE=%ERRORLEVEL%
 rmdir /s /q "%WORK%" >nul 2>&1
@@ -305,9 +302,9 @@ SourceFiles0=$bootstrapDir
 [Strings]
 TargetName=$installerExePath
 FriendlyName=CourseForge Setup
-AppLaunched=cmd.exe /k $bootstrapLauncherName
-AdminQuietInstCmd=cmd.exe /c $bootstrapLauncherName -Silent -InstallBoth
-UserQuietInstCmd=cmd.exe /c $bootstrapLauncherName -Silent -InstallBoth
+AppLaunched=cmd.exe /c $bootstrapLauncherName
+AdminQuietInstCmd=cmd.exe /c $bootstrapLauncherName -FullAuto
+UserQuietInstCmd=cmd.exe /c $bootstrapLauncherName -FullAuto
 FILE0=$bootstrapZipName
 FILE1=$bootstrapLauncherName
 "@

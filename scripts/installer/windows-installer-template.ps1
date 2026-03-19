@@ -18,6 +18,7 @@ $ErrorActionPreference = "Stop"
 $script:ProductName = "CourseForge"
 $script:ProductVersion = "__COURSEFORGE_VERSION__"
 $script:RegistryPath = "HKCU:\Software\CourseForge"
+$script:UninstallRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CourseForge"
 $script:UserRoot = Join-Path $env:LOCALAPPDATA "CourseForge"
 $script:LogsRoot = Join-Path $script:UserRoot "logs"
 $script:DataRoot = Join-Path $script:UserRoot "data"
@@ -180,6 +181,44 @@ function Remove-RegistryState {
   }
 }
 
+function Get-AppIconPath {
+  param([string]$ResolvedInstallPath)
+
+  $iconPath = Join-Path $ResolvedInstallPath "CourseForge.ico"
+  if (Test-Path $iconPath) {
+    return $iconPath
+  }
+
+  return "$env:SystemRoot\System32\SHELL32.dll,220"
+}
+
+function Write-UninstallRegistration {
+  param([string]$ResolvedInstallPath)
+
+  if (-not (Test-Path $script:UninstallRegistryPath)) {
+    New-Item -Path $script:UninstallRegistryPath -Force | Out-Null
+  }
+
+  $uninstallCmd = '"{0}" /SILENT /UNINSTALL' -f (Join-Path $ResolvedInstallPath "Uninstall-CourseForge-Windows.cmd")
+  $quietUninstallCmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" -Silent -Uninstall' -f (Join-Path $ResolvedInstallPath "Install-CourseForge-Windows.ps1")
+
+  New-ItemProperty -Path $script:UninstallRegistryPath -Name "DisplayName" -Value $script:ProductName -PropertyType String -Force | Out-Null
+  New-ItemProperty -Path $script:UninstallRegistryPath -Name "DisplayVersion" -Value $script:ProductVersion -PropertyType String -Force | Out-Null
+  New-ItemProperty -Path $script:UninstallRegistryPath -Name "Publisher" -Value "CourseForge" -PropertyType String -Force | Out-Null
+  New-ItemProperty -Path $script:UninstallRegistryPath -Name "InstallLocation" -Value $ResolvedInstallPath -PropertyType String -Force | Out-Null
+  New-ItemProperty -Path $script:UninstallRegistryPath -Name "DisplayIcon" -Value (Get-AppIconPath -ResolvedInstallPath $ResolvedInstallPath) -PropertyType String -Force | Out-Null
+  New-ItemProperty -Path $script:UninstallRegistryPath -Name "UninstallString" -Value $uninstallCmd -PropertyType String -Force | Out-Null
+  New-ItemProperty -Path $script:UninstallRegistryPath -Name "QuietUninstallString" -Value $quietUninstallCmd -PropertyType String -Force | Out-Null
+  New-ItemProperty -Path $script:UninstallRegistryPath -Name "NoModify" -Value 1 -PropertyType DWord -Force | Out-Null
+  New-ItemProperty -Path $script:UninstallRegistryPath -Name "NoRepair" -Value 0 -PropertyType DWord -Force | Out-Null
+}
+
+function Remove-UninstallRegistration {
+  if (Test-Path $script:UninstallRegistryPath) {
+    Remove-Item -Path $script:UninstallRegistryPath -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Get-StartMenuFolder {
   $programsPath = [Environment]::GetFolderPath("Programs")
   return Join-Path $programsPath "CourseForge"
@@ -190,11 +229,14 @@ function Get-DesktopShortcutPath {
   return Join-Path $desktopPath "CourseForge.lnk"
 }
 
+function Get-StartMenuAppShortcutPath {
+  return Join-Path (Get-StartMenuFolder) "CourseForge.lnk"
+}
+
 function Get-ShortcutState {
-  $startMenuFolder = Get-StartMenuFolder
   return [ordered]@{
     desktop = Test-Path (Get-DesktopShortcutPath)
-    startMenu = Test-Path (Join-Path $startMenuFolder "CourseForge Webapp.lnk")
+    startMenu = Test-Path (Get-StartMenuAppShortcutPath)
   }
 }
 
@@ -217,15 +259,17 @@ function New-Shortcut {
 function Set-Shortcuts {
   param(
     [string]$ResolvedInstallPath,
+    [hashtable]$Selection,
     [bool]$CreateDesktop,
     [bool]$CreateStartMenu
   )
 
   $desktopShortcut = Get-DesktopShortcutPath
   $startMenuFolder = Get-StartMenuFolder
+  $iconLocation = Get-AppIconPath -ResolvedInstallPath $ResolvedInstallPath
 
-  if ($CreateDesktop) {
-    New-Shortcut -ShortcutPath $desktopShortcut -TargetPath (Join-Path $ResolvedInstallPath "Start-CourseForge.cmd") -WorkingDirectory $ResolvedInstallPath
+  if ($CreateDesktop -and [bool]$Selection.webapp) {
+    New-Shortcut -ShortcutPath $desktopShortcut -TargetPath (Join-Path $ResolvedInstallPath "Start-CourseForge.cmd") -WorkingDirectory $ResolvedInstallPath -IconLocation $iconLocation
     Write-InstallerLog "Created desktop shortcut: $desktopShortcut"
   }
   elseif (Test-Path $desktopShortcut) {
@@ -235,8 +279,12 @@ function Set-Shortcuts {
 
   if ($CreateStartMenu) {
     Ensure-Directory -Path $startMenuFolder
-    New-Shortcut -ShortcutPath (Join-Path $startMenuFolder "CourseForge Webapp.lnk") -TargetPath (Join-Path $ResolvedInstallPath "Start-CourseForge.cmd") -WorkingDirectory $ResolvedInstallPath
-    New-Shortcut -ShortcutPath (Join-Path $startMenuFolder "CourseForge Extension Folder.lnk") -TargetPath (Join-Path $ResolvedInstallPath "extension") -WorkingDirectory (Join-Path $ResolvedInstallPath "extension")
+    if ([bool]$Selection.webapp) {
+      New-Shortcut -ShortcutPath (Get-StartMenuAppShortcutPath) -TargetPath (Join-Path $ResolvedInstallPath "Start-CourseForge.cmd") -WorkingDirectory $ResolvedInstallPath -IconLocation $iconLocation
+    }
+    if ([bool]$Selection.extension) {
+      New-Shortcut -ShortcutPath (Join-Path $startMenuFolder "CourseForge Extension.lnk") -TargetPath (Join-Path $ResolvedInstallPath "extension") -WorkingDirectory (Join-Path $ResolvedInstallPath "extension") -IconLocation $iconLocation
+    }
     New-Shortcut -ShortcutPath (Join-Path $startMenuFolder "Uninstall CourseForge.lnk") -TargetPath (Join-Path $ResolvedInstallPath "Uninstall-CourseForge-Windows.cmd") -WorkingDirectory $ResolvedInstallPath
     Write-InstallerLog "Created start menu shortcuts in: $startMenuFolder"
   }
@@ -357,6 +405,37 @@ function Read-YesNo {
   }
 }
 
+function Resolve-InstallPathSelection {
+  param(
+    [string]$CurrentPath,
+    [bool]$IsInstalled
+  )
+
+  if ($Silent -or $FullAuto -or $Repair -or $Uninstall -or $Modify -or $IsInstalled) {
+    return $CurrentPath
+  }
+
+  $useDefault = Read-YesNo -Prompt "Use default install location ($CurrentPath)" -DefaultValue $true
+  if ($useDefault) {
+    return $CurrentPath
+  }
+
+  while ($true) {
+    $candidate = Read-Host "Enter install path"
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+      Write-Host "Please enter a folder path."
+      continue
+    }
+
+    try {
+      return [System.IO.Path]::GetFullPath($candidate)
+    }
+    catch {
+      Write-Host "Invalid path. Please enter a full Windows folder path."
+    }
+  }
+}
+
 function Show-InitialDetectionMenu {
   param([bool]$IsInstalled)
 
@@ -457,7 +536,7 @@ function Build-IntegrityManifest {
 
   $entries = New-Object System.Collections.Generic.List[object]
 
-  $requiredRelative = @("Start-CourseForge.cmd", "Check-For-CourseForge-Updates.cmd", "package-manifest.json", "README.md", "CHANGELOG.md", "LICENSE", "Uninstall-CourseForge-Windows.cmd")
+  $requiredRelative = @("Start-CourseForge.cmd", "Check-For-CourseForge-Updates.cmd", "CourseForge.ico", "package-manifest.json", "README.md", "CHANGELOG.md", "LICENSE", "Uninstall-CourseForge-Windows.cmd")
   if ($Selection.webapp) {
     $requiredRelative += @("webapp/index.html")
   }
@@ -554,6 +633,7 @@ function Copy-ComponentFiles {
     "Check-For-CourseForge-Updates.cmd",
     "Start-CourseForge.cmd",
     "CourseForge-Start.url",
+    "CourseForge.ico",
     "Install-CourseForge-Windows.ps1",
     "Install-CourseForge-Windows.cmd",
     "Uninstall-CourseForge-Windows.cmd",
@@ -690,6 +770,7 @@ function Restore-RollbackSnapshot {
   if ($null -ne $registry) {
     try {
       Write-RegistryState -InstallPath ([string]$registry.InstallPath) -WebappInstalled ([bool]$registry.WebappInstalled) -ExtensionInstalled ([bool]$registry.ExtensionInstalled) -DesktopIconInstalled ([bool]$registry.DesktopIconInstalled) -StartMenuIconInstalled ([bool]$registry.StartMenuIconInstalled) -LastRepairTimestamp ([string]$registry.LastRepairTimestamp) -SilentInstallAllowed ([bool]$registry.SilentInstallAllowed)
+      Write-UninstallRegistration -ResolvedInstallPath ([string]$registry.InstallPath)
       Write-InstallerLog "Rollback restored registry map."
     }
     catch {
@@ -697,7 +778,7 @@ function Restore-RollbackSnapshot {
     }
   }
 
-  Set-Shortcuts -ResolvedInstallPath $installPath -CreateDesktop ([bool]$snapshot.icons.desktop) -CreateStartMenu ([bool]$snapshot.icons.startMenu)
+  Set-Shortcuts -ResolvedInstallPath $installPath -Selection $snapshot.components -CreateDesktop ([bool]$snapshot.icons.desktop) -CreateStartMenu ([bool]$snapshot.icons.startMenu)
   Write-InstallerLog "Rollback restored shortcuts."
 }
 
@@ -730,7 +811,7 @@ function Verify-Install {
     $issues.Add("Desktop shortcut missing after install.")
   }
 
-  if ($Icons.startMenu -and -not (Test-Path (Join-Path (Get-StartMenuFolder) "CourseForge Webapp.lnk"))) {
+  if ($Icons.startMenu -and $Selection.webapp -and -not (Test-Path (Get-StartMenuAppShortcutPath))) {
     $issues.Add("Start menu shortcut missing after install.")
   }
 
@@ -776,11 +857,12 @@ function Repair-Installation {
     }
   }
 
-  Set-Shortcuts -ResolvedInstallPath $ResolvedInstallPath -CreateDesktop ([bool]$Icons.desktop) -CreateStartMenu ([bool]$Icons.startMenu)
+  Set-Shortcuts -ResolvedInstallPath $ResolvedInstallPath -Selection $Selection -CreateDesktop ([bool]$Icons.desktop) -CreateStartMenu ([bool]$Icons.startMenu)
   Write-IntegrityManifest -RootPath $ResolvedInstallPath -Selection $Selection
 
   Write-InstallerMetadata -ResolvedInstallPath $ResolvedInstallPath -Selection $Selection -Icons $Icons -InstallPathSource "repair" -Mode "repair"
   Write-RegistryState -InstallPath $ResolvedInstallPath -WebappInstalled ([bool]$Selection.webapp) -ExtensionInstalled ([bool]$Selection.extension) -DesktopIconInstalled ([bool]$Icons.desktop) -StartMenuIconInstalled ([bool]$Icons.startMenu) -LastRepairTimestamp (Get-TimestampString)
+  Write-UninstallRegistration -ResolvedInstallPath $ResolvedInstallPath
 
   $verification = Verify-Install -ResolvedInstallPath $ResolvedInstallPath -Selection $Selection -Icons $Icons
   if (-not $verification.ok) {
@@ -843,6 +925,7 @@ function Uninstall-CourseForge {
 
   if (-not $remainingWebapp -and -not $remainingExtension) {
     Remove-RegistryState
+    Remove-UninstallRegistration
     Write-InstallerLog "Removed registry map."
 
     $metaFiles = @(
@@ -850,6 +933,7 @@ function Uninstall-CourseForge {
       "Check-For-CourseForge-Updates.cmd",
       "Start-CourseForge.cmd",
       "CourseForge-Start.url",
+      "CourseForge.ico",
       "README.md",
       "CHANGELOG.md",
       "LICENSE",
@@ -875,6 +959,7 @@ function Uninstall-CourseForge {
   }
   else {
     Write-RegistryState -InstallPath $ResolvedInstallPath -WebappInstalled $remainingWebapp -ExtensionInstalled $remainingExtension -DesktopIconInstalled $false -StartMenuIconInstalled $false -LastRepairTimestamp ""
+    Write-UninstallRegistration -ResolvedInstallPath $ResolvedInstallPath
   }
 
   if ($removeSelection.removeUserData -and (Test-Path $script:DataRoot)) {
@@ -984,6 +1069,9 @@ try {
   if ($menuChoice -eq "repair") { $Repair = $true }
   if ($menuChoice -eq "uninstall") { $Uninstall = $true }
 
+  $resolvedInstallPath = Resolve-InstallPathSelection -CurrentPath $resolvedInstallPath -IsInstalled ([bool]$detection.isInstalled)
+  $detection = Detect-Installation -ResolvedInstallPath $resolvedInstallPath
+
   if ($Uninstall) {
     $installedSelection = [ordered]@{
       webapp = [bool]$detection.webappInstalled
@@ -1036,10 +1124,11 @@ try {
   else {
     Invoke-WithRollback -ResolvedInstallPath $resolvedInstallPath -CurrentSelection $defaultSelection -CurrentIcons $icons -Operation {
       Copy-ComponentFiles -SourceRoot $sourceRoot -ResolvedInstallPath $resolvedInstallPath -Selection $selection
-      Set-Shortcuts -ResolvedInstallPath $resolvedInstallPath -CreateDesktop ([bool]$icons.desktop) -CreateStartMenu ([bool]$icons.startMenu)
+      Set-Shortcuts -ResolvedInstallPath $resolvedInstallPath -Selection $selection -CreateDesktop ([bool]$icons.desktop) -CreateStartMenu ([bool]$icons.startMenu)
       Write-IntegrityManifest -RootPath $resolvedInstallPath -Selection $selection
       Write-InstallerMetadata -ResolvedInstallPath $resolvedInstallPath -Selection $selection -Icons $icons -InstallPathSource $installPathSource -Mode $operationMode
       Write-RegistryState -InstallPath $resolvedInstallPath -WebappInstalled ([bool]$selection.webapp) -ExtensionInstalled ([bool]$selection.extension) -DesktopIconInstalled ([bool]$icons.desktop) -StartMenuIconInstalled ([bool]$icons.startMenu) -LastRepairTimestamp ""
+      Write-UninstallRegistration -ResolvedInstallPath $resolvedInstallPath
 
       $verification = Verify-Install -ResolvedInstallPath $resolvedInstallPath -Selection $selection -Icons $icons
       if (-not $verification.ok) {

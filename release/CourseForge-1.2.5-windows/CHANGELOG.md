@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Changed
+
+- Hardened the standalone real-sync runner so it can execute under `tsx` without assuming a Vite browser runtime.
+- Switched the Windows installer default install scope from admin-only `Program Files`/`HKLM` to per-user `%LOCALAPPDATA%\Programs`/`HKCU` to reduce setup failures on locked-down PCs.
+- Added a generated `CourseForge-<version>-installer.exe` self-extracting bootstrap artifact so Windows users can start setup from a single download.
+
 ## [1.2.4] - 2026-03-15
 
 ### Added (1.2.4)

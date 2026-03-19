@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-03-19
+
+### Fixed
+
+- Simplified uninstall flow by removing component-selection prompts; components are now detected upfront and removed by default, with only a single data-retention confirmation prompt.
+- Fixed installed-script uninstall resolution by adding install-root-hint detection via metadata presence, enabling uninstall from installed payload without explicit path parameter.
+- Hardened uninstaller wrapper to avoid self-deletion race condition by spawning deferred cleanup via detached PowerShell helper with sleep delay.
+- Extended Inno Setup compiler discovery to include user-local installation path (`%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe`).
+
+### Added
+
+- GUI-required release lane (`npm run quality:installer:gui`) for enforcing Inno Setup availability in release builds.
+- Regression test coverage for uninstall selection resolution and Windows installer guardrails.
+
 ### Changed
 
 - Hardened the standalone real-sync runner so it can execute under `tsx` without assuming a Vite browser runtime.

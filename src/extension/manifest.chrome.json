@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CourseForge Sidebar",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "Quick curriculum capture for CourseForge.",
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "minimum_chrome_version": "114",

@@ -1,5 +1,6 @@
 param(
-  [string]$Version
+  [string]$Version,
+  [switch]$RequireGuiInstaller
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +13,16 @@ $packageJson = Get-Content -Path $packageJsonPath -Raw | ConvertFrom-Json
 if ([string]::IsNullOrWhiteSpace($Version)) {
   $Version = $packageJson.version
 }
+
+$requireGuiFromEnv = $false
+if (-not [string]::IsNullOrWhiteSpace($env:COURSEFORGE_REQUIRE_GUI_INSTALLER)) {
+  $normalizedGuiFlag = $env:COURSEFORGE_REQUIRE_GUI_INSTALLER.Trim().ToLowerInvariant()
+  if ($normalizedGuiFlag -in @("1", "true", "yes", "on")) {
+    $requireGuiFromEnv = $true
+  }
+}
+
+$requireGuiInstaller = $RequireGuiInstaller.IsPresent -or $requireGuiFromEnv
 
 $releaseRoot = Join-Path $repoRoot "release"
 $portableName = "CourseForge-$Version-portable"
@@ -341,6 +352,10 @@ if (-not [string]::IsNullOrWhiteSpace($innoCompilerPath)) {
   Write-Host "[package] Windows installer created (GUI): $installerExePath"
   Write-Host "[package] Installer file: $packageDir\Install-CourseForge-Windows.cmd"
   return
+}
+
+if ($requireGuiInstaller) {
+  throw "GUI installer is required but Inno Setup compiler (ISCC.exe) was not found. Install Inno Setup 6 or unset -RequireGuiInstaller / COURSEFORGE_REQUIRE_GUI_INSTALLER."
 }
 
 Write-Warning "Inno Setup compiler (ISCC.exe) not found. Falling back to legacy bootstrap installer."

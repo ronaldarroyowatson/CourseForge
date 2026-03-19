@@ -1,5 +1,5 @@
 {
-    "generatedAtUtc":  "2026-03-19T21:46:54.6629373Z",
+    "generatedAtUtc":  "2026-03-19T21:49:15.5675771Z",
     "version":  "1.2.5",
     "files":  [
                   {
@@ -28,7 +28,7 @@
                   },
                   {
                       "path":  "README.md",
-                      "hash":  "56DADC1A8DDC8044FB4A15EDBE7C8F17FC2624F87D66C20A4D2AD9F07C7DA599"
+                      "hash":  "E34F512F4CB26F2353C37C924D0BE26B7E17AE24144831C11D65AD50B141BB07"
                   },
                   {
                       "path":  "CHANGELOG.md",
@@ -40,7 +40,7 @@
                   },
                   {
                       "path":  "package-manifest.json",
-                      "hash":  "239E95B3450686B560846E16CD35CCB6714898E02BFF469ECF79DB0396F48C66"
+                      "hash":  "25971C15F5D70F1F3774C5C622686558B12E44A2AA9FDDB547E8794D3DAD5A03"
                   },
                   {
                       "path":  "webapp/index.html",

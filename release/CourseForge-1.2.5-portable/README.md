@@ -191,6 +191,7 @@ Windows installer UX notes:
 - The packaging script now prefers an Inno Setup GUI wizard build when `ISCC.exe` (Inno Setup 6 compiler) is available on the build host.
 - If Inno Setup is not installed, packaging falls back to the legacy self-extracting bootstrap installer.
 - To always get the standard Windows wizard UI on double-click, install Inno Setup 6 and ensure `ISCC.exe` is available in PATH (or in a default Inno install location).
+- Release guardrail option: run `npm run package:windows:gui` (or set `COURSEFORGE_REQUIRE_GUI_INSTALLER=1`) to fail packaging if GUI installer prerequisites are missing.
 
 Auto-update behavior:
 

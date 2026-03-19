@@ -14,11 +14,14 @@ describe("windows installer template guardrails", () => {
 
     expect(generatorScript).toContain("windows-installer-template.ps1");
     expect(generatorScript).toContain("windows-installer.iss.template");
+    expect(generatorScript).toContain("[switch]$RequireGuiInstaller");
+    expect(generatorScript).toContain("COURSEFORGE_REQUIRE_GUI_INSTALLER");
     expect(generatorScript).toContain("__COURSEFORGE_VERSION__");
     expect(generatorScript).toContain("Uninstall-CourseForge-Windows.cmd");
     expect(generatorScript).toContain("installer-integrity.json");
     expect(generatorScript).toContain("ISCC.exe");
     expect(generatorScript).toContain("Inno Setup compiler (ISCC.exe) not found");
+    expect(generatorScript).toContain("GUI installer is required but Inno Setup compiler (ISCC.exe) was not found");
     expect(generatorScript).toContain("iexpress.exe");
     expect(generatorScript).toContain("CourseForge-windows-payload.zip");
     expect(generatorScript).toContain("Launch-CourseForge-Installer.cmd");

@@ -8,6 +8,7 @@ import {
   resolveComponentSelection,
   resolveIconOptions,
   resolveRequestedInstallPath,
+  resolveUninstallSelection,
   resolveMode,
   validateComponentSelection,
 } from "../../src/core/services/installer";
@@ -89,6 +90,15 @@ describe("installer lifecycle planning", () => {
 
     expect(webappOnly).toEqual({ webapp: true, extension: false });
     expect(extensionOnly).toEqual({ webapp: false, extension: true });
+  });
+
+  it("uninstall resolves to removing detected components and only toggles user data", () => {
+    const selection = resolveUninstallSelection(
+      { webapp: true, extension: false },
+      { removeUserData: true }
+    );
+
+    expect(selection).toEqual({ webapp: true, extension: false, removeUserData: true });
   });
 
   it("returns launch actions for initial detection screen", () => {

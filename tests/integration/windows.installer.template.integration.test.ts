@@ -9,6 +9,14 @@ function readWorkspaceFile(relativePath: string): string {
 }
 
 describe("windows installer template guardrails", () => {
+  it("exposes GUI-required packaging scripts for release builds", () => {
+    const packageJson = readWorkspaceFile("package.json");
+
+    expect(packageJson).toContain('"package:windows:gui"');
+    expect(packageJson).toContain('"check:installer:gui"');
+    expect(packageJson).toContain('"quality:installer:gui"');
+  });
+
   it("generates installer from the shared windows template", () => {
     const generatorScript = readWorkspaceFile("scripts/create-windows-package.ps1");
 
@@ -20,11 +28,16 @@ describe("windows installer template guardrails", () => {
     expect(generatorScript).toContain("Uninstall-CourseForge-Windows.cmd");
     expect(generatorScript).toContain("installer-integrity.json");
     expect(generatorScript).toContain("ISCC.exe");
+    expect(generatorScript).toContain("Programs\\Inno Setup 6\\ISCC.exe");
     expect(generatorScript).toContain("Inno Setup compiler (ISCC.exe) not found");
     expect(generatorScript).toContain("GUI installer is required but Inno Setup compiler (ISCC.exe) was not found");
     expect(generatorScript).toContain("iexpress.exe");
     expect(generatorScript).toContain("CourseForge-windows-payload.zip");
     expect(generatorScript).toContain("Launch-CourseForge-Installer.cmd");
+    expect(generatorScript).toContain('pushd "%TEMP%"');
+    expect(generatorScript).toContain('-InstallPath "%INSTALLROOT%" -Uninstall %*');
+    expect(generatorScript).toContain('start "" /b powershell.exe');
+    expect(generatorScript).toContain("Remove-Item -LiteralPath '%INSTALLROOT%' -Recurse -Force -ErrorAction SilentlyContinue");
     expect(generatorScript).toContain("AppLaunched=cmd.exe /c \"%FILE1%\"");
     expect(generatorScript).toContain("AdminQuietInstCmd=cmd.exe /c \"%FILE1%\" -FullAuto");
   });
@@ -39,6 +52,11 @@ describe("windows installer template guardrails", () => {
     expect(template).toContain("function Invoke-WithRollback");
     expect(template).toContain("function Repair-Installation");
     expect(template).toContain("function Uninstall-CourseForge");
+    expect(template).toContain("Using script directory as install root hint");
+    expect(template).toContain("Are you sure you want to uninstall CourseForge");
+    expect(template).toContain("Delete all local user data (NOT recommended)");
+    expect(template).not.toContain("Remove Webapp");
+    expect(template).not.toContain("Remove Browser Extension");
     expect(template).toContain("HKCU:\\Software\\CourseForge");
     expect(template).toContain("/SILENT");
     expect(template).toContain("/FULLAUTO");

@@ -148,10 +148,12 @@ Installer test and quality commands:
 ```bash
 npm run test:installer
 npm run quality:installer
+npm run quality:installer:gui
 ```
 
 - `test:installer` runs installer lifecycle logic tests and Windows installer template guardrail tests.
 - `quality:installer` runs `test:installer` and then performs full package generation + verification (`check:installer`).
+- `quality:installer:gui` runs the same installer tests, but requires the GUI installer build path and fails if Inno Setup is unavailable.
 
 This now validates both single-file installer-style artifacts:
 
@@ -192,6 +194,7 @@ Windows installer UX notes:
 - If Inno Setup is not installed, packaging falls back to the legacy self-extracting bootstrap installer.
 - To always get the standard Windows wizard UI on double-click, install Inno Setup 6 and ensure `ISCC.exe` is available in PATH (or in a default Inno install location).
 - Release guardrail option: run `npm run package:windows:gui` (or set `COURSEFORGE_REQUIRE_GUI_INSTALLER=1`) to fail packaging if GUI installer prerequisites are missing.
+- Full GUI release lane: run `npm run quality:installer:gui` to test, package, and verify the wizard installer end to end.
 
 Auto-update behavior:
 

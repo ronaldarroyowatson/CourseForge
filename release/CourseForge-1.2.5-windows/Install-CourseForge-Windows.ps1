@@ -1297,19 +1297,17 @@ function Uninstall-CourseForge {
     removeUserData = [bool]$RemoveUserData
   }
 
+  if (-not $removeSelection.webapp -and -not $removeSelection.extension) {
+    throw "Uninstall blocked because no installed components were detected."
+  }
+
   if (-not $Silent -and -not $FullAuto) {
     $confirmed = Read-YesNo -Prompt "Are you sure you want to uninstall CourseForge" -DefaultValue $true
     if (-not $confirmed) {
       throw "Uninstall cancelled by user."
     }
 
-    $removeSelection.webapp = Read-YesNo -Prompt "Remove Webapp" -DefaultValue ([bool]$InstalledSelection.webapp)
-    $removeSelection.extension = Read-YesNo -Prompt "Remove Browser Extension" -DefaultValue ([bool]$InstalledSelection.extension)
     $removeSelection.removeUserData = Read-YesNo -Prompt "Delete all local user data (NOT recommended)" -DefaultValue $false
-  }
-
-  if (-not $removeSelection.webapp -and -not $removeSelection.extension) {
-    throw "Uninstall blocked because no components were selected."
   }
 
   if ($removeSelection.webapp -and (Test-Path (Join-Path $ResolvedInstallPath "webapp"))) {
@@ -1345,10 +1343,7 @@ function Uninstall-CourseForge {
       "package-manifest.json",
       $script:InstallerMetadataFileName,
       $script:IntegrityManifestFileName,
-      $script:RollingSnapshotFileName,
-      "Install-CourseForge-Windows.ps1",
-      "Install-CourseForge-Windows.cmd",
-      "Uninstall-CourseForge-Windows.cmd"
+      $script:RollingSnapshotFileName
     )
 
     foreach ($meta in $metaFiles) {
@@ -1454,8 +1449,15 @@ try {
   Ensure-Directory -Path $script:RollbackRoot
 
   $sourceRoot = Split-Path -Parent $PSCommandPath
-  $installDiscovery = Find-ExistingInstallations -RequestedPath $InstallPath
-  $resolvedInstallPath = Get-EffectiveInstallPath -RequestedPath $InstallPath -Discovery $installDiscovery
+  $requestedInstallPath = $InstallPath
+  $sourceMetadataPath = Join-Path $sourceRoot $script:InstallerMetadataFileName
+  if ([string]::IsNullOrWhiteSpace($requestedInstallPath) -and (Test-Path $sourceMetadataPath)) {
+    $requestedInstallPath = $sourceRoot
+    Write-InstallerLog "Using script directory as install root hint: $requestedInstallPath"
+  }
+
+  $installDiscovery = Find-ExistingInstallations -RequestedPath $requestedInstallPath
+  $resolvedInstallPath = Get-EffectiveInstallPath -RequestedPath $requestedInstallPath -Discovery $installDiscovery
   $detection = Detect-Installation -ResolvedInstallPath $resolvedInstallPath
   if ($installDiscovery.detectedInstallations.Count -gt 0) {
     $detection.isInstalled = $true
@@ -1478,9 +1480,9 @@ try {
   if ($menuChoice -eq "repair") { $Repair = $true }
   if ($menuChoice -eq "uninstall") { $Uninstall = $true }
 
-  $resolvedInstallPath = Resolve-InstallPathSelection -CurrentPath $resolvedInstallPath -IsInstalled ([bool]$detection.isInstalled)
-  $installDiscovery = Find-ExistingInstallations -RequestedPath $resolvedInstallPath
-  $resolvedInstallPath = Get-EffectiveInstallPath -RequestedPath $resolvedInstallPath -Discovery $installDiscovery
+  $requestedInstallPath = Resolve-InstallPathSelection -CurrentPath $resolvedInstallPath -IsInstalled ([bool]$detection.isInstalled)
+  $installDiscovery = Find-ExistingInstallations -RequestedPath $requestedInstallPath
+  $resolvedInstallPath = Get-EffectiveInstallPath -RequestedPath $requestedInstallPath -Discovery $installDiscovery
   $detection = Detect-Installation -ResolvedInstallPath $resolvedInstallPath
   if ($installDiscovery.detectedInstallations.Count -gt 0) {
     $detection.isInstalled = $true

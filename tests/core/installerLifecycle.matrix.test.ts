@@ -4,6 +4,7 @@ import {
   getDefaultComponentSelection,
   resolveComponentSelection,
   resolveIconOptions,
+  resolveUninstallSelection,
   resolveMode,
   validateComponentSelection,
 } from "../../src/core/services/installer";
@@ -74,6 +75,11 @@ describe("installer lifecycle matrix", () => {
   it("uninstall mode resolves from explicit flag", () => {
     const mode = resolveMode({ uninstall: true }, detectionInstalled);
     expect(mode).toBe("uninstall");
+  });
+
+  it("uninstall keeps detected installed components and preserves local data by default", () => {
+    const selection = resolveUninstallSelection({ webapp: true, extension: true }, {});
+    expect(selection).toEqual({ webapp: true, extension: true, removeUserData: false });
   });
 
   it("blocks no-component selection", () => {

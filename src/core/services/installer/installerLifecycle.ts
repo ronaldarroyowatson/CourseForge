@@ -7,6 +7,7 @@ import type {
   InstallerDetection,
   InstallerLifecyclePlan,
   InstallerMode,
+  UninstallSelection,
   VerificationIssue,
   VerificationResult,
 } from "./types";
@@ -52,6 +53,17 @@ export function validateComponentSelection(selection: InstallComponentSelection)
   }
 
   return null;
+}
+
+export function resolveUninstallSelection(
+  installedSelection: InstallComponentSelection,
+  options: Pick<InstallerCliOptions, "removeUserData">
+): UninstallSelection {
+  return {
+    webapp: Boolean(installedSelection.webapp),
+    extension: Boolean(installedSelection.extension),
+    removeUserData: Boolean(options.removeUserData),
+  };
 }
 
 export function resolveRequestedInstallPath(options: InstallerCliOptions, fallbackPath: string): string {

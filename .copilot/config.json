@@ -2,12 +2,12 @@
   "version": 1,
   "mcpServers": {
     "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./"]
+      "command": ".\\node_modules\\.bin\\mcp-server-filesystem.cmd",
+      "args": ["./"]
     },
     "terminal": {
-      "command": "npx",
-      "args": ["-y", "@dillip285/mcp-terminal", "--allowed-paths", "./"]
+      "command": ".\\node_modules\\.bin\\mcp-terminal.cmd",
+      "args": ["--allowed-paths", "./"]
     }
   },
 

@@ -221,10 +221,13 @@ set PAYLOAD=%ROOT%$bootstrapZipName
 set WORK=%TEMP%\CourseForge-Installer-%RANDOM%%RANDOM%
 set EXTRACT=%WORK%\payload
 set INSTALLER=%EXTRACT%\Install-CourseForge-Windows.ps1
+set INTERACTIVE=0
+if "%~1"=="" set INTERACTIVE=1
 if exist "%WORK%" rmdir /s /q "%WORK%" >nul 2>&1
 mkdir "%EXTRACT%" >nul 2>&1
 if not exist "%PAYLOAD%" (
   echo [CourseForge] Missing installer payload archive.
+  if "%INTERACTIVE%"=="1" pause
   endlocal
   exit /b 1
 )
@@ -232,18 +235,38 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Lite
 if errorlevel 1 (
   echo [CourseForge] Failed to extract installer payload.
   rmdir /s /q "%WORK%" >nul 2>&1
+  if "%INTERACTIVE%"=="1" pause
   endlocal
   exit /b 1
 )
 if not exist "%INSTALLER%" (
   echo [CourseForge] Missing extracted installer script.
   rmdir /s /q "%WORK%" >nul 2>&1
+  if "%INTERACTIVE%"=="1" pause
   endlocal
   exit /b 1
 )
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER%" %*
+set INSTALL_ARGS=%*
+if "%INSTALL_ARGS%"=="" set INSTALL_ARGS=-FullAuto
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER%" %INSTALL_ARGS%
 set EXITCODE=%ERRORLEVEL%
 rmdir /s /q "%WORK%" >nul 2>&1
+if "%INTERACTIVE%"=="1" (
+  if "%EXITCODE%"=="0" (
+    echo.
+    echo CourseForge installed successfully.
+    echo Shortcuts have been created on your Desktop and Start Menu.
+    echo.
+    echo Press any key to close...
+    pause >nul
+  ) else (
+    echo.
+    echo Installation failed. Check logs in %%LOCALAPPDATA%%\CourseForge\logs for details.
+    echo.
+    echo Press any key to close...
+    pause >nul
+  )
+)
 endlocal & exit /b %EXITCODE%
 "@
 Set-Content -Path (Join-Path $bootstrapDir $bootstrapLauncherName) -Value $bootstrapLauncher -Encoding ASCII
@@ -282,7 +305,7 @@ SourceFiles0=$bootstrapDir
 [Strings]
 TargetName=$installerExePath
 FriendlyName=CourseForge Setup
-AppLaunched=cmd.exe /c $bootstrapLauncherName
+AppLaunched=cmd.exe /k $bootstrapLauncherName
 AdminQuietInstCmd=cmd.exe /c $bootstrapLauncherName -Silent -InstallBoth
 UserQuietInstCmd=cmd.exe /c $bootstrapLauncherName -Silent -InstallBoth
 FILE0=$bootstrapZipName

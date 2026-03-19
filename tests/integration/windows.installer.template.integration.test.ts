@@ -19,6 +19,7 @@ describe("windows installer template guardrails", () => {
     expect(generatorScript).toContain("iexpress.exe");
     expect(generatorScript).toContain("CourseForge-windows-payload.zip");
     expect(generatorScript).toContain("Launch-CourseForge-Installer.cmd");
+    expect(generatorScript).toContain("AppLaunched=cmd.exe /k $bootstrapLauncherName");
   });
 
   it("keeps advanced installer lifecycle features in the template", () => {

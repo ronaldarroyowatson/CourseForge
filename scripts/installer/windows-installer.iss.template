@@ -1,0 +1,104 @@
+#define CourseForgeVersion "__COURSEFORGE_VERSION__"
+#define BootstrapDir "__COURSEFORGE_BOOTSTRAP_DIR__"
+#define ReleaseRoot "__COURSEFORGE_RELEASE_ROOT__"
+
+[Setup]
+AppId={{5F0CBCEA-1A2E-4A58-91F9-9A45D5B7A8C4}
+AppName=CourseForge
+AppVersion={#CourseForgeVersion}
+AppPublisher=CourseForge
+DefaultDirName={localappdata}\Programs\CourseForge
+DefaultGroupName=CourseForge
+DisableProgramGroupPage=yes
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
+WizardStyle=modern
+Compression=lzma2
+SolidCompression=yes
+OutputDir={#ReleaseRoot}
+OutputBaseFilename=CourseForge-{#CourseForgeVersion}-installer
+SetupIconFile={#BootstrapDir}\CourseForge.ico
+Uninstallable=no
+CreateUninstallRegKey=no
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Types]
+Name: "full"; Description: "Typical installation"
+Name: "custom"; Description: "Custom installation"; Flags: iscustom
+
+[Components]
+Name: "webapp"; Description: "CourseForge Web App"; Types: full custom
+Name: "extension"; Description: "Browser Extension Files"; Types: full custom
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a Desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
+Name: "startmenuicon"; Description: "Create a Start Menu shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
+
+[Files]
+Source: "{#BootstrapDir}\CourseForge-windows-payload.zip"; Flags: dontcopy
+Source: "{#BootstrapDir}\Launch-CourseForge-Installer.cmd"; Flags: dontcopy
+
+[Code]
+function BuildInstallArguments(): string;
+begin
+  Result := '-FullAuto -InstallPath "' + ExpandConstant('{app}') + '"';
+
+  if WizardIsComponentSelected('webapp') and WizardIsComponentSelected('extension') then
+    Result := Result + ' -Install_Both'
+  else if WizardIsComponentSelected('webapp') then
+    Result := Result + ' -Install_Webapp'
+  else if WizardIsComponentSelected('extension') then
+    Result := Result + ' -Install_Extension';
+
+  if not WizardIsTaskSelected('desktopicon') then
+    Result := Result + ' -No_Desktop_Icon';
+
+  if not WizardIsTaskSelected('startmenuicon') then
+    Result := Result + ' -No_StartMenu_Icon';
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+
+  if CurPageID = wpSelectComponents then
+  begin
+    if not WizardIsComponentSelected('webapp') and not WizardIsComponentSelected('extension') then
+    begin
+      MsgBox('Select at least one component to install.', mbError, MB_OK);
+      Result := False;
+    end;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Args: string;
+  LauncherPath: string;
+  ResultCode: Integer;
+begin
+  if CurStep <> ssInstall then
+    Exit;
+
+  WizardForm.StatusLabel.Caption := 'Preparing CourseForge installer payload...';
+  ExtractTemporaryFile('CourseForge-windows-payload.zip');
+  ExtractTemporaryFile('Launch-CourseForge-Installer.cmd');
+
+  LauncherPath := ExpandConstant('{tmp}\Launch-CourseForge-Installer.cmd');
+  Args := BuildInstallArguments();
+
+  WizardForm.StatusLabel.Caption := 'Installing CourseForge...';
+  if not Exec(LauncherPath, Args, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+  begin
+    MsgBox('Failed to launch CourseForge installer payload.', mbError, MB_OK);
+    Abort;
+  end;
+
+  if ResultCode <> 0 then
+  begin
+    MsgBox('CourseForge installation failed. See logs at %LOCALAPPDATA%\\CourseForge\\logs.', mbError, MB_OK);
+    Abort;
+  end;
+end;

@@ -186,6 +186,12 @@ Windows install flow:
 - Supports component flags and icon flags for IT automation: `/SILENT`, `/FULLAUTO`, `/INSTALL_WEBAPP`, `/INSTALL_EXTENSION`, `/INSTALL_BOTH`, `/NO_DESKTOP_ICON`, `/NO_STARTMENU_ICON`, `/REPAIR`, `/UNINSTALL`.
 - Writes structured logs to `%LOCALAPPDATA%\CourseForge\logs\` including `installer.log`, `silent-install.log`, `auto-install.log`, `repair.log`, `uninstaller.log`, and `rollback.log`.
 
+Windows installer UX notes:
+
+- The packaging script now prefers an Inno Setup GUI wizard build when `ISCC.exe` (Inno Setup 6 compiler) is available on the build host.
+- If Inno Setup is not installed, packaging falls back to the legacy self-extracting bootstrap installer.
+- To always get the standard Windows wizard UI on double-click, install Inno Setup 6 and ensure `ISCC.exe` is available in PATH (or in a default Inno install location).
+
 Auto-update behavior:
 
 - On every launch, `Start-CourseForge.cmd` runs `AutoUpdate-CourseForge.ps1` silently.

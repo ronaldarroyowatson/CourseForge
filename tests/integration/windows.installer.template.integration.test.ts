@@ -13,14 +13,17 @@ describe("windows installer template guardrails", () => {
     const generatorScript = readWorkspaceFile("scripts/create-windows-package.ps1");
 
     expect(generatorScript).toContain("windows-installer-template.ps1");
+    expect(generatorScript).toContain("windows-installer.iss.template");
     expect(generatorScript).toContain("__COURSEFORGE_VERSION__");
     expect(generatorScript).toContain("Uninstall-CourseForge-Windows.cmd");
     expect(generatorScript).toContain("installer-integrity.json");
+    expect(generatorScript).toContain("ISCC.exe");
+    expect(generatorScript).toContain("Inno Setup compiler (ISCC.exe) not found");
     expect(generatorScript).toContain("iexpress.exe");
     expect(generatorScript).toContain("CourseForge-windows-payload.zip");
     expect(generatorScript).toContain("Launch-CourseForge-Installer.cmd");
-    expect(generatorScript).toContain("AppLaunched=cmd.exe /c $bootstrapLauncherName");
-    expect(generatorScript).toContain("AdminQuietInstCmd=cmd.exe /c $bootstrapLauncherName -FullAuto");
+    expect(generatorScript).toContain("AppLaunched=cmd.exe /c \"%FILE1%\"");
+    expect(generatorScript).toContain("AdminQuietInstCmd=cmd.exe /c \"%FILE1%\" -FullAuto");
   });
 
   it("keeps advanced installer lifecycle features in the template", () => {

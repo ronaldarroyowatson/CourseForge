@@ -28,6 +28,8 @@ $bootstrapDir = Join-Path $releaseRoot ".windows-installer-bootstrap-$Version"
 $bootstrapZipName = "CourseForge-windows-payload.zip"
 $bootstrapLauncherName = "Launch-CourseForge-Installer.cmd"
 $iexpressSedPath = Join-Path $releaseRoot ".windows-installer-$Version.sed"
+$innoTemplatePath = Join-Path $repoRoot "scripts/installer/windows-installer.iss.template"
+$innoScriptPath = Join-Path $releaseRoot ".windows-installer-$Version.iss"
 
 if (Test-Path $packageDir) {
   Remove-Item $packageDir -Recurse -Force
@@ -43,6 +45,9 @@ if (Test-Path $bootstrapDir) {
 }
 if (Test-Path $iexpressSedPath) {
   Remove-Item $iexpressSedPath -Force
+}
+if (Test-Path $innoScriptPath) {
+  Remove-Item $innoScriptPath -Force
 }
 
 Copy-Item -Path $portableDir -Destination $packageDir -Recurse -Force
@@ -208,6 +213,34 @@ if (-not $zipSucceeded) {
   throw "Failed to create Windows package zip: $zipPath"
 }
 
+function Get-InnoSetupCompilerPath {
+  $candidate = Get-Command iscc.exe -ErrorAction SilentlyContinue
+  if ($null -ne $candidate) {
+    return $candidate.Source
+  }
+
+  foreach ($path in @(
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe"
+  )) {
+    if (Test-Path $path) {
+      return $path
+    }
+  }
+
+  return $null
+}
+
+function Escape-InnoLiteral {
+  param([string]$Value)
+
+  if ($null -eq $Value) {
+    return ""
+  }
+
+  return $Value.Replace('"', '""')
+}
+
 New-Item -ItemType Directory -Path $bootstrapDir | Out-Null
 Copy-Item -Path $zipPath -Destination (Join-Path $bootstrapDir $bootstrapZipName) -Force
 
@@ -219,19 +252,29 @@ set PAYLOAD=%ROOT%$bootstrapZipName
 set WORK=%TEMP%\CourseForge-Installer-%RANDOM%%RANDOM%
 set EXTRACT=%WORK%\payload
 set INSTALLER=%EXTRACT%\Install-CourseForge-Windows.ps1
-set INTERACTIVE=0
-if "%~1"=="" set INTERACTIVE=1
+set LOGDIR=%LOCALAPPDATA%\CourseForge\logs
+set LOGFILE=%LOGDIR%\installer-bootstrap.log
+if not exist "%LOGDIR%" mkdir "%LOGDIR%" >nul 2>&1
+set INTERACTIVE=1
+for %%A in (%*) do (
+  if /I "%%~A"=="-FullAuto" set INTERACTIVE=0
+  if /I "%%~A"=="-Silent" set INTERACTIVE=0
+  if /I "%%~A"=="-Uninstall" set INTERACTIVE=0
+)
+echo [%%DATE%% %%TIME%%] Bootstrap start. Args: %* >> "%LOGFILE%"
 if exist "%WORK%" rmdir /s /q "%WORK%" >nul 2>&1
 mkdir "%EXTRACT%" >nul 2>&1
 if not exist "%PAYLOAD%" (
   echo [CourseForge] Missing installer payload archive.
+  echo [%%DATE%% %%TIME%%] Missing payload archive: %PAYLOAD% >> "%LOGFILE%"
   if "%INTERACTIVE%"=="1" pause
   endlocal
   exit /b 1
 )
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '%PAYLOAD%' -DestinationPath '%EXTRACT%' -Force"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '%PAYLOAD%' -DestinationPath '%EXTRACT%' -Force" >> "%LOGFILE%" 2>&1
 if errorlevel 1 (
   echo [CourseForge] Failed to extract installer payload.
+  echo [%%DATE%% %%TIME%%] Expand-Archive failed. >> "%LOGFILE%"
   rmdir /s /q "%WORK%" >nul 2>&1
   if "%INTERACTIVE%"=="1" pause
   endlocal
@@ -239,6 +282,7 @@ if errorlevel 1 (
 )
 if not exist "%INSTALLER%" (
   echo [CourseForge] Missing extracted installer script.
+  echo [%%DATE%% %%TIME%%] Missing installer script after extraction: %INSTALLER% >> "%LOGFILE%"
   rmdir /s /q "%WORK%" >nul 2>&1
   if "%INTERACTIVE%"=="1" pause
   endlocal
@@ -247,18 +291,21 @@ if not exist "%INSTALLER%" (
 set INSTALL_ARGS=%*
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER%" %INSTALL_ARGS%
 set EXITCODE=%ERRORLEVEL%
+echo [%%DATE%% %%TIME%%] Installer exit code: %EXITCODE% >> "%LOGFILE%"
 rmdir /s /q "%WORK%" >nul 2>&1
 if "%INTERACTIVE%"=="1" (
   if "%EXITCODE%"=="0" (
     echo.
     echo CourseForge installed successfully.
     echo Shortcuts have been created on your Desktop and Start Menu.
+    echo Bootstrap log: %LOGFILE%
     echo.
     echo Press any key to close...
     pause >nul
   ) else (
     echo.
     echo Installation failed. Check logs in %%LOCALAPPDATA%%\CourseForge\logs for details.
+    echo Bootstrap log: %LOGFILE%
     echo.
     echo Press any key to close...
     pause >nul
@@ -267,6 +314,37 @@ if "%INTERACTIVE%"=="1" (
 endlocal & exit /b %EXITCODE%
 "@
 Set-Content -Path (Join-Path $bootstrapDir $bootstrapLauncherName) -Value $bootstrapLauncher -Encoding ASCII
+
+Copy-Item -Path (Join-Path $packageDir "CourseForge.ico") -Destination (Join-Path $bootstrapDir "CourseForge.ico") -Force
+
+$innoCompilerPath = Get-InnoSetupCompilerPath
+if (-not [string]::IsNullOrWhiteSpace($innoCompilerPath)) {
+  if (-not (Test-Path $innoTemplatePath)) {
+    throw "Inno Setup template not found: $innoTemplatePath"
+  }
+
+  $innoScript = Get-Content -Path $innoTemplatePath -Raw
+  $innoScript = $innoScript.Replace("__COURSEFORGE_VERSION__", (Escape-InnoLiteral -Value $Version))
+  $innoScript = $innoScript.Replace("__COURSEFORGE_BOOTSTRAP_DIR__", (Escape-InnoLiteral -Value $bootstrapDir))
+  $innoScript = $innoScript.Replace("__COURSEFORGE_RELEASE_ROOT__", (Escape-InnoLiteral -Value $releaseRoot))
+  Set-Content -Path $innoScriptPath -Value $innoScript -Encoding ASCII
+
+  & $innoCompilerPath /Qp $innoScriptPath | Out-Host
+  if ($LASTEXITCODE -ne 0) {
+    throw "Inno Setup failed to create the Windows installer executable (exit code $LASTEXITCODE)."
+  }
+
+  Remove-Item $bootstrapDir -Recurse -Force
+  Remove-Item $innoScriptPath -Force
+
+  Write-Host "[package] Windows package created: $zipPath"
+  Write-Host "[package] Windows installer created (GUI): $installerExePath"
+  Write-Host "[package] Installer file: $packageDir\Install-CourseForge-Windows.cmd"
+  return
+}
+
+Write-Warning "Inno Setup compiler (ISCC.exe) not found. Falling back to legacy bootstrap installer."
+Write-Warning "Install Inno Setup 6 to produce a standard Windows wizard UI installer on double-click."
 
 $iexpressSed = @"
 [Version]
@@ -302,9 +380,9 @@ SourceFiles0=$bootstrapDir
 [Strings]
 TargetName=$installerExePath
 FriendlyName=CourseForge Setup
-AppLaunched=cmd.exe /c $bootstrapLauncherName
-AdminQuietInstCmd=cmd.exe /c $bootstrapLauncherName -FullAuto
-UserQuietInstCmd=cmd.exe /c $bootstrapLauncherName -FullAuto
+AppLaunched=cmd.exe /c "%FILE1%"
+AdminQuietInstCmd=cmd.exe /c "%FILE1%" -FullAuto
+UserQuietInstCmd=cmd.exe /c "%FILE1%" -FullAuto
 FILE0=$bootstrapZipName
 FILE1=$bootstrapLauncherName
 "@
@@ -319,5 +397,5 @@ Remove-Item $bootstrapDir -Recurse -Force
 Remove-Item $iexpressSedPath -Force
 
 Write-Host "[package] Windows package created: $zipPath"
-Write-Host "[package] Windows installer created: $installerExePath"
+Write-Host "[package] Windows installer created (legacy bootstrap): $installerExePath"
 Write-Host "[package] Installer file: $packageDir\Install-CourseForge-Windows.cmd"

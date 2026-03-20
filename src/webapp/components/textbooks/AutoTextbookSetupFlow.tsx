@@ -563,6 +563,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   });
   const imageRef = useRef<HTMLImageElement | null>(null);
   const selectionResolverRef = useRef<((value: SelectionRect | null) => void) | null>(null);
+  const selectionRectRef = useRef<SelectionRect | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const lastMetadataPipelineRef = useRef<MetadataPipelineResult | null>(null);
   const lastMetadataCaptureStepRef = useRef<"cover" | "title">("cover");
   const coverFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -736,18 +738,31 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   async function requestSelection(imageDataUrl: string): Promise<SelectionRect | null> {
     setCaptureDialog({ open: true, imageDataUrl });
     setSelectionRect(null);
+    selectionRectRef.current = null;
+    setDragStart(null);
+    dragStartRef.current = null;
 
     return new Promise<SelectionRect | null>((resolve) => {
       selectionResolverRef.current = resolve;
     });
   }
 
+  function updateSelectionRect(next: SelectionRect | null): void {
+    selectionRectRef.current = next;
+    setSelectionRect(next);
+  }
+
+  function updateDragStart(next: { x: number; y: number } | null): void {
+    dragStartRef.current = next;
+    setDragStart(next);
+  }
+
   function closeSelectionDialog(selection: SelectionRect | null): void {
     selectionResolverRef.current?.(selection);
     selectionResolverRef.current = null;
     setCaptureDialog({ open: false, imageDataUrl: "" });
-    setSelectionRect(null);
-    setDragStart(null);
+    updateSelectionRect(null);
+    updateDragStart(null);
   }
 
   function handleSelectionPointerDown(event: React.PointerEvent<HTMLDivElement>): void {
@@ -760,12 +775,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     const rect = imageRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
     const y = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
-    setDragStart({ x, y });
-    setSelectionRect({ x, y, width: 0, height: 0 });
+    updateDragStart({ x, y });
+    updateSelectionRect({ x, y, width: 0, height: 0 });
   }
 
   function handleSelectionPointerMove(event: React.PointerEvent<HTMLDivElement>): void {
-    if (!dragStart || !imageRef.current) {
+    const activeDragStart = dragStartRef.current ?? dragStart;
+    if (!activeDragStart || !imageRef.current) {
       return;
     }
 
@@ -773,11 +789,11 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     const currentX = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
     const currentY = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
 
-    const x = Math.min(dragStart.x, currentX);
-    const y = Math.min(dragStart.y, currentY);
-    const width = Math.abs(currentX - dragStart.x);
-    const height = Math.abs(currentY - dragStart.y);
-    setSelectionRect({ x, y, width, height });
+    const x = Math.min(activeDragStart.x, currentX);
+    const y = Math.min(activeDragStart.y, currentY);
+    const width = Math.abs(currentX - activeDragStart.x);
+    const height = Math.abs(currentY - activeDragStart.y);
+    updateSelectionRect({ x, y, width, height });
   }
 
   function handleSelectionPointerUp(event: React.PointerEvent<HTMLDivElement>): void {
@@ -785,25 +801,46 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
 
-    setDragStart(null);
+    const activeDragStart = dragStartRef.current ?? dragStart;
+    updateDragStart(null);
 
-    if (selectionRect) {
-      const hasArea = selectionRect.width > 3 && selectionRect.height > 3;
+    if (!imageRef.current) {
+      closeSelectionDialog(null);
+      return;
+    }
+
+    const imageBounds = imageRef.current.getBoundingClientRect();
+
+    if (activeDragStart) {
+      const currentX = Math.max(0, Math.min(imageBounds.width, event.clientX - imageBounds.left));
+      const currentY = Math.max(0, Math.min(imageBounds.height, event.clientY - imageBounds.top));
+
+      const normalizedSelection: SelectionRect = {
+        x: Math.min(activeDragStart.x, currentX),
+        y: Math.min(activeDragStart.y, currentY),
+        width: Math.abs(currentX - activeDragStart.x),
+        height: Math.abs(currentY - activeDragStart.y),
+      };
+
+      const hasArea = normalizedSelection.width > 3 && normalizedSelection.height > 3;
       if (hasArea) {
-        closeSelectionDialog(selectionRect);
+        closeSelectionDialog(normalizedSelection);
         return;
       }
-
-      if (imageRef.current) {
-        const fullImageSelection: SelectionRect = {
-          x: 0,
-          y: 0,
-          width: imageRef.current.getBoundingClientRect().width,
-          height: imageRef.current.getBoundingClientRect().height,
-        };
-        closeSelectionDialog(fullImageSelection);
-      }
     }
+
+    const latestSelection = selectionRectRef.current;
+    if (latestSelection && latestSelection.width > 3 && latestSelection.height > 3) {
+      closeSelectionDialog(latestSelection);
+      return;
+    }
+
+    closeSelectionDialog({
+      x: 0,
+      y: 0,
+      width: imageBounds.width,
+      height: imageBounds.height,
+    });
   }
 
   function convertSelectionToNaturalPixels(selection: SelectionRect, image: HTMLImageElement): SelectionRect {

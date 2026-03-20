@@ -185,6 +185,23 @@ describe("metadata correction safeguards", () => {
     expect(result.blockedReason).toBe("flagged");
   });
 
+  it("flags invalid image snippet references", async () => {
+    saveCorrectionRecord({
+      pageType: "cover",
+      publisher: "McGraw Hill",
+      series: null,
+      subject: "Math",
+      originalVisionOutput: metadata(),
+      originalOcrOutput: { rawText: "Algebra" },
+      finalMetadata: metadata({ title: "Algebra 2" }),
+      imageReference: "invalid-reference",
+    });
+
+    const result = await syncMetadataCorrectionLearning({ optedIn: true });
+    expect(result.pushed).toBe(0);
+    expect(result.blockedReason).toBe("flagged");
+  });
+
   it("detects suspicious metadata poisoning patterns", async () => {
     createRecord({
       title: "X9QWRTYPLM 992344 ZZZZZ",

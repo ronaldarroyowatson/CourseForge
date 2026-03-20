@@ -1,0 +1,54 @@
+{
+    "generatedAtUtc":  "2026-03-20T22:12:57.1523347Z",
+    "version":  "1.2.73",
+    "files":  [
+                  {
+                      "path":  "AutoUpdate-CourseForge.ps1",
+                      "hash":  "71BAF7713B13756823AA790A3ADD5008037EC5997616DA22D5E20CA5A4415ACC"
+                  },
+                  {
+                      "path":  "Check-For-CourseForge-Updates.cmd",
+                      "hash":  "AA939B1766348F897999FA82453A1DC59F1A6AB71FED54EA84CB6E15B32BC739"
+                  },
+                  {
+                      "path":  "Start-CourseForge.cmd",
+                      "hash":  "D7BF0360813477C4A16364D9E4E5FFCCC8F2DEA6400BBF0F3902BE3A7CEF6310"
+                  },
+                  {
+                      "path":  "Install-CourseForge-Windows.ps1",
+                      "hash":  "A96B3FFF32E0453D7F2F707469D94CBC20F0F892FC806DCA70DD1EEBF80A438B"
+                  },
+                  {
+                      "path":  "Install-CourseForge-Windows.cmd",
+                      "hash":  "F8CDAB4A28B7B12CF835877003076D954622E5A23B9A330475218C6538B01FB3"
+                  },
+                  {
+                      "path":  "Uninstall-CourseForge-Windows.cmd",
+                      "hash":  "75DDE22B698B17C1C2329330E51E8EF940078A9F2A01BAD6C9A7BAAE383E9799"
+                  },
+                  {
+                      "path":  "README.md",
+                      "hash":  "8165E2A1EC1D446F9AF400119D232CDE66DC518EDED7BA5A6D58657F6886EC64"
+                  },
+                  {
+                      "path":  "CHANGELOG.md",
+                      "hash":  "27E07C923B73E4D34A73D92539E0CA3434887B0BDE52AA7FCC3459A7D7E9167B"
+                  },
+                  {
+                      "path":  "LICENSE",
+                      "hash":  "3156401F63F96D54E0912F6BD2117FF3E9E6577A048726622829DAAC5C52B7D8"
+                  },
+                  {
+                      "path":  "package-manifest.json",
+                      "hash":  "80B47E3F7BD23ABEBF9C9E8D5C31C2A3EC6493D6B1857708549099C1C7053A93"
+                  },
+                  {
+                      "path":  "webapp/index.html",
+                      "hash":  "14A8F00BAEF23AF0F1135CC469A5DCDAC9F70DF7D68B7A3574C1C32D265C9103"
+                  },
+                  {
+                      "path":  "extension/manifest.json",
+                      "hash":  "489A6EC8BACC2F1E547CA482F8C364208F68455DE0FFA08F1917F9C2932A23DE"
+                  }
+              ]
+}

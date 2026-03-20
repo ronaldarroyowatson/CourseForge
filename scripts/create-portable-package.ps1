@@ -85,6 +85,46 @@ function New-CourseForgeIcon {
   }
 }
 
+function New-PortableFileManifest {
+  param(
+    [string]$PackageRoot,
+    [string]$Version,
+    [string]$NodeRange,
+    [string]$ConfigSchemaVersion,
+    [string]$DbSchemaVersion,
+    [string]$ExtensionSchemaVersion
+  )
+
+  $files = Get-ChildItem -Path $PackageRoot -File -Recurse -ErrorAction Stop |
+    Where-Object {
+      $_.Name -notin @("manifest.json")
+    } |
+    ForEach-Object {
+      $relative = $_.FullName.Substring($PackageRoot.Length).TrimStart('\\').Replace('\\', '/')
+      $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+      [ordered]@{
+        path = $relative
+        sizeBytes = [Int64]$_.Length
+        sha256 = $hash
+      }
+    } |
+    Sort-Object -Property path
+
+  return [ordered]@{
+    name = "CourseForge"
+    version = $Version
+    generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
+    dependencyVersions = [ordered]@{
+      node = $NodeRange
+    }
+    requiredNodeVersion = $NodeRange
+    requiredConfigSchemaVersion = $ConfigSchemaVersion
+    requiredDatabaseSchemaVersion = $DbSchemaVersion
+    requiredExtensionSchemaVersion = $ExtensionSchemaVersion
+    files = $files
+  }
+}
+
 Write-Host "[package] Building webapp..."
 npm run build | Out-Host
 
@@ -126,7 +166,9 @@ Copy-Item -Path $updaterTemplatePath -Destination (Join-Path $packageDir "AutoUp
 # Copy required support files for running the webapp server
 $supportFilesToCopy = @(
   "Start-CourseForge.ps1",
-  "courseforge-serve.js"
+  "courseforge-serve.js",
+  "boot-splash.html",
+  "Test-CourseForge-Integrity.ps1"
 )
 foreach ($file in $supportFilesToCopy) {
   $sourcePath = Join-Path (Join-Path $PSScriptRoot "installer") $file
@@ -201,8 +243,11 @@ $manifest = [ordered]@{
     "Start-CourseForge.cmd",
     "Start-CourseForge.ps1",
     "courseforge-serve.js",
+    "boot-splash.html",
+    "Test-CourseForge-Integrity.ps1",
     "CourseForge-Start.url",
     "CourseForge.ico",
+    "manifest.json",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -217,6 +262,10 @@ $manifest = [ordered]@{
   }
 } | ConvertTo-Json -Depth 5
 Set-Content -Path (Join-Path $packageDir "package-manifest.json") -Value $manifest -Encoding ASCII
+
+$nodeRange = if ($packageJson.engines.node) { [string]$packageJson.engines.node } else { ">=20 <25" }
+$fileManifest = New-PortableFileManifest -PackageRoot $packageDir -Version $Version -NodeRange $nodeRange -ConfigSchemaVersion "1" -DbSchemaVersion "1" -ExtensionSchemaVersion "1"
+Set-Content -Path (Join-Path $packageDir "manifest.json") -Value ($fileManifest | ConvertTo-Json -Depth 6) -Encoding ASCII
 
 Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $zipPath -CompressionLevel Optimal
 

@@ -42,7 +42,7 @@ Source: "{#PackageDir}\*"; DestDir: "{tmp}\CourseForgePayload"; Flags: ignorever
 [Code]
 function BuildInstallArguments(): string;
 begin
-  Result := '-FullAuto -InstallPath "' + ExpandConstant('{app}') + '"';
+  Result := '-Silent -InstallPath "' + ExpandConstant('{app}') + '"';
 
   if WizardIsComponentSelected('webapp') and WizardIsComponentSelected('extension') then
     Result := Result + ' -Install_Both'
@@ -127,7 +127,7 @@ begin
     ' >> "' + LaunchLogPath + '" 2>&1';
 
   WizardForm.StatusLabel.Caption := 'Installing CourseForge...';
-  if not Exec('cmd.exe', LaunchCommand, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+  if not Exec('cmd.exe', LaunchCommand, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
     SaveStringToFile(LaunchLogPath,
       '[' + GetDateTimeString('yyyy-mm-dd hh:nn:ss', '-', ':') + '] ERROR: Exec launch failed.' + #13#10,

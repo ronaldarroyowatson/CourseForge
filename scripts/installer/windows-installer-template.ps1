@@ -44,6 +44,10 @@ function Get-TimestampString {
   return (Get-Date).ToUniversalTime().ToString("o")
 }
 
+function New-InstallerSupportCode {
+  return ([Guid]::NewGuid().ToString("N").Substring(0, 8).ToUpperInvariant())
+}
+
 function Initialize-Log {
   param([string]$Mode)
 
@@ -224,6 +228,26 @@ function Get-NodeInstallHealth {
   }
 }
 
+function Write-NodeEnvironmentDiagnostics {
+  param([hashtable]$Health)
+
+  $pathPreview = @($env:Path -split ';' | Select-Object -First 12) -join ';'
+  $runtimeState = if ($Health.healthy) { "healthy" } else { "unhealthy" }
+  Write-InstallerLog "Node diagnostics: state=$runtimeState source=$($Health.source) nodePath=$($Health.nodePath) nodeVersion=$($Health.nodeVersion) npmVersion=$($Health.npmVersion)"
+  Write-InstallerLog "Node diagnostics PATH preview: $pathPreview"
+
+  $orphanedFolders = @()
+  foreach ($candidate in @("C:\Program Files\nodejs")) {
+    if ((Test-Path $candidate) -and -not (Test-Path (Join-Path $candidate "node.exe"))) {
+      $orphanedFolders += $candidate
+    }
+  }
+
+  if ($orphanedFolders.Count -gt 0) {
+    Write-InstallerLog "Node diagnostics orphaned folders: $($orphanedFolders -join ', ')"
+  }
+}
+
 function Install-BundledNodeRuntime {
   param([string]$ResolvedInstallPath)
 
@@ -271,6 +295,7 @@ function Ensure-NodeDependency {
 
   Remove-StaleNodePathEntries
   $health = Get-NodeInstallHealth -ResolvedInstallPath $ResolvedInstallPath
+  Write-NodeEnvironmentDiagnostics -Health $health
   if ($health.healthy) {
     Write-InstallerLog "Node.js dependency is healthy from $($health.source): $($health.nodeVersion), npm $($health.npmVersion)."
     return
@@ -1839,8 +1864,9 @@ try {
   exit 0
 }
 catch {
-  Write-InstallerLog "Fatal installer error: $($_.Exception.Message)"
-  Write-Error $_
-  Show-CompletionDialog -Success $false -Body ("CourseForge setup failed: " + $_.Exception.Message)
+  $supportCode = New-InstallerSupportCode
+  Write-InstallerLog "Fatal installer error [$supportCode]: $($_.Exception.Message)"
+  Show-CompletionDialog -Success $false -Body ("We couldn't set up the runtime automatically. Please contact support with this code: " + $supportCode)
+  Write-Host ("CourseForge setup failed. Support code: " + $supportCode)
   exit 1
 }

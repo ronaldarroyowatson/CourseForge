@@ -195,6 +195,19 @@ describe("local update status endpoint", () => {
         releaseUrl: "https://example.invalid/releases/tag/v1.2.71",
         checkedAt: expect.any(String),
         error: null,
+        diagnostics: {
+          checkedAt: expect.any(String),
+          latestEndpoint: releaseServer.url,
+          tokenConfigured: false,
+        },
+      });
+
+      const diagnosticsResponse = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/updater-diagnostics`);
+      const diagnosticsPayload = await diagnosticsResponse.json();
+      expect(diagnosticsResponse.status).toBe(200);
+      expect(diagnosticsPayload.lastCheck).toMatchObject({
+        ok: true,
+        latestVersion: "1.2.71",
       });
     } finally {
       if (releaseServer) {
@@ -246,6 +259,11 @@ describe("local update status endpoint", () => {
         latestVersion: "1.2.73",
         progressPercent: 50,
       });
+
+      const bootStatusResponse = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/boot-status`);
+      const bootStatusPayload = await bootStatusResponse.json();
+      expect(bootStatusResponse.status).toBe(200);
+      expect(bootStatusPayload).toMatchObject({ ready: true });
     } finally {
       if (child) {
         await stopServer(child);

@@ -147,7 +147,7 @@ else {
 @echo off
 setlocal
 set SCRIPT_DIR=%~dp0
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%Start-CourseForge.ps1"
+start "" /B cmd /c powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%SCRIPT_DIR%Start-CourseForge.ps1"
 exit /b %ERRORLEVEL%
 "@
   Set-Content -Path (Join-Path $packageDir "Start-CourseForge.cmd") -Value $startCmdFallback -Encoding ASCII
@@ -333,7 +333,6 @@ mkdir "%EXTRACT%" >nul 2>&1
 if not exist "%PAYLOAD%" (
   echo [CourseForge] Missing installer payload archive.
   echo [%%DATE%% %%TIME%%] Missing payload archive: %PAYLOAD% >> "%LOGFILE%"
-  if "%INTERACTIVE%"=="1" pause
   endlocal
   exit /b 1
 )
@@ -342,7 +341,6 @@ if errorlevel 1 (
   echo [CourseForge] Failed to extract installer payload.
   echo [%%DATE%% %%TIME%%] Expand-Archive failed. >> "%LOGFILE%"
   rmdir /s /q "%WORK%" >nul 2>&1
-  if "%INTERACTIVE%"=="1" pause
   endlocal
   exit /b 1
 )
@@ -350,7 +348,6 @@ if not exist "%INSTALLER%" (
   echo [CourseForge] Missing extracted installer script.
   echo [%%DATE%% %%TIME%%] Missing installer script after extraction: %INSTALLER% >> "%LOGFILE%"
   rmdir /s /q "%WORK%" >nul 2>&1
-  if "%INTERACTIVE%"=="1" pause
   endlocal
   exit /b 1
 )
@@ -363,14 +360,7 @@ if "%EXITCODE%"=="0" (
   echo [%%DATE%% %%TIME%%] Installation succeeded. Exiting silently. >> "%LOGFILE%"
 ) else (
   echo [%%DATE%% %%TIME%%] Installation failed with exit code %EXITCODE%. >> "%LOGFILE%"
-  if "%INTERACTIVE%"=="1" (
-    echo.
-    echo Installation failed. Check logs in %%LOCALAPPDATA%%\CourseForge\logs for details.
-    echo Bootstrap log: %LOGFILE%
-    echo.
-    echo Press any key to close...
-    pause >nul
-  )
+  if "%INTERACTIVE%"=="1" echo Installation failed. Check logs in %%LOCALAPPDATA%%\CourseForge\logs for details.
 )
 endlocal & exit /b %EXITCODE%
 "@
@@ -427,7 +417,7 @@ Class=IEXPRESS
 SEDVersion=3
 [Options]
 PackagePurpose=InstallApp
-ShowInstallProgramWindow=1
+ShowInstallProgramWindow=0
 HideExtractAnimation=1
 UseLongFileName=1
 InsideCompressed=0

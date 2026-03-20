@@ -20,6 +20,32 @@ export function App(): React.JSX.Element {
   useAuthBootstrap();
   useAutoSync();
 
+  React.useEffect(() => {
+    if (typeof window === "undefined" || window.location.protocol === "file:") {
+      return;
+    }
+
+    const heartbeat = async () => {
+      try {
+        await fetch("/api/session-heartbeat", {
+          method: "GET",
+          cache: "no-store",
+        });
+      } catch {
+        // Heartbeat is best-effort and only available in packaged local-server mode.
+      }
+    };
+
+    void heartbeat();
+    const intervalId = window.setInterval(() => {
+      void heartbeat();
+    }, 10000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   const authStatus = useAuthStore((state) => state.authStatus);
 
   if (authStatus === "loading") {

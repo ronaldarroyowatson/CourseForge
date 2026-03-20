@@ -6,6 +6,23 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+### Added (Unreleased)
+
+- Integration coverage for launcher staged-update apply/retry behavior (`auto-update-launcher.integration.test.ts`).
+- Integration coverage for local update-status endpoint responses served by the installer runtime (`update-status-server.integration.test.ts`).
+
+### Changed (Unreleased)
+
+- Increased timeout for the portable updater missing-payload diagnostic integration test to reduce false negatives on slower Windows runners.
+
+### Verified (Unreleased)
+
+- `npm run test:e2e:webapp`
+- `npm run test:e2e:extension`
+- `npm run test:e2e:packaged`
+- `npm run package:windows`
+- `npm run verify:windows`
+
 ## [1.2.6] - 2026-03-19
 
 ### Fixed

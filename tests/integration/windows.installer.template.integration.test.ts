@@ -65,5 +65,18 @@ describe("windows installer template guardrails", () => {
     expect(template).toContain("installer-metadata.json");
     expect(template).toContain("installer-integrity.json");
     expect(template).toContain("rollback.log");
+    expect(template).toContain("New-InstallerSupportCode");
+    expect(template).toContain("Write-NodeEnvironmentDiagnostics");
+    expect(template).toContain("Please contact support with this code");
+  });
+
+  it("keeps launcher runtime sanity checks teacher-friendly", () => {
+    const launcher = readWorkspaceFile("scripts/installer/Start-CourseForge.ps1");
+
+    expect(launcher).toContain("Get-NodeRuntimeHealth");
+    expect(launcher).toContain("Get-OrphanedNodeFolders");
+    expect(launcher).toContain("Write-RuntimeDiagnostics");
+    expect(launcher).toContain("Show-RuntimeFailureAndExit");
+    expect(launcher).toContain("We couldn't set up the runtime automatically. Please contact support with this code");
   });
 });

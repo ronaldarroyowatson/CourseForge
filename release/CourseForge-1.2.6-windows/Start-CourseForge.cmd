@@ -9,4 +9,16 @@ set "SCRIPT_DIR=%~dp0"
 REM Call PowerShell to do the heavy lifting
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%Start-CourseForge.ps1"
 
-exit /b %ERRORLEVEL%
+REM Capture the exit code
+set "ERRORCODE=%ERRORLEVEL%"
+
+REM If there was an error, pause so the user can see the error message
+if not "%ERRORCODE%"=="0" (
+  echo.
+  echo [CourseForge] Launcher exited with error code %ERRORCODE%
+  echo [CourseForge] Check %%LOCALAPPDATA%%\CourseForge\logs\launcher.log for details
+  echo.
+  pause
+)
+
+exit /b %ERRORCODE%

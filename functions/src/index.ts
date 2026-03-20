@@ -279,6 +279,7 @@ const OCR_RATE_LIMIT_MAX_REQUESTS = 30;
 const MAX_OCR_IMAGE_DATA_URL_BYTES = 8 * 1024 * 1024;
 const DEFAULT_CORRECTION_DAILY_LIMIT = 25;
 const DEFAULT_CORRECTION_MAX_IMAGE_BYTES = 200 * 1024;
+const DEFAULT_CORRECTION_MIN_UPLOAD_INTERVAL_SECONDS = 5;
 
 function roundToOneDecimal(value: number): number {
   return Number(value.toFixed(1));
@@ -569,11 +570,56 @@ function validateCorrectionForQueue(record: MetadataCorrectionRecord): { valid: 
     return { valid: false, reason: "Image snippet reference is required." };
   }
 
+  const imageRef = record.imageReference.trim();
+  const imageReferenceValid = imageRef.startsWith("data:image/")
+    || imageRef.startsWith("hash://")
+    || imageRef.startsWith("blob:")
+    || imageRef.startsWith("https://")
+    || imageRef.startsWith("http://");
+
+  if (!imageReferenceValid) {
+    return { valid: false, reason: "Image snippet reference is invalid." };
+  }
+
   if (estimateImageReferenceBytes(record.imageReference) > DEFAULT_CORRECTION_MAX_IMAGE_BYTES) {
     return { valid: false, reason: `Image snippet exceeds ${DEFAULT_CORRECTION_MAX_IMAGE_BYTES} bytes.` };
   }
 
   return { valid: true };
+}
+
+function detectSuspiciousCorrection(record: MetadataCorrectionRecord): { suspicious: boolean; reason?: string } {
+  const combined = [
+    record.finalMetadata.title,
+    record.finalMetadata.subtitle,
+    record.finalMetadata.publisher,
+    record.finalMetadata.series,
+    record.finalMetadata.subject,
+    record.finalMetadata.rawText,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(" ");
+
+  const randomLikeRuns = (combined.match(/[A-Za-z0-9]{10,}/g) ?? []).filter((entry) => !/[aeiou]/i.test(entry));
+  if (randomLikeRuns.length >= 3) {
+    return { suspicious: true, reason: "Contains excessive random character sequences." };
+  }
+
+  const symbolRatio = (combined.match(/[^A-Za-z0-9\s]/g) ?? []).length / Math.max(1, combined.length);
+  if (symbolRatio > 0.28) {
+    return { suspicious: true, reason: "Contains too many non-text symbols for textbook metadata." };
+  }
+
+  const publisher = (record.finalMetadata.publisher ?? "").toLowerCase();
+  const priorPublisher = (record.originalVisionOutput?.publisher ?? "").toLowerCase();
+  if (publisher && priorPublisher && publisher !== priorPublisher) {
+    const looksNonsense = publisher.length < 3 || !/[aeiou]/.test(publisher) || /[0-9]{3,}/.test(publisher);
+    if (looksNonsense) {
+      return { suspicious: true, reason: "Publisher overwrite appears to be nonsense." };
+    }
+  }
+
+  return { suspicious: false };
 }
 
 function filterAndSortCorrections(
@@ -1764,6 +1810,19 @@ export const correctionsUpload = onCall(async (request) => {
   const limitsDoc = await firestore.doc(METADATA_CORRECTION_LIMITS_DOC_PATH).get();
   const limitsData = limitsDoc.data() ?? {};
   const dailyLimit = typeof limitsData.dailyLimit === "number" ? Math.max(1, Math.round(limitsData.dailyLimit)) : DEFAULT_CORRECTION_DAILY_LIMIT;
+  const minUploadIntervalSeconds = typeof limitsData.minUploadIntervalSeconds === "number"
+    ? Math.max(1, Math.round(limitsData.minUploadIntervalSeconds))
+    : DEFAULT_CORRECTION_MIN_UPLOAD_INTERVAL_SECONDS;
+
+  const uploadRuntimeRef = firestore.doc(`users/${request.auth.uid}/metadataCorrectionUsageRuntime/state`);
+  const uploadRuntimeSnapshot = await uploadRuntimeRef.get();
+  const lastUploadAtMs = uploadRuntimeSnapshot.exists && typeof uploadRuntimeSnapshot.data()?.lastUploadAtMs === "number"
+    ? Math.max(0, Math.round(uploadRuntimeSnapshot.data()!.lastUploadAtMs))
+    : 0;
+  const nowMs = Date.now();
+  if (lastUploadAtMs > 0 && (nowMs - lastUploadAtMs) < (minUploadIntervalSeconds * 1000)) {
+    throw new HttpsError("resource-exhausted", "Correction upload rate limit reached. Please retry shortly.");
+  }
 
   const todayKey = getDateKey();
   const usageRef = firestore.doc(`users/${request.auth.uid}/metadataCorrectionUsage/${todayKey}`);
@@ -1783,11 +1842,14 @@ export const correctionsUpload = onCall(async (request) => {
   const batch = firestore.batch();
   for (const correction of accepted) {
     const validation = validateCorrectionForQueue(correction);
+    const suspicious = detectSuspiciousCorrection(correction);
+    const flagged = correction.flagged || !validation.valid || suspicious.suspicious;
+    const reasonFlagged = correction.reasonFlagged ?? validation.reason ?? suspicious.reason;
     const docRef = firestore.doc(`metadataCorrections/${request.auth.uid}/items/${correction.id}`);
     batch.set(docRef, {
       ...correction,
-      flagged: correction.flagged || !validation.valid,
-      reasonFlagged: correction.reasonFlagged ?? validation.reason,
+      flagged,
+      reasonFlagged,
       reviewStatus: "pending",
       userId: request.auth.uid,
       createdAt: correction.timestamp,
@@ -1798,6 +1860,11 @@ export const correctionsUpload = onCall(async (request) => {
   batch.set(usageRef, {
     count: usedToday + accepted.length,
     date: todayKey,
+    updatedAt: new Date().toISOString(),
+  }, { merge: true });
+
+  batch.set(uploadRuntimeRef, {
+    lastUploadAtMs: nowMs,
     updatedAt: new Date().toISOString(),
   }, { merge: true });
 

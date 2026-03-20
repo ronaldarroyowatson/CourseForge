@@ -79,4 +79,67 @@ describe("metadataExtractionPipelineService", () => {
     expect(result.originalOcrOutput?.providerId).toBe("local_tesseract");
     expect(result.result.title).toBeTruthy();
   });
+
+  it("falls back to OCR when vision misses required metadata fields", async () => {
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "",
+            publisher: "Northbridge Press",
+            confidence: 0.95,
+            rawText: "Northbridge Press",
+          },
+        },
+      },
+    });
+
+    ocrMock.mockResolvedValue({
+      text: "Algebra Foundations\nNorthbridge Press",
+      providerId: "local_tesseract",
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "title", publisherHint: "Northbridge Press" }
+    );
+
+    expect(ocrMock).toHaveBeenCalledTimes(1);
+    expect(result.result.source).toBe("ocr");
+    expect(result.result.title).toBeTruthy();
+  });
+
+  it("merges vision and OCR metadata when vision is below threshold", async () => {
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "Algebra",
+            subtitle: null,
+            publisher: null,
+            confidence: 0.5,
+            rawText: "Algebra",
+          },
+        },
+      },
+    });
+
+    ocrMock.mockResolvedValue({
+      text: "Algebra\nNorthbridge Press\nGrade 8",
+      providerId: "local_tesseract",
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "cover", publisherHint: null }
+    );
+
+    expect(result.result.source).toBe("vision+ocr");
+    expect(result.result.title).toBe("Algebra");
+    expect(result.result.publisher).toBeTruthy();
+    expect(result.originalVisionOutput).not.toBeNull();
+    expect(result.originalOcrOutput?.providerId).toBe("local_tesseract");
+  });
 });

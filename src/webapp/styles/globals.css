@@ -659,6 +659,12 @@ body {
   width: 100%;
 }
 
+.settings-log-tail {
+  max-height: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 .admin-shell {
   margin-top: 1rem;
   display: grid;

@@ -52,8 +52,16 @@ export function CorrectionReviewPanel(): React.JSX.Element {
   const [total, setTotal] = useState(0);
   const [sortBy, setSortBy] = useState<"errorScore" | "timestamp" | "finalConfidence">("errorScore");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const [modifyTitle, setModifyTitle] = useState("");
-  const [modifyPublisher, setModifyPublisher] = useState("");
+  const [modifyMetadata, setModifyMetadata] = useState({
+    title: "",
+    subtitle: "",
+    edition: "",
+    publisher: "",
+    series: "",
+    gradeLevel: "",
+    subject: "",
+    confidence: "",
+  });
 
   const selectedRecord = useMemo(
     () => records.find((record) => record.id === selectedRecordId) ?? null,
@@ -100,14 +108,37 @@ export function CorrectionReviewPanel(): React.JSX.Element {
 
   useEffect(() => {
     if (!selectedRecord) {
-      setModifyTitle("");
-      setModifyPublisher("");
+      setModifyMetadata({
+        title: "",
+        subtitle: "",
+        edition: "",
+        publisher: "",
+        series: "",
+        gradeLevel: "",
+        subject: "",
+        confidence: "",
+      });
       return;
     }
 
-    setModifyTitle(selectedRecord.finalMetadata.title ?? "");
-    setModifyPublisher(selectedRecord.finalMetadata.publisher ?? "");
+    setModifyMetadata({
+      title: selectedRecord.finalMetadata.title ?? "",
+      subtitle: selectedRecord.finalMetadata.subtitle ?? "",
+      edition: selectedRecord.finalMetadata.edition ?? "",
+      publisher: selectedRecord.finalMetadata.publisher ?? "",
+      series: selectedRecord.finalMetadata.series ?? "",
+      gradeLevel: selectedRecord.finalMetadata.gradeLevel ?? "",
+      subject: selectedRecord.finalMetadata.subject ?? "",
+      confidence: selectedRecord.finalConfidence.toString(),
+    });
   }, [selectedRecord]);
+
+  function updateModifyMetadataField(
+    field: keyof typeof modifyMetadata,
+    value: string
+  ): void {
+    setModifyMetadata((current) => ({ ...current, [field]: value }));
+  }
 
   function updateFilter<K extends keyof FiltersState>(field: K, value: FiltersState[K]): void {
     setFilters((current) => ({ ...current, [field]: value }));
@@ -165,8 +196,14 @@ export function CorrectionReviewPanel(): React.JSX.Element {
             action,
             recordIds: [selectedRecord.id],
             modifiedMetadata: {
-              title: modifyTitle || null,
-              publisher: modifyPublisher || null,
+              title: modifyMetadata.title || null,
+              subtitle: modifyMetadata.subtitle || null,
+              edition: modifyMetadata.edition || null,
+              publisher: modifyMetadata.publisher || null,
+              series: modifyMetadata.series || null,
+              gradeLevel: modifyMetadata.gradeLevel || null,
+              subject: modifyMetadata.subject || null,
+              confidence: Math.max(0, Math.min(1, Number(modifyMetadata.confidence) || selectedRecord.finalConfidence)),
             },
           }
         : {
@@ -382,11 +419,35 @@ export function CorrectionReviewPanel(): React.JSX.Element {
             </label>
             <label>
               Final title
-              <input value={modifyTitle} onChange={(event) => setModifyTitle(event.target.value)} />
+              <input value={modifyMetadata.title} onChange={(event) => updateModifyMetadataField("title", event.target.value)} />
+            </label>
+            <label>
+              Final subtitle
+              <input value={modifyMetadata.subtitle} onChange={(event) => updateModifyMetadataField("subtitle", event.target.value)} />
+            </label>
+            <label>
+              Final edition
+              <input value={modifyMetadata.edition} onChange={(event) => updateModifyMetadataField("edition", event.target.value)} />
             </label>
             <label>
               Final publisher
-              <input value={modifyPublisher} onChange={(event) => setModifyPublisher(event.target.value)} />
+              <input value={modifyMetadata.publisher} onChange={(event) => updateModifyMetadataField("publisher", event.target.value)} />
+            </label>
+            <label>
+              Final series
+              <input value={modifyMetadata.series} onChange={(event) => updateModifyMetadataField("series", event.target.value)} />
+            </label>
+            <label>
+              Final grade level
+              <input value={modifyMetadata.gradeLevel} onChange={(event) => updateModifyMetadataField("gradeLevel", event.target.value)} />
+            </label>
+            <label>
+              Final subject
+              <input value={modifyMetadata.subject} onChange={(event) => updateModifyMetadataField("subject", event.target.value)} />
+            </label>
+            <label>
+              Final confidence (0-1)
+              <input value={modifyMetadata.confidence} onChange={(event) => updateModifyMetadataField("confidence", event.target.value)} />
             </label>
           </div>
 

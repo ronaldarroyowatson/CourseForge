@@ -67,6 +67,41 @@ type UpdaterProgress = {
   message?: string | null;
   lastError?: string | null;
   updatedAt?: string | null;
+  filesTotal?: number | null;
+  filesPlanned?: number | null;
+  filesProcessed?: number | null;
+  filesFailed?: number | null;
+};
+
+type UpdaterDiagnostics = {
+  checkedAt?: string | null;
+  currentVersion?: string | null;
+  pendingUpdateVersion?: string | null;
+  pendingUpdateStagedAt?: string | null;
+  lastCheck?: {
+    ok?: boolean;
+    available?: boolean;
+    latestVersion?: string | null;
+    error?: string | null;
+    diagnostics?: {
+      responseStatus?: number | null;
+      responseStatusText?: string | null;
+      responseBodySnippet?: string | null;
+      latestEndpoint?: string | null;
+      tokenConfigured?: boolean;
+    } | null;
+  } | null;
+  updaterLogTail?: string[] | null;
+  integrity?: {
+    ok?: boolean;
+    summary?: {
+      trackedFiles?: number;
+      missing?: number;
+      modified?: number;
+      corrupted?: number;
+      extras?: number;
+    };
+  } | null;
 };
 
 /**
@@ -109,6 +144,9 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   const [pendingUpdateVersion, setPendingUpdateVersion] = React.useState<string | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = React.useState<string>("unknown");
   const [updaterProgress, setUpdaterProgress] = React.useState<UpdaterProgress | null>(null);
+  const [updaterDiagnostics, setUpdaterDiagnostics] = React.useState<UpdaterDiagnostics | null>(null);
+  const [showUpdaterDiagnostics, setShowUpdaterDiagnostics] = React.useState(false);
+  const [isLoadingUpdaterDiagnostics, setIsLoadingUpdaterDiagnostics] = React.useState(false);
   const languageOptions = React.useMemo(() => getSupportedLanguages(), []);
 
   async function persistPreferences(nextLanguage: string, nextAccessibility = accessibility): Promise<void> {
@@ -283,6 +321,26 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
     })();
   }, []);
 
+  async function refreshUpdaterDiagnostics(): Promise<void> {
+    setIsLoadingUpdaterDiagnostics(true);
+    try {
+      const response = await fetch("/api/updater-diagnostics", { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = await response.json() as UpdaterDiagnostics;
+      setUpdaterDiagnostics(payload);
+      if (payload.lastCheck?.latestVersion) {
+        setLatestAvailableVersion(payload.lastCheck.latestVersion);
+      }
+    } catch {
+      // Best effort diagnostics view only.
+    } finally {
+      setIsLoadingUpdaterDiagnostics(false);
+    }
+  }
+
   React.useEffect(() => {
     let active = true;
 
@@ -442,17 +500,21 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
         const trimmedBody = nonJsonBody.trim();
         if (data?.error) {
           setUpdateCheckStatus(`Update check failed (${response.status}): ${data.error}`);
+          void refreshUpdaterDiagnostics();
           return;
         }
         if (trimmedBody) {
           setUpdateCheckStatus(`Update check failed (${response.status}): ${trimmedBody.slice(0, 180)}`);
+          void refreshUpdaterDiagnostics();
           return;
         }
         setUpdateCheckStatus(`Update check failed with HTTP ${response.status}.`);
+        void refreshUpdaterDiagnostics();
         return;
       }
       if (!data || !data.ok) {
         setUpdateCheckStatus(data?.error || "Unable to check for updates right now. Please try again later.");
+        void refreshUpdaterDiagnostics();
         return;
       }
       const latest = data.latestVersion || null;
@@ -480,6 +542,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown request failure";
       setUpdateCheckStatus(`Unable to check for updates right now (${errorMessage}).`);
+      void refreshUpdaterDiagnostics();
     } finally {
       setIsCheckingUpdate(false);
     }
@@ -715,6 +778,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
           <h3>App Updates</h3>
           <p>Current version: <strong>v{currentAppVersion}</strong></p>
           <p>Latest available: <strong>{latestAvailableVersion ? `v${latestAvailableVersion}` : "Not checked yet"}</strong></p>
+          <p>Latest detected by updater service: <strong>{updaterProgress?.latestVersion ? `v${updaterProgress.latestVersion}` : "No updater detection yet"}</strong></p>
           <p>The portable and Windows launcher packages update automatically in the background each time you start the app.</p>
           {updaterProgress?.message ? (
             <p className="settings-meta">Updater status: {updaterProgress.message}</p>
@@ -733,6 +797,14 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
                 : ""}
             </p>
           ) : null}
+          {typeof updaterProgress?.filesTotal === "number" ? (
+            <p className="settings-meta">
+              Files in update: {updaterProgress.filesTotal}
+              {typeof updaterProgress.filesPlanned === "number" ? ` | planned: ${updaterProgress.filesPlanned}` : ""}
+              {typeof updaterProgress.filesProcessed === "number" ? ` | processed: ${updaterProgress.filesProcessed}` : ""}
+              {typeof updaterProgress.filesFailed === "number" ? ` | failed: ${updaterProgress.filesFailed}` : ""}
+            </p>
+          ) : null}
           {updaterProgress?.lastError ? (
             <p className="error-text">Updater error: {updaterProgress.lastError}</p>
           ) : null}
@@ -747,7 +819,53 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
           >
             {isCheckingUpdate ? "Checking..." : "Check for Updates"}
           </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              setShowUpdaterDiagnostics((previous) => !previous);
+              if (!showUpdaterDiagnostics) {
+                void refreshUpdaterDiagnostics();
+              }
+            }}
+            disabled={isLoadingUpdaterDiagnostics}
+          >
+            {isLoadingUpdaterDiagnostics ? "Loading diagnostics..." : (showUpdaterDiagnostics ? "Hide Updater Diagnostics" : "Show Updater Diagnostics")}
+          </button>
           {updateCheckStatus ? <p className="settings-meta">{updateCheckStatus}</p> : null}
+          {showUpdaterDiagnostics ? (
+            <div className="settings-meta" aria-live="polite">
+              <p>Last diagnostics snapshot: {updaterDiagnostics?.checkedAt ? new Date(updaterDiagnostics.checkedAt).toLocaleString() : "Not available"}</p>
+              <p>Last check result: {updaterDiagnostics?.lastCheck?.ok ? "Success" : "Failure or unavailable"}</p>
+              {updaterDiagnostics?.lastCheck?.error ? <p className="error-text">Last check error: {updaterDiagnostics.lastCheck.error}</p> : null}
+              {updaterDiagnostics?.lastCheck?.diagnostics?.responseStatus ? (
+                <p>HTTP status: {updaterDiagnostics.lastCheck.diagnostics.responseStatus} {updaterDiagnostics.lastCheck.diagnostics.responseStatusText || ""}</p>
+              ) : null}
+              {updaterDiagnostics?.lastCheck?.diagnostics?.latestEndpoint ? (
+                <p>Latest endpoint: {updaterDiagnostics.lastCheck.diagnostics.latestEndpoint}</p>
+              ) : null}
+              <p>Token configured: {updaterDiagnostics?.lastCheck?.diagnostics?.tokenConfigured ? "Yes" : "No"}</p>
+              {updaterDiagnostics?.lastCheck?.diagnostics?.responseBodySnippet ? (
+                <p>Response snippet: {updaterDiagnostics.lastCheck.diagnostics.responseBodySnippet}</p>
+              ) : null}
+              {updaterDiagnostics?.updaterLogTail && updaterDiagnostics.updaterLogTail.length > 0 ? (
+                <details>
+                  <summary>Updater log tail</summary>
+                  <pre className="settings-log-tail">
+                    {updaterDiagnostics.updaterLogTail.join("\n")}
+                  </pre>
+                </details>
+              ) : null}
+              {updaterDiagnostics?.integrity ? (
+                <p>
+                  Integrity: {updaterDiagnostics.integrity.ok ? "Healthy" : "Issues detected"}
+                  {updaterDiagnostics.integrity.summary
+                    ? ` | tracked: ${updaterDiagnostics.integrity.summary.trackedFiles ?? 0}, missing: ${updaterDiagnostics.integrity.summary.missing ?? 0}, modified: ${updaterDiagnostics.integrity.summary.modified ?? 0}, corrupted: ${updaterDiagnostics.integrity.summary.corrupted ?? 0}, extra: ${updaterDiagnostics.integrity.summary.extras ?? 0}`
+                    : ""}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {latestReleaseUrl ? (
             <p className="settings-meta">
               <a href={latestReleaseUrl} target="_blank" rel="noopener noreferrer">View release on GitHub</a>

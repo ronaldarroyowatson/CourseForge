@@ -2,9 +2,9 @@
 
 CourseForge is a local-first curriculum authoring platform for teachers. It combines a browser extension for quick capture with a full web app for textbook management, sync, moderation, and XML export.
 
-Version `1.2.4` hardens Auto textbook onboarding with image-level moderation, educational review holds, and admin cloud-sync blocking controls.
+Version `1.2.6` focuses on Windows installer reliability and staged auto-update hardening, including improved launcher apply/retry behavior and packaged-run verification coverage.
 
-Quick release note: v1.2.4 focuses on safer textbook image ingestion with local-only hold behavior until admin review.
+Quick release note: v1.2.6 improves first-time Windows setup and makes staged updates safer and easier to diagnose.
 
 ## What it does
 

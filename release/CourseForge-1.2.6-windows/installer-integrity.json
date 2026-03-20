@@ -1,5 +1,5 @@
 {
-    "generatedAtUtc":  "2026-03-20T03:24:42.2751792Z",
+    "generatedAtUtc":  "2026-03-20T20:30:30.7796566Z",
     "version":  "1.2.6",
     "files":  [
                   {
@@ -12,11 +12,11 @@
                   },
                   {
                       "path":  "Start-CourseForge.cmd",
-                      "hash":  "4CC0B7BC3A1E21757D74E7F4708193F01AE77519563AE85A087EDD860779FACE"
+                      "hash":  "BD0B575D1409284F91D214415D689E1CBD34619DE03583EC5F6769ED3A814F88"
                   },
                   {
                       "path":  "Install-CourseForge-Windows.ps1",
-                      "hash":  "970E3772B017DC0A5EE0AA4E3A6D6111604A510CB19E4637A5FB09FA66AD20A1"
+                      "hash":  "BCA1F144D314D7928CB4694752DE1D49F3A81480E1B59232E6272A6B720EF264"
                   },
                   {
                       "path":  "Install-CourseForge-Windows.cmd",
@@ -28,11 +28,11 @@
                   },
                   {
                       "path":  "README.md",
-                      "hash":  "2EE7B6E26ADC9669BC514BEFB265B753FA056B0B990555500D5E2AE20230FFA6"
+                      "hash":  "8165E2A1EC1D446F9AF400119D232CDE66DC518EDED7BA5A6D58657F6886EC64"
                   },
                   {
                       "path":  "CHANGELOG.md",
-                      "hash":  "73904FC010FB791BA0B72F15E646360C1D215F6B356F9519A093AB4E0E3AC255"
+                      "hash":  "27E07C923B73E4D34A73D92539E0CA3434887B0BDE52AA7FCC3459A7D7E9167B"
                   },
                   {
                       "path":  "LICENSE",
@@ -40,11 +40,11 @@
                   },
                   {
                       "path":  "package-manifest.json",
-                      "hash":  "09007F0A597FE61D8A065258449FA1D03DA374244AA446A92D97C95809FD20FB"
+                      "hash":  "FBA3746345E70AD4642E1540D5414317C4D67C07410563383C2AA13146655000"
                   },
                   {
                       "path":  "webapp/index.html",
-                      "hash":  "5D43BF2D95FA2658A171B5F5331C6645C71435BB8CF97641CC5C7D362FFC794E"
+                      "hash":  "BA83D30C8982B7518E266307137F102341D20AB64F27734E22AE55E562BDBAAA"
                   },
                   {
                       "path":  "extension/manifest.json",

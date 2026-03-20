@@ -155,6 +155,7 @@ function runLauncher(root: string, binDir: string, options: LauncherRunOptions) 
         TMP: tempDir,
         PATH: `${binDir};${process.env.PATH ?? ""}`,
         ROBOCOPY_MODE: options.robocopyMode,
+        COURSEFORGE_DISABLE_AUTO_BROWSER: "1",
       },
     }
   );

@@ -1,10 +1,10 @@
 {
-    "generatedAtUtc":  "2026-03-20T01:09:01.6300569Z",
+    "generatedAtUtc":  "2026-03-20T03:24:42.2751792Z",
     "version":  "1.2.6",
     "files":  [
                   {
                       "path":  "AutoUpdate-CourseForge.ps1",
-                      "hash":  "EB24E6798CE4C90D0329D65EA8480ADE3B526BAD1D60C8748EB26FF4F3098E0A"
+                      "hash":  "60604D207050A2340510E99A73B03D376AD0905F1477BFE80FA3585E0A8DEAED"
                   },
                   {
                       "path":  "Check-For-CourseForge-Updates.cmd",
@@ -40,11 +40,11 @@
                   },
                   {
                       "path":  "package-manifest.json",
-                      "hash":  "BE1143E16F6C6954BEDCBAA6927B52D6872DF6E787B5E61F1C494379D77DB3D2"
+                      "hash":  "09007F0A597FE61D8A065258449FA1D03DA374244AA446A92D97C95809FD20FB"
                   },
                   {
                       "path":  "webapp/index.html",
-                      "hash":  "FF24C25A92F3255D4CDD8D63111F9057DA8D2F19E238796F9DE04E90D749CC09"
+                      "hash":  "5D43BF2D95FA2658A171B5F5331C6645C71435BB8CF97641CC5C7D362FFC794E"
                   },
                   {
                       "path":  "extension/manifest.json",

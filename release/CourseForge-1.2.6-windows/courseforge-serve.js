@@ -16,6 +16,22 @@ const portArg = process.argv[3];
 const defaultPort = 3000;
 const host = process.argv[4] || "localhost";
 
+// Package root is one level above the webapp folder.
+// pending-update.json is written here by the updater.
+const packageRoot = path.dirname(webappPath);
+
+function readJsonFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    console.error(`[CourseForge server] Failed to read JSON file ${filePath}:`, error);
+    return null;
+  }
+}
+
 let port = defaultPort;
 if (portArg && !isNaN(portArg)) {
   port = parseInt(portArg, 10);
@@ -52,6 +68,30 @@ function startServer(finalPort) {
     try {
       const url = new URL(req.url, `http://localhost:${finalPort}`);
       let pathname = url.pathname;
+
+      // ── /api/* routes ──
+      if (pathname.startsWith("/api/")) {
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Content-Type", "application/json");
+        if (pathname === "/api/update-status") {
+          const pendingPath = path.join(packageRoot, "pending-update.json");
+          const manifestPath = path.join(packageRoot, "package-manifest.json");
+          const raw = readJsonFile(pendingPath);
+          const manifest = readJsonFile(manifestPath);
+          res.writeHead(200);
+          res.end(JSON.stringify({
+            available: Boolean(raw && raw.version),
+            version: raw?.version || null,
+            releaseUrl: raw?.releaseUrl || null,
+            stagedAt: raw?.stagedAt || null,
+            currentVersion: manifest?.version || null,
+          }));
+        } else {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: "not found" }));
+        }
+        return;
+      }
 
       // Remove leading slash for file path
       if (pathname.startsWith("/")) {
@@ -122,6 +162,7 @@ function startServer(finalPort) {
   server.listen(finalPort, host, () => {
     console.log(`CourseForge server running at http://${host}:${finalPort}`);
     console.log(`Serving from: ${webappPath}`);
+    console.log(`Package root: ${packageRoot}`);
   });
 
   server.on("error", (err) => {

@@ -60,6 +60,14 @@ interface CaptureDialogState {
   imageDataUrl: string;
 }
 
+interface UploadPreviewState {
+  open: boolean;
+  imageDataUrl: string;
+  ocrText: string;
+  ocrProviderId: string;
+  editableOcrText: string;
+}
+
 interface CaptureResult {
   imageDataUrl: string;
   ocrText: string;
@@ -496,8 +504,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   const [captureDialog, setCaptureDialog] = useState<CaptureDialogState>({ open: false, imageDataUrl: "" });
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [uploadPreview, setUploadPreview] = useState<UploadPreviewState>({
+    open: false,
+    imageDataUrl: "",
+    ocrText: "",
+    ocrProviderId: "",
+    editableOcrText: "",
+  });
   const imageRef = useRef<HTMLImageElement | null>(null);
   const selectionResolverRef = useRef<((value: SelectionRect | null) => void) | null>(null);
+  const coverFileInputRef = useRef<HTMLInputElement | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pendingUploadLimitResultRef = useRef<ReturnType<typeof enforceAutoCaptureLimit> | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -880,6 +899,119 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   function runTocExtraction(): void {
     applyTocFromText(ocrDraft);
+  }
+
+  async function processImageFileForCover(file: File): Promise<void> {
+    if (!file.type.startsWith("image/")) {
+      setErrorMessage("Please select an image file (JPEG, PNG, WEBP, etc.).");
+      return;
+    }
+
+    const limitResult = enforceAutoCaptureLimit(usage, "cover", DEFAULT_AUTO_CAPTURE_LIMITS);
+    if (!limitResult.allowed) {
+      setErrorMessage(limitResult.message ?? "Capture limit reached.");
+      appendDebugLogEntry({
+        eventType: "warning",
+        message: "File upload blocked by limit guard.",
+        autoModeStep: "cover",
+        context: { usage, limits: DEFAULT_AUTO_CAPTURE_LIMITS },
+      });
+      return;
+    }
+
+    setErrorMessage(null);
+    setInfoMessage(null);
+    setIsBusy(true);
+
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("Unable to read image file."));
+        reader.readAsDataURL(file);
+      });
+
+      setIsRunningOcr(true);
+      const ocr = await extractTextFromImageWithFallback(dataUrl);
+      setIsRunningOcr(false);
+      setOcrProviderStatus(`OCR provider: ${ocr.providerId}`);
+
+      // Show preview dialog so the user can review image and OCR text before confirming.
+      setUploadPreview({
+        open: true,
+        imageDataUrl: dataUrl,
+        ocrText: ocr.text,
+        ocrProviderId: ocr.providerId,
+        editableOcrText: ocr.text,
+      });
+
+      // Commit happens in confirmUploadPreview; store limitResult for use there.
+      pendingUploadLimitResultRef.current = limitResult;
+    } catch {
+      setIsRunningOcr(false);
+      setErrorMessage("Unable to process image file. Make sure the file is a valid image and try again.");
+      appendDebugLogEntry({
+        eventType: "error",
+        message: "Cover file upload processing failed.",
+        autoModeStep: "cover",
+      });
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  function confirmUploadPreview(): void {
+    const limitResult = pendingUploadLimitResultRef.current;
+    if (!limitResult) {
+      return;
+    }
+
+    const { imageDataUrl, editableOcrText, ocrProviderId } = uploadPreview;
+
+    setUsage(limitResult.nextUsage);
+    persistCaptureUsage(draftKeyRef.current, limitResult.nextUsage);
+    pendingUploadLimitResultRef.current = null;
+
+    setCoverImageDataUrl(imageDataUrl);
+    setOcrDraft(editableOcrText);
+    setModerationAssessment(null);
+    applyMetadataFromText(editableOcrText, "cover");
+    setInfoMessage(`Cover image loaded and parsed. Review the metadata fields before accepting. (OCR: ${ocrProviderId})`);
+    setUploadPreview((current) => ({ ...current, open: false }));
+
+    appendDebugLogEntry({
+      eventType: "auto_capture_complete",
+      message: "Cover confirmed from uploaded file.",
+      autoModeStep: "cover",
+      context: {
+        usageAfterCapture: limitResult.nextUsage,
+        ocrProvider: ocrProviderId,
+      },
+    });
+  }
+
+  function cancelUploadPreview(): void {
+    pendingUploadLimitResultRef.current = null;
+    setUploadPreview((current) => ({ ...current, open: false }));
+    setInfoMessage(null);
+  }
+
+  function handleCoverDropZoneDragOver(event: React.DragEvent<HTMLDivElement>): void {
+    event.preventDefault();
+    setIsDragOver(true);
+  }
+
+  function handleCoverDropZoneDragLeave(): void {
+    setIsDragOver(false);
+  }
+
+  function handleCoverDropZoneDrop(event: React.DragEvent<HTMLDivElement>): void {
+    event.preventDefault();
+    setIsDragOver(false);
+    const file = event.dataTransfer.files[0];
+    if (file) {
+      void processImageFileForCover(file);
+    }
   }
 
   async function handleCaptureCover(): Promise<void> {
@@ -1298,6 +1430,20 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       ) : null}
       {ocrProviderStatus ? <p className="form-hint">{ocrProviderStatus}</p> : null}
       {isRunningOcr ? <p className="form-hint">Running OCR...</p> : null}
+
+      {step === "cover" ? (
+        <div
+          className={`cover-drop-zone${isDragOver ? " cover-drop-zone--active" : ""}`}
+          onDragOver={handleCoverDropZoneDragOver}
+          onDragLeave={handleCoverDropZoneDragLeave}
+          onDrop={handleCoverDropZoneDrop}
+          role="region"
+          aria-label="Cover image drop zone"
+        >
+          <p className="cover-drop-zone__hint">Drag &amp; drop a cover image file here, or use the buttons below.</p>
+        </div>
+      ) : null}
+
       {duplicateMatch ? (
         <div className="panel" role="group" aria-label="Duplicate textbook resolution">
           <p className="form-hint">
@@ -1319,11 +1465,29 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         </div>
       ) : null}
 
+      <input
+        ref={coverFileInputRef}
+        type="file"
+        accept="image/*"
+        className="cover-file-input"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void processImageFileForCover(file);
+          event.target.value = "";
+        }}
+        aria-label="Upload cover image file"
+      />
+
       <div className="form-actions">
         {step === "cover" ? (
-          <button type="button" onClick={() => void handleCaptureCover()} disabled={isBusy}>
-            Capture Cover
-          </button>
+          <>
+            <button type="button" onClick={() => void handleCaptureCover()} disabled={isBusy}>
+              Capture Cover
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => coverFileInputRef.current?.click()} disabled={isBusy}>
+              Upload Image
+            </button>
+          </>
         ) : null}
 
         {step === "title" ? (
@@ -1375,6 +1539,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           <img src={coverImageDataUrl} alt="Auto-cropped cover" className="cover-preview-thumb" />
           <button type="button" className="btn-secondary" onClick={() => void handleCaptureCover()} disabled={isBusy}>
             Retake
+          </button>
+          <button type="button" className="btn-secondary" onClick={() => coverFileInputRef.current?.click()} disabled={isBusy}>
+            Upload New
           </button>
         </div>
       ) : null}
@@ -1539,6 +1706,49 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             <button type="button" className="btn-secondary" onClick={() => setStep("toc")}>
               Back to TOC Capture
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {uploadPreview.open ? (
+        <div className="capture-overlay" role="dialog" aria-modal="true" aria-label="Cover image upload preview">
+          <div className="capture-overlay__panel upload-preview-panel">
+            <h4>Review uploaded cover image</h4>
+            <p className="form-hint">
+              Verify the image and OCR text below. Edit the OCR text if anything was misread, then confirm to apply.
+            </p>
+            <div className="upload-preview-body">
+              <div className="upload-preview-image-wrap">
+                <img
+                  src={uploadPreview.imageDataUrl}
+                  alt="Cover image preview"
+                  className="upload-preview-image"
+                />
+                <p className="form-hint upload-preview-provider">OCR provider: {uploadPreview.ocrProviderId}</p>
+              </div>
+              <div className="upload-preview-ocr-wrap">
+                <label>
+                  Extracted text (editable)
+                  <textarea
+                    className="upload-preview-ocr-textarea"
+                    value={uploadPreview.editableOcrText}
+                    onChange={(event) =>
+                      setUploadPreview((current) => ({ ...current, editableOcrText: event.target.value }))
+                    }
+                    placeholder="No text was extracted. You can type or paste the cover text manually."
+                    rows={14}
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="form-actions">
+              <button type="button" onClick={confirmUploadPreview}>
+                Confirm &amp; Apply
+              </button>
+              <button type="button" className="btn-secondary" onClick={cancelUploadPreview}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

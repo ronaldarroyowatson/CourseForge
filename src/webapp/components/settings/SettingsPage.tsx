@@ -27,6 +27,13 @@ interface SettingsPageProps {
   onBack: () => void;
 }
 
+const RELEASES_API_URL = "https://api.github.com/repos/ronaldarroyowatson/CourseForge/releases/latest";
+
+function parseSemver(value: string): number[] | null {
+  const match = value.match(/(\d+)\.(\d+)\.(\d+)/);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
 /**
  * Centralized user preferences for sync safety and appearance.
  */
@@ -59,6 +66,11 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   const [preferenceStatus, setPreferenceStatus] = React.useState<string | null>(null);
   const [languageRegistryStatus, setLanguageRegistryStatus] = React.useState<string | null>(null);
   const [languageRoadmapPreview, setLanguageRoadmapPreview] = React.useState<string[]>([]);
+  const [updateCheckStatus, setUpdateCheckStatus] = React.useState<string | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = React.useState(false);
+  const [latestReleaseUrl, setLatestReleaseUrl] = React.useState<string | null>(null);
+  const [pendingUpdateVersion, setPendingUpdateVersion] = React.useState<string | null>(null);
+  const [currentAppVersion, setCurrentAppVersion] = React.useState<string>("unknown");
   const languageOptions = React.useMemo(() => getSupportedLanguages(), []);
 
   async function persistPreferences(nextLanguage: string, nextAccessibility = accessibility): Promise<void> {
@@ -167,6 +179,23 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       setDebugPolicyStatus(policy.enabledGlobally
         ? "Global debug logging is enabled."
         : "Global debug logging is currently disabled by an admin.");
+
+      try {
+        const response = await fetch("/api/update-status");
+        if (response.ok) {
+          const data = await response.json() as {
+            available: boolean;
+            version?: string | null;
+            currentVersion?: string | null;
+          };
+          if (data.currentVersion) {
+            setCurrentAppVersion(data.currentVersion);
+          }
+          setPendingUpdateVersion(data.available && data.version ? data.version : null);
+        }
+      } catch {
+        // The endpoint only exists in packaged launcher mode.
+      }
     })();
   }, []);
 
@@ -238,6 +267,51 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       );
     } catch {
       setLanguageRegistryStatus("Unable to check for language updates right now.");
+    }
+  }
+
+  async function handleCheckForUpdates(): Promise<void> {
+    setIsCheckingUpdate(true);
+    setUpdateCheckStatus(null);
+    setLatestReleaseUrl(null);
+    try {
+      const response = await fetch(RELEASES_API_URL, {
+        headers: { Accept: "application/vnd.github+json" },
+      });
+      if (!response.ok) {
+        setUpdateCheckStatus("Unable to check for updates right now. Please try again later.");
+        return;
+      }
+      const data = await response.json() as { tag_name: string; html_url: string };
+      const latest = data.tag_name.replace(/^v/, "");
+      const partsLatest = parseSemver(latest);
+      const partsCurrent = parseSemver(currentAppVersion);
+      if (!partsLatest) {
+        setUpdateCheckStatus("Unable to read the latest release version from GitHub.");
+        setLatestReleaseUrl(data.html_url);
+        return;
+      }
+      if (!partsCurrent) {
+        setLatestReleaseUrl(data.html_url);
+        setUpdateCheckStatus(`Latest release found: v${latest}. Local version metadata is unavailable in this runtime.`);
+        return;
+      }
+      let isNewer = false;
+      for (let i = 0; i < 3; i++) {
+        const diff = (partsLatest[i] ?? 0) - (partsCurrent[i] ?? 0);
+        if (diff > 0) { isNewer = true; break; }
+        if (diff < 0) break;
+      }
+      if (isNewer) {
+        setLatestReleaseUrl(data.html_url);
+        setUpdateCheckStatus(`Update available: v${latest}`);
+      } else {
+        setUpdateCheckStatus(`You are up to date (v${currentAppVersion}).`);
+      }
+    } catch {
+      setUpdateCheckStatus("Unable to check for updates right now. Please try again later.");
+    } finally {
+      setIsCheckingUpdate(false);
     }
   }
 
@@ -446,6 +520,29 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
             </button>
           </div>
           {debugStatus ? <p className="settings-meta">{debugStatus}</p> : null}
+        </article>
+
+        <article className="settings-card">
+          <h3>App Updates</h3>
+          <p>Current version: <strong>v{currentAppVersion}</strong></p>
+          <p>The portable and Windows launcher packages update automatically in the background each time you start the app.</p>
+          {pendingUpdateVersion ? (
+            <p className="settings-meta">Downloaded update ready: v{pendingUpdateVersion}. It will be applied automatically on your next launch.</p>
+          ) : null}
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => { void handleCheckForUpdates(); }}
+            disabled={isCheckingUpdate}
+          >
+            {isCheckingUpdate ? "Checking..." : "Check for Updates"}
+          </button>
+          {updateCheckStatus ? <p className="settings-meta">{updateCheckStatus}</p> : null}
+          {latestReleaseUrl ? (
+            <p className="settings-meta">
+              <a href={latestReleaseUrl} target="_blank" rel="noopener noreferrer">View release on GitHub</a>
+            </p>
+          ) : null}
         </article>
       </div>
     </section>

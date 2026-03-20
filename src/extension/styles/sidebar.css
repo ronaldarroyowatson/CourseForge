@@ -429,6 +429,33 @@ body,
   stroke-width: 2;
 }
 
+.sidebar-textbook-setup .cover-drop-zone {
+  border: 2px dashed var(--border-strong);
+  border-radius: 6px;
+  padding: 1rem 0.75rem;
+  text-align: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.sidebar-textbook-setup .cover-drop-zone--active {
+  background: var(--bg-hover);
+  border-color: var(--cf-accent);
+}
+
+.sidebar-textbook-setup .cover-drop-zone__hint {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.sidebar-textbook-setup .upload-preview-body {
+  grid-template-columns: 1fr;
+}
+
+.sidebar-textbook-setup .upload-preview-image {
+  max-height: 260px;
+}
+
 :root[data-theme="dark"] .sidebar-section-icon {
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.24);
 }

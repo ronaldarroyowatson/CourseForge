@@ -13,16 +13,12 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $PSCommandPath
 $webappDir = Join-Path $scriptDir "webapp"
 $serverScript = Join-Path $scriptDir "courseforge-serve.js"
-$port = 3000
-$hostName = "localhost"
-$logDir = Join-Path $env:LOCALAPPDATA "CourseForge\logs"
+$port       = 3000
+$hostName   = "localhost"
+$logDir     = Join-Path $env:LOCALAPPDATA "CourseForge\logs"
 $launcherLog = Join-Path $logDir "launcher.log"
 $serverStdoutLog = Join-Path $logDir "server-stdout.log"
 $serverStderrLog = Join-Path $logDir "server-stderr.log"
-
-if (-not (Test-Path $logDir)) {
-  New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-}
 
 function Write-LauncherLog {
   param([string]$Message)
@@ -31,6 +27,26 @@ function Write-LauncherLog {
   Write-Host $line
   Add-Content -Path $launcherLog -Value $line -Encoding ASCII
 }
+
+if (-not (Test-Path $logDir)) {
+  New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
+
+# ── Read version and asset template from package-manifest.json (never hard-coded) ──
+$manifestPath   = Join-Path $scriptDir "package-manifest.json"
+$currentVersion = "unknown"
+$assetTemplate  = "CourseForge-{version}-portable.zip"
+if (Test-Path $manifestPath) {
+  try {
+    $manifest = Get-Content -Path $manifestPath -Raw | ConvertFrom-Json
+    if ($manifest.version)                { $currentVersion = $manifest.version }
+    if ($manifest.updates.assetTemplate)  { $assetTemplate  = $manifest.updates.assetTemplate }
+  } catch {
+    Write-LauncherLog "WARNING: Failed to read package-manifest.json. $($_.Exception.Message)"
+  }
+}
+
+Write-LauncherLog "Launcher initialized. Version=$currentVersion AssetTemplate=$assetTemplate"
 
 # Verify webapp directory exists
 if (-not (Test-Path $webappDir)) {
@@ -52,16 +68,61 @@ if ($null -eq $nodeExe) {
 }
 
 # Auto-update check (background job)
+# ── Apply any staged update BEFORE the server starts ──
+$pendingDir  = Join-Path $scriptDir "_pending_update"
+$pendingJson = Join-Path $scriptDir "pending-update.json"
+if (Test-Path (Join-Path $pendingDir "webapp\index.html")) {
+  Write-LauncherLog "Applying staged update from _pending_update/ ..."
+  if (Test-Path $pendingJson) {
+    try {
+      $pendingInfo = Get-Content -Path $pendingJson -Raw | ConvertFrom-Json
+      if ($pendingInfo.version) {
+        Write-LauncherLog "Pending update metadata: targetVersion=$($pendingInfo.version) asset=$($pendingInfo.assetName) stagedAt=$($pendingInfo.stagedAt)"
+      }
+    } catch {
+      Write-LauncherLog "WARNING: Failed to read pending-update.json. $($_.Exception.Message)"
+    }
+  }
+  $null = robocopy $pendingDir $scriptDir /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XF updater.log /XF pending-update.json /XD _pending_update
+  $applyExitCode = $LASTEXITCODE
+  if ($applyExitCode -le 7) {
+    Remove-Item -Path $pendingDir  -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $pendingJson -Force         -ErrorAction SilentlyContinue
+    Write-LauncherLog "Staged update applied. Refreshing version from manifest."
+    # Re-read the version and asset template now that new files are in place.
+    if (Test-Path $manifestPath) {
+      try {
+        $manifest = Get-Content -Path $manifestPath -Raw | ConvertFrom-Json
+        if ($manifest.version)                { $currentVersion = $manifest.version }
+        if ($manifest.updates.assetTemplate)  { $assetTemplate  = $manifest.updates.assetTemplate }
+      } catch {
+        Write-LauncherLog "WARNING: Applied update but failed to refresh package-manifest.json. $($_.Exception.Message)"
+      }
+    }
+    Write-LauncherLog "Active version after apply: $currentVersion"
+  } else {
+    Write-LauncherLog "WARNING: Apply robocopy exited with code $applyExitCode. Keeping staged update for retry and investigation."
+  }
+} elseif ((Test-Path $pendingDir) -or (Test-Path $pendingJson)) {
+  Write-LauncherLog "WARNING: Found partial staged-update artifacts, but webapp payload is incomplete. Leaving files in place for inspection."
+}
+
+# ── Stage the next update in the background (download now, apply next launch) ──
 $updateScript = Join-Path $scriptDir "AutoUpdate-CourseForge.ps1"
 if (Test-Path $updateScript) {
+  Write-LauncherLog "Starting background updater in stage-only mode."
   Start-Process -FilePath "powershell.exe" -ArgumentList @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
     "-WindowStyle", "Hidden",
-    "-File", "`"$updateScript`"",
-    "-CurrentVersion", "1.2.6",
-    "-AssetNameTemplate", "CourseForge-{version}-windows.zip"
+    "-File",               "`"$updateScript`"",
+    "-PackageRoot",        "`"$scriptDir`"",
+    "-CurrentVersion",     $currentVersion,
+    "-AssetNameTemplate",  $assetTemplate,
+    "-StageOnly"
   ) -WindowStyle Hidden | Out-Null
+} else {
+  Write-LauncherLog "WARNING: AutoUpdate-CourseForge.ps1 not found. Background update check skipped."
 }
 
 # Try to find an available port

@@ -346,18 +346,47 @@ function Wait-ForHttpReady {
   return $false
 }
 
+function Test-CourseForgeServerReady {
+  param(
+    [string]$BaseUrl,
+    [int]$TimeoutSeconds = 5,
+    [int]$PollMilliseconds = 250
+  )
+
+  $statusUrl = "$BaseUrl/api/update-status"
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    try {
+      $response = Invoke-WebRequest -Uri $statusUrl -UseBasicParsing -Method Get -TimeoutSec 2
+      if ($response.StatusCode -eq 200) {
+        $payload = $response.Content | ConvertFrom-Json
+        if ($null -ne $payload -and ($payload.PSObject.Properties.Name -contains "currentVersion")) {
+          return $true
+        }
+      }
+    }
+    catch {
+      # Keep polling until timeout.
+    }
+
+    Start-Sleep -Milliseconds $PollMilliseconds
+  }
+
+  return $false
+}
+
 # Keep a fixed localhost origin for frontend/backend and OAuth consistency.
 $url = "http://${hostName}:$port"
 
 try {
   if (-not (Test-PortAvailable -TargetHost $hostName -Port $port)) {
-    if (Wait-ForHttpReady -Url $url -TimeoutSeconds 3) {
+    if (Test-CourseForgeServerReady -BaseUrl $url -TimeoutSeconds 3) {
       Write-LauncherLog "Existing CourseForge server detected at $url. Reusing running server."
       Start-Process $url
       exit 0
     }
 
-    Write-LauncherLog "ERROR: Port $port is in use by another process and no CourseForge server is responding at $url."
+    Write-LauncherLog "ERROR: Port $port is in use by another process and no CourseForge server is responding at $url. Close any other app using port $port, or close the already-running CourseForge window if one exists."
     exit 1
   }
 
@@ -387,11 +416,24 @@ try {
   while ((Get-Date) -lt $deadline) {
     if ($serverProcess.HasExited) {
       $stderrText = if (Test-Path $serverStderrLog) { (Get-Content -Path $serverStderrLog -Raw -ErrorAction SilentlyContinue).Trim() } else { "" }
+      $portRaceDetected = -not [string]::IsNullOrWhiteSpace($stderrText) -and $stderrText -match "already in use"
+      if ($portRaceDetected -and (Test-CourseForgeServerReady -BaseUrl $url -TimeoutSeconds 3)) {
+        Write-LauncherLog "Detected an existing CourseForge server after port race on $url. Reusing running server."
+        Start-Process $url
+        exit 0
+      }
+
       if ([string]::IsNullOrWhiteSpace($stderrText)) {
         Write-LauncherLog "ERROR: Local server exited early with code $($serverProcess.ExitCode)."
       }
       else {
-        Write-LauncherLog "ERROR: Local server exited early with code $($serverProcess.ExitCode). Details: $stderrText"
+        $portInUseMessage = if ($portRaceDetected) {
+          " Another process is holding CourseForge's fixed port $port. Close any other local server on that port and try again."
+        }
+        else {
+          ""
+        }
+        Write-LauncherLog "ERROR: Local server exited early with code $($serverProcess.ExitCode). Details: $stderrText$portInUseMessage"
       }
       exit 1
     }

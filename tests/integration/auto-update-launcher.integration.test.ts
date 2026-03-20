@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import net from "node:net";
 
 const repoRoot = join(__dirname, "..", "..");
 const launcherScriptSource = readFileSync(
@@ -33,7 +34,18 @@ function createRobocopyShim(binDir: string) {
   );
 }
 
-function createTestInstallRoot() {
+async function getAvailablePort() {
+  const server = net.createServer();
+  server.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve) => server.once("listening", () => resolve()));
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  server.close();
+  await new Promise<void>((resolve) => server.once("close", () => resolve()));
+  return port;
+}
+
+function createTestInstallRoot(port = 3000) {
   const root = mkdtempSync(join(tmpdir(), "courseforge-launcher-"));
   const webappDir = join(root, "webapp");
   const pendingDir = join(root, "_pending_update");
@@ -43,7 +55,7 @@ function createTestInstallRoot() {
   mkdirSync(join(pendingDir, "webapp"), { recursive: true });
   mkdirSync(binDir, { recursive: true });
 
-  writeFileSync(join(root, "Start-CourseForge.ps1"), launcherScriptSource, "utf8");
+  writeFileSync(join(root, "Start-CourseForge.ps1"), launcherScriptSource.replace('$port       = 3000', `$port       = ${port}`), "utf8");
   writeFileSync(
     join(root, "courseforge-serve.js"),
     [
@@ -116,7 +128,7 @@ function createTestInstallRoot() {
 
   createRobocopyShim(binDir);
 
-  return { root, binDir, pendingDir };
+  return { root, binDir, pendingDir, port };
 }
 
 type LauncherRunOptions = {
@@ -227,6 +239,54 @@ async function removeDirWithRetries(root: string) {
   }
 }
 
+async function stopChildProcess(child: ChildProcess | null) {
+  if (!child || child.killed || child.exitCode !== null) {
+    return;
+  }
+
+  child.kill("SIGTERM");
+  await new Promise<void>((resolve) => {
+    child.once("exit", () => resolve());
+  });
+}
+
+async function startExistingCourseForgeServer(port: number) {
+  const serverScript = [
+    "const http = require('http');",
+    "const server = http.createServer((req, res) => {",
+    "  if (req.url === '/api/update-status') {",
+    "    res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });",
+    "    res.end(JSON.stringify({ available: false, currentVersion: '1.2.71' }));",
+    "    return;",
+    "  }",
+    "  res.writeHead(200, { 'Content-Type': 'text/html', Connection: 'close' });",
+    "  res.end('<html><body>existing server</body></html>');",
+    "});",
+    `server.listen(${port}, () => { console.log('existing-courseforge-ready'); });`,
+    "process.on('SIGTERM', () => server.close(() => process.exit(0)));",
+  ].join("\n");
+
+  const child = spawn("node", ["-e", serverScript], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Timed out waiting for existing CourseForge server")), 10000);
+    child.stdout.on("data", (chunk) => {
+      if (chunk.toString().includes("existing-courseforge-ready")) {
+        clearTimeout(timeout);
+        resolve();
+      }
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`Existing CourseForge server exited early with code ${code}`));
+    });
+  });
+
+  return child;
+}
+
 function expectLogPathDiagnostics(logDetails: ReturnType<typeof readLauncherLog>) {
   if (logDetails.used === "primary") {
     expect(logDetails.primaryExists).toBe(true);
@@ -299,6 +359,24 @@ describe("portable launcher staged-update flow", () => {
       expect(logDetails.fallbackExists).toBe(true);
       expect(logDetails.content).toContain("Launcher initialized.");
     } finally {
+      await removeDirWithRetries(root);
+    }
+  }, 25000);
+
+  it.skipIf(process.platform !== "win32")("reuses an already running CourseForge server on the fixed port", async () => {
+    const port = await getAvailablePort();
+    const { root, binDir } = createTestInstallRoot(port);
+    let existingServer: ChildProcess | null = null;
+
+    try {
+      existingServer = await startExistingCourseForgeServer(port);
+      const result = runLauncher(root, binDir, { robocopyMode: "success" });
+      const logDetails = readLauncherLog(root);
+
+      expect(result.status).toBe(0);
+      expect(logDetails.content).toContain(`Existing CourseForge server detected at http://localhost:${port}. Reusing running server.`);
+    } finally {
+      await stopChildProcess(existingServer);
       await removeDirWithRetries(root);
     }
   }, 25000);

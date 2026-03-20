@@ -1,4 +1,4 @@
-// @vitest-environment node
+﻿// @vitest-environment node
 
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
@@ -119,9 +119,15 @@ function createTestInstallRoot() {
   return { root, binDir, pendingDir };
 }
 
-function runLauncher(root: string, binDir: string, robocopyMode: "success" | "fail") {
+type LauncherRunOptions = {
+  robocopyMode: "success" | "fail";
+  localAppDataOverride?: string;
+};
+
+function runLauncher(root: string, binDir: string, options: LauncherRunOptions) {
   const tempDir = join(root, "temp");
   mkdirSync(tempDir, { recursive: true });
+  const localAppData = options.localAppDataOverride ?? join(root, "appdata");
 
   return spawnSync(
     "powershell.exe",
@@ -132,11 +138,11 @@ function runLauncher(root: string, binDir: string, robocopyMode: "success" | "fa
       timeout: 30000,
       env: {
         ...process.env,
-        LOCALAPPDATA: join(root, "appdata"),
+        LOCALAPPDATA: localAppData,
         TEMP: tempDir,
         TMP: tempDir,
         PATH: `${binDir};${process.env.PATH ?? ""}`,
-        ROBOCOPY_MODE: robocopyMode,
+        ROBOCOPY_MODE: options.robocopyMode,
       },
     }
   );
@@ -144,16 +150,61 @@ function runLauncher(root: string, binDir: string, robocopyMode: "success" | "fa
 
 function readLauncherLog(root: string) {
   const primary = join(root, "appdata", "CourseForge", "logs", "launcher.log");
-  if (existsSync(primary)) {
-    return readFileSync(primary, "utf8");
-  }
+  const primaryExists = existsSync(primary);
 
   const fallback = join(root, "temp", "CourseForge-launcher", "launcher.log");
-  if (existsSync(fallback)) {
-    return readFileSync(fallback, "utf8");
+  const fallbackExists = existsSync(fallback);
+
+  if (primaryExists) {
+    return {
+      content: readFileSync(primary, "utf8"),
+      used: "primary" as const,
+      primaryPath: primary,
+      fallbackPath: fallback,
+      primaryExists,
+      fallbackExists,
+    };
   }
 
-  throw new Error(`launcher log not found in expected locations: ${primary} or ${fallback}`);
+  if (fallbackExists) {
+    return {
+      content: readFileSync(fallback, "utf8"),
+      used: "fallback" as const,
+      primaryPath: primary,
+      fallbackPath: fallback,
+      primaryExists,
+      fallbackExists,
+    };
+  }
+
+  throw new Error(
+    [
+      "launcher log not found in expected locations",
+      `primary=${primary} exists=${primaryExists}`,
+      `fallback=${fallback} exists=${fallbackExists}`,
+    ].join(" | ")
+  );
+}
+
+async function waitForCondition(check: () => boolean, timeoutMs = 5000, pollMs = 50) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (check()) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+
+  throw new Error(`Timed out waiting for condition after ${timeoutMs}ms`);
+}
+
+async function waitForFile(filePath: string, timeoutMs = 5000) {
+  await waitForCondition(() => existsSync(filePath), timeoutMs);
+}
+
+async function waitForLogEntry(logContentProvider: () => string, snippet: string, timeoutMs = 5000) {
+  await waitForCondition(() => logContentProvider().includes(snippet), timeoutMs);
 }
 
 async function removeDirWithRetries(root: string) {
@@ -176,23 +227,35 @@ async function removeDirWithRetries(root: string) {
   }
 }
 
+function expectLogPathDiagnostics(logDetails: ReturnType<typeof readLauncherLog>) {
+  if (logDetails.used === "primary") {
+    expect(logDetails.primaryExists).toBe(true);
+  } else {
+    expect(logDetails.primaryExists).toBe(false);
+    expect(logDetails.fallbackExists).toBe(true);
+  }
+}
+
 describe("portable launcher staged-update flow", () => {
   it.skipIf(process.platform !== "win32")("applies a staged update before startup and refreshes runtime version", async () => {
     const { root, binDir, pendingDir } = createTestInstallRoot();
 
     try {
-      const result = runLauncher(root, binDir, "success");
-      const launcherLog = readLauncherLog(root);
+      const result = runLauncher(root, binDir, { robocopyMode: "success" });
+      await waitForFile(join(root, "background-updater.json"), 8000);
+      await waitForLogEntry(() => readLauncherLog(root).content, "Active version after apply: 1.2.7", 8000);
+      const logDetails = readLauncherLog(root);
       const manifest = JSON.parse(readFileSync(join(root, "package-manifest.json"), "utf8"));
       const updaterMarker = JSON.parse(readFileSync(join(root, "background-updater.json"), "utf8"));
 
       expect(result.status).toBe(0);
+      expectLogPathDiagnostics(logDetails);
       expect(readFileSync(join(root, "webapp", "index.html"), "utf8")).toContain("new version");
       expect(manifest.version).toBe("1.2.7");
       expect(existsSync(pendingDir)).toBe(false);
       expect(existsSync(join(root, "pending-update.json"))).toBe(false);
-      expect(launcherLog).toContain("Applying staged update from _pending_update/");
-      expect(launcherLog).toContain("Active version after apply: 1.2.7");
+      expect(logDetails.content).toContain("Applying staged update from _pending_update/");
+      expect(logDetails.content).toContain("Active version after apply: 1.2.7");
       expect(updaterMarker.currentVersion).toBe("1.2.7");
       expect(updaterMarker.stageOnly).toBe(true);
     } finally {
@@ -204,16 +267,37 @@ describe("portable launcher staged-update flow", () => {
     const { root, binDir, pendingDir } = createTestInstallRoot();
 
     try {
-      const result = runLauncher(root, binDir, "fail");
-      const launcherLog = readLauncherLog(root);
+      const result = runLauncher(root, binDir, { robocopyMode: "fail" });
+      const logDetails = readLauncherLog(root);
+      expectLogPathDiagnostics(logDetails);
       const manifest = JSON.parse(readFileSync(join(root, "package-manifest.json"), "utf8"));
 
       expect(result.status).toBe(0);
       expect(manifest.version).toBe("1.2.6");
       expect(existsSync(pendingDir)).toBe(true);
       expect(existsSync(join(root, "pending-update.json"))).toBe(true);
-      expect(launcherLog).toContain("WARNING: Apply robocopy exited with code 12. Keeping staged update for retry and investigation.");
+      expect(logDetails.content).toContain("WARNING: Apply robocopy exited with code 12. Keeping staged update for retry and investigation.");
       expect(readFileSync(join(root, "webapp", "index.html"), "utf8")).toContain("old version");
+    } finally {
+      await removeDirWithRetries(root);
+    }
+  }, 25000);
+
+  it.skipIf(process.platform !== "win32")("falls back to temp logging when LOCALAPPDATA is unavailable and reports path outcome", async () => {
+    const { root, binDir } = createTestInstallRoot();
+
+    try {
+      const result = runLauncher(root, binDir, {
+        robocopyMode: "success",
+        localAppDataOverride: "",
+      });
+      const logDetails = readLauncherLog(root);
+
+      expect(result.status).toBe(0);
+      expect(logDetails.used).toBe("fallback");
+      expect(logDetails.primaryExists).toBe(false);
+      expect(logDetails.fallbackExists).toBe(true);
+      expect(logDetails.content).toContain("Launcher initialized.");
     } finally {
       await removeDirWithRetries(root);
     }

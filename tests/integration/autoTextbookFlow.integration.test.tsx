@@ -133,6 +133,23 @@ describe("auto textbook flow integration", () => {
     expect(manualDot).toBeTruthy();
   });
 
+  it("shows teacher-friendly correction guidance in metadata review", () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "cover",
+          coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+        }}
+      />
+    );
+
+    expect(
+      screen.getByText("You can edit any of these fields. Your corrections help improve future extractions.")
+    ).toBeInTheDocument();
+  });
+
   it("propagates manual sourceType when saving textbook in manual mode", async () => {
     render(<TextbookForm onSaved={() => undefined} />);
 

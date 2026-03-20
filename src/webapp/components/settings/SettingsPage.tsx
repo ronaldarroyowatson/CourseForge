@@ -15,6 +15,8 @@ import {
   getDebugLoggingPolicy,
   getDebugLogStorageStats,
   isDebugLoggingEnabled,
+  isMetadataCorrectionSharingEnabled,
+  setMetadataCorrectionSharingEnabled,
   setDebugLoggingEnabled,
   uploadAndClearDebugLogs,
 } from "../../../core/services";
@@ -60,6 +62,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   const [isUploadingDebugLog, setIsUploadingDebugLog] = React.useState(false);
   const [debugPolicyStatus, setDebugPolicyStatus] = React.useState<string | null>(null);
   const [ocrProviderOrder, setOcrProviderOrderState] = React.useState<AutoOcrProviderId[]>(["local_tesseract", "cloud_openai_vision"]);
+  const [metadataSharingEnabled, setMetadataSharingEnabled] = React.useState<boolean>(() => isMetadataCorrectionSharingEnabled());
   const [ocrProviderHealth, setOcrProviderHealth] = React.useState<Array<{ id: AutoOcrProviderId; label: string; available: boolean }>>([]);
   const [ocrProviderStatus, setOcrProviderStatus] = React.useState<string | null>(null);
   const [isUpdatingOcrPolicy, setIsUpdatingOcrPolicy] = React.useState(false);
@@ -493,6 +496,28 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
             </p>
           ))}
           {ocrProviderStatus ? <p className="settings-meta">{ocrProviderStatus}</p> : null}
+        </article>
+
+        <article className="settings-card">
+          <h3>Metadata Learning</h3>
+          <p>Share corrections to improve extraction accuracy for everyone.</p>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={metadataSharingEnabled}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setMetadataCorrectionSharingEnabled(enabled);
+                setMetadataSharingEnabled(enabled);
+              }}
+            />
+            Share corrections to improve accuracy for everyone.
+          </label>
+          <p className="settings-meta">
+            {metadataSharingEnabled
+              ? "Corrections can be synced to shared review queues with safeguards."
+              : "Corrections stay local only and are never uploaded."}
+          </p>
         </article>
 
         <article className="settings-card">

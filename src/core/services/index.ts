@@ -11,6 +11,10 @@ export {
 export * from "./adminFirestoreService";
 export * from "./accessibilityService";
 export * from "./autoOcrService";
+export * from "./ocrCorrectionLearningService";
+export * from "./metadataCorrectionLearningService";
+export * from "./metadataCorrectionSyncService";
+export * from "./metadataExtractionPipelineService";
 export * from "./coverImageService";
 export * from "./debugLogService";
 export {

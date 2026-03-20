@@ -182,6 +182,54 @@ interface DebugUploadSummary {
   appVersion?: string;
 }
 
+type MetadataPageType = "cover" | "title" | "other";
+
+interface MetadataResultRecord {
+  title: string | null;
+  subtitle: string | null;
+  edition: string | null;
+  publisher: string | null;
+  series: string | null;
+  gradeLevel: string | null;
+  subject: string | null;
+  confidence: number;
+  rawText: string;
+  source: "vision" | "ocr" | "vision+ocr";
+}
+
+interface MetadataCorrectionRecord {
+  id: string;
+  timestamp: string;
+  pageType: MetadataPageType;
+  publisher: string | null;
+  series: string | null;
+  subject: string | null;
+  originalVisionOutput: MetadataResultRecord | null;
+  originalOcrOutput: {
+    rawText: string;
+  } | null;
+  finalMetadata: MetadataResultRecord;
+  imageReference: string | null;
+  flagged: boolean;
+  reasonFlagged?: string;
+  finalConfidence: number;
+  errorScore: number;
+  reviewedByAdmin?: string | null;
+  reviewStatus: "pending" | "accepted" | "rejected";
+}
+
+interface MetadataCorrectionRulesRecord {
+  version: string;
+  updatedAt: string;
+  globalReplacements: Array<{ from: string; to: string }>;
+  publisherSpecific: {
+    [publisherName: string]: {
+      replacements: Array<{ from: string; to: string }>;
+      patterns?: Array<{ pattern: string; replacement: string }>;
+    };
+  };
+}
+
 function success<T>(message: string, data: T): CallableResult<T> {
   return { success: true, message, data };
 }
@@ -214,6 +262,9 @@ const WEEKLY_BASELINE_MULTIPLIER = 2.7;
 const MONTHLY_LIMIT_PERCENT = 100;
 const AI_PROVIDER_POLICY_DOC_PATH = "config/aiProviderPolicy";
 const DEBUG_POLICY_DOC_PATH = "config/debugLoggingPolicy";
+const METADATA_CORRECTION_RULES_DOC_PATH = "config/metadataCorrectionRules";
+const METADATA_CORRECTION_LIMITS_DOC_PATH = "config/metadataCorrectionLimits";
+const METADATA_CORRECTION_AUDIT_COLLECTION = "metadataCorrectionAuditLogs";
 const DEFAULT_AUTO_OCR_PROVIDER_ORDER: AutoOcrProviderId[] = ["local_tesseract", "cloud_openai_vision"];
 const DEFAULT_DEBUG_POLICY: DebugLoggingPolicyRecord = {
   enabledGlobally: true,
@@ -226,6 +277,8 @@ const DEFAULT_DEBUG_POLICY: DebugLoggingPolicyRecord = {
 const OCR_RATE_LIMIT_WINDOW_MS = 60_000;
 const OCR_RATE_LIMIT_MAX_REQUESTS = 30;
 const MAX_OCR_IMAGE_DATA_URL_BYTES = 8 * 1024 * 1024;
+const DEFAULT_CORRECTION_DAILY_LIMIT = 25;
+const DEFAULT_CORRECTION_MAX_IMAGE_BYTES = 200 * 1024;
 
 function roundToOneDecimal(value: number): number {
   return Number(value.toFixed(1));
@@ -318,6 +371,367 @@ function sanitizeDebugLogEntries(value: unknown): DebugLogEntryRecord[] {
       };
     })
     .filter((entry): entry is DebugLogEntryRecord => entry !== null);
+}
+
+function sanitizeMetadataResult(value: unknown, source: MetadataResultRecord["source"]): MetadataResultRecord {
+  const data = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  const asText = (field: string): string | null => {
+    const raw = data[field];
+    if (typeof raw !== "string") {
+      return null;
+    }
+
+    const trimmed = raw.trim();
+    return trimmed ? trimmed : null;
+  };
+
+  const confidenceRaw = typeof data.confidence === "number" ? data.confidence : 0;
+  const confidence = Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : 0;
+
+  return {
+    title: asText("title"),
+    subtitle: asText("subtitle"),
+    edition: asText("edition"),
+    publisher: asText("publisher"),
+    series: asText("series"),
+    gradeLevel: asText("gradeLevel"),
+    subject: asText("subject"),
+    confidence,
+    rawText: typeof data.rawText === "string" ? data.rawText : "",
+    source,
+  };
+}
+
+function sanitizeMetadataCorrectionRecords(value: unknown): MetadataCorrectionRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry): MetadataCorrectionRecord | null => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const record = entry as Record<string, unknown>;
+      const id = typeof record.id === "string" ? record.id : "";
+      const timestamp = typeof record.timestamp === "string" ? record.timestamp : "";
+      const pageType = record.pageType === "cover" || record.pageType === "title" || record.pageType === "other"
+        ? record.pageType
+        : "other";
+
+      if (!id || !timestamp) {
+        return null;
+      }
+
+      const finalMetadata = sanitizeMetadataResult(record.finalMetadata, "vision+ocr");
+      const finalConfidenceRaw = typeof record.finalConfidence === "number" ? record.finalConfidence : finalMetadata.confidence;
+      const finalConfidence = Number.isFinite(finalConfidenceRaw) ? Math.max(0, Math.min(1, finalConfidenceRaw)) : finalMetadata.confidence;
+      const visionConfidence = record.originalVisionOutput
+        ? sanitizeMetadataResult(record.originalVisionOutput, "vision").confidence
+        : finalConfidence;
+      const errorScoreRaw = typeof record.errorScore === "number"
+        ? record.errorScore
+        : Math.abs(visionConfidence - finalConfidence);
+      const errorScore = Number.isFinite(errorScoreRaw) ? Math.max(0, Math.min(1, errorScoreRaw)) : 0;
+      const flagged = Boolean(record.flagged);
+      const reasonFlagged = typeof record.reasonFlagged === "string" && record.reasonFlagged.trim()
+        ? record.reasonFlagged.trim()
+        : undefined;
+      const reviewStatus = record.reviewStatus === "accepted" || record.reviewStatus === "rejected" || record.reviewStatus === "pending"
+        ? record.reviewStatus
+        : "pending";
+
+      return {
+        id,
+        timestamp,
+        pageType,
+        publisher: typeof record.publisher === "string" && record.publisher.trim() ? record.publisher.trim() : null,
+        series: typeof record.series === "string" && record.series.trim() ? record.series.trim() : null,
+        subject: typeof record.subject === "string" && record.subject.trim() ? record.subject.trim() : null,
+        originalVisionOutput: record.originalVisionOutput
+          ? sanitizeMetadataResult(record.originalVisionOutput, "vision")
+          : null,
+        originalOcrOutput: typeof record.originalOcrOutput === "object" && record.originalOcrOutput !== null
+          ? {
+              rawText: typeof (record.originalOcrOutput as Record<string, unknown>).rawText === "string"
+                ? (record.originalOcrOutput as Record<string, unknown>).rawText as string
+                : "",
+            }
+          : null,
+        finalMetadata,
+        imageReference: typeof record.imageReference === "string" && record.imageReference.trim()
+          ? record.imageReference.trim()
+          : null,
+        flagged,
+        reasonFlagged,
+        finalConfidence,
+        errorScore,
+        reviewedByAdmin: typeof record.reviewedByAdmin === "string" && record.reviewedByAdmin.trim()
+          ? record.reviewedByAdmin.trim()
+          : null,
+        reviewStatus,
+      };
+    })
+    .filter((entry): entry is MetadataCorrectionRecord => entry !== null)
+    .slice(-200);
+}
+
+function normalizePublisherRuleKey(value: string | null | undefined): string {
+  if (!value) {
+    return "";
+  }
+
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sanitizeMetadataCorrectionRules(value: unknown): MetadataCorrectionRulesRecord {
+  const data = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  const globalReplacements = Array.isArray(data.globalReplacements)
+    ? data.globalReplacements
+      .filter((entry) => typeof (entry as { from?: unknown })?.from === "string" && typeof (entry as { to?: unknown })?.to === "string")
+      .map((entry) => ({
+        from: ((entry as { from: string }).from).trim(),
+        to: ((entry as { to: string }).to).trim(),
+      }))
+      .filter((entry) => entry.from && entry.to && entry.from !== entry.to)
+      .slice(0, 200)
+    : [];
+
+  const publisherSpecificRaw = typeof data.publisherSpecific === "object" && data.publisherSpecific !== null
+    ? data.publisherSpecific as Record<string, unknown>
+    : {};
+
+  const publisherSpecific: MetadataCorrectionRulesRecord["publisherSpecific"] = {};
+  for (const [publisher, valueEntry] of Object.entries(publisherSpecificRaw)) {
+    const normalizedPublisher = normalizePublisherRuleKey(publisher);
+    if (!normalizedPublisher) {
+      continue;
+    }
+
+    const entry = valueEntry as { replacements?: unknown; patterns?: unknown };
+    const replacements = Array.isArray(entry.replacements)
+      ? entry.replacements
+        .filter((item) => typeof (item as { from?: unknown })?.from === "string" && typeof (item as { to?: unknown })?.to === "string")
+        .map((item) => ({
+          from: ((item as { from: string }).from).trim(),
+          to: ((item as { to: string }).to).trim(),
+        }))
+        .filter((item) => item.from && item.to && item.from !== item.to)
+        .slice(0, 100)
+      : [];
+
+    if (!replacements.length) {
+      continue;
+    }
+
+    publisherSpecific[normalizedPublisher] = { replacements };
+  }
+
+  return {
+    version: typeof data.version === "string" ? data.version : "1",
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
+    globalReplacements,
+    publisherSpecific,
+  };
+}
+
+function estimateImageReferenceBytes(imageReference: string | null): number {
+  if (!imageReference) {
+    return 0;
+  }
+
+  if (imageReference.startsWith("data:image/")) {
+    const commaIndex = imageReference.indexOf(",");
+    if (commaIndex >= 0) {
+      const base64 = imageReference.slice(commaIndex + 1);
+      return Math.ceil((base64.length * 3) / 4);
+    }
+  }
+
+  return Buffer.byteLength(imageReference, "utf8");
+}
+
+function validateCorrectionForQueue(record: MetadataCorrectionRecord): { valid: boolean; reason?: string } {
+  if (!record.finalMetadata.title || !record.finalMetadata.title.trim()) {
+    return { valid: false, reason: "Title is required." };
+  }
+
+  if (!record.originalVisionOutput && !record.originalOcrOutput) {
+    return { valid: false, reason: "At least one source output is required." };
+  }
+
+  if (!record.imageReference) {
+    return { valid: false, reason: "Image snippet reference is required." };
+  }
+
+  if (estimateImageReferenceBytes(record.imageReference) > DEFAULT_CORRECTION_MAX_IMAGE_BYTES) {
+    return { valid: false, reason: `Image snippet exceeds ${DEFAULT_CORRECTION_MAX_IMAGE_BYTES} bytes.` };
+  }
+
+  return { valid: true };
+}
+
+function filterAndSortCorrections(
+  records: MetadataCorrectionRecord[],
+  query: {
+    publisher?: string;
+    pageType?: string;
+    confidenceMin?: number;
+    confidenceMax?: number;
+    source?: string;
+    flaggedOnly?: boolean;
+    reviewStatus?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    sortBy?: "timestamp" | "errorScore" | "finalConfidence";
+    sortDirection?: "asc" | "desc";
+  }
+): MetadataCorrectionRecord[] {
+  const filtered = records.filter((record) => {
+    if (query.publisher && normalizePublisherRuleKey(record.publisher) !== normalizePublisherRuleKey(query.publisher)) {
+      return false;
+    }
+
+    if (query.pageType && query.pageType !== "all" && record.pageType !== query.pageType) {
+      return false;
+    }
+
+    if (query.source && query.source !== "all" && record.finalMetadata.source !== query.source) {
+      return false;
+    }
+
+    if (query.flaggedOnly && !record.flagged) {
+      return false;
+    }
+
+    if (query.reviewStatus && query.reviewStatus !== "all" && record.reviewStatus !== query.reviewStatus) {
+      return false;
+    }
+
+    if (typeof query.confidenceMin === "number" && record.finalConfidence < query.confidenceMin) {
+      return false;
+    }
+
+    if (typeof query.confidenceMax === "number" && record.finalConfidence > query.confidenceMax) {
+      return false;
+    }
+
+    if (query.dateFrom && record.timestamp < query.dateFrom) {
+      return false;
+    }
+
+    if (query.dateTo && record.timestamp > query.dateTo) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const sortBy = query.sortBy ?? "errorScore";
+  const sortDirection = query.sortDirection ?? "desc";
+  const direction = sortDirection === "desc" ? -1 : 1;
+
+  filtered.sort((left, right) => {
+    if (sortBy === "timestamp") {
+      return left.timestamp.localeCompare(right.timestamp) * direction;
+    }
+    if (sortBy === "finalConfidence") {
+      return (left.finalConfidence - right.finalConfidence) * direction;
+    }
+    return (left.errorScore - right.errorScore) * direction;
+  });
+
+  return filtered;
+}
+
+async function appendMetadataCorrectionAuditLog(entry: {
+  actorId: string;
+  action: string;
+  targetIds: string[];
+  before?: unknown;
+  after?: unknown;
+}): Promise<void> {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  await firestore.collection(METADATA_CORRECTION_AUDIT_COLLECTION).doc(id).set({
+    id,
+    actorId: entry.actorId,
+    action: entry.action,
+    targetIds: entry.targetIds,
+    before: entry.before,
+    after: entry.after,
+    timestamp: new Date().toISOString(),
+  }, { merge: false });
+}
+
+function buildRulesFromCorrections(
+  corrections: MetadataCorrectionRecord[],
+  priorRules: MetadataCorrectionRulesRecord
+): MetadataCorrectionRulesRecord {
+  const frequency = new Map<string, { from: string; to: string; count: number; publisherKey: string }>();
+
+  for (const correction of corrections) {
+    const publisherKey = normalizePublisherRuleKey(correction.publisher ?? correction.finalMetadata.publisher);
+    const sourceCandidates = [
+      correction.originalVisionOutput?.title,
+      correction.originalVisionOutput?.publisher,
+      correction.originalVisionOutput?.series,
+      correction.originalVisionOutput?.edition,
+    ];
+    const targetCandidates = [
+      correction.finalMetadata.title,
+      correction.finalMetadata.publisher,
+      correction.finalMetadata.series,
+      correction.finalMetadata.edition,
+    ];
+
+    for (let index = 0; index < sourceCandidates.length; index += 1) {
+      const from = sourceCandidates[index]?.trim();
+      const to = targetCandidates[index]?.trim();
+      if (!from || !to || from.toLowerCase() === to.toLowerCase()) {
+        continue;
+      }
+
+      const key = `${from.toLowerCase()}=>${to.toLowerCase()}|${publisherKey}`;
+      const current = frequency.get(key);
+      if (current) {
+        current.count += 1;
+      } else {
+        frequency.set(key, { from, to, count: 1, publisherKey });
+      }
+    }
+  }
+
+  const ranked = [...frequency.values()].sort((left, right) => right.count - left.count);
+  const globalReplacements = [
+    ...priorRules.globalReplacements,
+    ...ranked.slice(0, 100).map((item) => ({ from: item.from, to: item.to })),
+  ].slice(0, 200);
+
+  const publisherSpecific: MetadataCorrectionRulesRecord["publisherSpecific"] = {
+    ...priorRules.publisherSpecific,
+  };
+
+  for (const item of ranked.slice(0, 100)) {
+    if (!item.publisherKey) {
+      continue;
+    }
+
+    const prior = publisherSpecific[item.publisherKey] ?? { replacements: [] };
+    prior.replacements = [...prior.replacements, { from: item.from, to: item.to }].slice(0, 100);
+    publisherSpecific[item.publisherKey] = prior;
+  }
+
+  return sanitizeMetadataCorrectionRules({
+    version: `rules-${Date.now()}`,
+    updatedAt: new Date().toISOString(),
+    globalReplacements,
+    publisherSpecific,
+  });
 }
 
 function inferImageMimeType(imageDataUrl: string): string {
@@ -1228,6 +1642,348 @@ export const extractScreenshotText = onCall(async (request) => {
   }
 
   return success("Screenshot text extracted.", { text: extractedText });
+});
+
+export const extractMetadataFromImageVision = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in to extract metadata from images.");
+  }
+
+  const payload = request.data as {
+    imageDataUrl?: unknown;
+    context?: {
+      pageType?: unknown;
+      publisherHint?: unknown;
+    };
+  };
+
+  const imageDataUrl = typeof payload.imageDataUrl === "string" ? payload.imageDataUrl.trim() : "";
+  if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
+    throw new HttpsError("invalid-argument", "A valid image data URL is required.");
+  }
+
+  if (Buffer.byteLength(imageDataUrl, "utf8") > MAX_OCR_IMAGE_DATA_URL_BYTES) {
+    throw new HttpsError("invalid-argument", "Screenshot payload is too large. Please crop before retrying.");
+  }
+
+  const pageType = payload.context?.pageType === "cover" || payload.context?.pageType === "title" || payload.context?.pageType === "other"
+    ? payload.context.pageType
+    : "other";
+  const publisherHint = typeof payload.context?.publisherHint === "string" ? payload.context.publisherHint.trim() : "";
+
+  const openaiKey = process.env.OPENAI_API_KEY ?? "";
+  if (!openaiKey) {
+    throw new HttpsError("failed-precondition", "Vision metadata extraction is unavailable because OPENAI_API_KEY is not configured.");
+  }
+
+  await consumeOcrRequestQuota(request.auth.uid);
+  inferImageMimeType(imageDataUrl);
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openaiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You extract textbook metadata from cover and title-page images. Return strict JSON only, no markdown fences.",
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: [
+                "Read this textbook image and return JSON with keys:",
+                "title, subtitle, edition, publisher, series, gradeLevel, subject, confidence, rawText.",
+                "Rules:",
+                "- Identify the main title and subtitle if present.",
+                "- Identify labels like Teacher's Edition when relevant.",
+                "- Identify publisher if visible.",
+                "- Ignore decorative text and watermarks.",
+                "- confidence must be a number from 0 to 1.",
+                `- pageType context: ${pageType}.`,
+                publisherHint ? `- publisherHint context: ${publisherHint}.` : "",
+              ].filter(Boolean).join("\n"),
+            },
+            { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
+          ],
+        },
+      ],
+      max_tokens: 1200,
+      temperature: 0,
+      response_format: {
+        type: "json_object",
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new HttpsError("internal", `Vision provider error: ${response.status} ${response.statusText}`);
+  }
+
+  const json = await response.json() as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+
+  const rawContent = json.choices?.[0]?.message?.content?.trim() ?? "";
+  if (!rawContent) {
+    throw new HttpsError("internal", "Vision provider returned empty metadata.");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch {
+    throw new HttpsError("internal", "Vision provider returned non-JSON metadata.");
+  }
+
+  const metadata = sanitizeMetadataResult(parsed, "vision");
+  return success("Image metadata extracted.", {
+    metadata,
+    confidence: metadata.confidence,
+    rawText: metadata.rawText,
+  });
+});
+
+export const correctionsUpload = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in to sync metadata corrections.");
+  }
+
+  const payload = request.data as { corrections?: unknown };
+  const corrections = sanitizeMetadataCorrectionRecords(payload.corrections);
+  if (!corrections.length) {
+    return success("No corrections to upload.", { acceptedCount: 0, rejectedCount: 0 });
+  }
+
+  const limitsDoc = await firestore.doc(METADATA_CORRECTION_LIMITS_DOC_PATH).get();
+  const limitsData = limitsDoc.data() ?? {};
+  const dailyLimit = typeof limitsData.dailyLimit === "number" ? Math.max(1, Math.round(limitsData.dailyLimit)) : DEFAULT_CORRECTION_DAILY_LIMIT;
+
+  const todayKey = getDateKey();
+  const usageRef = firestore.doc(`users/${request.auth.uid}/metadataCorrectionUsage/${todayKey}`);
+  const usageSnapshot = await usageRef.get();
+  const usedToday = usageSnapshot.exists && typeof usageSnapshot.data()?.count === "number"
+    ? Math.max(0, Math.round(usageSnapshot.data()!.count))
+    : 0;
+
+  const remaining = Math.max(0, dailyLimit - usedToday);
+  if (remaining <= 0) {
+    throw new HttpsError("resource-exhausted", "Daily correction upload limit reached.");
+  }
+
+  const accepted = corrections.slice(0, remaining);
+  const rejectedCount = corrections.length - accepted.length;
+
+  const batch = firestore.batch();
+  for (const correction of accepted) {
+    const validation = validateCorrectionForQueue(correction);
+    const docRef = firestore.doc(`metadataCorrections/${request.auth.uid}/items/${correction.id}`);
+    batch.set(docRef, {
+      ...correction,
+      flagged: correction.flagged || !validation.valid,
+      reasonFlagged: correction.reasonFlagged ?? validation.reason,
+      reviewStatus: "pending",
+      userId: request.auth.uid,
+      createdAt: correction.timestamp,
+      syncedAt: new Date().toISOString(),
+    }, { merge: true });
+  }
+
+  batch.set(usageRef, {
+    count: usedToday + accepted.length,
+    date: todayKey,
+    updatedAt: new Date().toISOString(),
+  }, { merge: true });
+
+  await batch.commit();
+
+  const rulesDoc = await firestore.doc(METADATA_CORRECTION_RULES_DOC_PATH).get();
+  const priorRules = sanitizeMetadataCorrectionRules(rulesDoc.data());
+  const nextRules = buildRulesFromCorrections(accepted.filter((entry) => entry.reviewStatus !== "rejected"), priorRules);
+
+  await firestore.doc(METADATA_CORRECTION_RULES_DOC_PATH).set(nextRules, { merge: true });
+
+  return success("Correction samples queued for review.", {
+    acceptedCount: accepted.length,
+    rejectedCount,
+  });
+});
+
+export const correctionsList = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const payload = request.data as {
+    page?: unknown;
+    pageSize?: unknown;
+    sortBy?: unknown;
+    sortDirection?: unknown;
+    filters?: {
+      publisher?: unknown;
+      pageType?: unknown;
+      confidenceMin?: unknown;
+      confidenceMax?: unknown;
+      source?: unknown;
+      flaggedOnly?: unknown;
+      reviewStatus?: unknown;
+      dateFrom?: unknown;
+      dateTo?: unknown;
+    };
+  };
+
+  const allSnaps = await firestore.collectionGroup("items").limit(1000).get();
+  const allRecords = allSnaps
+    .filter((snapshot) => snapshot.ref.path.includes("metadataCorrections/"))
+    .map((snapshot) => sanitizeMetadataCorrectionRecords([snapshot.data()])[0])
+    .filter((entry): entry is MetadataCorrectionRecord => Boolean(entry));
+
+  const filtered = filterAndSortCorrections(allRecords, {
+    publisher: typeof payload.filters?.publisher === "string" ? payload.filters.publisher : undefined,
+    pageType: typeof payload.filters?.pageType === "string" ? payload.filters.pageType : "all",
+    confidenceMin: typeof payload.filters?.confidenceMin === "number" ? payload.filters.confidenceMin : undefined,
+    confidenceMax: typeof payload.filters?.confidenceMax === "number" ? payload.filters.confidenceMax : undefined,
+    source: typeof payload.filters?.source === "string" ? payload.filters.source : "all",
+    flaggedOnly: payload.filters?.flaggedOnly === true,
+    reviewStatus: typeof payload.filters?.reviewStatus === "string" ? payload.filters.reviewStatus : "all",
+    dateFrom: typeof payload.filters?.dateFrom === "string" ? payload.filters.dateFrom : undefined,
+    dateTo: typeof payload.filters?.dateTo === "string" ? payload.filters.dateTo : undefined,
+    sortBy: payload.sortBy === "timestamp" || payload.sortBy === "finalConfidence" || payload.sortBy === "errorScore"
+      ? payload.sortBy
+      : "errorScore",
+    sortDirection: payload.sortDirection === "asc" || payload.sortDirection === "desc"
+      ? payload.sortDirection
+      : "desc",
+  });
+
+  const page = typeof payload.page === "number" ? Math.max(1, Math.round(payload.page)) : 1;
+  const pageSize = typeof payload.pageSize === "number" ? Math.max(1, Math.min(100, Math.round(payload.pageSize))) : 20;
+  const start = (page - 1) * pageSize;
+
+  return success("Loaded correction records.", {
+    items: filtered.slice(start, start + pageSize),
+    total: filtered.length,
+    page,
+    pageSize,
+  });
+});
+
+export const correctionsReview = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const payload = request.data as {
+    action?: unknown;
+    recordIds?: unknown;
+    modifiedMetadata?: unknown;
+  };
+
+  const action = payload.action === "accept" || payload.action === "reject" || payload.action === "modify"
+    ? payload.action
+    : null;
+  if (!action) {
+    throw new HttpsError("invalid-argument", "Invalid review action.");
+  }
+
+  const recordIds = Array.isArray(payload.recordIds)
+    ? payload.recordIds.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+  if (!recordIds.length) {
+    throw new HttpsError("invalid-argument", "At least one record ID is required.");
+  }
+
+  const batch = firestore.batch();
+  let updated = 0;
+
+  for (const recordId of recordIds) {
+    const querySnapshot = await firestore.collectionGroup("items").where("id", "==", recordId).limit(1).get();
+    if (querySnapshot.empty) {
+      continue;
+    }
+
+    const doc = querySnapshot.docs[0];
+    const data = doc.data() as Record<string, unknown>;
+    const before = sanitizeMetadataCorrectionRecords([data])[0];
+    if (!before) {
+      continue;
+    }
+
+    const nextPayload: Record<string, unknown> = {
+      reviewedByAdmin: request.auth?.uid ?? "unknown",
+      reviewedAt: new Date().toISOString(),
+      reviewStatus: action === "reject" ? "rejected" : "accepted",
+    };
+
+    if (action === "modify" && payload.modifiedMetadata && typeof payload.modifiedMetadata === "object") {
+      const patched = {
+        ...before.finalMetadata,
+        ...(payload.modifiedMetadata as Record<string, unknown>),
+      };
+      const sanitizedPatched = sanitizeMetadataResult(patched, before.finalMetadata.source);
+      nextPayload.finalMetadata = sanitizedPatched;
+      nextPayload.finalConfidence = sanitizedPatched.confidence;
+      nextPayload.errorScore = Math.abs((before.originalVisionOutput?.confidence ?? sanitizedPatched.confidence) - sanitizedPatched.confidence);
+      nextPayload.flagged = false;
+      nextPayload.reasonFlagged = admin.firestore.FieldValue.delete();
+    }
+
+    batch.set(doc.ref, nextPayload, { merge: true });
+    updated += 1;
+
+    await appendMetadataCorrectionAuditLog({
+      actorId: request.auth?.uid ?? "unknown",
+      action,
+      targetIds: [recordId],
+      before,
+      after: { ...before, ...nextPayload },
+    });
+  }
+
+  await batch.commit();
+
+  return success("Applied correction review action.", { updated });
+});
+
+export const correctionsRules = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in to fetch metadata correction rules.");
+  }
+
+  const snapshot = await firestore.doc(METADATA_CORRECTION_RULES_DOC_PATH).get();
+  const rules = sanitizeMetadataCorrectionRules(snapshot.data());
+
+  return success("Loaded metadata correction rules.", rules);
+});
+
+export const correctionsRulesUpdate = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const payload = request.data as { rules?: unknown };
+  const rules = sanitizeMetadataCorrectionRules(payload.rules);
+  const next = {
+    ...rules,
+    updatedAt: new Date().toISOString(),
+    updatedBy: request.auth?.uid ?? "unknown",
+  };
+
+  await firestore.doc(METADATA_CORRECTION_RULES_DOC_PATH).set(next, { merge: true });
+
+  await appendMetadataCorrectionAuditLog({
+    actorId: request.auth?.uid ?? "unknown",
+    action: "rules-update",
+    targetIds: [METADATA_CORRECTION_RULES_DOC_PATH],
+    after: next,
+  });
+
+  return success("Updated metadata correction rules.", next);
+});
+
+// Compatibility aliases for previous callable names.
+export const submitMetadataCorrections = correctionsUpload;
+export const getMetadataCorrectionRules = correctionsRules;
 });
 
 // ---------------------------------------------------------------------------

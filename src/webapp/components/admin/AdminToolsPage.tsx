@@ -14,6 +14,7 @@ import React, { useState } from "react";
 
 import {
   ContentBrowser,
+  CorrectionReviewPanel,
   DebugLoggingPanel,
   GlossaryManagementPanel,
   ModerationQueue,
@@ -23,7 +24,7 @@ import {
   UserManagement,
 } from "./index";
 
-type AdminTab = "users" | "moderation" | "browser" | "premium" | "translations" | "translationReview" | "glossaries" | "debug";
+type AdminTab = "users" | "moderation" | "browser" | "premium" | "translations" | "translationReview" | "glossaries" | "debug" | "corrections";
 
 interface AdminToolsPageProps {
   currentUserEmail: string | null;
@@ -51,6 +52,8 @@ export function AdminToolsPage({ currentUserEmail, onBack }: AdminToolsPageProps
         return <GlossaryManagementPanel />;
       case "debug":
         return <DebugLoggingPanel />;
+      case "corrections":
+        return <CorrectionReviewPanel />;
     }
   }
 
@@ -79,6 +82,7 @@ export function AdminToolsPage({ currentUserEmail, onBack }: AdminToolsPageProps
             { id: "translationReview", label: "Translation Review" },
             { id: "glossaries", label: "Glossaries" },
             { id: "debug", label: "Debug Logging" },
+            { id: "corrections", label: "Correction Review" },
           ] as { id: AdminTab; label: string }[]
         ).map(({ id, label }) => (
           <button

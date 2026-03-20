@@ -103,6 +103,37 @@ export interface ImageModerationAssessment {
 
 export const AUTO_MODE_SCOPE_MESSAGE = "This tool only extracts metadata and table of contents. For vocab or concept extraction, use the dedicated capture tool.";
 
+const METADATA_PRIORITY_TERMS = [
+  "edition",
+  "teacher",
+  "student",
+  "publisher",
+  "press",
+  "copyright",
+  "mcgraw",
+  "pearson",
+  "savvas",
+  "houghton",
+  "isbn",
+  "grade",
+  "science",
+  "math",
+  "history",
+  "english",
+  "language arts",
+];
+
+const DECORATIVE_TEXT_PATTERNS: RegExp[] = [
+  /all rights reserved/i,
+  /printed in/i,
+  /scan(ned|ning)? by/i,
+  /watermark/i,
+  /www\./i,
+  /http(s)?:\/\//i,
+  /^page\s+\d+$/i,
+  /^\d+\s*$/,
+  /^[^a-zA-Z]{3,}$/,
+];
 const PROFANITY_TERMS = [
   "f***",
   "f**k",
@@ -287,7 +318,7 @@ export function detectPageBoundaryFromRgba(
 }
 
 export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadata {
-  const text = rawText.replace(/\r/g, "").trim();
+  const text = preprocessMetadataOcrText(rawText);
   const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
 
   const metadata: AutoTextbookMetadata = {};
@@ -1030,4 +1061,127 @@ function isValidIsbn(value: string | undefined): boolean {
   }
 
   return false;
+}
+
+function hasAlphabeticSignal(value: string): boolean {
+  const alphaChars = (value.match(/[A-Za-z]/g) ?? []).length;
+  if (alphaChars < 3) {
+    return false;
+  }
+
+  const ratio = alphaChars / Math.max(1, value.length);
+  return ratio >= 0.45;
+}
+
+function normalizeDecorativeNoise(value: string): string {
+  const withoutControl = value
+    .replace(/[\u0000-\u001F]+/g, " ")
+    .replace(/[|_~`^*#@]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!withoutControl) {
+    return "";
+  }
+
+  // Remove obvious OCR garbage sequences like "IlI1l1" runs.
+  return withoutControl.replace(/\b[Il1]{4,}\b/g, "").replace(/\s+/g, " ").trim();
+}
+
+function collapseRepeatedWords(value: string): string {
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) {
+    return value;
+  }
+
+  const compact: string[] = [];
+  for (const word of words) {
+    const prior = compact[compact.length - 1];
+    if (prior && prior.localeCompare(word, undefined, { sensitivity: "accent" }) === 0) {
+      continue;
+    }
+    compact.push(word);
+  }
+
+  return compact.join(" ");
+}
+
+function shouldKeepMetadataLine(value: string, index: number): boolean {
+  if (!value) {
+    return false;
+  }
+
+  if (DECORATIVE_TEXT_PATTERNS.some((pattern) => pattern.test(value))) {
+    return false;
+  }
+
+  if (!hasAlphabeticSignal(value)) {
+    return false;
+  }
+
+  if (value.length >= 6 && value.length <= 120) {
+    return true;
+  }
+
+  // Keep early lines because title/subtitle are commonly near the top.
+  return index <= 3;
+}
+
+function metadataPriorityScore(value: string): number {
+  const normalized = value.toLowerCase();
+  let score = 0;
+
+  for (const term of METADATA_PRIORITY_TERMS) {
+    if (normalized.includes(term)) {
+      score += 2;
+    }
+  }
+
+  if (/\b(teacher|student)('?s)?\s+edition\b/i.test(value)) {
+    score += 4;
+  }
+  if (/\b(19|20)\d{2}\b/.test(value)) {
+    score += 1;
+  }
+  if (/\bisbn\b/i.test(value)) {
+    score += 2;
+  }
+
+  return score;
+}
+
+export function preprocessMetadataOcrText(rawText: string): string {
+  const normalizedText = rawText.replace(/\r/g, "\n").trim();
+  if (!normalizedText) {
+    return "";
+  }
+
+  const lines = normalizedText
+    .split("\n")
+    .map((line) => normalizeDecorativeNoise(line))
+    .map((line) => collapseRepeatedWords(line))
+    .filter(Boolean);
+
+  const filtered = lines
+    .map((line, index) => ({
+      line,
+      index,
+      keep: shouldKeepMetadataLine(line, index),
+      score: metadataPriorityScore(line),
+    }))
+    .filter((entry) => entry.keep)
+    .sort((a, b) => {
+      if (b.score === a.score) {
+        return a.index - b.index;
+      }
+      return b.score - a.score;
+    })
+    .slice(0, 20)
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => {
+      const mostlyUppercase = entry.line === entry.line.toUpperCase() && /[A-Z]/.test(entry.line);
+      return mostlyUppercase ? toTitleCase(entry.line) : entry.line;
+    });
+
+  return filtered.join("\n").trim();
 }

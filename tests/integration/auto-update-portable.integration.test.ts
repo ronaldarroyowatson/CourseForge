@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import JSZip from "jszip";
 
 const repoRoot = join(__dirname, "..", "..");
@@ -99,7 +99,7 @@ async function startAssetServer(assetPath: string) {
   };
 }
 
-async function closeServer(server: ChildProcessWithoutNullStreams | null) {
+async function closeServer(server: ChildProcess | null) {
   if (!server) {
     return;
   }
@@ -206,7 +206,7 @@ describe("portable updater script", () => {
 
   it.skipIf(process.platform !== "win32")("stages the downloaded package and writes pending metadata for the next launch", async () => {
     const root = mkdtempSync(join(tmpdir(), "courseforge-updater-"));
-    let server: ChildProcessWithoutNullStreams | null = null;
+    let server: ChildProcess | null = null;
 
     try {
       const zipPath = join(root, "portable.zip");
@@ -265,7 +265,7 @@ describe("portable updater script", () => {
 
   it.skipIf(process.platform !== "win32")("logs a useful diagnostic when the downloaded package is missing the webapp payload", async () => {
     const root = mkdtempSync(join(tmpdir(), "courseforge-updater-"));
-    let server: ChildProcessWithoutNullStreams | null = null;
+    let server: ChildProcess | null = null;
 
     try {
       const zipPath = join(root, "portable.zip");

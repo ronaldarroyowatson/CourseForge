@@ -20,6 +20,7 @@ import {
   isLikelyTocText,
   mergeAutoMetadata,
   parseTocFromOcrText,
+  preprocessMetadataOcrText,
   scoreMetadataConfidence,
   stitchTocPages,
   type AutoMetadataConfidenceMap,
@@ -30,6 +31,19 @@ import {
   type TocPage,
   type TocChapter,
 } from "../../../core/services/textbookAutoExtractionService";
+import {
+  applyCorrectionRulesToText,
+  didMetadataChange,
+  getEffectiveCorrectionRules,
+  isMetadataCorrectionSharingEnabled,
+  saveCorrectionRecord,
+  type MetadataResult,
+} from "../../../core/services/metadataCorrectionLearningService";
+import {
+  extractMetadataWithOcrFallbackFromDataUrl,
+  type MetadataPipelineResult,
+} from "../../../core/services/metadataExtractionPipelineService";
+import { syncMetadataCorrectionLearning } from "../../../core/services/metadataCorrectionSyncService";
 import { useRepositories } from "../../hooks/useRepositories";
 import { useUIStore } from "../../store/uiStore";
 import { t as translate } from "../../../core/services/i18nService";
@@ -62,16 +76,21 @@ interface CaptureDialogState {
 
 interface UploadPreviewState {
   open: boolean;
+  step: "cover" | "title";
   imageDataUrl: string;
   ocrText: string;
   ocrProviderId: string;
   editableOcrText: string;
+  metadataResult: MetadataResult | null;
+  pipelineResult: MetadataPipelineResult | null;
 }
 
 interface CaptureResult {
   imageDataUrl: string;
   ocrText: string;
   ocrProviderId: string;
+  metadataResult: MetadataResult | null;
+  pipelineResult: MetadataPipelineResult | null;
 }
 
 interface DuplicateTextbookMatch {
@@ -293,6 +312,33 @@ function fromMetadataFormState(form: MetadataFormState): AutoTextbookMetadata {
   };
 }
 
+function metadataResultToAutoMetadata(metadata: MetadataResult): AutoTextbookMetadata {
+  return {
+    title: metadata.title ?? undefined,
+    subtitle: metadata.subtitle ?? undefined,
+    edition: metadata.edition ?? undefined,
+    publisher: metadata.publisher ?? undefined,
+    seriesName: metadata.series ?? undefined,
+    gradeBand: metadata.gradeLevel ?? undefined,
+    subject: metadata.subject ?? undefined,
+  };
+}
+
+function metadataFormToResult(form: MetadataFormState, rawText: string, source: MetadataResult["source"]): MetadataResult {
+  return {
+    title: form.title.trim() || null,
+    subtitle: form.subtitle.trim() || null,
+    edition: form.edition.trim() || null,
+    publisher: form.publisher.trim() || null,
+    series: form.seriesName.trim() || null,
+    gradeLevel: form.gradeBand.trim() || null,
+    subject: form.subject.trim() || null,
+    confidence: 1,
+    rawText,
+    source,
+  };
+}
+
 async function captureDisplayFrame(input?: { preferChromeTabCapture?: boolean }): Promise<string> {
   if (input?.preferChromeTabCapture) {
     const chromeCapture = await captureVisibleChromeTab();
@@ -507,14 +553,24 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadPreview, setUploadPreview] = useState<UploadPreviewState>({
     open: false,
+    step: "cover",
     imageDataUrl: "",
     ocrText: "",
     ocrProviderId: "",
     editableOcrText: "",
+    metadataResult: null,
+    pipelineResult: null,
   });
   const imageRef = useRef<HTMLImageElement | null>(null);
   const selectionResolverRef = useRef<((value: SelectionRect | null) => void) | null>(null);
+  const lastMetadataPipelineRef = useRef<MetadataPipelineResult | null>(null);
+  const lastMetadataCaptureStepRef = useRef<"cover" | "title">("cover");
   const coverFileInputRef = useRef<HTMLInputElement | null>(null);
+  const titleFileInputRef = useRef<HTMLInputElement | null>(null);
+  const lastCapturedOcrByStepRef = useRef<Record<"cover" | "title", string>>({
+    cover: "",
+    title: "",
+  });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingUploadLimitResultRef = useRef<ReturnType<typeof enforceAutoCaptureLimit> | null>(null);
 
@@ -553,6 +609,17 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       mounted = false;
     };
   }, [runtime]);
+
+  useEffect(() => {
+    if (!isMetadataCorrectionSharingEnabled()) {
+      return;
+    }
+
+    void syncMetadataCorrectionLearning({
+      optedIn: true,
+      maxPushRecords: 25,
+    });
+  }, []);
 
   useEffect(() => {
     setDuplicateMatch(null);
@@ -688,6 +755,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       return;
     }
 
+    event.currentTarget.setPointerCapture(event.pointerId);
+
     const rect = imageRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
     const y = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
@@ -711,8 +780,30 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     setSelectionRect({ x, y, width, height });
   }
 
-  function handleSelectionPointerUp(): void {
+  function handleSelectionPointerUp(event: React.PointerEvent<HTMLDivElement>): void {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
     setDragStart(null);
+
+    if (selectionRect) {
+      const hasArea = selectionRect.width > 3 && selectionRect.height > 3;
+      if (hasArea) {
+        closeSelectionDialog(selectionRect);
+        return;
+      }
+
+      if (imageRef.current) {
+        const fullImageSelection: SelectionRect = {
+          x: 0,
+          y: 0,
+          width: imageRef.current.getBoundingClientRect().width,
+          height: imageRef.current.getBoundingClientRect().height,
+        };
+        closeSelectionDialog(fullImageSelection);
+      }
+    }
   }
 
   function convertSelectionToNaturalPixels(selection: SelectionRect, image: HTMLImageElement): SelectionRect {
@@ -736,7 +827,11 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   function applyMetadataFromText(rawText: string, sourceStep: "cover" | "title"): void {
-    const safety = evaluateAutoCaptureSafety(rawText, sourceStep);
+    const correctedText = applyCorrectionRulesToText(rawText, getEffectiveCorrectionRules(), {
+      publisher: metadataForm.publisher,
+    });
+    const cleanedText = preprocessMetadataOcrText(correctedText);
+    const safety = evaluateAutoCaptureSafety(cleanedText, sourceStep);
     if (!safety.allowed) {
       setErrorMessage(safety.message ?? "Capture blocked by safety checks.");
       appendDebugLogEntry({
@@ -748,9 +843,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       return;
     }
 
-    const parsed = extractMetadataFromOcrText(rawText);
+    const parsed = extractMetadataFromOcrText(cleanedText);
     const merged = mergeAutoMetadata(metadataDraft, parsed);
-    upsertAutoMetadataConfidence(scoreMetadataConfidence(rawText, parsed));
+    upsertAutoMetadataConfidence(scoreMetadataConfidence(cleanedText, parsed));
     applyMetadataDraft(merged);
     setErrorMessage(null);
     setInfoMessage("Metadata extracted automatically. Review and edit fields before accepting.");
@@ -758,7 +853,59 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       eventType: "metadata_extracted",
       message: "Metadata extracted from OCR draft.",
       autoModeStep: sourceStep,
-      context: { hasTitle: Boolean(merged.title), hasIsbn: Boolean(merged.isbn), hasAuthors: Boolean(merged.authors?.length) },
+        context: {
+          hasTitle: Boolean(merged.title),
+          hasIsbn: Boolean(merged.isbn),
+          hasAuthors: Boolean(merged.authors?.length),
+          cleanedLength: cleanedText.length,
+        },
+    });
+  }
+
+  function applyMetadataFromPipelineResult(result: MetadataResult, sourceStep: "cover" | "title"): void {
+    const merged = mergeAutoMetadata(metadataDraft, metadataResultToAutoMetadata(result));
+    const scored = scoreMetadataConfidence(result.rawText, metadataResultToAutoMetadata(result));
+
+    const fieldConfidence: AutoMetadataConfidenceMap = {
+      ...scored,
+      title: result.title
+        ? { value: result.title, confidence: result.confidence, sourceType: "auto" }
+        : scored.title,
+      subtitle: result.subtitle
+        ? { value: result.subtitle, confidence: result.confidence, sourceType: "auto" }
+        : scored.subtitle,
+      edition: result.edition
+        ? { value: result.edition, confidence: result.confidence, sourceType: "auto" }
+        : scored.edition,
+      publisher: result.publisher
+        ? { value: result.publisher, confidence: result.confidence, sourceType: "auto" }
+        : scored.publisher,
+      seriesName: result.series
+        ? { value: result.series, confidence: result.confidence, sourceType: "auto" }
+        : scored.seriesName,
+      gradeBand: result.gradeLevel
+        ? { value: result.gradeLevel, confidence: result.confidence, sourceType: "auto" }
+        : scored.gradeBand,
+      subject: result.subject
+        ? { value: result.subject, confidence: result.confidence, sourceType: "auto" }
+        : scored.subject,
+    };
+
+    upsertAutoMetadataConfidence(fieldConfidence);
+    applyMetadataDraft(merged);
+    setOcrDraft(result.rawText);
+    setErrorMessage(null);
+    setInfoMessage("Metadata extracted automatically. Review and edit fields before accepting.");
+    appendDebugLogEntry({
+      eventType: "metadata_extracted",
+      message: "Metadata extracted from vision-first pipeline.",
+      autoModeStep: sourceStep,
+      context: {
+        source: result.source,
+        confidence: result.confidence,
+        hasTitle: Boolean(result.title),
+        hasPublisher: Boolean(result.publisher),
+      },
     });
   }
 
@@ -844,22 +991,69 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       const rawImage = await captureDisplayFrame({ preferChromeTabCapture: chromeOs });
       const image = await loadImage(rawImage);
       const defaultSelection = createDefaultSelection(image);
-      const selectedRectDisplay = await requestSelection(rawImage);
-      if (!selectedRectDisplay) {
+      let cropped = "";
+      let selection = defaultSelection;
+
+      try {
+        const selectedRectDisplay = await requestSelection(rawImage);
+        if (!selectedRectDisplay) {
+          setErrorMessage("Capture was canceled before selecting a region. Try again or upload an image manually.");
+          appendDebugLogEntry({
+            eventType: "error",
+            message: "Capture canceled before region selection.",
+            autoModeStep: targetStep,
+          });
+          return null;
+        }
+
+        const selectedRectNatural = convertSelectionToNaturalPixels(selectedRectDisplay, image);
+        const hasMeaningfulSelection = selectedRectNatural.width > 6 && selectedRectNatural.height > 6;
+        selection = hasMeaningfulSelection ? selectedRectNatural : defaultSelection;
+        cropped = await cropToSelectionAndAutoBoundary(rawImage, selection);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unknown region capture error.";
+        setErrorMessage("We couldn't capture that region. Try again or upload a screenshot manually.");
+        appendDebugLogEntry({
+          eventType: "error",
+          message: "Region capture failed.",
+          autoModeStep: targetStep,
+          context: { detail },
+        });
         return null;
       }
 
-      const selectedRectNatural = convertSelectionToNaturalPixels(selectedRectDisplay, image);
-      const hasMeaningfulSelection = selectedRectNatural.width > 6 && selectedRectNatural.height > 6;
-      const selection = hasMeaningfulSelection ? selectedRectNatural : defaultSelection;
-
-      const cropped = await cropToSelectionAndAutoBoundary(rawImage, selection);
       setUsage(limitResult.nextUsage);
       persistCaptureUsage(draftKeyRef.current, limitResult.nextUsage);
-      setIsRunningOcr(true);
-      const ocr = await extractTextFromImageWithFallback(cropped);
-      setIsRunningOcr(false);
-      setOcrProviderStatus(`OCR provider: ${ocr.providerId}`);
+
+      let ocrProviderStatusMessage = "";
+      let ocrText = "";
+      let ocrProviderId = "n/a";
+      let metadataResult: MetadataResult | null = null;
+      let pipelineResult: MetadataPipelineResult | null = null;
+
+      if (targetStep === "cover" || targetStep === "title") {
+        setIsRunningOcr(true);
+        pipelineResult = await extractMetadataWithOcrFallbackFromDataUrl(cropped, {
+          pageType: targetStep,
+          publisherHint: metadataForm.publisher || null,
+        });
+        setIsRunningOcr(false);
+
+        metadataResult = pipelineResult.result;
+        ocrText = pipelineResult.originalOcrOutput?.rawText ?? pipelineResult.result.rawText;
+        ocrProviderId = pipelineResult.originalOcrOutput?.providerId ?? "vision-primary";
+        ocrProviderStatusMessage = `Metadata source: ${pipelineResult.result.source}${pipelineResult.originalOcrOutput ? ` (OCR: ${pipelineResult.originalOcrOutput.providerId})` : ""}`;
+        lastCapturedOcrByStepRef.current[targetStep] = ocrText;
+      } else {
+        setIsRunningOcr(true);
+        const ocr = await extractTextFromImageWithFallback(cropped);
+        setIsRunningOcr(false);
+        ocrText = ocr.text;
+        ocrProviderId = ocr.providerId;
+        ocrProviderStatusMessage = `OCR provider: ${ocr.providerId}`;
+      }
+
+      setOcrProviderStatus(ocrProviderStatusMessage);
       appendDebugLogEntry({
         eventType: "auto_capture_complete",
         message: "Capture completed.",
@@ -871,21 +1065,26 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         },
         context: {
           usageAfterCapture: limitResult.nextUsage,
-          ocrProvider: ocr.providerId,
+          ocrProvider: ocrProviderId,
+          metadataSource: metadataResult?.source,
         },
       });
       return {
         imageDataUrl: cropped,
-        ocrText: ocr.text,
-        ocrProviderId: ocr.providerId,
+        ocrText,
+        ocrProviderId,
+        metadataResult,
+        pipelineResult,
       };
-    } catch {
+    } catch (error) {
       setIsRunningOcr(false);
-      setErrorMessage("Unable to capture screen. Make sure screen sharing is allowed and try again.");
+      const message = error instanceof Error ? error.message : "Unknown capture error.";
+      setErrorMessage("Unable to capture screen. Try again, or use Upload Image as fallback.");
       appendDebugLogEntry({
         eventType: "error",
         message: "Display capture failed.",
         autoModeStep: targetStep,
+        context: { detail: message },
       });
       return null;
     } finally {
@@ -901,19 +1100,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     applyTocFromText(ocrDraft);
   }
 
-  async function processImageFileForCover(file: File): Promise<void> {
+  async function processImageFileForStep(file: File, targetStep: "cover" | "title"): Promise<void> {
     if (!file.type.startsWith("image/")) {
       setErrorMessage("Please select an image file (JPEG, PNG, WEBP, etc.).");
       return;
     }
 
-    const limitResult = enforceAutoCaptureLimit(usage, "cover", DEFAULT_AUTO_CAPTURE_LIMITS);
+    const limitResult = enforceAutoCaptureLimit(usage, targetStep, DEFAULT_AUTO_CAPTURE_LIMITS);
     if (!limitResult.allowed) {
       setErrorMessage(limitResult.message ?? "Capture limit reached.");
       appendDebugLogEntry({
         eventType: "warning",
         message: "File upload blocked by limit guard.",
-        autoModeStep: "cover",
+        autoModeStep: targetStep,
         context: { usage, limits: DEFAULT_AUTO_CAPTURE_LIMITS },
       });
       return;
@@ -932,17 +1131,28 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       });
 
       setIsRunningOcr(true);
-      const ocr = await extractTextFromImageWithFallback(dataUrl);
+      const pipelineResult = await extractMetadataWithOcrFallbackFromDataUrl(dataUrl, {
+        pageType: targetStep,
+        publisherHint: metadataForm.publisher || null,
+      });
       setIsRunningOcr(false);
-      setOcrProviderStatus(`OCR provider: ${ocr.providerId}`);
+
+      const ocrText = pipelineResult.originalOcrOutput?.rawText ?? pipelineResult.result.rawText;
+      const ocrProviderId = pipelineResult.originalOcrOutput?.providerId ?? "vision-primary";
+      setOcrProviderStatus(
+        `Metadata source: ${pipelineResult.result.source}${pipelineResult.originalOcrOutput ? ` (OCR: ${pipelineResult.originalOcrOutput.providerId})` : ""}`
+      );
 
       // Show preview dialog so the user can review image and OCR text before confirming.
       setUploadPreview({
         open: true,
+        step: targetStep,
         imageDataUrl: dataUrl,
-        ocrText: ocr.text,
-        ocrProviderId: ocr.providerId,
-        editableOcrText: ocr.text,
+        ocrText,
+        ocrProviderId,
+        editableOcrText: ocrText,
+        metadataResult: pipelineResult.result,
+        pipelineResult,
       });
 
       // Commit happens in confirmUploadPreview; store limitResult for use there.
@@ -952,8 +1162,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       setErrorMessage("Unable to process image file. Make sure the file is a valid image and try again.");
       appendDebugLogEntry({
         eventType: "error",
-        message: "Cover file upload processing failed.",
-        autoModeStep: "cover",
+        message: "Image file upload processing failed.",
+        autoModeStep: targetStep,
       });
     } finally {
       setIsBusy(false);
@@ -966,23 +1176,38 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       return;
     }
 
-    const { imageDataUrl, editableOcrText, ocrProviderId } = uploadPreview;
+    const { imageDataUrl, editableOcrText, ocrProviderId, metadataResult, pipelineResult } = uploadPreview;
 
     setUsage(limitResult.nextUsage);
     persistCaptureUsage(draftKeyRef.current, limitResult.nextUsage);
     pendingUploadLimitResultRef.current = null;
 
-    setCoverImageDataUrl(imageDataUrl);
+    const targetStep = uploadPreview.step;
+    lastCapturedOcrByStepRef.current[targetStep] = uploadPreview.ocrText;
     setOcrDraft(editableOcrText);
     setModerationAssessment(null);
-    applyMetadataFromText(editableOcrText, "cover");
-    setInfoMessage(`Cover image loaded and parsed. Review the metadata fields before accepting. (OCR: ${ocrProviderId})`);
+    if (pipelineResult) {
+      lastMetadataPipelineRef.current = pipelineResult;
+    }
+    if (targetStep === "cover") {
+      setCoverImageDataUrl(imageDataUrl);
+    }
+    lastMetadataCaptureStepRef.current = targetStep;
+    if (metadataResult) {
+      applyMetadataFromPipelineResult({
+        ...metadataResult,
+        rawText: editableOcrText,
+      }, targetStep);
+    } else {
+      applyMetadataFromText(editableOcrText, targetStep);
+    }
+    setInfoMessage(`${targetStep === "cover" ? "Cover" : "Title page"} image loaded and parsed. Review fields before accepting. (OCR: ${ocrProviderId})`);
     setUploadPreview((current) => ({ ...current, open: false }));
 
     appendDebugLogEntry({
       eventType: "auto_capture_complete",
-      message: "Cover confirmed from uploaded file.",
-      autoModeStep: "cover",
+      message: "Capture confirmed from uploaded file.",
+      autoModeStep: targetStep,
       context: {
         usageAfterCapture: limitResult.nextUsage,
         ocrProvider: ocrProviderId,
@@ -1010,7 +1235,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     setIsDragOver(false);
     const file = event.dataTransfer.files[0];
     if (file) {
-      void processImageFileForCover(file);
+      void processImageFileForStep(file, "cover");
     }
   }
 
@@ -1021,11 +1246,20 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     }
 
     setCoverImageDataUrl(captured.imageDataUrl);
+    lastCapturedOcrByStepRef.current.cover = captured.ocrText;
     setOcrDraft(captured.ocrText);
     setModerationAssessment(null);
     setStep("cover");
-    applyMetadataFromText(captured.ocrText, "cover");
-    setInfoMessage(`Cover captured and parsed. Review the metadata fields before accepting. (OCR: ${captured.ocrProviderId})`);
+    if (captured.pipelineResult) {
+      lastMetadataPipelineRef.current = captured.pipelineResult;
+    }
+    lastMetadataCaptureStepRef.current = "cover";
+    if (captured.metadataResult) {
+      applyMetadataFromPipelineResult(captured.metadataResult, "cover");
+    } else {
+      applyMetadataFromText(captured.ocrText, "cover");
+    }
+    setInfoMessage(`Cover captured and parsed. Review the metadata fields before accepting. (Source: ${captured.metadataResult?.source ?? `OCR: ${captured.ocrProviderId}`})`);
   }
 
   async function handleCaptureTitle(): Promise<void> {
@@ -1034,10 +1268,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       return;
     }
 
+    lastCapturedOcrByStepRef.current.title = captured.ocrText;
     setOcrDraft(captured.ocrText);
     setStep("title");
-    applyMetadataFromText(captured.ocrText, "title");
-    setInfoMessage(`Title page captured and parsed. Review merged metadata. (OCR: ${captured.ocrProviderId})`);
+    if (captured.pipelineResult) {
+      lastMetadataPipelineRef.current = captured.pipelineResult;
+    }
+    lastMetadataCaptureStepRef.current = "title";
+    if (captured.metadataResult) {
+      applyMetadataFromPipelineResult(captured.metadataResult, "title");
+    } else {
+      applyMetadataFromText(captured.ocrText, "title");
+    }
+    setInfoMessage(`Title page captured and parsed. Review merged metadata. (Source: ${captured.metadataResult?.source ?? `OCR: ${captured.ocrProviderId}`})`);
   }
 
   async function handleCaptureToc(): Promise<void> {
@@ -1162,6 +1405,34 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     }
 
     const metadata = fromMetadataFormState(metadataForm);
+    const latestPipeline = lastMetadataPipelineRef.current;
+    const finalMetadataResult = metadataFormToResult(
+      metadataForm,
+      ocrDraft,
+      latestPipeline?.result.source ?? "ocr"
+    );
+
+    const changedFromOriginal = didMetadataChange(latestPipeline?.result ?? null, finalMetadataResult);
+    saveCorrectionRecord({
+      pageType: lastMetadataCaptureStepRef.current,
+      publisher: metadata.publisher ?? null,
+      series: metadata.seriesName ?? null,
+      subject: metadata.subject ?? null,
+      originalVisionOutput: latestPipeline?.originalVisionOutput ?? null,
+      originalOcrOutput: latestPipeline?.originalOcrOutput
+        ? { rawText: latestPipeline.originalOcrOutput.rawText }
+        : null,
+      finalMetadata: finalMetadataResult,
+      imageReference: coverImageDataUrl,
+    });
+
+    if (!changedFromOriginal) {
+      appendDebugLogEntry({
+        eventType: "user_action",
+        message: "Metadata accepted without edits; logged as high-confidence sample.",
+        autoModeStep: lastMetadataCaptureStepRef.current,
+      });
+    }
 
     try {
       setIsBusy(true);
@@ -1392,6 +1663,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         setDuplicateMatch(null);
       }
 
+      if (isMetadataCorrectionSharingEnabled()) {
+        const syncResult = await syncMetadataCorrectionLearning({
+          optedIn: true,
+          maxPushRecords: 30,
+        });
+        if (syncResult.message) {
+          setInfoMessage(syncResult.message);
+        }
+      }
+
       onSaved();
     } catch {
       setErrorMessage("Unable to save Auto setup. Please verify metadata and try again.");
@@ -1472,10 +1753,23 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         className="cover-file-input"
         onChange={(event) => {
           const file = event.target.files?.[0];
-          if (file) void processImageFileForCover(file);
+          if (file) void processImageFileForStep(file, "cover");
           event.target.value = "";
         }}
         aria-label="Upload cover image file"
+      />
+
+      <input
+        ref={titleFileInputRef}
+        type="file"
+        accept="image/*"
+        className="cover-file-input"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void processImageFileForStep(file, "title");
+          event.target.value = "";
+        }}
+        aria-label="Upload title page image file"
       />
 
       <div className="form-actions">
@@ -1491,9 +1785,14 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         ) : null}
 
         {step === "title" ? (
-          <button type="button" onClick={() => void handleCaptureTitle()} disabled={isBusy}>
-            Capture Title Page
-          </button>
+          <>
+            <button type="button" onClick={() => void handleCaptureTitle()} disabled={isBusy}>
+              Capture Title Page
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => titleFileInputRef.current?.click()} disabled={isBusy}>
+              Upload Title Page
+            </button>
+          </>
         ) : null}
 
         {step === "toc" ? (
@@ -1544,6 +1843,12 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             Upload New
           </button>
         </div>
+      ) : null}
+
+      {step !== "toc-editor" ? (
+        <p className="form-hint">
+          You can edit any of these fields. Your corrections help improve future extractions.
+        </p>
       ) : null}
 
       {step !== "toc-editor" ? (
@@ -1713,7 +2018,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       {uploadPreview.open ? (
         <div className="capture-overlay" role="dialog" aria-modal="true" aria-label="Cover image upload preview">
           <div className="capture-overlay__panel upload-preview-panel">
-            <h4>Review uploaded cover image</h4>
+            <h4>Review uploaded image</h4>
             <p className="form-hint">
               Verify the image and OCR text below. Edit the OCR text if anything was misread, then confirm to apply.
             </p>
@@ -1725,6 +2030,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                   className="upload-preview-image"
                 />
                 <p className="form-hint upload-preview-provider">OCR provider: {uploadPreview.ocrProviderId}</p>
+                <p className="form-hint upload-preview-provider">Target step: {uploadPreview.step === "cover" ? "Cover" : "Title Page"}</p>
               </div>
               <div className="upload-preview-ocr-wrap">
                 <label>
@@ -1788,8 +2094,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
               <button
                 type="button"
                 onClick={() => {
-                  if (!selectionRect || !imageRef.current) {
+                  if (!imageRef.current) {
                     closeSelectionDialog(null);
+                    return;
+                  }
+
+                  if (!selectionRect) {
+                    closeSelectionDialog(createDefaultSelection(imageRef.current));
                     return;
                   }
 

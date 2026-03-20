@@ -1,0 +1,248 @@
+import { httpsCallable } from "firebase/functions";
+
+import { functionsClient } from "../../firebase/functions";
+import { extractTextFromImageWithFallback, type AutoOcrProviderId } from "./autoOcrService";
+import {
+  applyCorrectionRulesToText,
+  getEffectiveCorrectionRules,
+  type MetadataPageType,
+  type MetadataResult,
+} from "./metadataCorrectionLearning";
+import { extractMetadataFromOcrText, preprocessMetadataOcrText } from "./textbookAutoExtractionService";
+
+const DEFAULT_VISION_CONFIDENCE_THRESHOLD = 0.72;
+
+export interface MetadataExtractionContext {
+  pageType: MetadataPageType;
+  publisherHint?: string | null;
+}
+
+export interface OcrMetadataOutput {
+  rawText: string;
+  providerId: AutoOcrProviderId;
+}
+
+export interface MetadataPipelineResult {
+  result: MetadataResult;
+  originalVisionOutput: MetadataResult | null;
+  originalOcrOutput: OcrMetadataOutput | null;
+}
+
+interface VisionCallableResponse {
+  success?: boolean;
+  message?: string;
+  data?: {
+    metadata?: Partial<MetadataResult>;
+    rawText?: string;
+    confidence?: number;
+  };
+}
+
+function clampConfidence(value: unknown, fallback = 0): number {
+  const numeric = typeof value === "number" ? value : fallback;
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  return Math.max(0, Math.min(1, numeric));
+}
+
+function normalizeTextValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeMetadataResult(input: Partial<MetadataResult> & Pick<MetadataResult, "source">): MetadataResult {
+  return {
+    title: normalizeTextValue(input.title),
+    subtitle: normalizeTextValue(input.subtitle),
+    edition: normalizeTextValue(input.edition),
+    publisher: normalizeTextValue(input.publisher),
+    series: normalizeTextValue(input.series),
+    gradeLevel: normalizeTextValue(input.gradeLevel),
+    subject: normalizeTextValue(input.subject),
+    confidence: clampConfidence(input.confidence),
+    rawText: typeof input.rawText === "string" ? input.rawText : "",
+    source: input.source,
+  };
+}
+
+function metadataHasRequiredFields(metadata: MetadataResult): boolean {
+  return Boolean(metadata.title && metadata.title.trim().length >= 2);
+}
+
+function normalizeWhitespace(value: string): string {
+  return value
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function removeRepeatedAdjacentWords(value: string): string {
+  return value.replace(/\b([A-Za-z][A-Za-z0-9'’.-]*)\s+\1\b/gi, "$1");
+}
+
+function postProcessOcrText(rawText: string, context: MetadataExtractionContext): string {
+  const cleaned = preprocessMetadataOcrText(rawText);
+  const deduped = removeRepeatedAdjacentWords(cleaned);
+  const normalized = normalizeWhitespace(deduped);
+  return applyCorrectionRulesToText(normalized, getEffectiveCorrectionRules(), {
+    publisher: context.publisherHint,
+  });
+}
+
+function autoMetadataToMetadataResult(rawText: string, source: MetadataResult["source"]): MetadataResult {
+  const parsed = extractMetadataFromOcrText(rawText);
+
+  return {
+    title: parsed.title ?? null,
+    subtitle: parsed.subtitle ?? null,
+    edition: parsed.edition ?? null,
+    publisher: parsed.publisher ?? null,
+    series: parsed.seriesName ?? null,
+    gradeLevel: parsed.gradeBand ?? null,
+    subject: parsed.subject ?? null,
+    confidence: source === "ocr" ? 0.58 : 0.66,
+    rawText,
+    source,
+  };
+}
+
+function base64FromBytes(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+}
+
+export function imageBufferToDataUrl(imageBuffer: ArrayBuffer | Uint8Array, mimeType = "image/jpeg"): string {
+  const bytes = imageBuffer instanceof Uint8Array ? imageBuffer : new Uint8Array(imageBuffer);
+  const base64 = base64FromBytes(bytes);
+  return `data:${mimeType};base64,${base64}`;
+}
+
+export async function extractMetadataFromImageDataUrl(
+  imageDataUrl: string,
+  context: MetadataExtractionContext
+): Promise<MetadataResult> {
+  const callable = httpsCallable(functionsClient, "extractMetadataFromImageVision");
+
+  const response = await callable({
+    imageDataUrl,
+    context: {
+      pageType: context.pageType,
+      publisherHint: context.publisherHint ?? null,
+    },
+  });
+
+  const payload = response.data as VisionCallableResponse;
+  if (payload?.success !== true) {
+    throw new Error(payload?.message ?? "Vision metadata extraction failed.");
+  }
+
+  const incoming = payload.data?.metadata;
+  if (!incoming || typeof incoming !== "object") {
+    throw new Error("Vision metadata extraction returned an invalid payload.");
+  }
+
+  const normalized = normalizeMetadataResult({
+    ...incoming,
+    rawText: payload.data?.rawText ?? incoming.rawText,
+    confidence: payload.data?.confidence ?? incoming.confidence,
+    source: "vision",
+  });
+
+  if (!metadataHasRequiredFields(normalized)) {
+    throw new Error("Vision metadata extraction did not return enough fields.");
+  }
+
+  return normalized;
+}
+
+export async function extractMetadataFromImage(
+  imageBuffer: ArrayBuffer | Uint8Array,
+  context: MetadataExtractionContext
+): Promise<MetadataResult> {
+  const imageDataUrl = imageBufferToDataUrl(imageBuffer);
+  return extractMetadataFromImageDataUrl(imageDataUrl, context);
+}
+
+export async function extractMetadataWithOcrFallbackFromDataUrl(
+  imageDataUrl: string,
+  context: MetadataExtractionContext,
+  options: { confidenceThreshold?: number } = {}
+): Promise<MetadataPipelineResult> {
+  const confidenceThreshold = clampConfidence(options.confidenceThreshold, DEFAULT_VISION_CONFIDENCE_THRESHOLD);
+
+  let originalVisionOutput: MetadataResult | null = null;
+  try {
+    originalVisionOutput = await extractMetadataFromImageDataUrl(imageDataUrl, context);
+  } catch {
+    originalVisionOutput = null;
+  }
+
+  if (originalVisionOutput && originalVisionOutput.confidence >= confidenceThreshold && metadataHasRequiredFields(originalVisionOutput)) {
+    return {
+      result: originalVisionOutput,
+      originalVisionOutput,
+      originalOcrOutput: null,
+    };
+  }
+
+  const ocrResult = await extractTextFromImageWithFallback(imageDataUrl);
+  const correctedRawText = postProcessOcrText(ocrResult.text, context);
+  const ocrMetadata = autoMetadataToMetadataResult(correctedRawText, "ocr");
+
+  if (!originalVisionOutput) {
+    return {
+      result: ocrMetadata,
+      originalVisionOutput: null,
+      originalOcrOutput: {
+        rawText: ocrResult.text,
+        providerId: ocrResult.providerId,
+      },
+    };
+  }
+
+  const merged: MetadataResult = {
+    title: originalVisionOutput.title ?? ocrMetadata.title,
+    subtitle: originalVisionOutput.subtitle ?? ocrMetadata.subtitle,
+    edition: originalVisionOutput.edition ?? ocrMetadata.edition,
+    publisher: originalVisionOutput.publisher ?? ocrMetadata.publisher,
+    series: originalVisionOutput.series ?? ocrMetadata.series,
+    gradeLevel: originalVisionOutput.gradeLevel ?? ocrMetadata.gradeLevel,
+    subject: originalVisionOutput.subject ?? ocrMetadata.subject,
+    confidence: Math.max(ocrMetadata.confidence, originalVisionOutput.confidence),
+    rawText: [originalVisionOutput.rawText, correctedRawText].filter(Boolean).join("\n\n").trim(),
+    source: "vision+ocr",
+  };
+
+  return {
+    result: merged,
+    originalVisionOutput,
+    originalOcrOutput: {
+      rawText: ocrResult.text,
+      providerId: ocrResult.providerId,
+    },
+  };
+}
+
+export async function extractMetadataWithOcrFallback(
+  imageBuffer: ArrayBuffer | Uint8Array,
+  context: MetadataExtractionContext,
+  options: { confidenceThreshold?: number } = {}
+): Promise<MetadataPipelineResult> {
+  const imageDataUrl = imageBufferToDataUrl(imageBuffer);
+  return extractMetadataWithOcrFallbackFromDataUrl(imageDataUrl, context, options);
+}

@@ -1,6 +1,7 @@
 import { httpsCallable } from "firebase/functions";
 
 import type { ContentStatus } from "../models/entities";
+import type { CorrectionRecord, CorrectionRules } from "./metadataCorrectionLearningService";
 import { functionsClient } from "../../firebase/functions";
 import { getAdminClaim, getCurrentUser } from "../../firebase/auth";
 import { logSyncEvent } from "./syncService";
@@ -84,6 +85,13 @@ export interface DebugUploadSummary {
   totalSizeBytes: number;
   entriesCount: number;
   appVersion?: string;
+}
+
+export interface CorrectionListResponse {
+  items: CorrectionRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 interface CallableResponse<T> {
@@ -239,4 +247,36 @@ export async function setDebugLoggingPolicyAdmin(policy: Partial<DebugLoggingPol
 
 export async function listRecentDebugUploadsAdmin(): Promise<DebugUploadSummary[]> {
   return callAdminFunction<Record<string, never>, DebugUploadSummary[]>("listRecentDebugUploads", {});
+}
+
+export async function listCorrectionsAdmin(payload: {
+  filters?: {
+    publisher?: string;
+    pageType?: "cover" | "title" | "other" | "all";
+    confidenceMin?: number;
+    confidenceMax?: number;
+    source?: "vision" | "ocr" | "vision+ocr" | "all";
+    flaggedOnly?: boolean;
+    reviewStatus?: "pending" | "accepted" | "rejected" | "all";
+    dateFrom?: string;
+    dateTo?: string;
+  };
+  page?: number;
+  pageSize?: number;
+  sortBy?: "timestamp" | "finalConfidence" | "errorScore";
+  sortDirection?: "asc" | "desc";
+}): Promise<CorrectionListResponse> {
+  return callAdminFunction<typeof payload, CorrectionListResponse>("correctionsList", payload);
+}
+
+export async function reviewCorrectionsAdmin(payload: {
+  action: "accept" | "reject" | "modify";
+  recordIds: string[];
+  modifiedMetadata?: Partial<CorrectionRecord["finalMetadata"]>;
+}): Promise<{ updated: number }> {
+  return callAdminFunction<typeof payload, { updated: number }>("correctionsReview", payload);
+}
+
+export async function updateCorrectionRulesAdmin(rules: CorrectionRules): Promise<CorrectionRules> {
+  return callAdminFunction<{ rules: CorrectionRules }, CorrectionRules>("correctionsRulesUpdate", { rules });
 }

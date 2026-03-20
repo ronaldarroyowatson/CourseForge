@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import net from "node:net";
 
@@ -48,7 +48,7 @@ async function startStatusServer(root: string, port: number) {
   return child;
 }
 
-async function stopServer(child: ChildProcessWithoutNullStreams) {
+async function stopServer(child: ChildProcess) {
   if (child.killed || child.exitCode !== null) {
     return;
   }
@@ -58,7 +58,7 @@ async function stopServer(child: ChildProcessWithoutNullStreams) {
 }
 
 describe("local update status endpoint", () => {
-  let child: ChildProcessWithoutNullStreams | null = null;
+  let child: ChildProcess | null = null;
 
   afterEach(async () => {
     if (child) {

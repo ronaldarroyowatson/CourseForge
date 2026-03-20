@@ -1,4 +1,5 @@
 export { ContentBrowser } from "./ContentBrowser";
+export { CorrectionReviewPanel } from "./CorrectionReviewPanel";
 export { DebugLoggingPanel } from "./DebugLoggingPanel";
 export { GlossaryManagementPanel } from "./GlossaryManagementPanel";
 export { ModerationQueue } from "./ModerationQueue";

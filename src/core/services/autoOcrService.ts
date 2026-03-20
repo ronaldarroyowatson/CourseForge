@@ -45,6 +45,60 @@ interface CircuitStateEntry {
 
 type CircuitState = Record<AutoOcrProviderId, CircuitStateEntry>;
 
+async function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Unable to decode OCR image."));
+    image.src = dataUrl;
+  });
+}
+
+async function preprocessImageForOcr(imageDataUrl: string): Promise<string> {
+  if (typeof document === "undefined") {
+    return imageDataUrl;
+  }
+
+  try {
+    const image = await loadImageFromDataUrl(imageDataUrl);
+    const maxDimension = 2200;
+    const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) {
+      return imageDataUrl;
+    }
+
+    context.drawImage(image, 0, 0, width, height);
+    const imageData = context.getImageData(0, 0, width, height);
+    const pixels = imageData.data;
+
+    for (let index = 0; index < pixels.length; index += 4) {
+      const red = pixels[index];
+      const green = pixels[index + 1];
+      const blue = pixels[index + 2];
+
+      const gray = Math.round((red * 0.299) + (green * 0.587) + (blue * 0.114));
+      const boosted = Math.max(0, Math.min(255, (gray - 128) * 1.45 + 128));
+      const binary = boosted > 168 ? 255 : Math.round(boosted * 0.65);
+
+      pixels[index] = binary;
+      pixels[index + 1] = binary;
+      pixels[index + 2] = binary;
+    }
+
+    context.putImageData(imageData, 0, 0);
+    return canvas.toDataURL("image/jpeg", 0.95);
+  } catch {
+    return imageDataUrl;
+  }
+}
+
 function getStorage(): Storage | null {
   if (typeof window === "undefined") {
     return null;
@@ -319,6 +373,7 @@ export async function extractTextFromImageWithFallback(
     providersOverride?: AutoOcrProvider[];
   } = {}
 ): Promise<AutoOcrExtractionResult> {
+  const preprocessedImage = await preprocessImageForOcr(imageDataUrl);
   const providerOrder = normalizeProviderOrder(options.providerOrder ?? await getEffectiveAutoOcrProviderOrder());
   const providerMap = new Map((options.providersOverride ?? getAutoOcrProviders()).map((provider) => [provider.id, provider]));
   const attempts: AutoOcrAttemptResult[] = [];
@@ -350,7 +405,7 @@ export async function extractTextFromImageWithFallback(
     }
 
     try {
-      const text = await provider.extractText(imageDataUrl);
+      const text = await provider.extractText(preprocessedImage);
       if (!text.trim()) {
         attempts.push({ providerId, success: false, errorMessage: "OCR returned empty text." });
         recordProviderFailure(providerId, "OCR returned empty text.");

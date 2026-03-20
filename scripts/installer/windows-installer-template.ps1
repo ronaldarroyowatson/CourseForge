@@ -27,6 +27,9 @@ $script:DefaultInstallPath = Join-Path (Join-Path $env:LOCALAPPDATA "Programs") 
 $script:InstallerMetadataFileName = "installer-metadata.json"
 $script:IntegrityManifestFileName = "installer-integrity.json"
 $script:RollingSnapshotFileName = "installer-rollback-snapshot.json"
+$script:BundledNodeFolderName = "node-runtime"
+$script:PortableNodeVersion = "20.19.5"
+$script:PortableNodeZipUrlTemplate = "https://nodejs.org/dist/v{0}/node-v{0}-win-x64.zip"
 $script:CurrentLogPath = $null
 $script:CurrentModeForLog = "install"
 
@@ -72,6 +75,221 @@ function Write-InstallerLog {
 
   $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
   Add-Content -Path $script:CurrentLogPath -Value $line -Encoding ASCII
+}
+
+function Get-BundledNodeRuntimePath {
+  param([string]$ResolvedInstallPath)
+  return Join-Path $ResolvedInstallPath $script:BundledNodeFolderName
+}
+
+function Get-UserPathSegments {
+  try {
+    $raw = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+      return @()
+    }
+
+    return @($raw.Split(';') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+  }
+  catch {
+    return @()
+  }
+}
+
+function Set-UserPathSegments {
+  param([string[]]$Segments)
+
+  $normalized = @($Segments | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+  [Environment]::SetEnvironmentVariable("Path", ($normalized -join ';'), "User")
+  $env:Path = (($env:Path -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) + $normalized | Select-Object -Unique) -join ';'
+}
+
+function Remove-StaleNodePathEntries {
+  $segments = Get-UserPathSegments
+  if ($segments.Count -eq 0) {
+    return
+  }
+
+  $clean = New-Object System.Collections.Generic.List[string]
+  foreach ($segment in $segments) {
+    $candidate = $segment.Trim()
+    $looksNodePath = $candidate -match '(?i)\\nodejs\\?$' -or $candidate -match '(?i)courseforge\\node-runtime\\?$'
+    if ($looksNodePath -and -not (Test-Path $candidate)) {
+      Write-InstallerLog "Removed stale Node PATH entry: $candidate"
+      continue
+    }
+
+    $clean.Add($candidate)
+  }
+
+  Set-UserPathSegments -Segments @($clean)
+}
+
+function Add-PathIfMissing {
+  param([string]$PathEntry)
+
+  if ([string]::IsNullOrWhiteSpace($PathEntry)) {
+    return
+  }
+
+  $segments = Get-UserPathSegments
+  $exists = $segments | Where-Object { [System.StringComparer]::OrdinalIgnoreCase.Equals($_, $PathEntry) } | Select-Object -First 1
+  if ($null -ne $exists) {
+    return
+  }
+
+  Set-UserPathSegments -Segments @($segments + $PathEntry)
+}
+
+function Test-NodeExecutable {
+  param([string]$NodePath)
+
+  if ([string]::IsNullOrWhiteSpace($NodePath) -or -not (Test-Path $NodePath)) {
+    return [ordered]@{ ok = $false; reason = "node.exe was not found." }
+  }
+
+  try {
+    $nodeVersion = (& $NodePath -v 2>&1 | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($nodeVersion) -or -not $nodeVersion.StartsWith("v")) {
+      return [ordered]@{ ok = $false; reason = "node -v returned an unexpected response." }
+    }
+
+    $npmCmdPath = Join-Path (Split-Path $NodePath -Parent) "npm.cmd"
+    if (-not (Test-Path $npmCmdPath)) {
+      return [ordered]@{ ok = $false; reason = "npm.cmd is missing." }
+    }
+
+    $npmVersion = (& $npmCmdPath -v 2>&1 | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($npmVersion)) {
+      return [ordered]@{ ok = $false; reason = "npm -v returned an empty response." }
+    }
+
+    return [ordered]@{
+      ok = $true
+      nodeVersion = $nodeVersion
+      npmVersion = $npmVersion
+    }
+  }
+  catch {
+    return [ordered]@{ ok = $false; reason = $_.Exception.Message }
+  }
+}
+
+function Get-NodeInstallHealth {
+  param([string]$ResolvedInstallPath)
+
+  $bundledRuntimePath = Get-BundledNodeRuntimePath -ResolvedInstallPath $ResolvedInstallPath
+  $bundledNodeExe = Join-Path $bundledRuntimePath "node.exe"
+  $bundledHealth = Test-NodeExecutable -NodePath $bundledNodeExe
+  if ($bundledHealth.ok) {
+    return [ordered]@{
+      source = "bundled"
+      nodePath = $bundledNodeExe
+      nodeVersion = $bundledHealth.nodeVersion
+      npmVersion = $bundledHealth.npmVersion
+      healthy = $true
+    }
+  }
+
+  $globalNode = Get-Command node.exe -ErrorAction SilentlyContinue
+  if ($null -ne $globalNode) {
+    $globalHealth = Test-NodeExecutable -NodePath $globalNode.Source
+    if ($globalHealth.ok) {
+      return [ordered]@{
+        source = "global"
+        nodePath = $globalNode.Source
+        nodeVersion = $globalHealth.nodeVersion
+        npmVersion = $globalHealth.npmVersion
+        healthy = $true
+      }
+    }
+
+    return [ordered]@{
+      source = "global"
+      nodePath = $globalNode.Source
+      healthy = $false
+      reason = $globalHealth.reason
+    }
+  }
+
+  $systemNodePath = "C:\Program Files\nodejs"
+  $looksCorruptedSystemNode = (Test-Path $systemNodePath) -and -not (Test-Path (Join-Path $systemNodePath "node.exe"))
+
+  return [ordered]@{
+    source = "none"
+    nodePath = ""
+    healthy = $false
+    looksCorruptedSystemNode = $looksCorruptedSystemNode
+    reason = if ($looksCorruptedSystemNode) { "System Node.js folder exists without node.exe." } else { "Node.js was not detected." }
+  }
+}
+
+function Install-BundledNodeRuntime {
+  param([string]$ResolvedInstallPath)
+
+  $runtimeRoot = Get-BundledNodeRuntimePath -ResolvedInstallPath $ResolvedInstallPath
+  Ensure-Directory -Path $runtimeRoot
+
+  $downloadRoot = Join-Path $script:DataRoot "downloads"
+  Ensure-Directory -Path $downloadRoot
+  $zipPath = Join-Path $downloadRoot ("node-v{0}-win-x64.zip" -f $script:PortableNodeVersion)
+  $extractPath = Join-Path $downloadRoot ("node-extract-{0}" -f ([Guid]::NewGuid().ToString("N")))
+  Ensure-Directory -Path $extractPath
+
+  $url = [string]::Format($script:PortableNodeZipUrlTemplate, $script:PortableNodeVersion)
+  Write-InstallerLog "Downloading portable Node.js from $url"
+  Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+
+  Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+  $expandedFolder = Get-ChildItem -Path $extractPath -Directory | Where-Object { $_.Name -like "node-v*-win-x64" } | Select-Object -First 1
+  if ($null -eq $expandedFolder) {
+    throw "Portable Node.js archive did not contain expected folder layout."
+  }
+
+  Remove-Item -Path $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue
+  Ensure-Directory -Path $runtimeRoot
+  $null = robocopy $expandedFolder.FullName $runtimeRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP
+  if ($LASTEXITCODE -gt 7) {
+    throw "Failed to place bundled Node.js runtime (robocopy code $LASTEXITCODE)."
+  }
+
+  Remove-Item -Path $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+
+  $nodeExe = Join-Path $runtimeRoot "node.exe"
+  $health = Test-NodeExecutable -NodePath $nodeExe
+  if (-not $health.ok) {
+    throw "Bundled Node.js failed validation: $($health.reason)"
+  }
+
+  Add-PathIfMissing -PathEntry $runtimeRoot
+  Write-InstallerLog "Bundled Node.js ready at $runtimeRoot ($($health.nodeVersion), npm $($health.npmVersion))."
+}
+
+function Ensure-NodeDependency {
+  param([string]$ResolvedInstallPath)
+
+  Remove-StaleNodePathEntries
+  $health = Get-NodeInstallHealth -ResolvedInstallPath $ResolvedInstallPath
+  if ($health.healthy) {
+    Write-InstallerLog "Node.js dependency is healthy from $($health.source): $($health.nodeVersion), npm $($health.npmVersion)."
+    return
+  }
+
+  if ($health.looksCorruptedSystemNode) {
+    Write-InstallerLog "Detected corrupted system Node.js folder. Attempting cleanup of orphaned folder and PATH entries."
+    try {
+      Remove-Item -Path "C:\Program Files\nodejs" -Recurse -Force -ErrorAction Stop
+      Write-InstallerLog "Removed orphaned C:\Program Files\nodejs folder."
+    }
+    catch {
+      Write-InstallerLog "Could not remove C:\Program Files\nodejs (non-admin or locked). Continuing with bundled Node.js."
+    }
+  }
+
+  Write-Host "Installing Node.js... This may take a moment."
+  Write-InstallerLog "Installing bundled Node.js runtime because dependency check failed: $($health.reason)"
+  Install-BundledNodeRuntime -ResolvedInstallPath $ResolvedInstallPath
 }
 
 function Show-CompletionDialog {
@@ -600,6 +818,7 @@ function Get-KnownInstallArtifactNames {
   foreach ($name in @(
     "webapp",
     "extension",
+    "node-runtime",
     "AutoUpdate-CourseForge.ps1",
     "Check-For-CourseForge-Updates.cmd",
     "Start-CourseForge.cmd",
@@ -1091,6 +1310,14 @@ function Copy-ComponentFiles {
     "package-manifest.json"
   )
 
+  $nodeRuntimeSource = Get-BundledNodeRuntimePath -ResolvedInstallPath $SourceRoot
+  if (Test-Path $nodeRuntimeSource) {
+    $null = robocopy $nodeRuntimeSource (Get-BundledNodeRuntimePath -ResolvedInstallPath $ResolvedInstallPath) /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP
+    if ($LASTEXITCODE -gt 7) {
+      throw "Failed copying bundled Node runtime with robocopy exit code $LASTEXITCODE"
+    }
+  }
+
   foreach ($file in $supportFiles) {
     $source = Join-Path $SourceRoot $file
     if (Test-Path $source) {
@@ -1298,6 +1525,7 @@ function Repair-Installation {
   Invoke-PreInstallCleanup -ResolvedInstallPath $ResolvedInstallPath -Discovery $Discovery
 
   Copy-ComponentFiles -SourceRoot $SourceRoot -ResolvedInstallPath $ResolvedInstallPath -Selection $Selection
+  Ensure-NodeDependency -ResolvedInstallPath $ResolvedInstallPath
 
   if ($Selection.extension) {
     $targetManifest = Join-Path $ResolvedInstallPath "extension\manifest.json"
@@ -1381,8 +1609,11 @@ function Uninstall-CourseForge {
       "AutoUpdate-CourseForge.ps1",
       "Check-For-CourseForge-Updates.cmd",
       "Start-CourseForge.cmd",
+      "Start-CourseForge.ps1",
+      "courseforge-serve.js",
       "CourseForge-Start.url",
       "CourseForge.ico",
+      "node-runtime",
       "README.md",
       "CHANGELOG.md",
       "LICENSE",
@@ -1395,7 +1626,7 @@ function Uninstall-CourseForge {
     foreach ($meta in $metaFiles) {
       $target = Join-Path $ResolvedInstallPath $meta
       if (Test-Path $target) {
-        Remove-Item -Path $target -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $target -Recurse -Force -ErrorAction SilentlyContinue
       }
     }
 
@@ -1587,6 +1818,7 @@ try {
     Invoke-WithRollback -ResolvedInstallPath $resolvedInstallPath -CurrentSelection $defaultSelection -CurrentIcons $icons -Operation {
       Invoke-PreInstallCleanup -ResolvedInstallPath $resolvedInstallPath -Discovery $installDiscovery
       Copy-ComponentFiles -SourceRoot $sourceRoot -ResolvedInstallPath $resolvedInstallPath -Selection $selection
+      Ensure-NodeDependency -ResolvedInstallPath $resolvedInstallPath
       Set-Shortcuts -ResolvedInstallPath $resolvedInstallPath -Selection $selection -CreateDesktop ([bool]$icons.desktop) -CreateStartMenu ([bool]$icons.startMenu)
       Write-IntegrityManifest -RootPath $resolvedInstallPath -Selection $selection
       Write-InstallerMetadata -ResolvedInstallPath $resolvedInstallPath -Selection $selection -Icons $icons -InstallPathSource $installPathSource -Mode $operationMode

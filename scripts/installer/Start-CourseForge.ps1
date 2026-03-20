@@ -13,6 +13,7 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $PSCommandPath
 $webappDir = Join-Path $scriptDir "webapp"
 $serverScript = Join-Path $scriptDir "courseforge-serve.js"
+$bundledNodeExe = Join-Path (Join-Path $scriptDir "node-runtime") "node.exe"
 $port       = 3000
 $hostName   = "localhost"
 $logDir     = Join-Path $env:LOCALAPPDATA "CourseForge\logs"
@@ -60,11 +61,26 @@ if (-not (Test-Path $serverScript)) {
   exit 1
 }
 
-# Check if Node.js is available
-$nodeExe = Get-Command node.exe -ErrorAction SilentlyContinue
-if ($null -eq $nodeExe) {
-  Write-LauncherLog "ERROR: Node.js is not installed or not in PATH."
-  exit 1
+# Check if Node.js is available (prefer bundled runtime to avoid machine-level install issues)
+$nodePath = $null
+if (Test-Path $bundledNodeExe) {
+  $nodePath = $bundledNodeExe
+  Write-LauncherLog "Using bundled Node runtime: $bundledNodeExe"
+
+  $runtimeRoot = Split-Path -Parent $bundledNodeExe
+  if ($env:Path -notmatch [regex]::Escape($runtimeRoot)) {
+    $env:Path = "$runtimeRoot;$env:Path"
+  }
+}
+else {
+  $nodeExe = Get-Command node.exe -ErrorAction SilentlyContinue
+  if ($null -eq $nodeExe) {
+    Write-LauncherLog "ERROR: Node.js runtime is missing. Please rerun the installer to repair dependencies."
+    exit 1
+  }
+
+  $nodePath = $nodeExe.Source
+  Write-LauncherLog "Using system Node runtime: $nodePath"
 }
 
 # Auto-update check (background job)
@@ -190,7 +206,7 @@ foreach ($serverLogPath in @($serverStdoutLog, $serverStderrLog)) {
   }
 }
 
-$serverProcess = Start-Process -FilePath $nodeExe.Source -ArgumentList @("`"$serverScript`"", "`"$webappDir`"", $port, "`"$hostName`"") -PassThru -WindowStyle Hidden -RedirectStandardOutput $serverStdoutLog -RedirectStandardError $serverStderrLog
+$serverProcess = Start-Process -FilePath $nodePath -ArgumentList @("`"$serverScript`"", "`"$webappDir`"", $port, "`"$hostName`"") -PassThru -WindowStyle Hidden -RedirectStandardOutput $serverStdoutLog -RedirectStandardError $serverStderrLog
 
 # Check if process started successfully
 if ($serverProcess.HasExited) {

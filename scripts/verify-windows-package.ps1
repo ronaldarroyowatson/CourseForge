@@ -1,5 +1,6 @@
 param(
-  [string]$Version
+  [string]$Version,
+  [switch]$RequireZip
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,7 +40,8 @@ if (-not (Test-Path $packageDir)) {
   throw "Package directory not found: $packageDir"
 }
 
-if (-not (Test-Path $zipPath)) {
+$zipExists = Test-Path $zipPath
+if ($RequireZip.IsPresent -and -not $zipExists) {
   throw "Package zip not found: $zipPath"
 }
 
@@ -58,9 +60,12 @@ foreach ($relative in $required) {
   }
 }
 
-$zipSize = (Get-Item $zipPath).Length
-if ($zipSize -le 0) {
-  throw "Zip artifact is empty: $zipPath"
+$zipSize = -1
+if ($zipExists) {
+  $zipSize = (Get-Item $zipPath).Length
+  if ($zipSize -le 0) {
+    throw "Zip artifact is empty: $zipPath"
+  }
 }
 
 $installerExeSize = (Get-Item $installerExePath).Length
@@ -89,5 +94,9 @@ if ($webappIndex -match 'src="/assets/' -or $webappIndex -match 'href="/assets/'
 
 Write-Host "[verify] Windows package looks complete."
 Write-Host "[verify] Checked files: $($required.Count)"
-Write-Host "[verify] Zip size (bytes): $zipSize"
+if ($zipExists) {
+  Write-Host "[verify] Zip size (bytes): $zipSize"
+} else {
+  Write-Host "[verify] Zip artifact: not present (intentional in GUI installer mode)."
+}
 Write-Host "[verify] Installer exe size (bytes): $installerExeSize"

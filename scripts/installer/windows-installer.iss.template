@@ -1,5 +1,5 @@
 #define CourseForgeVersion "__COURSEFORGE_VERSION__"
-#define BootstrapDir "__COURSEFORGE_BOOTSTRAP_DIR__"
+#define PackageDir "__COURSEFORGE_PACKAGE_DIR__"
 #define ReleaseRoot "__COURSEFORGE_RELEASE_ROOT__"
 
 [Setup]
@@ -17,7 +17,7 @@ Compression=lzma2
 SolidCompression=yes
 OutputDir={#ReleaseRoot}
 OutputBaseFilename=CourseForge-{#CourseForgeVersion}-installer
-SetupIconFile={#BootstrapDir}\CourseForge.ico
+SetupIconFile={#PackageDir}\CourseForge.ico
 Uninstallable=no
 CreateUninstallRegKey=no
 
@@ -37,8 +37,7 @@ Name: "desktopicon"; Description: "Create a Desktop shortcut"; GroupDescription:
 Name: "startmenuicon"; Description: "Create a Start Menu shortcut"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 
 [Files]
-Source: "{#BootstrapDir}\CourseForge-windows-payload.zip"; Flags: dontcopy
-Source: "{#BootstrapDir}\Launch-CourseForge-Installer.cmd"; Flags: dontcopy
+Source: "{#PackageDir}\*"; DestDir: "{tmp}\CourseForgePayload"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Code]
 function BuildInstallArguments(): string;
@@ -76,29 +75,75 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Args: string;
-  LauncherPath: string;
+  InstallerPath: string;
+  PayloadDir: string;
+  LogDir: string;
+  LaunchLogPath: string;
+  LaunchCommand: string;
+  WaitSeconds: Integer;
+  MaxWaitSeconds: Integer;
   ResultCode: Integer;
 begin
-  if CurStep <> ssInstall then
+  if CurStep <> ssPostInstall then
     Exit;
 
-  WizardForm.StatusLabel.Caption := 'Preparing CourseForge installer payload...';
-  ExtractTemporaryFile('CourseForge-windows-payload.zip');
-  ExtractTemporaryFile('Launch-CourseForge-Installer.cmd');
+  PayloadDir := ExpandConstant('{tmp}\CourseForgePayload');
+  InstallerPath := ExpandConstant('{tmp}\CourseForgePayload\Install-CourseForge-Windows.ps1');
+  LogDir := ExpandConstant('{localappdata}\CourseForge\logs');
+  ForceDirectories(LogDir);
+  LaunchLogPath := LogDir + '\inno-launch.log';
 
-  LauncherPath := ExpandConstant('{tmp}\Launch-CourseForge-Installer.cmd');
+  SaveStringToFile(LaunchLogPath,
+    '[' + GetDateTimeString('yyyy-mm-dd hh:nn:ss', '-', ':') + '] Starting installer launch from Inno Setup.' + #13#10 +
+    'PayloadDir=' + PayloadDir + #13#10 +
+    'InstallerPath=' + InstallerPath + #13#10,
+    True);
+
+  MaxWaitSeconds := 20;
+  WaitSeconds := 0;
+  while (not FileExists(InstallerPath)) and (WaitSeconds < MaxWaitSeconds) do
+  begin
+    if WaitSeconds = 0 then
+      SaveStringToFile(LaunchLogPath,
+        '[' + GetDateTimeString('yyyy-mm-dd hh:nn:ss', '-', ':') + '] Waiting for payload script to become available...' + #13#10,
+        True);
+
+    Sleep(1000);
+    WaitSeconds := WaitSeconds + 1;
+  end;
+
+  if not FileExists(InstallerPath) then
+  begin
+    SaveStringToFile(LaunchLogPath,
+      '[' + GetDateTimeString('yyyy-mm-dd hh:nn:ss', '-', ':') + '] ERROR: Install script not found after waiting ' + IntToStr(MaxWaitSeconds) + ' seconds.' + #13#10,
+      True);
+    MsgBox('Failed to launch CourseForge installer. Missing script:' + #13#10 + InstallerPath + #13#10 + #13#10 +
+      'See logs at ' + LogDir + '.', mbError, MB_OK);
+    Abort;
+  end;
+
   Args := BuildInstallArguments();
+  LaunchCommand := '/c powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + InstallerPath + '" ' + Args +
+    ' >> "' + LaunchLogPath + '" 2>&1';
 
   WizardForm.StatusLabel.Caption := 'Installing CourseForge...';
-  if not Exec(LauncherPath, Args, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+  if not Exec('cmd.exe', LaunchCommand, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
   begin
-    MsgBox('Failed to launch CourseForge installer payload.', mbError, MB_OK);
+    SaveStringToFile(LaunchLogPath,
+      '[' + GetDateTimeString('yyyy-mm-dd hh:nn:ss', '-', ':') + '] ERROR: Exec launch failed.' + #13#10,
+      True);
+    MsgBox('Failed to launch CourseForge installer script.' + #13#10 + #13#10 +
+      'See logs at ' + LogDir + '.', mbError, MB_OK);
     Abort;
   end;
 
   if ResultCode <> 0 then
   begin
-    MsgBox('CourseForge installation failed. See logs at %LOCALAPPDATA%\\CourseForge\\logs.', mbError, MB_OK);
+    SaveStringToFile(LaunchLogPath,
+      '[' + GetDateTimeString('yyyy-mm-dd hh:nn:ss', '-', ':') + '] Installer exited with code ' + IntToStr(ResultCode) + '.' + #13#10,
+      True);
+    MsgBox('CourseForge installation failed (exit code ' + IntToStr(ResultCode) + ').' + #13#10 + #13#10 +
+      'See logs at ' + LogDir + '.', mbError, MB_OK);
     Abort;
   end;
 end;

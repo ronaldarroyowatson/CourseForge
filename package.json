@@ -35,6 +35,7 @@
     "verify:portable": "powershell -ExecutionPolicy Bypass -File scripts/verify-portable-package.ps1",
     "package:windows": "powershell -ExecutionPolicy Bypass -File scripts/create-windows-package.ps1",
     "package:windows:gui": "powershell -ExecutionPolicy Bypass -File scripts/create-windows-package.ps1 -RequireGuiInstaller",
+    "package:windows:legacy": "powershell -ExecutionPolicy Bypass -File scripts/create-windows-package.ps1 -AllowLegacyBootstrap -EmitWindowsZip",
     "verify:windows": "powershell -ExecutionPolicy Bypass -File scripts/verify-windows-package.ps1",
     "check:installer": "npm run package:portable && npm run verify:portable && npm run package:windows && npm run verify:windows",
     "check:installer:gui": "npm run package:portable && npm run verify:portable && npm run package:windows:gui && npm run verify:windows",

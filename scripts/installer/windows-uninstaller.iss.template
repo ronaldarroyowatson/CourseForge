@@ -1,0 +1,78 @@
+#define CourseForgeVersion "__COURSEFORGE_VERSION__"
+#define InstallDir "__COURSEFORGE_INSTALL_DIR__"
+#define BootstrapDir "__COURSEFORGE_BOOTSTRAP_DIR__"
+#define ReleaseRoot "__COURSEFORGE_RELEASE_ROOT__"
+
+[Setup]
+AppId={{5F0CBCEA-1A2E-4A58-91F9-9A45D5B7A8C4}
+AppName=CourseForge
+AppVersion={#CourseForgeVersion}
+AppPublisher=CourseForge
+DefaultDirName={#InstallDir}
+DefaultGroupName=CourseForge
+DisableProgramGroupPage=yes
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
+WizardStyle=modern
+Compression=lzma2
+SolidCompression=yes
+OutputDir={#ReleaseRoot}
+OutputBaseFilename=CourseForge-{#CourseForgeVersion}-uninstaller
+SetupIconFile={#BootstrapDir}\CourseForge.ico
+Uninstallable=no
+CreateUninstallRegKey=no
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Files]
+Source: "{#BootstrapDir}\CourseForge-windows-payload.zip"; Flags: dontcopy
+Source: "{#BootstrapDir}\Launch-CourseForge-Uninstaller.cmd"; Flags: dontcopy
+
+[Code]
+function BuildUninstallArguments(): string;
+begin
+  Result := '-FullAuto -Uninstall';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Args: string;
+  LauncherPath: string;
+  ResultCode: Integer;
+  DiskPath: string;
+begin
+  if CurStep <> ssInstall then
+    Exit;
+
+  WizardForm.StatusLabel.Caption := 'Preparing CourseForge uninstaller payload...';
+  ExtractTemporaryFile('CourseForge-windows-payload.zip');
+  ExtractTemporaryFile('Launch-CourseForge-Uninstaller.cmd');
+
+  LauncherPath := ExpandConstant('{tmp}\Launch-CourseForge-Uninstaller.cmd');
+  DiskPath := ExpandConstant('{#InstallDir}');
+  Args := BuildUninstallArguments();
+  Args := Args + ' -InstallPath "' + DiskPath + '"';
+
+  WizardForm.StatusLabel.Caption := 'Uninstalling CourseForge...';
+  if not Exec(LauncherPath, Args, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+  begin
+    MsgBox('Failed to launch CourseForge uninstaller payload.', mbError, MB_OK);
+    Abort;
+  end;
+
+  if ResultCode <> 0 then
+  begin
+    MsgBox('CourseForge uninstallation failed. See logs at %LOCALAPPDATA%\CourseForge\logs.', mbError, MB_OK);
+    Abort;
+  end;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpFinished then
+  begin
+    WizardForm.FinishedHeadingLabel.Caption := 'CourseForge Uninstalled';
+    WizardForm.FinishedLabel.Caption := 'CourseForge has been successfully uninstalled from your computer.';
+  end;
+end;

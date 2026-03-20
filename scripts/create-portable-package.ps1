@@ -123,6 +123,20 @@ if (-not (Test-Path $updaterTemplatePath)) {
 }
 Copy-Item -Path $updaterTemplatePath -Destination (Join-Path $packageDir "AutoUpdate-CourseForge.ps1") -Force
 
+# Copy required support files for running the webapp server
+$supportFilesToCopy = @(
+  "Start-CourseForge.ps1",
+  "courseforge-serve.js"
+)
+foreach ($file in $supportFilesToCopy) {
+  $sourcePath = Join-Path (Join-Path $PSScriptRoot "installer") $file
+  if (Test-Path $sourcePath) {
+    Copy-Item -Path $sourcePath -Destination (Join-Path $packageDir $file) -Force
+  } else {
+    Write-Warning "Support file not found: $sourcePath"
+  }
+}
+
 $startCmd = @"
 @echo off
 setlocal
@@ -185,6 +199,8 @@ $manifest = [ordered]@{
     "AutoUpdate-CourseForge.ps1",
     "Check-For-CourseForge-Updates.cmd",
     "Start-CourseForge.cmd",
+    "Start-CourseForge.ps1",
+    "courseforge-serve.js",
     "CourseForge-Start.url",
     "CourseForge.ico",
     "README.md",

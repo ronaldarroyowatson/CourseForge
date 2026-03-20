@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $script:ProductName = "CourseForge"
-$script:ProductVersion = "__COURSEFORGE_VERSION__"
+$script:ProductVersion = "1.2.6"
 $script:RegistryPath = "HKCU:\Software\CourseForge"
 $script:UninstallRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CourseForge"
 $script:UserRoot = Join-Path $env:LOCALAPPDATA "CourseForge"
@@ -1612,3 +1612,4 @@ catch {
   Show-CompletionDialog -Success $false -Body ("CourseForge setup failed: " + $_.Exception.Message)
   exit 1
 }
+

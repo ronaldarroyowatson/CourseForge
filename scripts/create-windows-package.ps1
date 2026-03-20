@@ -1,6 +1,8 @@
 param(
   [string]$Version,
-  [switch]$RequireGuiInstaller
+  [switch]$RequireGuiInstaller,
+  [switch]$EmitWindowsZip,
+  [switch]$AllowLegacyBootstrap
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,6 +26,14 @@ if (-not [string]::IsNullOrWhiteSpace($env:COURSEFORGE_REQUIRE_GUI_INSTALLER)) {
 
 $requireGuiInstaller = $RequireGuiInstaller.IsPresent -or $requireGuiFromEnv
 
+$emitZipFromEnv = $false
+if (-not [string]::IsNullOrWhiteSpace($env:COURSEFORGE_EMIT_WINDOWS_ZIP)) {
+  $normalizedZipFlag = $env:COURSEFORGE_EMIT_WINDOWS_ZIP.Trim().ToLowerInvariant()
+  if ($normalizedZipFlag -in @("1", "true", "yes", "on")) {
+    $emitZipFromEnv = $true
+  }
+}
+
 $releaseRoot = Join-Path $repoRoot "release"
 $portableName = "CourseForge-$Version-portable"
 $portableDir = Join-Path $releaseRoot $portableName
@@ -41,6 +51,55 @@ $bootstrapLauncherName = "Launch-CourseForge-Installer.cmd"
 $iexpressSedPath = Join-Path $releaseRoot ".windows-installer-$Version.sed"
 $innoTemplatePath = Join-Path $repoRoot "scripts/installer/windows-installer.iss.template"
 $innoScriptPath = Join-Path $releaseRoot ".windows-installer-$Version.iss"
+
+function Get-InnoSetupCompilerPath {
+  $candidate = Get-Command iscc.exe -ErrorAction SilentlyContinue
+  if ($null -ne $candidate) {
+    return $candidate.Source
+  }
+
+  foreach ($path in @(
+    (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe"
+  )) {
+    if (Test-Path $path) {
+      return $path
+    }
+  }
+
+  return $null
+}
+
+function New-WindowsZipArtifact {
+  param(
+    [string]$SourcePackageDir,
+    [string]$DestinationZipPath
+  )
+
+  $zipSucceeded = $false
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    try {
+      Compress-Archive -Path (Join-Path $SourcePackageDir "*") -DestinationPath $DestinationZipPath -CompressionLevel Optimal
+      $zipSucceeded = $true
+      break
+    }
+    catch {
+      if ($attempt -ge 3) {
+        throw
+      }
+
+      Start-Sleep -Seconds 1
+      if (Test-Path $DestinationZipPath) {
+        Remove-Item $DestinationZipPath -Force -ErrorAction SilentlyContinue
+      }
+    }
+  }
+
+  if (-not $zipSucceeded) {
+    throw "Failed to create Windows package zip: $DestinationZipPath"
+  }
+}
 
 if (Test-Path $packageDir) {
   Remove-Item $packageDir -Recurse -Force
@@ -63,21 +122,36 @@ if (Test-Path $innoScriptPath) {
 
 Copy-Item -Path $portableDir -Destination $packageDir -Recurse -Force
 
-$startCmd = @"
+# Copy GUI uninstaller files from scripts/installer directory
+$guiUninstallerFiles = @(
+  "Launch-CourseForge-Uninstaller.cmd",
+  "Launch-CourseForge-Uninstaller-GUI.ps1",
+  "Launch-CourseForge-Uninstaller-GUI.cmd"
+)
+foreach ($file in $guiUninstallerFiles) {
+  $sourcePath = Join-Path (Join-Path (Join-Path $repoRoot "scripts") "installer") $file
+  if (Test-Path $sourcePath) {
+    Copy-Item -Path $sourcePath -Destination (Join-Path $packageDir $file) -Force
+  } else {
+    Write-Warning "GUI uninstaller file not found: $sourcePath"
+  }
+}
+
+$startCmdTemplatePath = Join-Path (Join-Path (Join-Path $repoRoot "scripts") "installer") "Start-CourseForge.cmd"
+if (Test-Path $startCmdTemplatePath) {
+  Copy-Item -Path $startCmdTemplatePath -Destination (Join-Path $packageDir "Start-CourseForge.cmd") -Force
+}
+else {
+  Write-Warning "Start launcher template not found: $startCmdTemplatePath. Falling back to minimal launcher wrapper."
+  $startCmdFallback = @"
 @echo off
 setlocal
-set ROOT=%~dp0
-if exist "%ROOT%AutoUpdate-CourseForge.ps1" (
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%AutoUpdate-CourseForge.ps1" -CurrentVersion "$Version" -AssetNameTemplate "CourseForge-{version}-windows.zip" >nul 2>&1
-)
-set APP=%ROOT%webapp\index.html
-if not exist "%APP%" (
-  echo [CourseForge] Missing webapp\index.html in package.
-  exit /b 1
-)
-start "CourseForge" "%APP%"
+set SCRIPT_DIR=%~dp0
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%Start-CourseForge.ps1"
+exit /b %ERRORLEVEL%
 "@
-Set-Content -Path (Join-Path $packageDir "Start-CourseForge.cmd") -Value $startCmd -Encoding ASCII
+  Set-Content -Path (Join-Path $packageDir "Start-CourseForge.cmd") -Value $startCmdFallback -Encoding ASCII
+}
 
 $checkUpdatesCmd = @"
 @echo off
@@ -205,46 +279,17 @@ $integrityManifest = [ordered]@{
 
 $integrityManifest | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $packageDir "installer-integrity.json") -Encoding ASCII
 
-$zipSucceeded = $false
-for ($attempt = 1; $attempt -le 3; $attempt++) {
-  try {
-    Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $zipPath -CompressionLevel Optimal
-    $zipSucceeded = $true
-    break
-  }
-  catch {
-    if ($attempt -ge 3) {
-      throw
-    }
-
-    Start-Sleep -Seconds 1
-    if (Test-Path $zipPath) {
-      Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-    }
-  }
+$innoCompilerPath = Get-InnoSetupCompilerPath
+$emitZipArtifact = $EmitWindowsZip.IsPresent -or $emitZipFromEnv
+if (-not $emitZipArtifact -and [string]::IsNullOrWhiteSpace($innoCompilerPath)) {
+  # Legacy bootstrap mode still needs a payload zip.
+  $emitZipArtifact = $true
 }
 
-if (-not $zipSucceeded) {
-  throw "Failed to create Windows package zip: $zipPath"
-}
-
-function Get-InnoSetupCompilerPath {
-  $candidate = Get-Command iscc.exe -ErrorAction SilentlyContinue
-  if ($null -ne $candidate) {
-    return $candidate.Source
-  }
-
-  foreach ($path in @(
-    (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
-    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-    "C:\Program Files\Inno Setup 6\ISCC.exe"
-  )) {
-    if (Test-Path $path) {
-      return $path
-    }
-  }
-
-  return $null
+if ($emitZipArtifact) {
+  New-WindowsZipArtifact -SourcePackageDir $packageDir -DestinationZipPath $zipPath
+} elseif (Test-Path $zipPath) {
+  Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
 }
 
 function Escape-InnoLiteral {
@@ -257,10 +302,15 @@ function Escape-InnoLiteral {
   return $Value.Replace('"', '""')
 }
 
-New-Item -ItemType Directory -Path $bootstrapDir | Out-Null
-Copy-Item -Path $zipPath -Destination (Join-Path $bootstrapDir $bootstrapZipName) -Force
+if ([string]::IsNullOrWhiteSpace($innoCompilerPath)) {
+  if (-not (Test-Path $zipPath)) {
+    New-WindowsZipArtifact -SourcePackageDir $packageDir -DestinationZipPath $zipPath
+  }
 
-$bootstrapLauncher = @"
+  New-Item -ItemType Directory -Path $bootstrapDir | Out-Null
+  Copy-Item -Path $zipPath -Destination (Join-Path $bootstrapDir $bootstrapZipName) -Force
+
+  $bootstrapLauncher = @"
 @echo off
 setlocal
 set ROOT=%~dp0
@@ -309,16 +359,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER%" %INSTALL_A
 set EXITCODE=%ERRORLEVEL%
 echo [%%DATE%% %%TIME%%] Installer exit code: %EXITCODE% >> "%LOGFILE%"
 rmdir /s /q "%WORK%" >nul 2>&1
-if "%INTERACTIVE%"=="1" (
-  if "%EXITCODE%"=="0" (
-    echo.
-    echo CourseForge installed successfully.
-    echo Shortcuts have been created on your Desktop and Start Menu.
-    echo Bootstrap log: %LOGFILE%
-    echo.
-    echo Press any key to close...
-    pause >nul
-  ) else (
+if "%EXITCODE%"=="0" (
+  echo [%%DATE%% %%TIME%%] Installation succeeded. Exiting silently. >> "%LOGFILE%"
+) else (
+  echo [%%DATE%% %%TIME%%] Installation failed with exit code %EXITCODE%. >> "%LOGFILE%"
+  if "%INTERACTIVE%"=="1" (
     echo.
     echo Installation failed. Check logs in %%LOCALAPPDATA%%\CourseForge\logs for details.
     echo Bootstrap log: %LOGFILE%
@@ -329,11 +374,11 @@ if "%INTERACTIVE%"=="1" (
 )
 endlocal & exit /b %EXITCODE%
 "@
-Set-Content -Path (Join-Path $bootstrapDir $bootstrapLauncherName) -Value $bootstrapLauncher -Encoding ASCII
+  Set-Content -Path (Join-Path $bootstrapDir $bootstrapLauncherName) -Value $bootstrapLauncher -Encoding ASCII
 
-Copy-Item -Path (Join-Path $packageDir "CourseForge.ico") -Destination (Join-Path $bootstrapDir "CourseForge.ico") -Force
+  Copy-Item -Path (Join-Path $packageDir "CourseForge.ico") -Destination (Join-Path $bootstrapDir "CourseForge.ico") -Force
+}
 
-$innoCompilerPath = Get-InnoSetupCompilerPath
 if (-not [string]::IsNullOrWhiteSpace($innoCompilerPath)) {
   if (-not (Test-Path $innoTemplatePath)) {
     throw "Inno Setup template not found: $innoTemplatePath"
@@ -341,7 +386,7 @@ if (-not [string]::IsNullOrWhiteSpace($innoCompilerPath)) {
 
   $innoScript = Get-Content -Path $innoTemplatePath -Raw
   $innoScript = $innoScript.Replace("__COURSEFORGE_VERSION__", (Escape-InnoLiteral -Value $Version))
-  $innoScript = $innoScript.Replace("__COURSEFORGE_BOOTSTRAP_DIR__", (Escape-InnoLiteral -Value $bootstrapDir))
+  $innoScript = $innoScript.Replace("__COURSEFORGE_PACKAGE_DIR__", (Escape-InnoLiteral -Value $packageDir))
   $innoScript = $innoScript.Replace("__COURSEFORGE_RELEASE_ROOT__", (Escape-InnoLiteral -Value $releaseRoot))
   Set-Content -Path $innoScriptPath -Value $innoScript -Encoding ASCII
 
@@ -350,10 +395,16 @@ if (-not [string]::IsNullOrWhiteSpace($innoCompilerPath)) {
     throw "Inno Setup failed to create the Windows installer executable (exit code $LASTEXITCODE)."
   }
 
-  Remove-Item $bootstrapDir -Recurse -Force
+  if (Test-Path $bootstrapDir) {
+    Remove-Item $bootstrapDir -Recurse -Force
+  }
   Remove-Item $innoScriptPath -Force
 
-  Write-Host "[package] Windows package created: $zipPath"
+  if (Test-Path $zipPath) {
+    Write-Host "[package] Windows package created: $zipPath"
+  } else {
+    Write-Host "[package] Windows package zip skipped (GUI installer mode default)."
+  }
   Write-Host "[package] Windows installer created (GUI): $installerExePath"
   Write-Host "[package] Installer file: $packageDir\Install-CourseForge-Windows.cmd"
   return
@@ -361,6 +412,10 @@ if (-not [string]::IsNullOrWhiteSpace($innoCompilerPath)) {
 
 if ($requireGuiInstaller) {
   throw "GUI installer is required but Inno Setup compiler (ISCC.exe) was not found. Install Inno Setup 6 or unset -RequireGuiInstaller / COURSEFORGE_REQUIRE_GUI_INSTALLER."
+}
+
+if (-not $AllowLegacyBootstrap.IsPresent) {
+  throw "Inno Setup compiler (ISCC.exe) was not found and legacy bootstrap fallback is disabled by default to avoid AV-sensitive ZIP bootstrap behavior. Install Inno Setup 6, or rerun with -AllowLegacyBootstrap if you explicitly need the legacy path."
 }
 
 Write-Warning "Inno Setup compiler (ISCC.exe) not found. Falling back to legacy bootstrap installer."

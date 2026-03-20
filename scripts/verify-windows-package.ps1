@@ -83,7 +83,7 @@ if (-not $manifest.updates) {
   throw "package-manifest.json is missing updates metadata."
 }
 
-if ($manifest.updates.assetTemplate -ne "CourseForge-{version}-windows.zip") {
+if ($manifest.updates.assetTemplate -ne "CourseForge-{version}-portable.zip") {
   throw "Unexpected updates.assetTemplate value: $($manifest.updates.assetTemplate)"
 }
 

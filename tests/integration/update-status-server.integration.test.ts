@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import net from "node:net";
+import http from "node:http";
 
 const repoRoot = join(__dirname, "..", "..");
 const serverScriptSource = readFileSync(
@@ -55,6 +56,25 @@ async function stopServer(child: ChildProcess) {
 
   child.kill("SIGTERM");
   await once(child, "exit");
+}
+
+async function startReleaseServer(payload: unknown) {
+  const port = await getAvailablePort();
+  const server = http.createServer((_, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(payload));
+  });
+
+  server.listen(port, "127.0.0.1");
+  await once(server, "listening");
+
+  return {
+    url: `http://127.0.0.1:${port}/releases/latest`,
+    async close() {
+      server.close();
+      await once(server, "close");
+    },
+  };
 }
 
 async function fetchUpdateStatusWithRetry(url: string, timeoutMs = 10000) {
@@ -126,6 +146,60 @@ describe("local update status endpoint", () => {
         currentVersion: "1.2.6",
       });
     } finally {
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("checks latest release metadata through the local server endpoint", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+    let releaseServer: Awaited<ReturnType<typeof startReleaseServer>> | null = null;
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+
+    try {
+      releaseServer = await startReleaseServer({
+        tag_name: "v1.2.71",
+        html_url: "https://example.invalid/releases/tag/v1.2.71",
+      });
+
+      writeFileSync(
+        join(root, "package-manifest.json"),
+        JSON.stringify({
+          version: "1.2.7",
+          updates: {
+            latestEndpoint: releaseServer.url,
+          },
+        }, null, 2),
+        "utf8"
+      );
+
+      const port = await getAvailablePort();
+      child = await startStatusServer(root, port);
+
+      const response = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/check-for-updates`);
+      const payload = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(payload).toEqual({
+        ok: true,
+        available: true,
+        currentVersion: "1.2.7",
+        latestVersion: "1.2.71",
+        releaseUrl: "https://example.invalid/releases/tag/v1.2.71",
+        checkedAt: expect.any(String),
+        error: null,
+      });
+    } finally {
+      if (releaseServer) {
+        await releaseServer.close();
+      }
       if (child) {
         await stopServer(child);
         child = null;

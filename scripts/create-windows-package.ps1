@@ -162,7 +162,7 @@ if not exist "%ROOT%AutoUpdate-CourseForge.ps1" (
   endlocal
   exit /b 1
 )
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%AutoUpdate-CourseForge.ps1" -CurrentVersion "$Version" -AssetNameTemplate "CourseForge-{version}-windows.zip" -CheckOnly
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%AutoUpdate-CourseForge.ps1" -CurrentVersion "$Version" -AssetNameTemplate "CourseForge-{version}-portable.zip" -CheckOnly
 set EXITCODE=%ERRORLEVEL%
 if "%EXITCODE%"=="2" (
   echo Update available.
@@ -241,7 +241,7 @@ $manifest.includes = @(
   "CHANGELOG.md",
   "LICENSE"
 )
-$manifest.updates.assetTemplate = "CourseForge-{version}-windows.zip"
+$manifest.updates.assetTemplate = "CourseForge-{version}-portable.zip"
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $manifestPath -Encoding ASCII
 
 $integrityFiles = @(

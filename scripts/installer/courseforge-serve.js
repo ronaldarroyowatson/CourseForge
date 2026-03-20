@@ -15,6 +15,7 @@ const webappPath = process.argv[2] || process.cwd();
 const portArg = process.argv[3];
 const defaultPort = 3000;
 const host = process.argv[4] || "localhost";
+const defaultLatestReleaseEndpoint = "https://api.github.com/repos/ronaldarroyowatson/CourseForge/releases/latest";
 
 // Package root is one level above the webapp folder.
 // pending-update.json is written here by the updater.
@@ -30,6 +31,106 @@ function readJsonFile(filePath) {
     console.error(`[CourseForge server] Failed to read JSON file ${filePath}:`, error);
     return null;
   }
+}
+
+function parseSemver(value) {
+  if (!value || typeof value !== "string") {
+    return null;
+  }
+
+  const match = value.match(/(\d+)\.(\d+)\.(\d+)/);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function compareSemver(left, right) {
+  for (let index = 0; index < 3; index += 1) {
+    const diff = (left[index] ?? 0) - (right[index] ?? 0);
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+
+  return 0;
+}
+
+async function fetchLatestReleaseStatus() {
+  const manifestPath = path.join(packageRoot, "package-manifest.json");
+  const manifest = readJsonFile(manifestPath);
+  const currentVersion = manifest?.version || null;
+  const latestEndpoint = manifest?.updates?.latestEndpoint || defaultLatestReleaseEndpoint;
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "CourseForge-Local-Server",
+  };
+
+  const token = process.env.COURSEFORGE_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(latestEndpoint, {
+    headers,
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      available: false,
+      currentVersion,
+      latestVersion: null,
+      releaseUrl: null,
+      checkedAt: new Date().toISOString(),
+      error: `Latest release request failed with status ${response.status}.`,
+    };
+  }
+
+  const release = await response.json();
+  const latestVersion = String(release.tag_name || release.name || "").replace(/^v/, "");
+  const latestSemver = parseSemver(latestVersion);
+  const currentSemver = parseSemver(currentVersion);
+  const available = Boolean(latestSemver && currentSemver && compareSemver(latestSemver, currentSemver) > 0);
+
+  return {
+    ok: true,
+    available,
+    currentVersion,
+    latestVersion: latestSemver ? latestVersion : null,
+    releaseUrl: release.html_url || null,
+    checkedAt: new Date().toISOString(),
+    error: latestSemver ? null : "Unable to parse latest release version.",
+  };
+}
+
+async function handleApiRoute(pathname, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+
+  if (pathname === "/api/update-status") {
+    const pendingPath = path.join(packageRoot, "pending-update.json");
+    const manifestPath = path.join(packageRoot, "package-manifest.json");
+    const raw = readJsonFile(pendingPath);
+    const manifest = readJsonFile(manifestPath);
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      available: Boolean(raw && raw.version),
+      version: raw?.version || null,
+      releaseUrl: raw?.releaseUrl || null,
+      stagedAt: raw?.stagedAt || null,
+      currentVersion: manifest?.version || null,
+    }));
+    return;
+  }
+
+  if (pathname === "/api/check-for-updates") {
+    const payload = await fetchLatestReleaseStatus();
+    res.writeHead(payload.ok ? 200 : 502);
+    res.end(JSON.stringify(payload));
+    return;
+  }
+
+  res.writeHead(404);
+  res.end(JSON.stringify({ error: "not found" }));
 }
 
 let port = defaultPort;
@@ -71,25 +172,11 @@ function startServer(finalPort) {
 
       // ── /api/* routes ──
       if (pathname.startsWith("/api/")) {
-        res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Content-Type", "application/json");
-        if (pathname === "/api/update-status") {
-          const pendingPath = path.join(packageRoot, "pending-update.json");
-          const manifestPath = path.join(packageRoot, "package-manifest.json");
-          const raw = readJsonFile(pendingPath);
-          const manifest = readJsonFile(manifestPath);
-          res.writeHead(200);
-          res.end(JSON.stringify({
-            available: Boolean(raw && raw.version),
-            version: raw?.version || null,
-            releaseUrl: raw?.releaseUrl || null,
-            stagedAt: raw?.stagedAt || null,
-            currentVersion: manifest?.version || null,
-          }));
-        } else {
-          res.writeHead(404);
-          res.end(JSON.stringify({ error: "not found" }));
-        }
+        void handleApiRoute(pathname, res).catch((error) => {
+          console.error("API route error:", error);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "internal error" }));
+        });
         return;
       }
 

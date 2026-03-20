@@ -183,7 +183,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
         : "Global debug logging is currently disabled by an admin.");
 
       try {
-        const response = await fetch("/api/update-status");
+        const response = await fetch("/api/update-status", { cache: "no-store" });
         if (response.ok) {
           const data = await response.json() as {
             available: boolean;
@@ -204,13 +204,17 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       }
 
       try {
-        const response = await fetch("/api/check-for-updates");
+        const response = await fetch("/api/check-for-updates", { cache: "no-store" });
         if (response.ok) {
           const data = await response.json() as {
             ok: boolean;
+            currentVersion?: string | null;
             latestVersion?: string | null;
             releaseUrl?: string | null;
           };
+          if (data.currentVersion) {
+            setCurrentAppVersion(data.currentVersion);
+          }
           if (data.ok && data.latestVersion) {
             setLatestAvailableVersion(data.latestVersion);
           }
@@ -300,23 +304,60 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
     setUpdateCheckStatus(null);
     setLatestReleaseUrl(null);
     try {
-      const response = await fetch("/api/check-for-updates");
-      const data = await response.json() as {
+      const response = await fetch("/api/check-for-updates", { cache: "no-store" });
+      const contentType = response.headers.get("content-type") || "";
+      let data: {
         ok: boolean;
         available: boolean;
         latestVersion?: string | null;
         currentVersion?: string | null;
         releaseUrl?: string | null;
         error?: string | null;
-      };
-      if (data.latestVersion) {
+      } | null = null;
+      let nonJsonBody = "";
+
+      if (contentType.toLowerCase().includes("application/json")) {
+        try {
+          data = await response.json() as {
+            ok: boolean;
+            available: boolean;
+            latestVersion?: string | null;
+            currentVersion?: string | null;
+            releaseUrl?: string | null;
+            error?: string | null;
+          };
+        } catch {
+          setUpdateCheckStatus("Unable to parse updater response from local service.");
+          return;
+        }
+      } else {
+        nonJsonBody = await response.text();
+      }
+
+      if (data?.latestVersion) {
         setLatestAvailableVersion(data.latestVersion);
       }
-      if (data.releaseUrl) {
+      if (data?.currentVersion) {
+        setCurrentAppVersion(data.currentVersion);
+      }
+      if (data?.releaseUrl) {
         setLatestReleaseUrl(data.releaseUrl);
       }
-      if (!response.ok || !data.ok) {
-        setUpdateCheckStatus(data.error || "Unable to check for updates right now. Please try again later.");
+      if (!response.ok) {
+        const trimmedBody = nonJsonBody.trim();
+        if (data?.error) {
+          setUpdateCheckStatus(`Update check failed (${response.status}): ${data.error}`);
+          return;
+        }
+        if (trimmedBody) {
+          setUpdateCheckStatus(`Update check failed (${response.status}): ${trimmedBody.slice(0, 180)}`);
+          return;
+        }
+        setUpdateCheckStatus(`Update check failed with HTTP ${response.status}.`);
+        return;
+      }
+      if (!data || !data.ok) {
+        setUpdateCheckStatus(data?.error || "Unable to check for updates right now. Please try again later.");
         return;
       }
       const latest = data.latestVersion || null;
@@ -341,8 +382,9 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       } else {
         setUpdateCheckStatus(`You are up to date (v${currentAppVersion}).`);
       }
-    } catch {
-      setUpdateCheckStatus("Unable to check for updates right now. Please try again later.");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown request failure";
+      setUpdateCheckStatus(`Unable to check for updates right now (${errorMessage}).`);
     } finally {
       setIsCheckingUpdate(false);
     }

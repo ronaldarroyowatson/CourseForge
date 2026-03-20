@@ -321,6 +321,122 @@ function Test-PortAvailable {
   }
 }
 
+function Get-ListeningProcessForPort {
+  param([int]$Port)
+
+  try {
+    $connection = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -First 1
+  }
+  catch {
+    return $null
+  }
+
+  if ($null -eq $connection) {
+    return $null
+  }
+
+  try {
+    return Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $connection.OwningProcess) -ErrorAction Stop | Select-Object -First 1
+  }
+  catch {
+    return $null
+  }
+}
+
+function Find-AvailableLocalPort {
+  param(
+    [int]$StartPort,
+    [int]$MaxAttempts = 200
+  )
+
+  $candidate = [Math]::Max(1024, $StartPort)
+  for ($attempt = 0; $attempt -lt $MaxAttempts; $attempt++) {
+    if (Test-PortAvailable -TargetHost $hostName -Port $candidate) {
+      return $candidate
+    }
+    $candidate++
+  }
+
+  return $null
+}
+
+function Prompt-CloseOldCourseForgeServer {
+  param(
+    [string]$Message,
+    [int]$TimeoutSeconds = 15
+  )
+
+  # Allow silent automation to skip interactive prompts.
+  if ($env:COURSEFORGE_DISABLE_OLD_SERVER_PROMPT -eq "1") {
+    return $false
+  }
+
+  try {
+    $shell = New-Object -ComObject WScript.Shell
+    $promptResult = $shell.Popup($Message, $TimeoutSeconds, "CourseForge Startup", 4 + 32)
+    # 6 = Yes, 7 = No, -1 = timeout
+    return ($promptResult -eq 6)
+  }
+  catch {
+    Write-LauncherLog "WARNING: Could not display old-server prompt. Continuing without interactive confirmation."
+    return $false
+  }
+}
+
+function Stop-StaleCourseForgeServerOnPort {
+  param(
+    [int]$Port,
+    [string]$ExpectedRoot
+  )
+
+  $process = Get-ListeningProcessForPort -Port $Port
+  if ($null -eq $process) {
+    return $false
+  }
+
+  $commandLine = [string]$process.CommandLine
+  if ([string]::IsNullOrWhiteSpace($commandLine)) {
+    return $false
+  }
+
+  $isCourseForgeServer = $commandLine -match "courseforge-serve\.js"
+  $isExpectedInstall = $commandLine -match [regex]::Escape($ExpectedRoot)
+  if (-not $isCourseForgeServer -or $isExpectedInstall) {
+    return $false
+  }
+
+  Write-LauncherLog "Detected stale CourseForge server on port $Port (PID=$($process.ProcessId)) from a different install path. Stopping it to avoid version conflicts."
+  try {
+    Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+    Start-Sleep -Milliseconds 400
+    return $true
+  }
+  catch {
+    Write-LauncherLog "WARNING: Failed to stop stale CourseForge server PID=$($process.ProcessId). $($_.Exception.Message)"
+    return $false
+  }
+}
+
+function Get-CourseForgeServerVersion {
+  param([string]$BaseUrl)
+
+  $statusUrl = "$BaseUrl/api/update-status"
+  try {
+    $response = Invoke-WebRequest -Uri $statusUrl -UseBasicParsing -Method Get -TimeoutSec 2
+    if ($response.StatusCode -eq 200) {
+      $payload = $response.Content | ConvertFrom-Json
+      if ($null -ne $payload -and ($payload.PSObject.Properties.Name -contains "currentVersion")) {
+        return [string]$payload.currentVersion
+      }
+    }
+  }
+  catch {
+    # Best effort.
+  }
+
+  return $null
+}
+
 function Wait-ForHttpReady {
   param(
     [string]$Url,
@@ -375,23 +491,67 @@ function Test-CourseForgeServerReady {
   return $false
 }
 
-# Keep a fixed localhost origin for frontend/backend and OAuth consistency.
-$url = "http://${hostName}:$port"
+# Prefer localhost:$port, but allow adaptive fallback when occupied.
 
 try {
-  if (-not (Test-PortAvailable -TargetHost $hostName -Port $port)) {
+  $activePort = $port
+  $url = "http://${hostName}:$activePort"
+
+  if (-not (Test-PortAvailable -TargetHost $hostName -Port $activePort)) {
+    $listeningProcess = Get-ListeningProcessForPort -Port $activePort
+    $processCommandLine = if ($null -ne $listeningProcess) { [string]$listeningProcess.CommandLine } else { "" }
+    $isCourseForgeProcess = -not [string]::IsNullOrWhiteSpace($processCommandLine) -and $processCommandLine -match "courseforge-serve\.js"
+    $isExpectedInstall = $isCourseForgeProcess -and $processCommandLine -match [regex]::Escape($scriptDir)
+
     if (Test-CourseForgeServerReady -BaseUrl $url -TimeoutSeconds 3) {
-      Write-LauncherLog "Existing CourseForge server detected at $url. Reusing running server."
-      Start-Process $url
-      exit 0
+      if ($isCourseForgeProcess -and -not $isExpectedInstall) {
+        $existingVersion = Get-CourseForgeServerVersion -BaseUrl $url
+        $versionLabel = if ([string]::IsNullOrWhiteSpace($existingVersion)) { "unknown" } else { $existingVersion }
+        $closeMessage = "An older CourseForge instance (version $versionLabel) is already using port $activePort from another install path.`n`nChoose Yes to close it and continue on port $activePort.`nChoose No to keep it running and launch this session on another available local port."
+        $shouldCloseOldServer = Prompt-CloseOldCourseForgeServer -Message $closeMessage
+
+        if ($shouldCloseOldServer) {
+          Write-LauncherLog "User chose to close old CourseForge server on port $activePort (PID=$($listeningProcess.ProcessId))."
+          try {
+            Stop-Process -Id $listeningProcess.ProcessId -Force -ErrorAction Stop
+            Start-Sleep -Milliseconds 600
+          }
+          catch {
+            Write-LauncherLog "WARNING: Could not stop old CourseForge server PID=$($listeningProcess.ProcessId). $($_.Exception.Message)"
+          }
+        }
+      }
+
+      if (-not (Test-PortAvailable -TargetHost $hostName -Port $activePort)) {
+        $existingVersion = Get-CourseForgeServerVersion -BaseUrl $url
+        if ($isExpectedInstall -or -not $isCourseForgeProcess) {
+          if ([string]::IsNullOrWhiteSpace($existingVersion)) {
+            Write-LauncherLog "Existing CourseForge server detected at $url. Reusing running server."
+          }
+          else {
+            Write-LauncherLog "Existing CourseForge server detected at $url (version=$existingVersion). Reusing running server."
+          }
+          Start-Process $url
+          exit 0
+        }
+      }
     }
 
-    Write-LauncherLog "ERROR: Port $port is in use by another process and no CourseForge server is responding at $url. Close any other app using port $port, or close the already-running CourseForge window if one exists."
-    exit 1
+    if (-not (Test-PortAvailable -TargetHost $hostName -Port $activePort)) {
+      $fallbackPort = Find-AvailableLocalPort -StartPort ($activePort + 1)
+      if ($null -eq $fallbackPort) {
+        Write-LauncherLog "ERROR: Preferred port $activePort is busy and no fallback local port could be found."
+        exit 1
+      }
+
+      Write-LauncherLog "Preferred port $activePort is busy. Falling back to available local port $fallbackPort."
+      $activePort = $fallbackPort
+      $url = "http://${hostName}:$activePort"
+    }
   }
 
   # Start server in background
-  Write-LauncherLog "Starting local server on port $port."
+  Write-LauncherLog "Starting local server on port $activePort."
 
   foreach ($serverLogPath in @($serverStdoutLog, $serverStderrLog)) {
     if (Test-Path $serverLogPath) {
@@ -399,7 +559,7 @@ try {
     }
   }
 
-  $serverProcess = Start-Process -FilePath $nodePath -ArgumentList @("`"$serverScript`"", "`"$webappDir`"", $port, "`"$hostName`"") -PassThru -WindowStyle Hidden -RedirectStandardOutput $serverStdoutLog -RedirectStandardError $serverStderrLog
+  $serverProcess = Start-Process -FilePath $nodePath -ArgumentList @("`"$serverScript`"", "`"$webappDir`"", $activePort, "`"$hostName`"") -PassThru -WindowStyle Hidden -RedirectStandardOutput $serverStdoutLog -RedirectStandardError $serverStderrLog
 
   # Check if process started successfully
   if ($serverProcess.HasExited) {
@@ -428,7 +588,7 @@ try {
       }
       else {
         $portInUseMessage = if ($portRaceDetected) {
-          " Another process is holding CourseForge's fixed port $port. Close any other local server on that port and try again."
+          " Another process is holding CourseForge's preferred port $activePort. Close any other local server on that port and try again."
         }
         else {
           ""

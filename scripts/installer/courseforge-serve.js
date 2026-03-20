@@ -20,6 +20,16 @@ const defaultLatestReleaseEndpoint = "https://api.github.com/repos/ronaldarroyow
 // Package root is one level above the webapp folder.
 // pending-update.json is written here by the updater.
 const packageRoot = path.dirname(webappPath);
+const updaterLogPath = path.join(packageRoot, "updater.log");
+
+function writeUpdaterLog(message) {
+  const line = `[${new Date().toISOString()}] ${message}`;
+  try {
+    fs.appendFileSync(updaterLogPath, `${line}\n`, "utf8");
+  } catch (error) {
+    console.error("[CourseForge server] Failed to append updater log entry:", error);
+  }
+}
 
 function readJsonFile(filePath) {
   try {
@@ -105,6 +115,8 @@ async function fetchLatestReleaseStatus() {
 async function handleApiRoute(pathname, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
 
   if (pathname === "/api/update-status") {
     const pendingPath = path.join(packageRoot, "pending-update.json");
@@ -123,7 +135,13 @@ async function handleApiRoute(pathname, res) {
   }
 
   if (pathname === "/api/check-for-updates") {
+    writeUpdaterLog("Manual update check requested via /api/check-for-updates.");
     const payload = await fetchLatestReleaseStatus();
+    if (payload.ok) {
+      writeUpdaterLog(`Manual update check result: ok=true current=${payload.currentVersion || "unknown"} latest=${payload.latestVersion || "unknown"} available=${payload.available}`);
+    } else {
+      writeUpdaterLog(`Manual update check result: ok=false error=${payload.error || "unknown"}`);
+    }
     res.writeHead(payload.ok ? 200 : 502);
     res.end(JSON.stringify(payload));
     return;
@@ -174,6 +192,10 @@ function startServer(finalPort) {
       if (pathname.startsWith("/api/")) {
         void handleApiRoute(pathname, res).catch((error) => {
           console.error("API route error:", error);
+          if (pathname === "/api/check-for-updates") {
+            const message = error instanceof Error ? error.message : String(error);
+            writeUpdaterLog(`Manual update check failed with internal error: ${message}`);
+          }
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "internal error" }));
         });

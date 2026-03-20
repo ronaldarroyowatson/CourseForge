@@ -287,6 +287,38 @@ async function startExistingCourseForgeServer(port: number) {
   return child;
 }
 
+async function startBlockingServer(port: number) {
+  const blockerScript = [
+    "const http = require('http');",
+    "const server = http.createServer((req, res) => {",
+    "  res.writeHead(200, { 'Content-Type': 'text/plain', Connection: 'close' });",
+    "  res.end('busy');",
+    "});",
+    `server.listen(${port}, () => { console.log('blocking-ready'); });`,
+    "process.on('SIGTERM', () => server.close(() => process.exit(0)));",
+  ].join("\n");
+
+  const child = spawn("node", ["-e", blockerScript], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Timed out waiting for blocking server")), 10000);
+    child.stdout.on("data", (chunk) => {
+      if (chunk.toString().includes("blocking-ready")) {
+        clearTimeout(timeout);
+        resolve();
+      }
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`Blocking server exited early with code ${code}`));
+    });
+  });
+
+  return child;
+}
+
 function expectLogPathDiagnostics(logDetails: ReturnType<typeof readLauncherLog>) {
   if (logDetails.used === "primary") {
     expect(logDetails.primaryExists).toBe(true);
@@ -374,9 +406,31 @@ describe("portable launcher staged-update flow", () => {
       const logDetails = readLauncherLog(root);
 
       expect(result.status).toBe(0);
-      expect(logDetails.content).toContain(`Existing CourseForge server detected at http://localhost:${port}. Reusing running server.`);
+      expect(logDetails.content).toContain(`Existing CourseForge server detected at http://localhost:${port}`);
+      expect(logDetails.content).toContain("Reusing running server.");
     } finally {
       await stopChildProcess(existingServer);
+      await removeDirWithRetries(root);
+    }
+  }, 25000);
+
+  it.skipIf(process.platform !== "win32")("falls back to another local port when preferred port is occupied by non-CourseForge process", async () => {
+    const preferredPort = await getAvailablePort();
+    const { root, binDir } = createTestInstallRoot(preferredPort);
+    let blocker: ChildProcess | null = null;
+
+    try {
+      blocker = await startBlockingServer(preferredPort);
+      const result = runLauncher(root, binDir, { robocopyMode: "success" });
+      const logDetails = readLauncherLog(root);
+      const started = JSON.parse(readFileSync(join(root, "server-started.json"), "utf8")) as { args: string[] };
+      const actualPort = Number(started.args[1]);
+
+      expect(result.status).toBe(0);
+      expect(actualPort).not.toBe(preferredPort);
+      expect(logDetails.content).toContain(`Preferred port ${preferredPort} is busy. Falling back to available local port`);
+    } finally {
+      await stopChildProcess(blocker);
       await removeDirWithRetries(root);
     }
   }, 25000);

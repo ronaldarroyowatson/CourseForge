@@ -207,4 +207,51 @@ describe("local update status endpoint", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("returns updater progress payload from local status file", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+    writeFileSync(join(root, "package-manifest.json"), JSON.stringify({ version: "1.2.72" }, null, 2), "utf8");
+    writeFileSync(
+      join(root, "updater-status.json"),
+      JSON.stringify({
+        state: "downloading",
+        currentVersion: "1.2.72",
+        latestVersion: "1.2.73",
+        assetName: "CourseForge-1.2.73-portable.zip",
+        assetSizeBytes: 1024,
+        bytesDownloaded: 512,
+        progressPercent: 50,
+        message: "Downloading update package",
+        updatedAt: "2026-03-20T00:00:00.000Z",
+      }, null, 2),
+      "utf8"
+    );
+
+    try {
+      const port = await getAvailablePort();
+      child = await startStatusServer(root, port);
+
+      const response = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/updater-progress`);
+      const payload = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(payload).toMatchObject({
+        state: "downloading",
+        currentVersion: "1.2.72",
+        latestVersion: "1.2.73",
+        progressPercent: 50,
+      });
+    } finally {
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

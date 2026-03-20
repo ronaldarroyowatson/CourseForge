@@ -34,6 +34,41 @@ function parseSemver(value: string): number[] | null {
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
+function formatBytes(bytes: number | null | undefined): string {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
+    return "Unknown size";
+  }
+
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+type UpdaterProgress = {
+  state?: string | null;
+  mode?: string | null;
+  currentVersion?: string | null;
+  latestVersion?: string | null;
+  assetName?: string | null;
+  assetSizeBytes?: number | null;
+  bytesDownloaded?: number | null;
+  progressPercent?: number | null;
+  releaseUrl?: string | null;
+  message?: string | null;
+  lastError?: string | null;
+  updatedAt?: string | null;
+};
+
 /**
  * Centralized user preferences for sync safety and appearance.
  */
@@ -73,6 +108,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   const [latestAvailableVersion, setLatestAvailableVersion] = React.useState<string | null>(null);
   const [pendingUpdateVersion, setPendingUpdateVersion] = React.useState<string | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = React.useState<string>("unknown");
+  const [updaterProgress, setUpdaterProgress] = React.useState<UpdaterProgress | null>(null);
   const languageOptions = React.useMemo(() => getSupportedLanguages(), []);
 
   async function persistPreferences(nextLanguage: string, nextAccessibility = accessibility): Promise<void> {
@@ -225,7 +261,66 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       } catch {
         // Best-effort latest version hint only.
       }
+
+      try {
+        const response = await fetch("/api/updater-progress", { cache: "no-store" });
+        if (response.ok) {
+          const data = await response.json() as UpdaterProgress;
+          setUpdaterProgress(data);
+          if (data.currentVersion) {
+            setCurrentAppVersion(data.currentVersion);
+          }
+          if (data.latestVersion) {
+            setLatestAvailableVersion(data.latestVersion);
+          }
+          if (data.releaseUrl) {
+            setLatestReleaseUrl(data.releaseUrl);
+          }
+        }
+      } catch {
+        // Best-effort updater telemetry only.
+      }
     })();
+  }, []);
+
+  React.useEffect(() => {
+    let active = true;
+
+    const pollUpdaterProgress = async () => {
+      try {
+        const response = await fetch("/api/updater-progress", { cache: "no-store" });
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json() as UpdaterProgress;
+        if (!active) {
+          return;
+        }
+
+        setUpdaterProgress(data);
+        if (data.currentVersion) {
+          setCurrentAppVersion(data.currentVersion);
+        }
+        if (data.latestVersion) {
+          setLatestAvailableVersion(data.latestVersion);
+        }
+        if (data.releaseUrl) {
+          setLatestReleaseUrl(data.releaseUrl);
+        }
+      } catch {
+        // Keep polling quietly in environments without local updater API.
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void pollUpdaterProgress();
+    }, 1500);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   async function handleReloadCloudPolicy(): Promise<void> {
@@ -624,6 +719,26 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
           <p>Current version: <strong>v{currentAppVersion}</strong></p>
           <p>Latest available: <strong>{latestAvailableVersion ? `v${latestAvailableVersion}` : "Not checked yet"}</strong></p>
           <p>The portable and Windows launcher packages update automatically in the background each time you start the app.</p>
+          {updaterProgress?.message ? (
+            <p className="settings-meta">Updater status: {updaterProgress.message}</p>
+          ) : null}
+          {typeof updaterProgress?.progressPercent === "number" ? (
+            <div className="settings-meta" aria-live="polite">
+              <label htmlFor="updater-progress">Update progress: {updaterProgress.progressPercent}%</label>
+              <progress id="updater-progress" max={100} value={Math.max(0, Math.min(100, updaterProgress.progressPercent))} style={{ width: "100%" }} />
+            </div>
+          ) : null}
+          {typeof updaterProgress?.assetSizeBytes === "number" ? (
+            <p className="settings-meta">
+              Package size: {formatBytes(updaterProgress.assetSizeBytes)}
+              {typeof updaterProgress.bytesDownloaded === "number"
+                ? ` (${formatBytes(updaterProgress.bytesDownloaded)} downloaded)`
+                : ""}
+            </p>
+          ) : null}
+          {updaterProgress?.lastError ? (
+            <p className="error-text">Updater error: {updaterProgress.lastError}</p>
+          ) : null}
           {pendingUpdateVersion ? (
             <p className="settings-meta">Downloaded update ready: v{pendingUpdateVersion}. It will be applied automatically on your next launch.</p>
           ) : null}

@@ -43,6 +43,29 @@ function readJsonFile(filePath) {
   }
 }
 
+function readUpdaterProgress() {
+  const progressPath = path.join(packageRoot, "updater-status.json");
+  const payload = readJsonFile(progressPath);
+  if (!payload || typeof payload !== "object") {
+    return {
+      state: "idle",
+      mode: null,
+      currentVersion: null,
+      latestVersion: null,
+      assetName: null,
+      assetSizeBytes: null,
+      bytesDownloaded: null,
+      progressPercent: null,
+      releaseUrl: null,
+      message: "Updater idle.",
+      lastError: null,
+      updatedAt: null,
+    };
+  }
+
+  return payload;
+}
+
 function parseSemver(value) {
   if (!value || typeof value !== "string") {
     return null;
@@ -143,6 +166,13 @@ async function handleApiRoute(pathname, res) {
       writeUpdaterLog(`Manual update check result: ok=false error=${payload.error || "unknown"}`);
     }
     res.writeHead(payload.ok ? 200 : 502);
+    res.end(JSON.stringify(payload));
+    return;
+  }
+
+  if (pathname === "/api/updater-progress") {
+    const payload = readUpdaterProgress();
+    res.writeHead(200);
     res.end(JSON.stringify(payload));
     return;
   }

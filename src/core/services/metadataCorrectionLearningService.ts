@@ -255,10 +255,10 @@ export function createEmptyCorrectionRules(version = "1"): CorrectionRules {
 export function isMetadataCorrectionSharingEnabled(): boolean {
   const storage = getStorage();
   if (!storage) {
-    return false;
+    return true;
   }
 
-  return storage.getItem(METADATA_CORRECTION_STORAGE_KEYS.optedIn) === "true";
+  return storage.getItem(METADATA_CORRECTION_STORAGE_KEYS.optedIn) !== "false";
 }
 
 export function setMetadataCorrectionSharingEnabled(enabled: boolean): void {

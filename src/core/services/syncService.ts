@@ -40,13 +40,92 @@ const SYNC_THROTTLE_MS = 5000;
 const DEFAULT_WRITE_BUDGET_LIMIT = Number(viteEnv?.VITE_SYNC_WRITE_BUDGET ?? "500");
 const DEFAULT_RETRY_LIMIT = 3;
 const WRITE_BUDGET_WARNING = "Cloud sync paused to prevent excessive writes. Please review your data or try again later.";
+const WRITE_BUDGET_STORAGE_KEY = "courseforge.sync.writeBudgetDaily";
 
 const recentWrites = new Map<string, number>();
 let lastSyncAttemptAt = 0;
 let writeLoopTriggered = false;
 let writeBudgetExceeded = false;
 let sessionWriteCount = 0;
+let writeBudgetDateKey = "";
 let syncContext: { uid: string | null; isAdmin: boolean | null } = { uid: null, isAdmin: null };
+
+function getUtcDateKey(now = new Date()): string {
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(now.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function readDailyWriteBudgetState(): { dateKey: string; writeCount: number; exceeded: boolean } | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(WRITE_BUDGET_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as { dateKey?: unknown; writeCount?: unknown; exceeded?: unknown };
+    if (typeof parsed.dateKey !== "string") {
+      return null;
+    }
+
+    const parsedWriteCount = Number(parsed.writeCount ?? 0);
+    const safeWriteCount = Number.isFinite(parsedWriteCount) && parsedWriteCount >= 0
+      ? Math.floor(parsedWriteCount)
+      : 0;
+
+    return {
+      dateKey: parsed.dateKey,
+      writeCount: safeWriteCount,
+      exceeded: Boolean(parsed.exceeded),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistDailyWriteBudgetState(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      WRITE_BUDGET_STORAGE_KEY,
+      JSON.stringify({
+        dateKey: writeBudgetDateKey,
+        writeCount: sessionWriteCount,
+        exceeded: writeBudgetExceeded,
+      })
+    );
+  } catch {
+    // Best effort persistence only.
+  }
+}
+
+function refreshDailyWriteBudgetState(): void {
+  const currentDateKey = getUtcDateKey();
+  if (writeBudgetDateKey === currentDateKey) {
+    return;
+  }
+
+  const persisted = readDailyWriteBudgetState();
+  if (persisted && persisted.dateKey === currentDateKey) {
+    writeBudgetDateKey = persisted.dateKey;
+    sessionWriteCount = persisted.writeCount;
+    writeBudgetExceeded = persisted.exceeded || persisted.writeCount >= DEFAULT_WRITE_BUDGET_LIMIT;
+    return;
+  }
+
+  writeBudgetDateKey = currentDateKey;
+  sessionWriteCount = 0;
+  writeBudgetExceeded = false;
+  persistDailyWriteBudgetState();
+}
 
 interface UserCloudSyncPolicy {
   isBlocked: boolean;
@@ -160,8 +239,11 @@ function shouldSkipWriteForLoop(path: string): boolean {
 }
 
 function hasWriteBudgetCapacity(path: string, payload: unknown): boolean {
+  refreshDailyWriteBudgetState();
+
   if (writeBudgetExceeded || sessionWriteCount >= DEFAULT_WRITE_BUDGET_LIMIT) {
     writeBudgetExceeded = true;
+    persistDailyWriteBudgetState();
     logSyncEvent("write:budget-exceeded", path, {
       payload,
       writeCount: sessionWriteCount,
@@ -188,12 +270,14 @@ export function resetSyncSafetyStateForTests(): void {
   writeLoopTriggered = false;
   writeBudgetExceeded = false;
   sessionWriteCount = 0;
+  writeBudgetDateKey = getUtcDateKey();
 }
 
 /**
  * Test-only helper to simulate budget exhaustion without mutating Firestore.
  */
 export function setWriteBudgetStateForTests(exceeded: boolean, writeCount = DEFAULT_WRITE_BUDGET_LIMIT): void {
+  writeBudgetDateKey = getUtcDateKey();
   writeBudgetExceeded = exceeded;
   sessionWriteCount = writeCount;
 }
@@ -918,6 +1002,7 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
   try {
     await setDoc(doc(firestoreDb, path), cloudRecord, { merge: true });
     sessionWriteCount += 1;
+    persistDailyWriteBudgetState();
     logSyncEvent("write:success", path, { id: item.id });
     return true;
   } catch (error) {
@@ -1158,6 +1243,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
   const getPending = deps.getPendingSyncDiagnosticsFn ?? getPendingSyncDiagnostics;
   const getUser = deps.getCurrentUserFn ?? getCurrentUser;
   const runSyncUserData = deps.syncUserDataFn ?? syncUserData;
+  refreshDailyWriteBudgetState();
 
   if (now - lastSyncAttemptAt < SYNC_THROTTLE_MS) {
     const pending = await getPending();

@@ -601,6 +601,14 @@ body {
   margin-bottom: 0.8rem;
 }
 
+.settings-page__header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .settings-page__header h2 {
   margin: 0;
 }
@@ -645,6 +653,10 @@ body {
 
 .settings-meta {
   font-size: 0.9rem;
+}
+
+.settings-progress {
+  width: 100%;
 }
 
 .admin-shell {

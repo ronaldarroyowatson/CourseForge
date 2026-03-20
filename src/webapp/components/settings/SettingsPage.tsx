@@ -94,7 +94,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   const [debugStatus, setDebugStatus] = React.useState<string | null>(null);
   const [isUploadingDebugLog, setIsUploadingDebugLog] = React.useState(false);
   const [debugPolicyStatus, setDebugPolicyStatus] = React.useState<string | null>(null);
-  const [ocrProviderOrder, setOcrProviderOrderState] = React.useState<AutoOcrProviderId[]>(["local_tesseract", "cloud_openai_vision"]);
+  const [ocrProviderOrder, setOcrProviderOrderState] = React.useState<AutoOcrProviderId[]>(["cloud_openai_vision", "local_tesseract"]);
   const [metadataSharingEnabled, setMetadataSharingEnabled] = React.useState<boolean>(() => isMetadataCorrectionSharingEnabled());
   const [ocrProviderHealth, setOcrProviderHealth] = React.useState<Array<{ id: AutoOcrProviderId; label: string; available: boolean }>>([]);
   const [ocrProviderStatus, setOcrProviderStatus] = React.useState<string | null>(null);
@@ -489,7 +489,12 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
     <section className="settings-page placeholder-panel">
       <div className="settings-page__header">
         <h2>Settings</h2>
-        <button type="button" className="btn-secondary" onClick={onBack}>Back To Workspace</button>
+        <div className="settings-page__header-actions">
+          <button type="button" className="btn-secondary" onClick={() => { void handleThemeToggle(); }}>
+            Theme: {theme === "dark" ? "Dark" : "Light"}
+          </button>
+          <button type="button" className="btn-secondary" onClick={onBack}>Back To Workspace</button>
+        </div>
       </div>
 
       <div className="settings-grid">
@@ -516,14 +521,6 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
             </p>
           ) : null}
           <p className="settings-meta">Retries used: {retryCount}/{retryLimit}</p>
-        </article>
-
-        <article className="settings-card">
-          <h3>Appearance</h3>
-          <p>Theme preference is stored locally and mirrored to your user profile when available.</p>
-          <button type="button" className="btn-secondary" onClick={() => { void handleThemeToggle(); }}>
-            Theme: {theme === "dark" ? "Dark" : "Light"}
-          </button>
         </article>
 
         <article className="settings-card">
@@ -617,7 +614,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
           <h3>Sync Safety Status</h3>
           <p className="settings-meta">Sync status: {syncStatus}</p>
           <p className="settings-meta">Pending changes: {pendingChangesCount}</p>
-          <p className="settings-meta">Writes this session: {writeCount}/{writeBudgetLimit}</p>
+          <p className="settings-meta">Writes today (UTC): {writeCount}/{writeBudgetLimit}</p>
           {writeBudgetExceeded ? (
             <p className="error-text">Cloud sync paused to prevent excessive writes. Please review your data or try again later.</p>
           ) : null}
@@ -639,7 +636,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
           <label>
             Fallback OCR Provider
             <select
-              value={ocrProviderOrder[1] ?? "cloud_openai_vision"}
+              value={ocrProviderOrder[1] ?? "local_tesseract"}
               onChange={(event) => updateFallbackOcrProvider(event.target.value as AutoOcrProviderId)}
             >
               <option value="local_tesseract">Local OCR (Tesseract)</option>
@@ -725,7 +722,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
           {typeof updaterProgress?.progressPercent === "number" ? (
             <div className="settings-meta" aria-live="polite">
               <label htmlFor="updater-progress">Update progress: {updaterProgress.progressPercent}%</label>
-              <progress id="updater-progress" max={100} value={Math.max(0, Math.min(100, updaterProgress.progressPercent))} style={{ width: "100%" }} />
+              <progress id="updater-progress" className="settings-progress" max={100} value={Math.max(0, Math.min(100, updaterProgress.progressPercent))} />
             </div>
           ) : null}
           {typeof updaterProgress?.assetSizeBytes === "number" ? (

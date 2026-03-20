@@ -35,7 +35,7 @@ const AUTO_OCR_CIRCUIT_STATE_KEY = "courseforge.autoOcr.circuitState";
 const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000;
 
-const DEFAULT_PROVIDER_ORDER: AutoOcrProviderId[] = ["local_tesseract", "cloud_openai_vision"];
+const DEFAULT_PROVIDER_ORDER: AutoOcrProviderId[] = ["cloud_openai_vision", "local_tesseract"];
 
 interface CircuitStateEntry {
   consecutiveFailures: number;

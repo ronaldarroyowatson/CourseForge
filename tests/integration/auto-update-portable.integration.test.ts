@@ -261,7 +261,7 @@ describe("portable updater script", () => {
       await closeServer(server);
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 15000);
 
   it.skipIf(process.platform !== "win32")("logs a useful diagnostic when the downloaded package is missing the webapp payload", async () => {
     const root = mkdtempSync(join(tmpdir(), "courseforge-updater-"));

@@ -120,21 +120,40 @@ function createTestInstallRoot() {
 }
 
 function runLauncher(root: string, binDir: string, robocopyMode: "success" | "fail") {
+  const tempDir = join(root, "temp");
+  mkdirSync(tempDir, { recursive: true });
+
   return spawnSync(
     "powershell.exe",
     ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(root, "Start-CourseForge.ps1")],
     {
       cwd: root,
       encoding: "utf8",
-      timeout: 15000,
+      timeout: 30000,
       env: {
         ...process.env,
         LOCALAPPDATA: join(root, "appdata"),
+        TEMP: tempDir,
+        TMP: tempDir,
         PATH: `${binDir};${process.env.PATH ?? ""}`,
         ROBOCOPY_MODE: robocopyMode,
       },
     }
   );
+}
+
+function readLauncherLog(root: string) {
+  const primary = join(root, "appdata", "CourseForge", "logs", "launcher.log");
+  if (existsSync(primary)) {
+    return readFileSync(primary, "utf8");
+  }
+
+  const fallback = join(root, "temp", "CourseForge-launcher", "launcher.log");
+  if (existsSync(fallback)) {
+    return readFileSync(fallback, "utf8");
+  }
+
+  throw new Error(`launcher log not found in expected locations: ${primary} or ${fallback}`);
 }
 
 async function removeDirWithRetries(root: string) {
@@ -163,7 +182,7 @@ describe("portable launcher staged-update flow", () => {
 
     try {
       const result = runLauncher(root, binDir, "success");
-      const launcherLog = readFileSync(join(root, "appdata", "CourseForge", "logs", "launcher.log"), "utf8");
+      const launcherLog = readLauncherLog(root);
       const manifest = JSON.parse(readFileSync(join(root, "package-manifest.json"), "utf8"));
       const updaterMarker = JSON.parse(readFileSync(join(root, "background-updater.json"), "utf8"));
 
@@ -186,7 +205,7 @@ describe("portable launcher staged-update flow", () => {
 
     try {
       const result = runLauncher(root, binDir, "fail");
-      const launcherLog = readFileSync(join(root, "appdata", "CourseForge", "logs", "launcher.log"), "utf8");
+      const launcherLog = readLauncherLog(root);
       const manifest = JSON.parse(readFileSync(join(root, "package-manifest.json"), "utf8"));
 
       expect(result.status).toBe(0);

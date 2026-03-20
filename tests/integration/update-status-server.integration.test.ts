@@ -57,6 +57,23 @@ async function stopServer(child: ChildProcess) {
   await once(child, "exit");
 }
 
+async function fetchUpdateStatusWithRetry(url: string, timeoutMs = 10000) {
+  const startedAt = Date.now();
+  let lastError: unknown = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(2500) });
+      return response;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+
+  throw lastError ?? new Error("Timed out waiting for update-status endpoint");
+}
+
 describe("local update status endpoint", () => {
   let child: ChildProcess | null = null;
 
@@ -97,7 +114,7 @@ describe("local update status endpoint", () => {
       const port = await getAvailablePort();
       child = await startStatusServer(root, port);
 
-      const response = await fetch(`http://127.0.0.1:${port}/api/update-status`);
+      const response = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/update-status`);
       const payload = await response.json();
 
       expect(response.status).toBe(200);

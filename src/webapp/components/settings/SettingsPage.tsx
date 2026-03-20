@@ -72,6 +72,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   const [updateCheckStatus, setUpdateCheckStatus] = React.useState<string | null>(null);
   const [isCheckingUpdate, setIsCheckingUpdate] = React.useState(false);
   const [latestReleaseUrl, setLatestReleaseUrl] = React.useState<string | null>(null);
+  const [latestAvailableVersion, setLatestAvailableVersion] = React.useState<string | null>(null);
   const [pendingUpdateVersion, setPendingUpdateVersion] = React.useState<string | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = React.useState<string>("unknown");
   const languageOptions = React.useMemo(() => getSupportedLanguages(), []);
@@ -194,7 +195,11 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
           if (data.currentVersion) {
             setCurrentAppVersion(data.currentVersion);
           }
-          setPendingUpdateVersion(data.available && data.version ? data.version : null);
+          const availableVersion = data.available && data.version ? data.version : null;
+          setPendingUpdateVersion(availableVersion);
+          if (availableVersion) {
+            setLatestAvailableVersion(availableVersion);
+          }
         }
       } catch {
         // The endpoint only exists in packaged launcher mode.
@@ -287,6 +292,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       }
       const data = await response.json() as { tag_name: string; html_url: string };
       const latest = data.tag_name.replace(/^v/, "");
+      setLatestAvailableVersion(latest);
       const partsLatest = parseSemver(latest);
       const partsCurrent = parseSemver(currentAppVersion);
       if (!partsLatest) {
@@ -550,6 +556,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
         <article className="settings-card">
           <h3>App Updates</h3>
           <p>Current version: <strong>v{currentAppVersion}</strong></p>
+          <p>Latest available: <strong>{latestAvailableVersion ? `v${latestAvailableVersion}` : "Not checked yet"}</strong></p>
           <p>The portable and Windows launcher packages update automatically in the background each time you start the app.</p>
           {pendingUpdateVersion ? (
             <p className="settings-meta">Downloaded update ready: v{pendingUpdateVersion}. It will be applied automatically on your next launch.</p>

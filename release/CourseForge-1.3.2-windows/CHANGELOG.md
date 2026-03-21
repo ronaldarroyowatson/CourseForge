@@ -33,29 +33,6 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - `npm run package:windows`
 - `npm run verify:windows`
 
-## [1.3.2] - 2026-03-21
-
-### Fixed (1.3.2)
-
-- Cloud OCR readiness now uses an explicit provider-status callable so the app can distinguish unavailable cloud providers from temporary probe failures and fall back predictably.
-- Firebase Functions OCR/AI callables now consume `OPENAI_API_KEY` through v2 secrets configuration, preventing false “cloud unavailable” states caused by missing secret injection.
-- Auto OCR image preprocessing is hardened with decode/progress timeouts so stalled decodes do not block provider fallback.
-- Auto setup dropped-cover preview now uses scaled display images and tighter overflow constraints to prevent preview card bleed/overflow on large images.
-
-### Added (1.3.2)
-
-- OCR-focused e2e lane via `npm run test:e2e:ocr`.
-- Coverage for cloud/local OCR fallback and provider status behavior in `tests/core/autoOcrService.test.ts`.
-- Coverage for vision-to-OCR fallback in `tests/core/metadataExtractionPipelineService.test.ts`.
-- Integration coverage for dropped-cover OCR pipeline/provider status visibility in `tests/integration/autoTextbookFlow.integration.test.tsx`.
-
-### Verified (1.3.2)
-
-- `npm run typecheck`
-- `npm run functions:build:compat`
-- `npm run test:e2e`
-- `npm run check:installer`
-
 ## [1.3.1] - 2026-03-20
 
 ### Added (1.3.1)

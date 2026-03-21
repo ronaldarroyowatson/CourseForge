@@ -1,5 +1,6 @@
 import { httpsCallable } from "firebase/functions";
 
+import { getCurrentUser, waitForAuthStateChange } from "../../firebase/auth";
 import { functionsClient } from "../../firebase/functions";
 
 export type AutoOcrProviderId = "local_tesseract" | "cloud_openai_vision";
@@ -36,6 +37,7 @@ export interface AutoOcrProviderHealthRecord {
   label: string;
   available: boolean;
   availabilityState: ProviderAvailabilityState;
+  errorMessage?: string;
 }
 
 const AUTO_OCR_PROVIDER_ORDER_KEY = "courseforge.autoOcr.providerOrder";
@@ -55,7 +57,64 @@ interface CircuitStateEntry {
 
 type CircuitState = Record<AutoOcrProviderId, CircuitStateEntry>;
 
-let autoOcrAvailabilityCache: { state: ProviderAvailabilityState; expiresAt: number } | null = null;
+let autoOcrAvailabilityCache: {
+  state: ProviderAvailabilityState;
+  expiresAt: number;
+  errorMessage?: string;
+} | null = null;
+let cloudAvailabilityProbeInFlight: Promise<ProviderAvailabilityState> | null = null;
+
+function normalizeCallableError(error: unknown): { code: string; message: string } {
+  if (typeof error === "object" && error !== null) {
+    const record = error as Record<string, unknown>;
+    const code = typeof record.code === "string" ? record.code : "unknown";
+    const message = typeof record.message === "string" ? record.message : "Unknown callable error.";
+    return { code, message };
+  }
+
+  if (error instanceof Error) {
+    return { code: "unknown", message: error.message };
+  }
+
+  return { code: "unknown", message: String(error) };
+}
+
+function isUnauthenticatedCallableError(error: { code: string; message: string }): boolean {
+  const loweredCode = error.code.toLowerCase();
+  const loweredMessage = error.message.toLowerCase();
+  return loweredCode.includes("unauthenticated")
+    || loweredMessage.includes("unauthenticated")
+    || loweredMessage.includes("not authenticated");
+}
+
+async function callWithAuthRefreshRetry<TPayload extends object, TResponse>(
+  callableName: string,
+  payload: TPayload
+): Promise<TResponse> {
+  const callable = httpsCallable(functionsClient, callableName);
+
+  try {
+    return await callable(payload) as TResponse;
+  } catch (error) {
+    const normalized = normalizeCallableError(error);
+    if (!isUnauthenticatedCallableError(normalized)) {
+      throw error;
+    }
+
+    const user = getCurrentUser() ?? await waitForAuthStateChange(3000);
+    if (!user) {
+      throw error;
+    }
+
+    try {
+      await user.getIdToken(true);
+    } catch {
+      // Best effort token refresh before retrying callable.
+    }
+
+    return await callable(payload) as TResponse;
+  }
+}
 
 async function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
   return new Promise<HTMLImageElement>((resolve, reject) => {
@@ -350,54 +409,90 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
     return autoOcrAvailabilityCache.state;
   }
 
+  if (cloudAvailabilityProbeInFlight) {
+    return cloudAvailabilityProbeInFlight;
+  }
+
+  cloudAvailabilityProbeInFlight = (async () => {
+    const user = getCurrentUser() ?? await waitForAuthStateChange(2500);
+    if (!user) {
+      autoOcrAvailabilityCache = {
+        state: "unavailable",
+        expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+        errorMessage: "Sign in is required for Cloud OCR.",
+      };
+      return "unavailable";
+    }
+
+    try {
+      const response = await callWithAuthRefreshRetry<{}, { data: unknown }>("getAiProviderStatus", {});
+      const payload = response.data as {
+        success?: boolean;
+        data?: {
+          providers?: Array<{
+            id?: AutoOcrProviderId;
+            available?: boolean;
+          }>;
+        };
+      };
+
+      if (payload?.success !== true || !Array.isArray(payload.data?.providers)) {
+        autoOcrAvailabilityCache = {
+          state: "unknown",
+          expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+          errorMessage: "Cloud OCR status probe returned an invalid payload.",
+        };
+        return "unknown";
+      }
+
+      const cloudProvider = payload.data.providers.find((provider) => provider.id === "cloud_openai_vision");
+      if (!cloudProvider || typeof cloudProvider.available !== "boolean") {
+        autoOcrAvailabilityCache = {
+          state: "unknown",
+          expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+          errorMessage: "Cloud OCR status probe did not include provider availability.",
+        };
+        return "unknown";
+      }
+
+      const resolvedState: ProviderAvailabilityState = cloudProvider.available ? "available" : "unavailable";
+      autoOcrAvailabilityCache = {
+        state: resolvedState,
+        expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+      };
+      return resolvedState;
+    } catch (error) {
+      const normalized = normalizeCallableError(error);
+      if (isUnauthenticatedCallableError(normalized)) {
+        autoOcrAvailabilityCache = {
+          state: "unavailable",
+          expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+          errorMessage: "Sign in is required for Cloud OCR.",
+        };
+        return "unavailable";
+      }
+
+      autoOcrAvailabilityCache = {
+        state: "unknown",
+        expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+        errorMessage: normalized.message,
+      };
+      return "unknown";
+    }
+  })();
+
   try {
-    const callable = httpsCallable(functionsClient, "getAiProviderStatus");
-    const response = await callable({});
-    const payload = response.data as {
-      success?: boolean;
-      data?: {
-        providers?: Array<{
-          id?: AutoOcrProviderId;
-          available?: boolean;
-        }>;
-      };
-    };
-
-    if (payload?.success !== true || !Array.isArray(payload.data?.providers)) {
-      autoOcrAvailabilityCache = {
-        state: "unknown",
-        expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
-      };
-      return "unknown";
-    }
-
-    const cloudProvider = payload.data.providers.find((provider) => provider.id === "cloud_openai_vision");
-    if (!cloudProvider || typeof cloudProvider.available !== "boolean") {
-      autoOcrAvailabilityCache = {
-        state: "unknown",
-        expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
-      };
-      return "unknown";
-    }
-
-    const resolvedState: ProviderAvailabilityState = cloudProvider.available ? "available" : "unavailable";
-    autoOcrAvailabilityCache = {
-      state: resolvedState,
-      expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
-    };
-    return resolvedState;
-  } catch {
-    autoOcrAvailabilityCache = {
-      state: "unknown",
-      expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
-    };
-    return "unknown";
+    return await cloudAvailabilityProbeInFlight;
+  } finally {
+    cloudAvailabilityProbeInFlight = null;
   }
 }
 
 async function extractWithCloudOpenAiVision(imageDataUrl: string): Promise<string> {
-  const callable = httpsCallable(functionsClient, "extractScreenshotText");
-  const response = await callable({ imageDataUrl });
+  const response = await callWithAuthRefreshRetry<{ imageDataUrl: string }, { data: unknown }>(
+    "extractScreenshotText",
+    { imageDataUrl }
+  );
   const payload = response.data as {
     success?: boolean;
     data?: { text?: string };
@@ -439,6 +534,7 @@ export async function getAutoOcrProviderHealth(options: { forceRefresh?: boolean
           label: provider.label,
           available: availabilityState === "available",
           availabilityState,
+          errorMessage: autoOcrAvailabilityCache?.errorMessage,
         };
       }
 

@@ -248,10 +248,21 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   async function refreshOcrProviderHealth(): Promise<void> {
     const health = await getAutoOcrProviderHealth({ forceRefresh: true });
     setOcrProviderHealth(health);
+    const cloudHealth = health.find((provider) => provider.id === "cloud_openai_vision");
     const hasUnknown = health.some((provider) => provider.availabilityState === "unknown");
     if (hasUnknown) {
-      setOcrProviderStatus("One or more provider checks were inconclusive. Cloud OCR may still work during extraction.");
+      setOcrProviderStatus(cloudHealth?.errorMessage
+        ? `Cloud OCR probe is inconclusive: ${cloudHealth.errorMessage}`
+        : "One or more provider checks were inconclusive. Cloud OCR may still work during extraction.");
+      return;
     }
+
+    if (cloudHealth && !cloudHealth.available && cloudHealth.errorMessage) {
+      setOcrProviderStatus(cloudHealth.errorMessage);
+      return;
+    }
+
+    setOcrProviderStatus(null);
   }
 
   function updatePrimaryOcrProvider(providerId: AutoOcrProviderId): void {
@@ -788,6 +799,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
                 : provider.available
                   ? "Available"
                   : "Unavailable"}
+              {provider.errorMessage ? ` - ${provider.errorMessage}` : ""}
             </p>
           ))}
           {ocrProviderStatus ? <p className="settings-meta">{ocrProviderStatus}</p> : null}

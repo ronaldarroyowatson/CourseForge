@@ -5,6 +5,11 @@ const callableMocks = vi.hoisted(() => ({
   extractScreenshotText: vi.fn(),
 }));
 
+const authMocks = vi.hoisted(() => ({
+  getCurrentUser: vi.fn(),
+  waitForAuthStateChange: vi.fn(),
+}));
+
 vi.mock("firebase/functions", () => ({
   httpsCallable: (_client: unknown, callableName: string) => {
     const handler = callableMocks[callableName as keyof typeof callableMocks];
@@ -14,6 +19,11 @@ vi.mock("firebase/functions", () => ({
 
 vi.mock("../../src/firebase/functions", () => ({
   functionsClient: {},
+}));
+
+vi.mock("../../src/firebase/auth", () => ({
+  getCurrentUser: authMocks.getCurrentUser,
+  waitForAuthStateChange: authMocks.waitForAuthStateChange,
 }));
 
 import {
@@ -59,6 +69,14 @@ describe("autoOcrService", () => {
     clearAutoOcrAvailabilityCache();
     callableMocks.getAiProviderStatus.mockReset();
     callableMocks.extractScreenshotText.mockReset();
+    authMocks.getCurrentUser.mockReset();
+    authMocks.waitForAuthStateChange.mockReset();
+    authMocks.getCurrentUser.mockReturnValue({
+      getIdToken: vi.fn(async () => "token"),
+    });
+    authMocks.waitForAuthStateChange.mockResolvedValue({
+      getIdToken: vi.fn(async () => "token"),
+    });
   });
 
   it("stores and returns normalized provider order", () => {
@@ -219,6 +237,37 @@ describe("autoOcrService", () => {
     expect(callableMocks.getAiProviderStatus).toHaveBeenCalledTimes(2);
   });
 
+  it("gates concurrent force-refresh health probes to a single status request", async () => {
+    let resolveStatusProbe: (value: unknown) => void = () => {};
+    callableMocks.getAiProviderStatus.mockReturnValue(
+      new Promise((resolve) => {
+        resolveStatusProbe = resolve;
+      })
+    );
+
+    const first = getAutoOcrProviderHealth({ forceRefresh: true });
+    const second = getAutoOcrProviderHealth({ forceRefresh: true });
+
+    expect(callableMocks.getAiProviderStatus).toHaveBeenCalledTimes(1);
+
+    resolveStatusProbe({
+      data: {
+        success: true,
+        data: {
+          providers: [
+            { id: "cloud_openai_vision", available: true },
+            { id: "local_tesseract", available: true },
+          ],
+        },
+      },
+    });
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult.find((provider) => provider.id === "cloud_openai_vision")?.availabilityState).toBe("available");
+    expect(secondResult.find((provider) => provider.id === "cloud_openai_vision")?.availabilityState).toBe("available");
+    expect(callableMocks.getAiProviderStatus).toHaveBeenCalledTimes(1);
+  });
+
   it("reports unknown health state when cloud status probe fails", async () => {
     callableMocks.getAiProviderStatus.mockRejectedValue(new Error("status probe failed"));
 
@@ -230,7 +279,47 @@ describe("autoOcrService", () => {
       label: "Cloud OCR (OpenAI Vision via Firebase Function)",
       available: false,
       availabilityState: "unknown",
+      errorMessage: "status probe failed",
     });
+  });
+
+  it("marks cloud provider unavailable when no authenticated user is present", async () => {
+    authMocks.getCurrentUser.mockReturnValue(null);
+    authMocks.waitForAuthStateChange.mockResolvedValue(null);
+
+    const health = await getAutoOcrProviderHealth({ forceRefresh: true });
+    const cloud = health.find((provider) => provider.id === "cloud_openai_vision");
+
+    expect(cloud).toEqual({
+      id: "cloud_openai_vision",
+      label: "Cloud OCR (OpenAI Vision via Firebase Function)",
+      available: false,
+      availabilityState: "unavailable",
+      errorMessage: "Sign in is required for Cloud OCR.",
+    });
+    expect(callableMocks.getAiProviderStatus).not.toHaveBeenCalled();
+  });
+
+  it("retries status callable after auth refresh when first attempt is unauthenticated", async () => {
+    callableMocks.getAiProviderStatus
+      .mockRejectedValueOnce({ code: "unauthenticated", message: "not authenticated" })
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            providers: [
+              { id: "cloud_openai_vision", available: true },
+              { id: "local_tesseract", available: true },
+            ],
+          },
+        },
+      });
+
+    const health = await getAutoOcrProviderHealth({ forceRefresh: true });
+    const cloud = health.find((provider) => provider.id === "cloud_openai_vision");
+
+    expect(cloud?.availabilityState).toBe("available");
+    expect(callableMocks.getAiProviderStatus).toHaveBeenCalledTimes(2);
   });
 
   it("still attempts cloud OCR when provider status is temporarily unknown", async () => {

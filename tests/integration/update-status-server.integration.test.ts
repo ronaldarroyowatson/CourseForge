@@ -513,6 +513,7 @@ describe("local update status endpoint", () => {
         assetName: "CourseForge-1.2.73-portable.zip",
         assetSizeBytes: 1024,
         bytesDownloaded: 512,
+        downloadSpeedBytesPerSecond: 256,
         progressPercent: 50,
         message: "Downloading update package",
         updatedAt: "2026-03-20T00:00:00.000Z",
@@ -532,6 +533,7 @@ describe("local update status endpoint", () => {
         state: "downloading",
         currentVersion: "1.2.72",
         latestVersion: "1.2.73",
+        downloadSpeedBytesPerSecond: 256,
         progressPercent: 50,
       });
 

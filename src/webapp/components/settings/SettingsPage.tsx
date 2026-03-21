@@ -62,6 +62,7 @@ type UpdaterProgress = {
   assetName?: string | null;
   assetSizeBytes?: number | null;
   bytesDownloaded?: number | null;
+  downloadSpeedBytesPerSecond?: number | null;
   progressPercent?: number | null;
   releaseUrl?: string | null;
   message?: string | null;
@@ -807,6 +808,11 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
                 : ""}
             </p>
           ) : null}
+          {typeof updaterProgress?.downloadSpeedBytesPerSecond === "number" ? (
+            <p className="settings-meta">
+              Download speed: {formatBytes(updaterProgress.downloadSpeedBytesPerSecond)}/s
+            </p>
+          ) : null}
           {typeof updaterProgress?.filesTotal === "number" ? (
             <p className="settings-meta">
               Files in update: {updaterProgress.filesTotal}
@@ -814,6 +820,12 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
               {typeof updaterProgress.filesProcessed === "number" ? ` | processed: ${updaterProgress.filesProcessed}` : ""}
               {typeof updaterProgress.filesFailed === "number" ? ` | failed: ${updaterProgress.filesFailed}` : ""}
             </p>
+          ) : null}
+          {updaterProgress?.state === "staged" ? (
+            <p className="settings-meta">Update staged and waiting for restart to apply.</p>
+          ) : null}
+          {updaterProgress?.state === "updated" ? (
+            <p className="settings-meta">Update already applied in this runtime session.</p>
           ) : null}
           {updaterProgress?.lastError ? (
             <p className="error-text">Updater error: {updaterProgress.lastError}</p>

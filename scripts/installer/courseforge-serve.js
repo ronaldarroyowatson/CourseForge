@@ -90,6 +90,7 @@ function readUpdaterProgress() {
       assetName: null,
       assetSizeBytes: null,
       bytesDownloaded: null,
+      downloadSpeedBytesPerSecond: null,
       progressPercent: null,
       releaseUrl: null,
       message: "Updater idle.",

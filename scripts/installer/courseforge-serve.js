@@ -17,6 +17,8 @@ const defaultPort = 3000;
 const host = process.argv[4] || "localhost";
 const defaultLatestReleaseEndpoint = "https://api.github.com/repos/ronaldarroyowatson/CourseForge/releases/latest";
 const heartbeatTimeoutMs = Math.max(15000, Number(process.env.COURSEFORGE_HEARTBEAT_TIMEOUT_MS || 45000));
+const latestReleaseRequestTimeoutMs = Math.max(8000, Number(process.env.COURSEFORGE_UPDATE_CHECK_TIMEOUT_MS || 15000));
+const latestReleaseMaxAttempts = Math.max(1, Number(process.env.COURSEFORGE_UPDATE_CHECK_RETRIES || 2));
 
 // Package root is one level above the webapp folder.
 // pending-update.json is written here by the updater.
@@ -161,13 +163,24 @@ async function fetchLatestReleaseStatus() {
   };
 
   let response;
-  try {
-    response = await fetch(latestEndpoint, {
-      headers,
-      signal: AbortSignal.timeout(10000),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+  let lastRequestError = null;
+  for (let attempt = 1; attempt <= latestReleaseMaxAttempts; attempt += 1) {
+    try {
+      response = await fetch(latestEndpoint, {
+        headers,
+        signal: AbortSignal.timeout(latestReleaseRequestTimeoutMs),
+      });
+      break;
+    } catch (error) {
+      lastRequestError = error;
+      if (attempt < latestReleaseMaxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+  }
+
+  if (!response) {
+    const message = lastRequestError instanceof Error ? lastRequestError.message : String(lastRequestError);
     return {
       ok: false,
       available: false,
@@ -176,7 +189,11 @@ async function fetchLatestReleaseStatus() {
       releaseUrl: null,
       checkedAt,
       error: `Latest release request failed before receiving a response: ${message}`,
-      diagnostics,
+      diagnostics: {
+        ...diagnostics,
+        requestAttempts: latestReleaseMaxAttempts,
+        requestTimeoutMs: latestReleaseRequestTimeoutMs,
+      },
     };
   }
 

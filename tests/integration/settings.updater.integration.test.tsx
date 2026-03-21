@@ -238,8 +238,8 @@ describe("Settings updater communication", () => {
         if (checkCallCount === 1) {
           return jsonResponse({
             ok: true,
-            available: false,
-            latestVersion: "1.2.76",
+            available: true,
+            latestVersion: "1.2.77",
             currentVersion: "1.2.76",
           });
         }
@@ -255,7 +255,7 @@ describe("Settings updater communication", () => {
       }
 
       if (url.includes("/api/updater-progress")) {
-        return jsonResponse({ state: "idle", currentVersion: "1.2.76" });
+        return jsonResponse({ state: "idle", currentVersion: "1.2.76", latestVersion: "1.2.77" });
       }
 
       if (url.includes("/api/updater-diagnostics")) {
@@ -343,6 +343,73 @@ describe("Settings updater communication", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Already up to date. You're running v1.2.78.")).toBeInTheDocument();
+    });
+  });
+
+  it("uses last known latest version when manual check fails due to timeout", async () => {
+    let checkCallCount = 0;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.includes("/api/update-status")) {
+        return jsonResponse({ available: false, currentVersion: "1.3.2" });
+      }
+
+      if (url.includes("/api/check-for-updates")) {
+        checkCallCount += 1;
+        if (checkCallCount === 1) {
+          return jsonResponse({
+            ok: true,
+            available: false,
+            latestVersion: "1.3.2",
+            currentVersion: "1.3.2",
+          });
+        }
+
+        return jsonResponse({
+          ok: false,
+          available: false,
+          currentVersion: "1.3.2",
+          latestVersion: null,
+          error: "Latest release request failed before receiving a response: The operation was aborted due to timeout",
+        }, 502);
+      }
+
+      if (url.includes("/api/updater-progress")) {
+        return jsonResponse({
+          state: "idle",
+          currentVersion: "1.3.2",
+          latestVersion: "1.3.2",
+          message: "No update found",
+        });
+      }
+
+      if (url.includes("/api/updater-diagnostics")) {
+        return jsonResponse({
+          checkedAt: "2026-03-21T00:00:00.000Z",
+          lastCheck: {
+            ok: false,
+            error: "Latest release request failed before receiving a response: The operation was aborted due to timeout",
+          },
+        });
+      }
+
+      return jsonResponse({ error: "not found" }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<SettingsPage onBack={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Current version:")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Check for Updates" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Already up to date (latest confirmed: v1.3.2). You're running v1.3.2.")).toBeInTheDocument();
     });
   });
 });

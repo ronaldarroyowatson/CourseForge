@@ -35,6 +35,17 @@ function parseSemver(value: string): number[] | null {
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
+function compareSemver(left: number[], right: number[]): number {
+  for (let i = 0; i < 3; i += 1) {
+    const diff = (left[i] ?? 0) - (right[i] ?? 0);
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+
+  return 0;
+}
+
 function formatBytes(bytes: number | null | undefined): string {
   if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
     return "Unknown size";
@@ -507,7 +518,23 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       if (data?.releaseUrl) {
         setLatestReleaseUrl(data.releaseUrl);
       }
+
+      const resolvedCurrentVersion = data?.currentVersion || currentAppVersion;
+      const knownLatestVersion = data?.latestVersion || latestAvailableVersion || updaterProgress?.latestVersion || null;
+      const knownCurrentSemver = parseSemver(resolvedCurrentVersion);
+      const knownLatestSemver = parseSemver(knownLatestVersion || "");
+      const knownAlreadyCurrent = Boolean(
+        knownCurrentSemver
+        && knownLatestSemver
+        && compareSemver(knownCurrentSemver, knownLatestSemver) >= 0
+      );
+
       if (!response.ok) {
+        if (knownAlreadyCurrent) {
+          setUpdateCheckStatus(`Already up to date (latest confirmed: v${knownLatestVersion}). You're running v${resolvedCurrentVersion}.`);
+          return;
+        }
+
         const trimmedBody = nonJsonBody.trim();
         if (data?.error) {
           setUpdateCheckStatus(`Update check failed (${response.status}): ${data.error}`);
@@ -523,12 +550,18 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
         void refreshUpdaterDiagnostics();
         return;
       }
+
       if (!data || !data.ok) {
+        if (knownAlreadyCurrent) {
+          setUpdateCheckStatus(`Already up to date (latest confirmed: v${knownLatestVersion}). You're running v${resolvedCurrentVersion}.`);
+          return;
+        }
+
         setUpdateCheckStatus(data?.error || "Unable to check for updates right now. Please try again later.");
         void refreshUpdaterDiagnostics();
         return;
       }
-      const resolvedCurrentVersion = data.currentVersion || currentAppVersion;
+
       if (!data.available) {
         setUpdateCheckStatus(`Already up to date. You're running v${resolvedCurrentVersion}.`);
         return;
@@ -557,6 +590,21 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown request failure";
+
+      const knownLatestVersion = latestAvailableVersion || updaterProgress?.latestVersion || null;
+      const knownCurrentSemver = parseSemver(currentAppVersion);
+      const knownLatestSemver = parseSemver(knownLatestVersion || "");
+      const knownAlreadyCurrent = Boolean(
+        knownCurrentSemver
+        && knownLatestSemver
+        && compareSemver(knownCurrentSemver, knownLatestSemver) >= 0
+      );
+
+      if (knownAlreadyCurrent) {
+        setUpdateCheckStatus(`Already up to date (latest confirmed: v${knownLatestVersion}). You're running v${currentAppVersion}.`);
+        return;
+      }
+
       setUpdateCheckStatus(`Unable to check for updates right now (${errorMessage}).`);
       void refreshUpdaterDiagnostics();
     } finally {

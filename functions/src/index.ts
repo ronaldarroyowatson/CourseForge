@@ -1514,6 +1514,7 @@ export const getAiProviderPolicy = onCall(async (request) => {
 });
 
 export const getAiProviderStatus = onCall({ secrets: [openAiKeySecret] }, async (request) => {
+  export const getAiProviderStatus = onCall(async (request) => {
   const openaiKey = getOpenAiApiKey();
 
   return success("Loaded AI provider status.", {
@@ -1683,9 +1684,17 @@ export const extractScreenshotText = onCall({ secrets: [openAiKeySecret] }, asyn
   }
 
   await consumeOcrRequestQuota(request.auth.uid);
+    console.log("[OCR] Starting screenshot text extraction", { userId: request.auth.uid, imageSize: imageDataUrl.length });
   inferImageMimeType(imageDataUrl);
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Use AbortController to timeout OpenAI requests after 30 seconds
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    let response;
+    try {
+      response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1710,10 +1719,23 @@ export const extractScreenshotText = onCall({ secrets: [openAiKeySecret] }, asyn
       temperature: 0,
     }),
   });
+      if (!response.ok) {
+        clearTimeout(timeoutId);
+        throw new HttpsError("internal", `Cloud OCR provider error: ${response.status} ${response.statusText}`);
+      }
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes("aborted")) {
+        throw new HttpsError("deadline-exceeded", "Cloud OCR request timed out. OpenAI service may be slow or unavailable.");
+      }
+      throw new HttpsError("internal", `Cloud OCR request failed: ${errorMessage}`);
+    }
+    clearTimeout(timeoutId);
 
-  if (!response.ok) {
-    throw new HttpsError("internal", `Cloud OCR provider error: ${response.status} ${response.statusText}`);
-  }
 
   const json = await response.json() as {
     choices?: Array<{ message?: { content?: string } }>;
@@ -1724,7 +1746,31 @@ export const extractScreenshotText = onCall({ secrets: [openAiKeySecret] }, asyn
     throw new HttpsError("internal", "Cloud OCR provider returned empty text.");
   }
 
+    // Validate response structure explicitly for better debugging
+    if (!json || typeof json !== "object") {
+      throw new HttpsError("internal", `Cloud OCR: Invalid response format from OpenAI (expected object, got ${typeof json})`);
+    }
+
+    if (!Array.isArray(json.choices) || json.choices.length === 0) {
+      const jsonStr = typeof json === "object" ? JSON.stringify(json).substring(0, 150) : String(json);
+      throw new HttpsError("internal", `Cloud OCR: OpenAI response missing valid choices array. Response: ${jsonStr}`);
+    }
+
+    const firstChoice = json.choices[0];
+    if (!firstChoice || typeof firstChoice !== "object") {
+      throw new HttpsError("internal", `Cloud OCR: Invalid choice object in OpenAI response`);
+    }
+
+    if (!firstChoice.message || typeof firstChoice.message !== "object") {
+      throw new HttpsError("internal", `Cloud OCR: OpenAI response choice missing message object`);
+    }
+
+    if (typeof firstChoice.message.content !== "string") {
+      throw new HttpsError("internal", `Cloud OCR: OpenAI response message missing content string`);
+    }
+
   return success("Screenshot text extracted.", { text: extractedText });
+
 });
 
 export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret] }, async (request) => {

@@ -404,4 +404,156 @@ describe("autoOcrService", () => {
       providersOverride: providers,
     })).rejects.toThrow(/All OCR providers failed/i);
   });
+
+  describe("cloud OCR Firebase callable response handling", () => {
+    const cloudProvider = {
+      id: "cloud_openai_vision" as const,
+      label: "Cloud",
+      isAvailable: async () => true,
+      extractText: async () => {
+        const callable = (callableMocks.extractScreenshotText as unknown as () => Promise<unknown>);
+        const response = await callable();
+        const payload = response as { data?: { success?: boolean; data?: { text?: string }; message?: string } };
+        if (!payload?.data?.success || !payload?.data?.data?.text) {
+          const message = (payload?.data?.message as string) || "Invalid payload";
+          throw new Error(message);
+        }
+        return (payload.data.data.text as string).trim();
+      },
+    };
+
+    const localProvider = {
+      id: "local_tesseract" as const,
+      label: "Local",
+      isAvailable: async () => true,
+      extractText: async () => "Fallback text",
+    };
+
+    it("fallsback to local when callable returns success=false", async () => {
+      callableMocks.extractScreenshotText.mockResolvedValue({
+        data: {
+          success: false,
+          message: "OpenAI API rate limited",
+        },
+      });
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        providersOverride: [cloudProvider, localProvider],
+      });
+
+      expect(result.providerId).toBe("local_tesseract");
+      expect(result.attempts[0].success).toBe(false);
+    });
+
+    it("fallsback to local when callable returns missing text field", async () => {
+      callableMocks.extractScreenshotText.mockResolvedValue({
+        data: {
+          success: true,
+          data: { text: undefined },
+        },
+      });
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        providersOverride: [cloudProvider, localProvider],
+      });
+
+      expect(result.providerId).toBe("local_tesseract");
+      expect(result.attempts[0].success).toBe(false);
+    });
+
+    it("fallsback to local when callable returns null data object", async () => {
+      callableMocks.extractScreenshotText.mockResolvedValue({
+        data: { success: true, data: null },
+      });
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        providersOverride: [cloudProvider, localProvider],
+  });
+
+      expect(result.providerId).toBe("local_tesseract");
+    });
+
+    it("fallsback to local when callable returns whitespace-only text", async () => {
+      callableMocks.extractScreenshotText.mockResolvedValue({
+        data: {
+          success: true,
+          data: { text: "   \n\n  \t  " },
+        },
+      });
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        providersOverride: [cloudProvider, localProvider],
+      });
+
+      expect(result.providerId).toBe("local_tesseract");
+    });
+
+    it("fallsback to local when callable throws HttpsError", async () => {
+      callableMocks.extractScreenshotText.mockRejectedValue({
+        code: "internal",
+        message: "Cloud OCR provider error: 429 Too Many Requests",
+      });
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        providersOverride: [cloudProvider, localProvider],
+      });
+
+      expect(result.providerId).toBe("local_tesseract");
+      expect(result.attempts[0].success).toBe(false);
+    });
+
+    it("fallsback to local when callable throws network error", async () => {
+      callableMocks.extractScreenshotText.mockRejectedValue(
+        new Error("Failed to fetch from OpenAI")
+      );
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        providersOverride: [cloudProvider, localProvider],
+      });
+
+      expect(result.providerId).toBe("local_tesseract");
+      expect(result.attempts[0].success).toBe(false);
+    });
+
+    it("succeeds when callable returns valid text response", async () => {
+      const expectedText = "Chapter 1\nIntroduction";
+      callableMocks.extractScreenshotText.mockResolvedValue({
+        data: {
+          success: true,
+          data: { text: expectedText },
+        },
+      });
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision"],
+        providersOverride: [cloudProvider],
+      });
+
+      expect(result.providerId).toBe("cloud_openai_vision");
+      expect(result.text).toBe(expectedText);
+      expect(result.attempts[0].success).toBe(true);
+    });
+
+    it("trims whitespace from valid callable response", async () => {
+      callableMocks.extractScreenshotText.mockResolvedValue({
+        data: {
+          success: true,
+          data: { text: "  Chapter 1  \n" },
+        },
+      });
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision"],
+        providersOverride: [cloudProvider],
+      });
+
+      expect(result.text).toBe("Chapter 1");
+    });
+  });
 });

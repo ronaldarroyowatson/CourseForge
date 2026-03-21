@@ -1111,6 +1111,11 @@ function shouldKeepMetadataLine(value: string, index: number): boolean {
     return false;
   }
 
+  // Preserve structured identifier lines even when alphabetic density is low.
+  if (/\bisbn\b/i.test(value)) {
+    return true;
+  }
+
   if (DECORATIVE_TEXT_PATTERNS.some((pattern) => pattern.test(value))) {
     return false;
   }

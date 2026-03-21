@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-    "version": "1.3.6",
+    "version": "1.3.7",
   "private": true,
   "type": "module",
   "engines": {
@@ -30,6 +30,7 @@
     "test:e2e:extension": "vitest run tests/integration/extension.auth.communication.integration.test.ts tests/integration/extension.repositories.integration.test.ts",
     "test:e2e:autoupdate": "vitest run tests/integration/auto-update-portable.integration.test.ts tests/integration/auto-update-launcher.integration.test.ts tests/integration/update-status-server.integration.test.ts tests/integration/settings.updater.integration.test.tsx",
     "test:e2e": "npm run test:e2e:ocr && npm run test:e2e:webapp && npm run test:e2e:extension && npm run test:e2e:autoupdate",
+    "test:e2e:comprehensive": "npm run test:e2e && npm run test:core && npm run test:unit && npm run test:integration && npm run test:rules",
     "test:e2e:packaged": "npm run test:e2e:autoupdate && npm run test:installer && npm run check:installer",
     "test:real-sync": "tsx tests/realSyncTest.ts",
     "test:installer:guardrails": "vitest run tests/integration/windows.installer.template.integration.test.ts",

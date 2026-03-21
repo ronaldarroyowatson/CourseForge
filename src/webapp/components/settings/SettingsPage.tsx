@@ -3,6 +3,7 @@ import { doc, setDoc } from "firebase/firestore";
 
 import {
   type AutoOcrProviderId,
+  type AutoOcrProviderHealthRecord,
   getAutoOcrProviderHealth,
   getCloudAutoOcrProviderPolicy,
   getEffectiveAutoOcrProviderOrder,
@@ -132,7 +133,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   const [debugPolicyStatus, setDebugPolicyStatus] = React.useState<string | null>(null);
   const [ocrProviderOrder, setOcrProviderOrderState] = React.useState<AutoOcrProviderId[]>(["cloud_openai_vision", "local_tesseract"]);
   const [metadataSharingEnabled, setMetadataSharingEnabled] = React.useState<boolean>(() => isMetadataCorrectionSharingEnabled());
-  const [ocrProviderHealth, setOcrProviderHealth] = React.useState<Array<{ id: AutoOcrProviderId; label: string; available: boolean }>>([]);
+  const [ocrProviderHealth, setOcrProviderHealth] = React.useState<AutoOcrProviderHealthRecord[]>([]);
   const [ocrProviderStatus, setOcrProviderStatus] = React.useState<string | null>(null);
   const [isUpdatingOcrPolicy, setIsUpdatingOcrPolicy] = React.useState(false);
   const [preferenceStatus, setPreferenceStatus] = React.useState<string | null>(null);
@@ -234,8 +235,12 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   }
 
   async function refreshOcrProviderHealth(): Promise<void> {
-    const health = await getAutoOcrProviderHealth();
+    const health = await getAutoOcrProviderHealth({ forceRefresh: true });
     setOcrProviderHealth(health);
+    const hasUnknown = health.some((provider) => provider.availabilityState === "unknown");
+    if (hasUnknown) {
+      setOcrProviderStatus("One or more provider checks were inconclusive. Cloud OCR may still work during extraction.");
+    }
   }
 
   function updatePrimaryOcrProvider(providerId: AutoOcrProviderId): void {
@@ -730,7 +735,11 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
           </div>
           {ocrProviderHealth.map((provider) => (
             <p key={provider.id} className="settings-meta">
-              {provider.label}: {provider.available ? "Available" : "Unavailable"}
+              {provider.label}: {provider.availabilityState === "unknown"
+                ? "Unknown (status probe failed)"
+                : provider.available
+                  ? "Available"
+                  : "Unavailable"}
             </p>
           ))}
           {ocrProviderStatus ? <p className="settings-meta">{ocrProviderStatus}</p> : null}

@@ -31,6 +31,13 @@ export interface AutoOcrProviderPolicy {
 
 type ProviderAvailabilityState = "available" | "unavailable" | "unknown";
 
+export interface AutoOcrProviderHealthRecord {
+  id: AutoOcrProviderId;
+  label: string;
+  available: boolean;
+  availabilityState: ProviderAvailabilityState;
+}
+
 const AUTO_OCR_PROVIDER_ORDER_KEY = "courseforge.autoOcr.providerOrder";
 const AUTO_OCR_CIRCUIT_STATE_KEY = "courseforge.autoOcr.circuitState";
 const AUTO_OCR_AVAILABILITY_CACHE_TTL_MS = 3 * 60 * 1000;
@@ -338,8 +345,8 @@ async function isCloudVisionConfigured(): Promise<boolean> {
   return status !== "unavailable";
 }
 
-async function getCloudAutoOcrAvailabilityState(): Promise<ProviderAvailabilityState> {
-  if (autoOcrAvailabilityCache && autoOcrAvailabilityCache.expiresAt > Date.now()) {
+async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolean } = {}): Promise<ProviderAvailabilityState> {
+  if (!options.forceRefresh && autoOcrAvailabilityCache && autoOcrAvailabilityCache.expiresAt > Date.now()) {
     return autoOcrAvailabilityCache.state;
   }
 
@@ -421,16 +428,17 @@ export function getAutoOcrProviders(): AutoOcrProvider[] {
   ];
 }
 
-export async function getAutoOcrProviderHealth(): Promise<Array<{ id: AutoOcrProviderId; label: string; available: boolean }>> {
+export async function getAutoOcrProviderHealth(options: { forceRefresh?: boolean } = {}): Promise<AutoOcrProviderHealthRecord[]> {
   const providers = getAutoOcrProviders();
   return Promise.all(
     providers.map(async (provider) => {
       if (provider.id === "cloud_openai_vision") {
-        const availabilityState = await getCloudAutoOcrAvailabilityState();
+        const availabilityState = await getCloudAutoOcrAvailabilityState(options);
         return {
           id: provider.id,
           label: provider.label,
           available: availabilityState === "available",
+          availabilityState,
         };
       }
 
@@ -440,12 +448,14 @@ export async function getAutoOcrProviderHealth(): Promise<Array<{ id: AutoOcrPro
           id: provider.id,
           label: provider.label,
           available,
+          availabilityState: available ? "available" : "unavailable",
         };
       } catch {
         return {
           id: provider.id,
           label: provider.label,
           available: false,
+          availabilityState: "unknown",
         };
       }
     })

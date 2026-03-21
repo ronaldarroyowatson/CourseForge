@@ -115,11 +115,13 @@ describe("autoOcrService", () => {
         id: "local_tesseract",
         label: "Local OCR (Tesseract)",
         available: true,
+        availabilityState: "available",
       },
       {
         id: "cloud_openai_vision",
         label: "Cloud OCR (OpenAI Vision via Firebase Function)",
         available: true,
+        availabilityState: "available",
       },
     ]);
 
@@ -182,6 +184,53 @@ describe("autoOcrService", () => {
     await getAutoOcrProviderHealth();
 
     expect(callableMocks.getAiProviderStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("bypasses cache when force refresh is requested", async () => {
+    callableMocks.getAiProviderStatus
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            providers: [
+              { id: "cloud_openai_vision", available: false },
+              { id: "local_tesseract", available: true },
+            ],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            providers: [
+              { id: "cloud_openai_vision", available: true },
+              { id: "local_tesseract", available: true },
+            ],
+          },
+        },
+      });
+
+    const first = await getAutoOcrProviderHealth();
+    const second = await getAutoOcrProviderHealth({ forceRefresh: true });
+
+    expect(first.find((provider) => provider.id === "cloud_openai_vision")?.availabilityState).toBe("unavailable");
+    expect(second.find((provider) => provider.id === "cloud_openai_vision")?.availabilityState).toBe("available");
+    expect(callableMocks.getAiProviderStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports unknown health state when cloud status probe fails", async () => {
+    callableMocks.getAiProviderStatus.mockRejectedValue(new Error("status probe failed"));
+
+    const health = await getAutoOcrProviderHealth();
+    const cloud = health.find((provider) => provider.id === "cloud_openai_vision");
+
+    expect(cloud).toEqual({
+      id: "cloud_openai_vision",
+      label: "Cloud OCR (OpenAI Vision via Firebase Function)",
+      available: false,
+      availabilityState: "unknown",
+    });
   });
 
   it("still attempts cloud OCR when provider status is temporarily unknown", async () => {

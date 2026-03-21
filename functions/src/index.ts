@@ -1514,10 +1514,6 @@ export const getAiProviderPolicy = onCall(async (request) => {
 });
 
 export const getAiProviderStatus = onCall({ secrets: [openAiKeySecret] }, async (request) => {
-  if (!request.auth?.uid) {
-    throw new HttpsError("unauthenticated", "You must be signed in.");
-  }
-
   const openaiKey = getOpenAiApiKey();
 
   return success("Loaded AI provider status.", {

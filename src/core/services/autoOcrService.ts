@@ -68,7 +68,14 @@ function normalizeCallableError(error: unknown): { code: string; message: string
   if (typeof error === "object" && error !== null) {
     const record = error as Record<string, unknown>;
     const code = typeof record.code === "string" ? record.code : "unknown";
-    const message = typeof record.message === "string" ? record.message : "Unknown callable error.";
+    const details = record.details;
+    const detailsMessage = typeof details === "string"
+      ? details
+      : (typeof details === "object" && details !== null)
+        ? JSON.stringify(details)
+        : "";
+    const rawMessage = typeof record.message === "string" ? record.message : "Unknown callable error.";
+    const message = detailsMessage ? `${rawMessage} (${detailsMessage})` : rawMessage;
     return { code, message };
   }
 

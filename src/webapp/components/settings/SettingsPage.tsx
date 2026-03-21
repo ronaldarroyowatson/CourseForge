@@ -149,6 +149,11 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   const [isLoadingUpdaterDiagnostics, setIsLoadingUpdaterDiagnostics] = React.useState(false);
   const languageOptions = React.useMemo(() => getSupportedLanguages(), []);
 
+  function toNoStoreApiUrl(path: string): string {
+    const separator = path.includes("?") ? "&" : "?";
+    return `${path}${separator}_ts=${Date.now()}`;
+  }
+
   async function persistPreferences(nextLanguage: string, nextAccessibility = accessibility): Promise<void> {
     if (!userId) {
       return;
@@ -257,7 +262,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
         : "Global debug logging is currently disabled by an admin.");
 
       try {
-        const response = await fetch("/api/update-status", { cache: "no-store" });
+        const response = await fetch(toNoStoreApiUrl("/api/update-status"), { cache: "no-store" });
         if (response.ok) {
           const data = await response.json() as {
             available: boolean;
@@ -278,7 +283,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       }
 
       try {
-        const response = await fetch("/api/check-for-updates", { cache: "no-store" });
+        const response = await fetch(toNoStoreApiUrl("/api/check-for-updates"), { cache: "no-store" });
         if (response.ok) {
           const data = await response.json() as {
             ok: boolean;
@@ -301,7 +306,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       }
 
       try {
-        const response = await fetch("/api/updater-progress", { cache: "no-store" });
+        const response = await fetch(toNoStoreApiUrl("/api/updater-progress"), { cache: "no-store" });
         if (response.ok) {
           const data = await response.json() as UpdaterProgress;
           setUpdaterProgress(data);
@@ -324,7 +329,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   async function refreshUpdaterDiagnostics(): Promise<void> {
     setIsLoadingUpdaterDiagnostics(true);
     try {
-      const response = await fetch("/api/updater-diagnostics", { cache: "no-store" });
+      const response = await fetch(toNoStoreApiUrl("/api/updater-diagnostics"), { cache: "no-store" });
       if (!response.ok) {
         return;
       }
@@ -346,7 +351,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
 
     const pollUpdaterProgress = async () => {
       try {
-        const response = await fetch("/api/updater-progress", { cache: "no-store" });
+        const response = await fetch(toNoStoreApiUrl("/api/updater-progress"), { cache: "no-store" });
         if (!response.ok) {
           return;
         }
@@ -457,7 +462,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
     setUpdateCheckStatus(null);
     setLatestReleaseUrl(null);
     try {
-      const response = await fetch("/api/check-for-updates", { cache: "no-store" });
+      const response = await fetch(toNoStoreApiUrl("/api/check-for-updates"), { cache: "no-store" });
       const contentType = response.headers.get("content-type") || "";
       let data: {
         ok: boolean;

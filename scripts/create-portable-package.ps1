@@ -166,6 +166,7 @@ Copy-Item -Path $updaterTemplatePath -Destination (Join-Path $packageDir "AutoUp
 # Copy required support files for running the webapp server
 $supportFilesToCopy = @(
   "Start-CourseForge.ps1",
+  "courseforge-serve.cjs",
   "courseforge-serve.js",
   "boot-splash.html",
   "Test-CourseForge-Integrity.ps1"
@@ -242,6 +243,7 @@ $manifest = [ordered]@{
     "Check-For-CourseForge-Updates.cmd",
     "Start-CourseForge.cmd",
     "Start-CourseForge.ps1",
+    "courseforge-serve.cjs",
     "courseforge-serve.js",
     "boot-splash.html",
     "Test-CourseForge-Integrity.ps1",

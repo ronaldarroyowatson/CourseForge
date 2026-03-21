@@ -2,6 +2,7 @@ import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { METADATA_CORRECTION_STORAGE_KEYS } from "../../src/core/services/metadataCorrectionLearningService";
 import { persistAutoTextbook } from "../../src/core/services/autoTextbookPersistenceService";
 import type { TocChapter } from "../../src/core/services/textbookAutoExtractionService";
 import { AutoTextbookSetupFlow } from "../../src/webapp/components/textbooks/AutoTextbookSetupFlow";
@@ -90,6 +91,9 @@ describe("auto textbook flow integration", () => {
       selectedTextbook: null,
       selectedTextbookId: null,
     });
+
+    // Keep integration tests deterministic by opting out of metadata-learning uploads.
+    window.localStorage.setItem(METADATA_CORRECTION_STORAGE_KEYS.optedIn, "false");
   });
 
   it("switches from Auto setup back to Manual entry", () => {

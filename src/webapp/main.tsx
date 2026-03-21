@@ -20,7 +20,41 @@ const Router = useHashRouter ? HashRouter : BrowserRouter;
 
 if (typeof window !== "undefined" && window.location.protocol !== "file:" && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("./sw.js").catch(() => {
+    void navigator.serviceWorker.register("./sw.js").then((registration) => {
+      // Keep registration fresh so updates are discovered quickly.
+      void registration.update();
+
+      const notifyWaitingWorker = () => {
+        if (registration.waiting) {
+          registration.waiting.postMessage("SKIP_WAITING");
+        }
+      };
+
+      notifyWaitingWorker();
+
+      registration.addEventListener("updatefound", () => {
+        const installingWorker = registration.installing;
+        if (!installingWorker) {
+          return;
+        }
+
+        installingWorker.addEventListener("statechange", () => {
+          if (installingWorker.state === "installed") {
+            notifyWaitingWorker();
+          }
+        });
+      });
+
+      let hasRefreshedForNewWorker = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (hasRefreshedForNewWorker) {
+          return;
+        }
+
+        hasRefreshedForNewWorker = true;
+        window.location.reload();
+      });
+    }).catch(() => {
       // Offline cache registration is best-effort.
     });
   });

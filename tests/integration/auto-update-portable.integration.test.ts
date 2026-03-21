@@ -315,4 +315,43 @@ describe("portable updater script", () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 15000);
+
+  it.skipIf(process.platform !== "win32")("writes updater error diagnostics when latest release metadata is invalid", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-updater-"));
+
+    try {
+      const releasePath = join(root, "latest.json");
+      writeFileSync(releasePath, "{ invalid-json", "utf8");
+
+      const result = await runUpdater([
+        "-PackageRoot",
+        root,
+        "-CurrentVersion",
+        "1.2.76",
+        "-LatestReleaseJsonPath",
+        releasePath,
+        "-CheckOnly",
+      ]);
+
+      const updaterLog = readFileSync(join(root, "updater.log"), "utf8");
+      const statusPayload = JSON.parse(
+        readFileSync(join(root, "updater-status.json"), "utf8")
+      ) as {
+        state?: string;
+        lastError?: string;
+      };
+
+      // Updater errors are reported through diagnostics payload + log, not process exit code.
+      expect(result.status).toBe(0);
+      expect(statusPayload.state).toBe("error");
+      expect(statusPayload.lastError).toMatch(
+        /(Unexpected character encountered|Invalid object passed in)/
+      );
+      expect(updaterLog).toContain("Updater start. Mode=check-only");
+      expect(updaterLog).toContain("updater error:");
+      expect(updaterLog).toContain("auto-update-portable.ps1: line");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

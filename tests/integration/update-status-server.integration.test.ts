@@ -77,6 +77,58 @@ async function startReleaseServer(payload: unknown) {
   };
 }
 
+async function startReleaseServerWithStatus(status: number, body: string, contentType = "text/plain") {
+  const requests: Array<{ method: string; path: string; headers: http.IncomingHttpHeaders }> = [];
+  const port = await getAvailablePort();
+  const server = http.createServer((req, res) => {
+    requests.push({
+      method: req.method || "GET",
+      path: req.url || "",
+      headers: req.headers,
+    });
+    res.writeHead(status, { "Content-Type": contentType });
+    res.end(body);
+  });
+
+  server.listen(port, "127.0.0.1");
+  await once(server, "listening");
+
+  return {
+    url: `http://127.0.0.1:${port}/releases/latest`,
+    requests,
+    async close() {
+      server.close();
+      await once(server, "close");
+    },
+  };
+}
+
+async function startReleaseServerWithRecorder(payload: unknown) {
+  const requests: Array<{ method: string; path: string; headers: http.IncomingHttpHeaders }> = [];
+  const port = await getAvailablePort();
+  const server = http.createServer((req, res) => {
+    requests.push({
+      method: req.method || "GET",
+      path: req.url || "",
+      headers: req.headers,
+    });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(payload));
+  });
+
+  server.listen(port, "127.0.0.1");
+  await once(server, "listening");
+
+  return {
+    url: `http://127.0.0.1:${port}/releases/latest`,
+    requests,
+    async close() {
+      server.close();
+      await once(server, "close");
+    },
+  };
+}
+
 async function fetchUpdateStatusWithRetry(url: string, timeoutMs = 10000) {
   const startedAt = Date.now();
   let lastError: unknown = null;
@@ -209,6 +261,229 @@ describe("local update status endpoint", () => {
         ok: true,
         latestVersion: "1.2.71",
       });
+    } finally {
+      if (releaseServer) {
+        await releaseServer.close();
+      }
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("verifies end-to-end manual check communication and records diagnostics payload", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+    let releaseServer: Awaited<ReturnType<typeof startReleaseServerWithRecorder>> | null = null;
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+
+    try {
+      releaseServer = await startReleaseServerWithRecorder({
+        tag_name: "v1.2.77",
+        html_url: "https://example.invalid/releases/tag/v1.2.77",
+      });
+
+      writeFileSync(
+        join(root, "package-manifest.json"),
+        JSON.stringify(
+          {
+            version: "1.2.76",
+            updates: {
+              latestEndpoint: releaseServer.url,
+            },
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const port = await getAvailablePort();
+      child = await startStatusServer(root, port);
+
+      const response = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/check-for-updates`);
+      const payload = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(payload).toMatchObject({
+        ok: true,
+        available: true,
+        currentVersion: "1.2.76",
+        latestVersion: "1.2.77",
+        releaseUrl: "https://example.invalid/releases/tag/v1.2.77",
+        diagnostics: {
+          latestEndpoint: releaseServer.url,
+          tokenConfigured: false,
+        },
+      });
+
+      expect(releaseServer.requests).toHaveLength(1);
+      expect(releaseServer.requests[0]?.method).toBe("GET");
+      expect(releaseServer.requests[0]?.path).toBe("/releases/latest");
+      expect(releaseServer.requests[0]?.headers.accept).toContain("application/vnd.github+json");
+      expect(releaseServer.requests[0]?.headers["user-agent"]).toContain("CourseForge-Local-Server");
+
+      const diagnosticsResponse = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/updater-diagnostics`);
+      const diagnosticsPayload = await diagnosticsResponse.json();
+
+      expect(diagnosticsResponse.status).toBe(200);
+      expect(diagnosticsPayload.lastCheck).toMatchObject({
+        ok: true,
+        available: true,
+        latestVersion: "1.2.77",
+      });
+
+      const updaterLog = readFileSync(join(root, "updater.log"), "utf8");
+      expect(updaterLog).toContain("Manual update check requested via /api/check-for-updates.");
+      expect(updaterLog).toContain("Manual update check result: ok=true current=1.2.76 latest=1.2.77 available=true");
+    } finally {
+      if (releaseServer) {
+        await releaseServer.close();
+      }
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("prevents false positives by rejecting non-semver latest versions", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+    let releaseServer: Awaited<ReturnType<typeof startReleaseServer>> | null = null;
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+
+    try {
+      releaseServer = await startReleaseServer({
+        tag_name: "latest",
+        html_url: "https://example.invalid/releases/tag/latest",
+      });
+
+      writeFileSync(
+        join(root, "package-manifest.json"),
+        JSON.stringify(
+          {
+            version: "1.2.76",
+            updates: {
+              latestEndpoint: releaseServer.url,
+            },
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const port = await getAvailablePort();
+      child = await startStatusServer(root, port);
+
+      const response = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/check-for-updates`);
+      const payload = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(payload).toMatchObject({
+        ok: true,
+        available: false,
+        currentVersion: "1.2.76",
+        latestVersion: null,
+        error: "Unable to parse latest release version.",
+      });
+
+      const diagnosticsResponse = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/updater-diagnostics`);
+      const diagnosticsPayload = await diagnosticsResponse.json();
+      expect(diagnosticsResponse.status).toBe(200);
+      expect(diagnosticsPayload.lastCheck).toMatchObject({
+        ok: true,
+        available: false,
+        latestVersion: null,
+        error: "Unable to parse latest release version.",
+      });
+    } finally {
+      if (releaseServer) {
+        await releaseServer.close();
+      }
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("records manual-check failure codes in diagnostics and updater log", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+    let releaseServer: Awaited<ReturnType<typeof startReleaseServerWithStatus>> | null = null;
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+
+    try {
+      releaseServer = await startReleaseServerWithStatus(404, "not found");
+
+      writeFileSync(
+        join(root, "package-manifest.json"),
+        JSON.stringify(
+          {
+            version: "1.2.76",
+            updates: {
+              latestEndpoint: releaseServer.url,
+            },
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const port = await getAvailablePort();
+      child = await startStatusServer(root, port);
+
+      const response = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/check-for-updates`);
+      const payload = await response.json();
+
+      expect(response.status).toBe(502);
+      expect(payload).toMatchObject({
+        ok: false,
+        available: false,
+        currentVersion: "1.2.76",
+        latestVersion: null,
+        error: "Latest release request failed with status 404.",
+        diagnostics: {
+          latestEndpoint: releaseServer.url,
+          responseStatus: 404,
+          responseStatusText: "Not Found",
+          responseBodySnippet: "not found",
+        },
+      });
+
+      expect(releaseServer.requests).toHaveLength(1);
+
+      const diagnosticsResponse = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/updater-diagnostics`);
+      const diagnosticsPayload = await diagnosticsResponse.json();
+      expect(diagnosticsResponse.status).toBe(200);
+      expect(diagnosticsPayload.lastCheck).toMatchObject({
+        ok: false,
+        error: "Latest release request failed with status 404.",
+        diagnostics: {
+          responseStatus: 404,
+          responseStatusText: "Not Found",
+        },
+      });
+
+      const updaterLog = readFileSync(join(root, "updater.log"), "utf8");
+      expect(updaterLog).toContain("Manual update check requested via /api/check-for-updates.");
+      expect(updaterLog).toContain("Manual update check result: ok=false error=Latest release request failed with status 404.");
     } finally {
       if (releaseServer) {
         await releaseServer.close();

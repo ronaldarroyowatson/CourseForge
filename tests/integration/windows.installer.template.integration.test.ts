@@ -27,6 +27,11 @@ describe("windows installer template guardrails", () => {
     expect(generatorScript).toContain("__COURSEFORGE_VERSION__");
     expect(generatorScript).toContain("Uninstall-CourseForge-Windows.cmd");
     expect(generatorScript).toContain("installer-integrity.json");
+    expect(generatorScript).toContain('"Start-CourseForge.ps1"');
+    expect(generatorScript).toContain('"courseforge-serve.cjs"');
+    expect(generatorScript).toContain('"courseforge-serve.js"');
+    expect(generatorScript).toContain('"boot-splash.html"');
+    expect(generatorScript).toContain('"Test-CourseForge-Integrity.ps1"');
     expect(generatorScript).toContain("ISCC.exe");
     expect(generatorScript).toContain("Programs\\Inno Setup 6\\ISCC.exe");
     expect(generatorScript).toContain("Inno Setup compiler (ISCC.exe) not found");
@@ -52,6 +57,8 @@ describe("windows installer template guardrails", () => {
     expect(template).toContain("function Invoke-WithRollback");
     expect(template).toContain("function Repair-Installation");
     expect(template).toContain("function Uninstall-CourseForge");
+    expect(template).toContain('"boot-splash.html"');
+    expect(template).toContain('"Test-CourseForge-Integrity.ps1"');
     expect(template).toContain("Using script directory as install root hint");
     expect(template).toContain("Are you sure you want to uninstall CourseForge");
     expect(template).toContain("Delete all local user data (NOT recommended)");

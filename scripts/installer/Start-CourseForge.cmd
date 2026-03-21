@@ -6,15 +6,16 @@ setlocal enabledelayedexpansion
 
 set "SCRIPT_DIR=%~dp0"
 
-set "LAUNCH_CMD=powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"%SCRIPT_DIR%Start-CourseForge.ps1\""
+REM Keep automatic browser/splash launch enabled by default.
+if not defined COURSEFORGE_DETACH_AFTER_READY set "COURSEFORGE_DETACH_AFTER_READY=1"
 
-REM Run the launcher hidden to avoid a visible console window during startup.
-start "" /B cmd /c %LAUNCH_CMD%
+REM Start detached (without /B) so closing this cmd window does not kill the launcher process tree.
+start "" cmd /c powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%SCRIPT_DIR%Start-CourseForge.ps1"
 set "ERRORCODE=%ERRORLEVEL%"
 
 if not "%ERRORCODE%"=="0" (
   echo.
-  echo [CourseForge] Launcher failed to start hidden process (error %ERRORCODE%).
+  echo [CourseForge] Launcher failed to start hidden process ^(error %ERRORCODE%^).
   echo [CourseForge] Falling back to visible launcher for diagnostics.
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%Start-CourseForge.ps1"
   set "ERRORCODE=%ERRORLEVEL%"

@@ -147,7 +147,8 @@ else {
 @echo off
 setlocal
 set SCRIPT_DIR=%~dp0
-start "" /B cmd /c powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%SCRIPT_DIR%Start-CourseForge.ps1"
+if not defined COURSEFORGE_DETACH_AFTER_READY set COURSEFORGE_DETACH_AFTER_READY=1
+start "" cmd /c powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%SCRIPT_DIR%Start-CourseForge.ps1"
 exit /b %ERRORLEVEL%
 "@
   Set-Content -Path (Join-Path $packageDir "Start-CourseForge.cmd") -Value $startCmdFallback -Encoding ASCII
@@ -232,6 +233,11 @@ $manifest.includes = @(
   "AutoUpdate-CourseForge.ps1",
   "Check-For-CourseForge-Updates.cmd",
   "Start-CourseForge.cmd",
+  "Start-CourseForge.ps1",
+  "courseforge-serve.cjs",
+  "courseforge-serve.js",
+  "boot-splash.html",
+  "Test-CourseForge-Integrity.ps1",
   "CourseForge-Start.url",
   "Install-CourseForge-Windows.ps1",
   "Install-CourseForge-Windows.cmd",
@@ -248,6 +254,11 @@ $integrityFiles = @(
   "AutoUpdate-CourseForge.ps1",
   "Check-For-CourseForge-Updates.cmd",
   "Start-CourseForge.cmd",
+  "Start-CourseForge.ps1",
+  "courseforge-serve.cjs",
+  "courseforge-serve.js",
+  "boot-splash.html",
+  "Test-CourseForge-Integrity.ps1",
   "Install-CourseForge-Windows.ps1",
   "Install-CourseForge-Windows.cmd",
   "Uninstall-CourseForge-Windows.cmd",

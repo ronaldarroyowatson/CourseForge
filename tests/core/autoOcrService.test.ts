@@ -1,15 +1,64 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+const callableMocks = vi.hoisted(() => ({
+  getAiProviderStatus: vi.fn(),
+  extractScreenshotText: vi.fn(),
+}));
+
+vi.mock("firebase/functions", () => ({
+  httpsCallable: (_client: unknown, callableName: string) => {
+    const handler = callableMocks[callableName as keyof typeof callableMocks];
+    return handler ?? vi.fn();
+  },
+}));
+
+vi.mock("../../src/firebase/functions", () => ({
+  functionsClient: {},
+}));
 
 import {
+  clearAutoOcrAvailabilityCache,
   extractTextFromImageWithFallback,
   getAutoOcrProviderOrder,
+  getAutoOcrProviderHealth,
+  resetAutoOcrCircuitStateForTests,
   setAutoOcrProviderOrder,
   type AutoOcrProvider,
 } from "../../src/core/services/autoOcrService";
 
+const TEST_IMAGE_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6W2NcAAAAASUVORK5CYII=";
+
+const OriginalImage = globalThis.Image;
+
+beforeAll(() => {
+  class InstantImage {
+    naturalWidth = 1;
+    naturalHeight = 1;
+    onload: null | (() => void) = null;
+    onerror: null | (() => void) = null;
+
+    set src(_value: string) {
+      queueMicrotask(() => {
+        this.onload?.();
+      });
+    }
+  }
+
+  globalThis.Image = InstantImage as unknown as typeof Image;
+});
+
+afterAll(() => {
+  globalThis.Image = OriginalImage;
+});
+
 describe("autoOcrService", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    resetAutoOcrCircuitStateForTests();
+    clearAutoOcrAvailabilityCache();
+    callableMocks.getAiProviderStatus.mockReset();
+    callableMocks.extractScreenshotText.mockReset();
   });
 
   it("stores and returns normalized provider order", () => {
@@ -36,7 +85,7 @@ describe("autoOcrService", () => {
       },
     ];
 
-    const result = await extractTextFromImageWithFallback("data:image/png;base64,AAAA", {
+    const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
       providerOrder: ["local_tesseract", "cloud_openai_vision"],
       providersOverride: providers,
     });
@@ -45,6 +94,152 @@ describe("autoOcrService", () => {
     expect(result.text).toContain("Chapter 1");
     expect(result.attempts).toHaveLength(2);
     expect(result.attempts[0].success).toBe(false);
+    expect(result.attempts[1].success).toBe(true);
+  });
+
+  it("uses backend provider status for cloud OCR health and execution", async () => {
+    callableMocks.getAiProviderStatus.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          providers: [
+            { id: "cloud_openai_vision", available: true },
+            { id: "local_tesseract", available: true },
+          ],
+        },
+      },
+    });
+    const health = await getAutoOcrProviderHealth();
+    expect(health).toEqual([
+      {
+        id: "local_tesseract",
+        label: "Local OCR (Tesseract)",
+        available: true,
+      },
+      {
+        id: "cloud_openai_vision",
+        label: "Cloud OCR (OpenAI Vision via Firebase Function)",
+        available: true,
+      },
+    ]);
+
+    const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+      providerOrder: ["cloud_openai_vision", "local_tesseract"],
+      providersOverride: [
+        {
+          id: "cloud_openai_vision",
+          label: "Cloud OCR (OpenAI Vision via Firebase Function)",
+          isAvailable: async () => true,
+          extractText: async () => "Inspire Physical Science",
+        },
+        {
+          id: "local_tesseract",
+          label: "Local OCR (Tesseract)",
+          isAvailable: async () => true,
+          extractText: async () => "Fallback OCR",
+        },
+      ],
+    });
+
+    expect(result.providerId).toBe("cloud_openai_vision");
+    expect(result.text).toContain("Inspire Physical Science");
+  });
+
+  it("caches provider availability status within the session TTL", async () => {
+    callableMocks.getAiProviderStatus.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          providers: [
+            { id: "cloud_openai_vision", available: true },
+            { id: "local_tesseract", available: true },
+          ],
+        },
+      },
+    });
+
+    await getAutoOcrProviderHealth();
+    await getAutoOcrProviderHealth();
+
+    expect(callableMocks.getAiProviderStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-fetches provider availability after cache is cleared", async () => {
+    callableMocks.getAiProviderStatus.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          providers: [
+            { id: "cloud_openai_vision", available: true },
+            { id: "local_tesseract", available: true },
+          ],
+        },
+      },
+    });
+
+    await getAutoOcrProviderHealth();
+    clearAutoOcrAvailabilityCache();
+    await getAutoOcrProviderHealth();
+
+    expect(callableMocks.getAiProviderStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("still attempts cloud OCR when provider status is temporarily unknown", async () => {
+    callableMocks.getAiProviderStatus.mockRejectedValue(new Error("status probe failed"));
+    callableMocks.extractScreenshotText.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          text: "Teacher Edition\nEarth Science",
+        },
+      },
+    });
+
+    const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+      providerOrder: ["cloud_openai_vision", "local_tesseract"],
+    });
+
+    expect(result.providerId).toBe("cloud_openai_vision");
+    expect(result.attempts).toEqual([{ providerId: "cloud_openai_vision", success: true }]);
+  });
+
+  it("uses the local provider when cloud OCR is reported unavailable", async () => {
+    callableMocks.getAiProviderStatus.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          providers: [
+            { id: "cloud_openai_vision", available: false },
+            { id: "local_tesseract", available: true },
+          ],
+        },
+      },
+    });
+
+    const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+      providerOrder: ["cloud_openai_vision", "local_tesseract"],
+      providersOverride: [
+        {
+          id: "local_tesseract",
+          label: "Local OCR (Tesseract)",
+          isAvailable: async () => true,
+          extractText: async () => "Fallback TOC text",
+        },
+        {
+          id: "cloud_openai_vision",
+          label: "Cloud OCR (OpenAI Vision via Firebase Function)",
+          isAvailable: async () => false,
+          extractText: async () => "should not run",
+        },
+      ],
+    });
+
+    expect(result.providerId).toBe("local_tesseract");
+    expect(result.attempts[0]).toEqual({
+      providerId: "cloud_openai_vision",
+      success: false,
+      errorMessage: "Provider is not available in this environment.",
+    });
     expect(result.attempts[1].success).toBe(true);
   });
 
@@ -66,7 +261,7 @@ describe("autoOcrService", () => {
       },
     ];
 
-    await expect(extractTextFromImageWithFallback("data:image/png;base64,AAAA", {
+    await expect(extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
       providerOrder: ["local_tesseract", "cloud_openai_vision"],
       providersOverride: providers,
     })).rejects.toThrow(/All OCR providers failed/i);

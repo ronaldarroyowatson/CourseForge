@@ -242,11 +242,11 @@ describe("portable updater script", () => {
 
     try {
       const zipPath = join(root, "portable.zip");
-      const files = {
+      const files: Record<string, string> = {
         "webapp/index.html": "<html><body>updated</body></html>",
         "package-manifest.json": JSON.stringify({ version: "1.2.7" }, null, 2),
         "Test-CourseForge-Integrity.ps1": integrityScriptSource,
-      } satisfies Record<string, string>;
+      };
       files["manifest.json"] = buildPortableManifest("1.2.7", files);
       await createPortableZip(zipPath, files);
 
@@ -457,11 +457,11 @@ describe("portable updater script", () => {
 
     try {
       const zipPath = join(root, "portable.zip");
-      const files = {
+      const files: Record<string, string> = {
         "webapp/index.html": "<html><body>updated</body></html>",
         "package-manifest.json": JSON.stringify({ version: "1.2.6" }, null, 2),
         "Test-CourseForge-Integrity.ps1": integrityScriptSource,
-      } satisfies Record<string, string>;
+      };
       files["manifest.json"] = buildPortableManifest("1.2.6", files);
       await createPortableZip(zipPath, files);
 
@@ -520,11 +520,11 @@ describe("portable updater script", () => {
 
     try {
       const zipPath = join(root, "portable.zip");
-      const files = {
+      const files: Record<string, string> = {
         "webapp/index.html": "<html><body>updated</body></html>",
         "package-manifest.json": JSON.stringify({ version: "1.2.7" }, null, 2),
         "Test-CourseForge-Integrity.ps1": integrityScriptSource,
-      } satisfies Record<string, string>;
+      };
       const manifest = JSON.parse(buildPortableManifest("1.2.7", files)) as {
         files: Array<{ path: string; sizeBytes: number; sha256: string }>;
       };

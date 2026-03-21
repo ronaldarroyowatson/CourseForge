@@ -10,15 +10,25 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 - Integration coverage for launcher staged-update apply/retry behavior (`auto-update-launcher.integration.test.ts`).
 - Integration coverage for local update-status endpoint responses served by the installer runtime (`update-status-server.integration.test.ts`).
+- Added OCR-focused e2e lane (`npm run test:e2e:ocr`) to include cloud/local provider fallback behavior, metadata vision fallback behavior, and Auto setup dropped-cover OCR pipeline assertions.
+- Added cloud-provider availability callable (`getAiProviderStatus`) and secret-backed OpenAI key access helper in Firebase Functions for reliable OCR readiness reporting.
 
 ### Changed (Unreleased)
 
 - Increased timeout for the portable updater missing-payload diagnostic integration test to reduce false negatives on slower Windows runners.
+- Auto setup upload preview now uses a scaled display image while keeping full-resolution OCR input, reducing card overflow risk with large drop-zone images.
+- Auto OCR service now caches cloud availability checks and hardens image preprocessing against decode stalls to preserve fast fallback behavior.
+- Updated docs (`README.md`, `docs/AI_SERVICE_RESILIENCE_PLAN.md`) with OCR e2e coverage and live smoke-test intent.
 
 ### Verified (Unreleased)
 
+- `npm run typecheck`
+- `npm run functions:build:compat`
+- `npm run test:e2e:ocr`
 - `npm run test:e2e:webapp`
 - `npm run test:e2e:extension`
+- `npm run test:e2e:autoupdate`
+- `npm run test:e2e`
 - `npm run test:e2e:packaged`
 - `npm run package:windows`
 - `npm run verify:windows`

@@ -9,6 +9,28 @@ import { AutoTextbookSetupFlow } from "../../src/webapp/components/textbooks/Aut
 import { TextbookForm } from "../../src/webapp/components/textbooks/TextbookForm";
 import { useUIStore } from "../../src/webapp/store/uiStore";
 
+const metadataPipelineMocks = vi.hoisted(() => ({
+  extractMetadataWithOcrFallbackFromDataUrl: vi.fn(async () => ({
+    result: {
+      title: "Inspire Physical Science",
+      subtitle: "with Earth Science",
+      edition: "Student Edition",
+      publisher: "McGraw Hill",
+      series: null,
+      gradeLevel: null,
+      subject: "Science",
+      confidence: 0.91,
+      rawText: "Inspire Physical Science\nwith Earth Science\nStudent Edition\nMcGraw Hill",
+      source: "ocr",
+    },
+    originalVisionOutput: null,
+    originalOcrOutput: {
+      rawText: "Inspire Physical Science\nwith Earth Science\nStudent Edition\nMcGraw Hill",
+      providerId: "cloud_openai_vision",
+    },
+  })),
+}));
+
 const repositoryMocks = vi.hoisted(() => ({
   createTextbook: vi.fn<(input: any) => Promise<string>>(async () => "textbook-1"),
   editTextbook: vi.fn<(id: string, changes: Record<string, unknown>) => Promise<{ id: string }>>(async () => ({ id: "textbook-1" })),
@@ -64,6 +86,14 @@ vi.mock("../../src/webapp/hooks/useRepositories", () => ({
   }),
 }));
 
+vi.mock("../../src/core/services/metadataExtractionPipelineService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/core/services/metadataExtractionPipelineService")>("../../src/core/services/metadataExtractionPipelineService");
+  return {
+    ...actual,
+    extractMetadataWithOcrFallbackFromDataUrl: metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl,
+  };
+});
+
 describe("auto textbook flow integration", () => {
   beforeEach(() => {
     repositoryMocks.createTextbook.mockClear();
@@ -94,6 +124,7 @@ describe("auto textbook flow integration", () => {
 
     // Keep integration tests deterministic by opting out of metadata-learning uploads.
     window.localStorage.setItem(METADATA_CORRECTION_STORAGE_KEYS.optedIn, "false");
+    metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl.mockClear();
   });
 
   it("switches from Auto setup back to Manual entry", () => {
@@ -152,6 +183,45 @@ describe("auto textbook flow integration", () => {
     expect(
       screen.getByText("You can edit any of these fields. Your corrections help improve future extractions.")
     ).toBeInTheDocument();
+  });
+
+  it("processes a dropped cover image through OCR pipeline and surfaces provider/source status", async () => {
+    const fileReaderReadAsDataUrl = vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function mockReadAsDataUrl(this: FileReader) {
+      Object.defineProperty(this, "result", {
+        configurable: true,
+        value: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6W2NcAAAAASUVORK5CYII=",
+      });
+      this.onload?.(new ProgressEvent("load") as ProgressEvent<FileReader>);
+    });
+
+    try {
+      render(
+        <AutoTextbookSetupFlow
+          onSaved={() => undefined}
+          onSwitchToManual={() => undefined}
+        />
+      );
+
+      fireEvent.drop(screen.getByRole("region", { name: "Cover image drop zone" }), {
+        dataTransfer: {
+          files: [new File(["cover"], "cover.png", { type: "image/png" })],
+        },
+      });
+
+      await waitFor(() => {
+        expect(metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl).toHaveBeenCalledTimes(1);
+      });
+
+      const confirmButton = screen.queryByRole("button", { name: /Confirm & Apply/i });
+      if (confirmButton) {
+        fireEvent.click(confirmButton);
+      }
+
+      expect(screen.getByText(/Metadata source: ocr/i)).toBeInTheDocument();
+      expect(screen.getByText(/OCR: cloud_openai_vision/i)).toBeInTheDocument();
+    } finally {
+      fileReaderReadAsDataUrl.mockRestore();
+    }
   });
 
   it("propagates manual sourceType when saving textbook in manual mode", async () => {

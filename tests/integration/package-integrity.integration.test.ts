@@ -82,10 +82,10 @@ describe("portable package integrity script", () => {
     const root = mkdtempSync(join(tmpdir(), "courseforge-integrity-"));
 
     try {
-      const files = {
+      const files: Record<string, string> = {
         "webapp/index.html": "<html><body>healthy</body></html>",
         "package-manifest.json": JSON.stringify({ version: "1.2.77" }, null, 2),
-      } satisfies Record<string, string>;
+      };
       files["manifest.json"] = buildManifest("1.2.77", files);
       writePackageFiles(root, files);
 
@@ -115,10 +115,10 @@ describe("portable package integrity script", () => {
     const root = mkdtempSync(join(tmpdir(), "courseforge-integrity-"));
 
     try {
-      const files = {
+      const files: Record<string, string> = {
         "webapp/index.html": "<html><body>healthy</body></html>",
         "package-manifest.json": JSON.stringify({ version: "1.2.77" }, null, 2),
-      } satisfies Record<string, string>;
+      };
       files["manifest.json"] = buildManifest("1.2.77", files);
       writePackageFiles(root, files);
 

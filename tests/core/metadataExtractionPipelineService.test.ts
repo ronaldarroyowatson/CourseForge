@@ -142,4 +142,22 @@ describe("metadataExtractionPipelineService", () => {
     expect(result.originalVisionOutput).not.toBeNull();
     expect(result.originalOcrOutput?.providerId).toBe("local_tesseract");
   });
+
+  it("falls back to OCR when vision callable throws", async () => {
+    callableMock.mockRejectedValue(new Error("vision unavailable"));
+    ocrMock.mockResolvedValue({
+      text: "Earth Science\nNorthbridge Press",
+      providerId: "cloud_openai_vision",
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "cover", publisherHint: null }
+    );
+
+    expect(ocrMock).toHaveBeenCalledTimes(1);
+    expect(result.result.source).toBe("ocr");
+    expect(result.originalVisionOutput).toBeNull();
+    expect(result.originalOcrOutput?.providerId).toBe("cloud_openai_vision");
+  });
 });

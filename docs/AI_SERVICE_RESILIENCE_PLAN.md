@@ -77,6 +77,28 @@ Model host support:
   - user sees actionable message
   - manual OCR text entry remains available
 
+## Verification Coverage
+
+Automated OCR resilience coverage is now included in the e2e lane via `npm run test:e2e:ocr`:
+
+- `tests/core/autoOcrService.test.ts`
+  - validates provider order normalization
+  - validates cloud-provider health status mapping from `getAiProviderStatus`
+  - validates availability cache behavior (cache hit and forced refresh)
+  - validates fallback path when cloud is unavailable or temporarily unknown
+  - validates full-failure behavior when all providers fail
+- `tests/core/metadataExtractionPipelineService.test.ts`
+  - validates vision-first path
+  - validates fallback to OCR when vision throws or is insufficient
+- `tests/integration/autoTextbookFlow.integration.test.tsx`
+  - validates dropped-cover image processing triggers OCR pipeline
+  - validates OCR provider/source status is surfaced in Auto setup UI
+
+Live smoke checks should include:
+
+- local OCR extraction against a representative cover image
+- cloud OCR extraction attempt against the same image to validate provider availability and error messaging
+
 ## Non-Goals
 
 - Full document OCR archival.

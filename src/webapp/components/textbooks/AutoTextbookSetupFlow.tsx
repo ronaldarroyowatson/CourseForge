@@ -435,6 +435,42 @@ async function loadImage(dataUrl: string): Promise<HTMLImageElement> {
   });
 }
 
+/**
+ * Creates a scaled-down preview version of an image for display in the upload
+ * preview dialog.  The full-resolution dataUrl is used for OCR; this thumbnail
+ * is used only for display, keeping the card within sensible bounds.
+ */
+async function scaleDownForPreview(dataUrl: string, maxDimension = 900): Promise<string> {
+  if (typeof document === "undefined") {
+    return dataUrl;
+  }
+
+  try {
+    const image = await loadImage(dataUrl);
+    const naturalMax = Math.max(image.naturalWidth, image.naturalHeight);
+    if (naturalMax <= maxDimension) {
+      return dataUrl;
+    }
+
+    const scale = maxDimension / naturalMax;
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return dataUrl;
+    }
+
+    ctx.drawImage(image, 0, 0, width, height);
+    return canvas.toDataURL("image/jpeg", 0.85);
+  } catch {
+    return dataUrl;
+  }
+}
+
 async function estimateSkinToneRatio(dataUrl: string): Promise<number> {
   const image = await loadImage(dataUrl);
   const canvas = document.createElement("canvas");
@@ -1181,10 +1217,12 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       );
 
       // Show preview dialog so the user can review image and OCR text before confirming.
+      // Use a scaled-down version only for display; full-res `dataUrl` was already used for OCR.
+      const previewDataUrl = await scaleDownForPreview(dataUrl);
       setUploadPreview({
         open: true,
         step: targetStep,
-        imageDataUrl: dataUrl,
+        imageDataUrl: previewDataUrl,
         ocrText,
         ocrProviderId,
         editableOcrText: ocrText,

@@ -29,8 +29,11 @@ export interface AutoOcrProviderPolicy {
   updatedAt?: string;
 }
 
+type ProviderAvailabilityState = "available" | "unavailable" | "unknown";
+
 const AUTO_OCR_PROVIDER_ORDER_KEY = "courseforge.autoOcr.providerOrder";
 const AUTO_OCR_CIRCUIT_STATE_KEY = "courseforge.autoOcr.circuitState";
+const AUTO_OCR_AVAILABILITY_CACHE_TTL_MS = 3 * 60 * 1000;
 
 const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000;
@@ -45,11 +48,30 @@ interface CircuitStateEntry {
 
 type CircuitState = Record<AutoOcrProviderId, CircuitStateEntry>;
 
+let autoOcrAvailabilityCache: { state: ProviderAvailabilityState; expiresAt: number } | null = null;
+
 async function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Unable to decode OCR image."));
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out while decoding OCR image."));
+    }, 2000);
+
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      image.onload = null;
+      image.onerror = null;
+    };
+
+    image.onload = () => {
+      cleanup();
+      resolve(image);
+    };
+    image.onerror = () => {
+      cleanup();
+      reject(new Error("Unable to decode OCR image."));
+    };
     image.src = dataUrl;
   });
 }
@@ -236,6 +258,10 @@ export function resetAutoOcrCircuitStateForTests(): void {
   });
 }
 
+export function clearAutoOcrAvailabilityCache(): void {
+  autoOcrAvailabilityCache = null;
+}
+
 export async function getCloudAutoOcrProviderPolicy(): Promise<AutoOcrProviderPolicy | null> {
   try {
     const callable = httpsCallable(functionsClient, "getAiProviderPolicy");
@@ -308,7 +334,58 @@ async function extractWithLocalTesseract(imageDataUrl: string): Promise<string> 
 }
 
 async function isCloudVisionConfigured(): Promise<boolean> {
-  return import.meta.env.VITE_ENABLE_CLOUD_OCR === "true";
+  const status = await getCloudAutoOcrAvailabilityState();
+  return status !== "unavailable";
+}
+
+async function getCloudAutoOcrAvailabilityState(): Promise<ProviderAvailabilityState> {
+  if (autoOcrAvailabilityCache && autoOcrAvailabilityCache.expiresAt > Date.now()) {
+    return autoOcrAvailabilityCache.state;
+  }
+
+  try {
+    const callable = httpsCallable(functionsClient, "getAiProviderStatus");
+    const response = await callable({});
+    const payload = response.data as {
+      success?: boolean;
+      data?: {
+        providers?: Array<{
+          id?: AutoOcrProviderId;
+          available?: boolean;
+        }>;
+      };
+    };
+
+    if (payload?.success !== true || !Array.isArray(payload.data?.providers)) {
+      autoOcrAvailabilityCache = {
+        state: "unknown",
+        expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+      };
+      return "unknown";
+    }
+
+    const cloudProvider = payload.data.providers.find((provider) => provider.id === "cloud_openai_vision");
+    if (!cloudProvider || typeof cloudProvider.available !== "boolean") {
+      autoOcrAvailabilityCache = {
+        state: "unknown",
+        expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+      };
+      return "unknown";
+    }
+
+    const resolvedState: ProviderAvailabilityState = cloudProvider.available ? "available" : "unavailable";
+    autoOcrAvailabilityCache = {
+      state: resolvedState,
+      expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+    };
+    return resolvedState;
+  } catch {
+    autoOcrAvailabilityCache = {
+      state: "unknown",
+      expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+    };
+    return "unknown";
+  }
 }
 
 async function extractWithCloudOpenAiVision(imageDataUrl: string): Promise<string> {
@@ -348,6 +425,15 @@ export async function getAutoOcrProviderHealth(): Promise<Array<{ id: AutoOcrPro
   const providers = getAutoOcrProviders();
   return Promise.all(
     providers.map(async (provider) => {
+      if (provider.id === "cloud_openai_vision") {
+        const availabilityState = await getCloudAutoOcrAvailabilityState();
+        return {
+          id: provider.id,
+          label: provider.label,
+          available: availabilityState === "available",
+        };
+      }
+
       try {
         const available = await provider.isAvailable();
         return {
@@ -373,7 +459,12 @@ export async function extractTextFromImageWithFallback(
     providersOverride?: AutoOcrProvider[];
   } = {}
 ): Promise<AutoOcrExtractionResult> {
-  const preprocessedImage = await preprocessImageForOcr(imageDataUrl);
+  const preprocessedImage = await Promise.race<string>([
+    preprocessImageForOcr(imageDataUrl),
+    new Promise<string>((resolve) => {
+      setTimeout(() => resolve(imageDataUrl), 1500);
+    }),
+  ]);
   const providerOrder = normalizeProviderOrder(options.providerOrder ?? await getEffectiveAutoOcrProviderOrder());
   const providerMap = new Map((options.providersOverride ?? getAutoOcrProviders()).map((provider) => [provider.id, provider]));
   const attempts: AutoOcrAttemptResult[] = [];

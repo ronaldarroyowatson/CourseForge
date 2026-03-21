@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import * as admin from "firebase-admin";
+import { defineSecret } from "firebase-functions/params";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import {
   analyzeDocumentQuality,
@@ -13,6 +14,8 @@ import {
 } from "./documentExtraction";
 
 dotenv.config();
+
+const openAiKeySecret = defineSecret("OPENAI_API_KEY");
 
 admin.initializeApp();
 
@@ -117,6 +120,21 @@ interface ModerationItem {
   currentStatus: ContentStatus;
   lastModified: string | null;
   isArchived?: boolean;
+}
+
+function getOpenAiApiKey(): string {
+  const candidates = [
+    process.env.OPENAI_API_KEY,
+    process.env.OPENAI_KEY,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return "";
 }
 
 interface AdminContentRecord {
@@ -1495,6 +1513,29 @@ export const getAiProviderPolicy = onCall(async (request) => {
   return success("Loaded AI provider policy.", normalized);
 });
 
+export const getAiProviderStatus = onCall({ secrets: [openAiKeySecret] }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const openaiKey = getOpenAiApiKey();
+
+  return success("Loaded AI provider status.", {
+    providers: [
+      {
+        id: "cloud_openai_vision" as const,
+        label: "Cloud OCR (OpenAI Vision via Firebase Function)",
+        available: Boolean(openaiKey),
+      },
+      {
+        id: "local_tesseract" as const,
+        label: "Local OCR (Tesseract)",
+        available: true,
+      },
+    ],
+  });
+});
+
 export const setAiProviderPolicy = onCall(async (request) => {
   assertAdmin(request.auth);
 
@@ -1624,7 +1665,7 @@ export const listRecentDebugUploads = onCall(async (request) => {
   return success("Loaded recent debug uploads.", rows);
 });
 
-export const extractScreenshotText = onCall(async (request) => {
+export const extractScreenshotText = onCall({ secrets: [openAiKeySecret] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to extract screenshot text.");
   }
@@ -1640,7 +1681,7 @@ export const extractScreenshotText = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "Screenshot payload is too large. Please crop before retrying.");
   }
 
-  const openaiKey = process.env.OPENAI_API_KEY ?? "";
+  const openaiKey = getOpenAiApiKey();
   if (!openaiKey) {
     throw new HttpsError("failed-precondition", "Cloud OCR is unavailable because OPENAI_API_KEY is not configured.");
   }
@@ -1690,7 +1731,7 @@ export const extractScreenshotText = onCall(async (request) => {
   return success("Screenshot text extracted.", { text: extractedText });
 });
 
-export const extractMetadataFromImageVision = onCall(async (request) => {
+export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to extract metadata from images.");
   }
@@ -1717,7 +1758,7 @@ export const extractMetadataFromImageVision = onCall(async (request) => {
     : "other";
   const publisherHint = typeof payload.context?.publisherHint === "string" ? payload.context.publisherHint.trim() : "";
 
-  const openaiKey = process.env.OPENAI_API_KEY ?? "";
+  const openaiKey = getOpenAiApiKey();
   if (!openaiKey) {
     throw new HttpsError("failed-precondition", "Vision metadata extraction is unavailable because OPENAI_API_KEY is not configured.");
   }
@@ -1904,7 +1945,7 @@ export const correctionsList = onCall(async (request) => {
   };
 
   const allSnaps = await firestore.collectionGroup("items").limit(1000).get();
-  const allRecords = allSnaps
+  const allRecords = allSnaps.docs
     .filter((snapshot) => snapshot.ref.path.includes("metadataCorrections/"))
     .map((snapshot) => sanitizeMetadataCorrectionRecords([snapshot.data()])[0])
     .filter((entry): entry is MetadataCorrectionRecord => Boolean(entry));
@@ -2051,7 +2092,6 @@ export const correctionsRulesUpdate = onCall(async (request) => {
 // Compatibility aliases for previous callable names.
 export const submitMetadataCorrections = correctionsUpload;
 export const getMetadataCorrectionRules = correctionsRules;
-});
 
 // ---------------------------------------------------------------------------
 // AI Document Content Extraction
@@ -2290,11 +2330,11 @@ function isTieredQuestionItem(value: unknown): value is TieredQuestionItem {
  *   - { fileName, mimeType, text }   — plain-text content already extracted by the client
  *   - { fileName, mimeType, base64 } — Base64-encoded PDF or DOCX for server-side extraction
  *
- * Reads OPENAI_API_KEY from Firebase Function config (set via `firebase functions:config:set openai.key="sk-..."`).
+ * Reads OPENAI_API_KEY from Firebase Functions secrets (set via `firebase functions:secrets:set OPENAI_API_KEY`).
  * Falls back to an empty extraction result rather than throwing when the key is not configured,
  * so the UI can still display the review screen with a prompt to configure the key.
  */
-export const extractDocumentContent = onCall(async (request) => {
+export const extractDocumentContent = onCall({ secrets: [openAiKeySecret] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to use document extraction.");
   }
@@ -2345,7 +2385,7 @@ export const extractDocumentContent = onCall(async (request) => {
     return success("Document blocked for review.", buildBlockedExtraction(heuristicQuality));
   }
 
-  const openaiKey = process.env.OPENAI_API_KEY ?? "";
+  const openaiKey = getOpenAiApiKey();
   if (!openaiKey) {
     const quality = mergeQualityReports(heuristicQuality, {
       accepted: false,
@@ -2359,7 +2399,7 @@ export const extractDocumentContent = onCall(async (request) => {
       }],
     });
     return success(
-      `OpenAI key not configured. Set it with: firebase functions:config:set openai.key="sk-..."`,
+      `OpenAI key not configured. Set it with: firebase functions:secrets:set OPENAI_API_KEY`,
       buildBlockedExtraction(quality)
     );
   }
@@ -2491,7 +2531,7 @@ export const extractDocumentContent = onCall(async (request) => {
   );
 });
 
-export const generateTieredQuestionVariations = onCall(async (request) => {
+export const generateTieredQuestionVariations = onCall({ secrets: [openAiKeySecret] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to generate tiered question variations.");
   }
@@ -2547,7 +2587,7 @@ export const generateTieredQuestionVariations = onCall(async (request) => {
   const chapterTerms = uniqueTrimmedStrings(payload.chapterTerms);
   const fallbackItems = buildFallbackTieredItems(seedItems, chapterTerms, generationContext);
 
-  const openaiKey = process.env.OPENAI_API_KEY ?? "";
+  const openaiKey = getOpenAiApiKey();
   if (!openaiKey) {
     return success("Tiered variations generated with local fallback.", { items: fallbackItems });
   }
@@ -2663,7 +2703,7 @@ export const generateTieredQuestionVariations = onCall(async (request) => {
 /**
  * Generate theme and visual redesign suggestions for imported slide decks.
  */
-export const generatePresentationDesignSuggestions = onCall(async (request) => {
+export const generatePresentationDesignSuggestions = onCall({ secrets: [openAiKeySecret] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to generate design suggestions.");
   }
@@ -2680,7 +2720,7 @@ export const generatePresentationDesignSuggestions = onCall(async (request) => {
     ? payload.slideTexts.filter((value): value is string => typeof value === "string").slice(0, 50)
     : [];
 
-  const openaiKey = process.env.OPENAI_API_KEY ?? "";
+  const openaiKey = getOpenAiApiKey();
   if (!openaiKey) {
     return success("Fallback design suggestions generated.", {
       themeName: "Clear Professional",

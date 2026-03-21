@@ -2,9 +2,11 @@
 
 CourseForge is a local-first curriculum authoring platform for teachers. It combines a browser extension for quick capture with a full web app for textbook management, sync, moderation, and XML export.
 
-Version `1.3.0` focuses on updater maintainability and user-facing status clarity, including friendlier manual check messaging and a dedicated updater maintainer guide for future architecture and pipeline work.
+Version `1.3.2` includes OCR resilience hardening and expanded OCR regression coverage in the e2e lane.
 
 Quick release note: v1.3.0 improves manual update UX when already current and adds a full updater maintenance handoff guide.
+
+Quick release note: v1.3.2 improves Auto OCR provider fallback resilience, cloud-provider readiness checks, and drag/drop OCR pipeline test coverage.
 
 ## What it does
 
@@ -218,7 +220,15 @@ npm run test:core
 npm run test:unit
 npm run test:integration
 npm run test:rules
+npm run test:e2e:ocr
+npm run test:e2e
 ```
+
+OCR e2e-focused coverage now includes:
+
+- `tests/core/autoOcrService.test.ts`: provider ordering, provider health status mapping, availability caching, fallback behavior, and all-provider failure handling.
+- `tests/core/metadataExtractionPipelineService.test.ts`: vision-first extraction and OCR fallback behavior when vision errors or confidence is insufficient.
+- `tests/integration/autoTextbookFlow.integration.test.tsx`: dropped-cover OCR pipeline invocation and surfaced provider/source status in Auto setup flow.
 
 ## Firebase notes
 

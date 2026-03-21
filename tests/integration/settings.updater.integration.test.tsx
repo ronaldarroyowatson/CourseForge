@@ -85,6 +85,11 @@ type CheckResponsePayload = {
   currentVersion?: string | null;
   releaseUrl?: string | null;
   error?: string | null;
+  stageRequested?: boolean;
+  stageAccepted?: boolean;
+  stageReason?: string | null;
+  stageMessage?: string | null;
+  stagePid?: number | null;
 };
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -171,6 +176,11 @@ describe("Settings updater communication", () => {
               latestVersion: "1.2.77",
               currentVersion: "1.2.76",
               releaseUrl: "https://example.invalid/releases/tag/v1.2.77",
+              stageRequested: true,
+              stageAccepted: true,
+              stageReason: "started",
+              stageMessage: "Update download and staging started in the background.",
+              stagePid: 1184,
             };
         return jsonResponse(payload);
       }
@@ -209,7 +219,8 @@ describe("Settings updater communication", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check for Updates" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Update available: v1.2.77")).toBeInTheDocument();
+      expect(screen.getByText("Update available: v1.2.77. Download and staging started in the background (PID 1184)."))
+        .toBeInTheDocument();
     });
 
     const allManualCheckCalls = fetchCalls.filter((call) => call.url.includes("/api/check-for-updates"));

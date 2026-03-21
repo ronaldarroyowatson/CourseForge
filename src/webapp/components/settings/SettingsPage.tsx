@@ -499,6 +499,11 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
         currentVersion?: string | null;
         releaseUrl?: string | null;
         error?: string | null;
+        stageRequested?: boolean;
+        stageAccepted?: boolean;
+        stageReason?: string | null;
+        stageMessage?: string | null;
+        stagePid?: number | null;
       } | null = null;
       let nonJsonBody = "";
 
@@ -595,7 +600,18 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
         if (diff < 0) break;
       }
       if (isNewer) {
-        setUpdateCheckStatus(`Update available: v${latest}`);
+        if (data?.stageRequested && data.stageAccepted) {
+          setUpdateCheckStatus(`Update available: v${latest}. Download and staging started in the background (PID ${data.stagePid ?? "unknown"}).`);
+          return;
+        }
+
+        if (data?.stageRequested && !data.stageAccepted) {
+          const reason = data.stageMessage || "Unable to start background staging.";
+          setUpdateCheckStatus(`Update available: v${latest}. ${reason}`);
+          return;
+        }
+
+        setUpdateCheckStatus(`Update available: v${latest}.`);
       } else {
         setUpdateCheckStatus(`Already up to date. You're running v${resolvedCurrentVersion}.`);
       }

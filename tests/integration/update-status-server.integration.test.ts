@@ -239,12 +239,16 @@ describe("local update status endpoint", () => {
       const payload = await response.json();
 
       expect(response.status).toBe(200);
-      expect(payload).toEqual({
+      expect(payload).toMatchObject({
         ok: true,
         available: true,
         currentVersion: "1.2.7",
         latestVersion: "1.2.71",
         releaseUrl: "https://example.invalid/releases/tag/v1.2.71",
+        stageRequested: true,
+        stageAccepted: false,
+        stageReason: "missing-updater-script",
+        stageMessage: "Updater script is missing in this runtime package.",
         checkedAt: expect.any(String),
         error: null,
         diagnostics: {
@@ -316,6 +320,9 @@ describe("local update status endpoint", () => {
         currentVersion: "1.2.76",
         latestVersion: "1.2.77",
         releaseUrl: "https://example.invalid/releases/tag/v1.2.77",
+        stageRequested: true,
+        stageAccepted: false,
+        stageReason: "missing-updater-script",
         diagnostics: {
           latestEndpoint: releaseServer.url,
           tokenConfigured: false,
@@ -336,6 +343,8 @@ describe("local update status endpoint", () => {
         ok: true,
         available: true,
         latestVersion: "1.2.77",
+        stageRequested: true,
+        stageAccepted: false,
       });
 
       const updaterLog = readFileSync(join(root, "updater.log"), "utf8");

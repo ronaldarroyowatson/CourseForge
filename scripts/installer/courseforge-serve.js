@@ -8,6 +8,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const { spawn } = require("child_process");
 const { URL } = require("url");
 
 // Get webapp path from argument or default
@@ -25,6 +26,7 @@ const latestReleaseMaxAttempts = Math.max(1, Number(process.env.COURSEFORGE_UPDA
 const packageRoot = path.dirname(webappPath);
 const updaterLogPath = path.join(packageRoot, "updater.log");
 const updaterCheckPath = path.join(packageRoot, "updater-check.json");
+let manualStageProcess = null;
 let hasActiveHeartbeat = false;
 let lastHeartbeatAt = 0;
 
@@ -118,6 +120,160 @@ function readBootStatus() {
   }
 
   return payload;
+}
+
+function isUpdaterActiveState(state) {
+  return ["checking", "update-available", "downloading", "extracting", "staging"].includes(String(state || "").toLowerCase());
+}
+
+function getAutoUpdateScriptPath() {
+  const candidates = [
+    path.join(packageRoot, "AutoUpdate-CourseForge.ps1"),
+    path.join(packageRoot, "autoupdate-courseforge.ps1"),
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+function parseBooleanQueryValue(rawValue) {
+  if (Array.isArray(rawValue)) {
+    return parseBooleanQueryValue(rawValue[rawValue.length - 1]);
+  }
+
+  if (typeof rawValue !== "string") {
+    return false;
+  }
+
+  const normalized = rawValue.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+function launchManualStageUpdate(checkPayload, options = {}) {
+  const { skipStage = false } = options;
+  if (!checkPayload?.ok || !checkPayload?.available) {
+    return {
+      stageRequested: false,
+      stageAccepted: false,
+      stageReason: "no-update",
+      stageMessage: "No update is available to stage.",
+      stagePid: null,
+    };
+  }
+
+  if (skipStage) {
+    writeUpdaterLog("Manual update stage skipped by request parameter.");
+    return {
+      stageRequested: false,
+      stageAccepted: false,
+      stageReason: "skip-stage",
+      stageMessage: "Manual check completed without background staging.",
+      stagePid: null,
+    };
+  }
+
+  const progress = readUpdaterProgress();
+  if (isUpdaterActiveState(progress?.state)) {
+    writeUpdaterLog(`Manual update stage request ignored because updater is already active (state=${progress.state}).`);
+    return {
+      stageRequested: true,
+      stageAccepted: false,
+      stageReason: "updater-active",
+      stageMessage: `Updater is already running (${progress.state}).`,
+      stagePid: null,
+    };
+  }
+
+  if (manualStageProcess && manualStageProcess.exitCode === null && !manualStageProcess.killed) {
+    writeUpdaterLog("Manual update stage request ignored because a manual stage process is already running.");
+    return {
+      stageRequested: true,
+      stageAccepted: false,
+      stageReason: "manual-stage-running",
+      stageMessage: "Manual staging is already running.",
+      stagePid: manualStageProcess.pid || null,
+    };
+  }
+
+  const updateScriptPath = getAutoUpdateScriptPath();
+  if (!updateScriptPath) {
+    writeUpdaterLog("Manual update stage could not start because AutoUpdate-CourseForge.ps1 was not found.");
+    return {
+      stageRequested: true,
+      stageAccepted: false,
+      stageReason: "missing-updater-script",
+      stageMessage: "Updater script is missing in this runtime package.",
+      stagePid: null,
+    };
+  }
+
+  const manifestPath = path.join(packageRoot, "package-manifest.json");
+  const manifest = readJsonFile(manifestPath);
+  const owner = manifest?.updates?.owner;
+  const repo = manifest?.updates?.repo;
+  const assetNameTemplate = manifest?.updates?.assetNameTemplate;
+
+  const updaterArgs = [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    updateScriptPath,
+    "-PackageRoot",
+    packageRoot,
+    "-CurrentVersion",
+    checkPayload.currentVersion || manifest?.version || "",
+    "-StageOnly",
+  ];
+
+  if (typeof owner === "string" && owner.trim().length > 0) {
+    updaterArgs.push("-Owner", owner.trim());
+  }
+
+  if (typeof repo === "string" && repo.trim().length > 0) {
+    updaterArgs.push("-Repo", repo.trim());
+  }
+
+  if (typeof assetNameTemplate === "string" && assetNameTemplate.trim().length > 0) {
+    updaterArgs.push("-AssetNameTemplate", assetNameTemplate.trim());
+  }
+
+  try {
+    const child = spawn("powershell.exe", updaterArgs, {
+      cwd: packageRoot,
+      detached: false,
+      windowsHide: true,
+      stdio: "ignore",
+    });
+
+    manualStageProcess = child;
+    child.on("exit", (code, signal) => {
+      writeUpdaterLog(`Manual update stage process finished with code=${code ?? "null"} signal=${signal || "none"}.`);
+      manualStageProcess = null;
+    });
+    child.on("error", (error) => {
+      writeUpdaterLog(`Manual update stage process failed to start: ${error.message}`);
+      manualStageProcess = null;
+    });
+
+    writeUpdaterLog(`Manual update stage process started (pid=${child.pid || "unknown"}).`);
+    return {
+      stageRequested: true,
+      stageAccepted: true,
+      stageReason: "started",
+      stageMessage: "Update download and staging started in the background.",
+      stagePid: child.pid || null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    writeUpdaterLog(`Manual update stage process launch failed: ${message}`);
+    return {
+      stageRequested: true,
+      stageAccepted: false,
+      stageReason: "spawn-failed",
+      stageMessage: `Failed to start updater staging: ${message}`,
+      stagePid: null,
+    };
+  }
 }
 
 function parseSemver(value) {
@@ -281,14 +437,20 @@ async function handleApiRoute(pathname, url, method, res) {
   if (pathname === "/api/check-for-updates") {
     writeUpdaterLog("Manual update check requested via /api/check-for-updates.");
     const payload = await fetchLatestReleaseStatus();
-    writeJsonFile(updaterCheckPath, payload);
+    const skipStage = parseBooleanQueryValue(url.searchParams.get("skipStage"));
+    const stage = launchManualStageUpdate(payload, { skipStage });
+    const responsePayload = {
+      ...payload,
+      ...stage,
+    };
+    writeJsonFile(updaterCheckPath, responsePayload);
     if (payload.ok) {
-      writeUpdaterLog(`Manual update check result: ok=true current=${payload.currentVersion || "unknown"} latest=${payload.latestVersion || "unknown"} available=${payload.available}`);
+      writeUpdaterLog(`Manual update check result: ok=true current=${payload.currentVersion || "unknown"} latest=${payload.latestVersion || "unknown"} available=${payload.available} stageAccepted=${stage.stageAccepted}`);
     } else {
       writeUpdaterLog(`Manual update check result: ok=false error=${payload.error || "unknown"}`);
     }
     res.writeHead(payload.ok ? 200 : 502);
-    res.end(JSON.stringify(payload));
+    res.end(JSON.stringify(responsePayload));
     return;
   }
 

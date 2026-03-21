@@ -2,7 +2,7 @@
     "name":  "CourseForge",
     "version":  "1.2.75",
     "packageType":  "portable",
-    "createdAtUtc":  "2026-03-20T23:11:14.8332699Z",
+    "createdAtUtc":  "2026-03-21T00:24:55.9176789Z",
     "includes":  [
                      "webapp/",
                      "extension/",
@@ -10,6 +10,7 @@
                      "Check-For-CourseForge-Updates.cmd",
                      "Start-CourseForge.cmd",
                      "Start-CourseForge.ps1",
+                     "courseforge-serve.cjs",
                      "courseforge-serve.js",
                      "boot-splash.html",
                      "Test-CourseForge-Integrity.ps1",

@@ -12,7 +12,9 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $PSCommandPath
 $webappDir = Join-Path $scriptDir "webapp"
-$serverScript = Join-Path $scriptDir "courseforge-serve.js"
+$serverScriptCjs = Join-Path $scriptDir "courseforge-serve.cjs"
+$serverScriptJs = Join-Path $scriptDir "courseforge-serve.js"
+$serverScript = if (Test-Path $serverScriptCjs) { $serverScriptCjs } else { $serverScriptJs }
 $bundledNodeExe = Join-Path (Join-Path $scriptDir "node-runtime") "node.exe"
 $port       = 3000
 $hostName   = "localhost"
@@ -178,7 +180,7 @@ function Show-RuntimeFailureAndExit {
   exit 1
 }
 
-# ── Read version and asset template from package-manifest.json (never hard-coded) ──
+# ?????? Read version and asset template from package-manifest.json (never hard-coded) ??????
 $manifestPath   = Join-Path $scriptDir "package-manifest.json"
 $currentVersion = "unknown"
 $assetTemplate  = "CourseForge-{version}-portable.zip"
@@ -246,7 +248,7 @@ if (-not $runtimeHealth.healthy) {
 }
 
 # Auto-update check (background job)
-# ── Apply any staged update BEFORE the server starts ──
+# ?????? Apply any staged update BEFORE the server starts ??????
 $pendingDir  = Join-Path $scriptDir "_pending_update"
 $pendingJson = Join-Path $scriptDir "pending-update.json"
 if (Test-Path (Join-Path $pendingDir "webapp\index.html")) {
@@ -285,7 +287,7 @@ if (Test-Path (Join-Path $pendingDir "webapp\index.html")) {
   Write-LauncherLog "WARNING: Found partial staged-update artifacts, but webapp payload is incomplete. Leaving files in place for inspection."
 }
 
-# ── Stage the next update in the background (download now, apply next launch) ──
+# ?????? Stage the next update in the background (download now, apply next launch) ??????
 $updateScript = Join-Path $scriptDir "AutoUpdate-CourseForge.ps1"
 if (Test-Path $updateScript) {
   Write-LauncherLog "Starting background updater in stage-only mode."
@@ -674,10 +676,20 @@ try {
     exit 1
   }
 
-  Write-LauncherLog "Opening browser to $url."
+  if ($env:COURSEFORGE_DISABLE_AUTO_BROWSER -eq "1") {
+    Write-LauncherLog "Server ready at $url. Auto browser launch disabled."
+  }
+  else {
+    Write-LauncherLog "Opening browser to $url."
+  }
 
   # Open in default browser
   Open-CourseForgeUrl -Url $url
+
+  if ($env:COURSEFORGE_DETACH_AFTER_READY -eq "1") {
+    Write-LauncherLog "Background launch mode enabled. Launcher exiting while server keeps running."
+    exit 0
+  }
 
   # Keep PowerShell window open
   Write-Host ""
@@ -709,3 +721,4 @@ catch {
   }
   exit 1
 }
+

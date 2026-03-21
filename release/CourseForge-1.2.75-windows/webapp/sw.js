@@ -1,8 +1,14 @@
-const CACHE_NAME = "courseforge-webapp-v1";
+const CACHE_NAME = "courseforge-webapp-v2";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
 ];
+
+self.addEventListener("message", (event) => {
+  if (event.data === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -22,6 +28,31 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") {
+    return;
+  }
+
+  const requestUrl = new URL(event.request.url);
+  const isSameOrigin = requestUrl.origin === self.location.origin;
+  const isApiRoute = isSameOrigin && requestUrl.pathname.startsWith("/api/");
+
+  // API calls must always hit the local server so updater status/check actions are never stale.
+  if (isApiRoute) {
+    event.respondWith(fetch(event.request, { cache: "no-store" }));
+    return;
+  }
+
+  const isDocumentRequest = event.request.mode === "navigate" || (isSameOrigin && requestUrl.pathname === "/index.html");
+
+  if (isDocumentRequest) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const cloned = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/index.html")))
+    );
     return;
   }
 

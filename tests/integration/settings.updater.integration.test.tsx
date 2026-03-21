@@ -299,4 +299,50 @@ describe("Settings updater communication", () => {
     expect(failedManualCall?.url).toMatch(/\/api\/check-for-updates\?_ts=\d+/);
     expect(failedManualCall?.init?.cache).toBe("no-store");
   });
+
+  it("shows a friendly message when manual check reports no update is available", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.includes("/api/update-status")) {
+        return jsonResponse({ available: false, currentVersion: "1.2.78" });
+      }
+
+      if (url.includes("/api/check-for-updates")) {
+        return jsonResponse({
+          ok: true,
+          available: false,
+          latestVersion: "1.2.78",
+          currentVersion: "1.2.78",
+        });
+      }
+
+      if (url.includes("/api/updater-progress")) {
+        return jsonResponse({ state: "idle", currentVersion: "1.2.78" });
+      }
+
+      if (url.includes("/api/updater-diagnostics")) {
+        return jsonResponse({
+          checkedAt: "2026-03-20T00:00:00.000Z",
+          lastCheck: { ok: true, available: false },
+        });
+      }
+
+      return jsonResponse({ error: "not found" }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<SettingsPage onBack={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Current version:")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Check for Updates" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Already up to date. You're running v1.2.78.")).toBeInTheDocument();
+    });
+  });
 });

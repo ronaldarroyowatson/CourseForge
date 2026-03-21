@@ -107,3 +107,9 @@ See `XML_SCHEMA.md` for details.
   - Vocab definition suggestions
   - Equation suggestions
   - Student hint generation based on XML.
+
+---
+
+## 7. Updater maintenance
+
+- For updater architecture, pipeline, diagnostics files, and extension conventions, see `updater-maintainer-guide.md`.

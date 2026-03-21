@@ -522,11 +522,16 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
         void refreshUpdaterDiagnostics();
         return;
       }
+      const resolvedCurrentVersion = data.currentVersion || currentAppVersion;
+      if (!data.available) {
+        setUpdateCheckStatus(`Already up to date. You're running v${resolvedCurrentVersion}.`);
+        return;
+      }
       const latest = data.latestVersion || null;
       const partsLatest = latest ? parseSemver(latest) : null;
-      const partsCurrent = parseSemver(currentAppVersion);
+      const partsCurrent = parseSemver(resolvedCurrentVersion);
       if (!partsLatest) {
-        setUpdateCheckStatus("Unable to read the latest release version from the local updater service.");
+        setUpdateCheckStatus("Update is already current, but the updater service did not return a parseable latest version.");
         return;
       }
       if (!partsCurrent) {
@@ -542,7 +547,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       if (isNewer) {
         setUpdateCheckStatus(`Update available: v${latest}`);
       } else {
-        setUpdateCheckStatus(`You are up to date (v${currentAppVersion}).`);
+        setUpdateCheckStatus(`Already up to date. You're running v${resolvedCurrentVersion}.`);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown request failure";

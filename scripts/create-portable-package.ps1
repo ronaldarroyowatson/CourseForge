@@ -163,7 +163,7 @@ if (-not (Test-Path $updaterTemplatePath)) {
 }
 Copy-Item -Path $updaterTemplatePath -Destination (Join-Path $packageDir "AutoUpdate-CourseForge.ps1") -Force
 
-# Copy required support files for running the webapp server
+# Copy required support files for running the packaged launcher/server flow.
 $supportFilesToCopy = @(
   "Start-CourseForge.ps1",
   "courseforge-serve.cjs",
@@ -180,21 +180,22 @@ foreach ($file in $supportFilesToCopy) {
   }
 }
 
-$startCmd = @"
+$startCmdTemplatePath = Join-Path (Join-Path $PSScriptRoot "installer") "Start-CourseForge.cmd"
+if (Test-Path $startCmdTemplatePath) {
+  Copy-Item -Path $startCmdTemplatePath -Destination (Join-Path $packageDir "Start-CourseForge.cmd") -Force
+}
+else {
+  Write-Warning "Start launcher template not found: $startCmdTemplatePath. Falling back to minimal launcher wrapper."
+  $startCmdFallback = @"
 @echo off
 setlocal
-set ROOT=%~dp0
-if exist "%ROOT%AutoUpdate-CourseForge.ps1" (
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%AutoUpdate-CourseForge.ps1" -CurrentVersion "$Version" -Owner "$repoOwner" -Repo "$repoName" >nul 2>&1
-)
-set APP=%ROOT%webapp\index.html
-if not exist "%APP%" (
-  echo [CourseForge] Missing webapp\index.html in package.
-  exit /b 1
-)
-start "CourseForge" "%APP%"
+set SCRIPT_DIR=%~dp0
+if not defined COURSEFORGE_DETACH_AFTER_READY set COURSEFORGE_DETACH_AFTER_READY=1
+start "" cmd /c powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%SCRIPT_DIR%Start-CourseForge.ps1"
+exit /b %ERRORLEVEL%
 "@
-Set-Content -Path (Join-Path $packageDir "Start-CourseForge.cmd") -Value $startCmd -Encoding ASCII
+  Set-Content -Path (Join-Path $packageDir "Start-CourseForge.cmd") -Value $startCmdFallback -Encoding ASCII
+}
 
 $checkUpdatesCmd = @"
 @echo off

@@ -23,6 +23,14 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - `npm run package:windows`
 - `npm run verify:windows`
 
+## [1.2.77] - 2026-03-20
+
+### Fixed
+
+- Restored launcher-consistent portable packaging so auto-updated installs keep the local server, updater APIs, and startup splash instead of falling back to a static `index.html` launch path.
+- Restored startup splash support in packaged updates by verifying `boot-splash.html`, launcher scripts, and integrity helpers as required package contents.
+- Changed debug logging to default on unless the user explicitly disables it, matching the intended troubleshooting-first settings behavior.
+
 ## [1.2.6] - 2026-03-19
 
 ### Fixed

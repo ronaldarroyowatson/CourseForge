@@ -19,6 +19,7 @@ describe("windows installer template guardrails", () => {
 
   it("generates installer from the shared windows template", () => {
     const generatorScript = readWorkspaceFile("scripts/create-windows-package.ps1");
+    const portableGeneratorScript = readWorkspaceFile("scripts/create-portable-package.ps1");
 
     expect(generatorScript).toContain("windows-installer-template.ps1");
     expect(generatorScript).toContain("windows-installer.iss.template");
@@ -45,6 +46,14 @@ describe("windows installer template guardrails", () => {
     expect(generatorScript).toContain("Remove-Item -LiteralPath '%INSTALLROOT%' -Recurse -Force -ErrorAction SilentlyContinue");
     expect(generatorScript).toContain("AppLaunched=cmd.exe /c \"%FILE1%\"");
     expect(generatorScript).toContain("AdminQuietInstCmd=cmd.exe /c \"%FILE1%\" -FullAuto");
+
+    expect(portableGeneratorScript).toContain('"Start-CourseForge.ps1"');
+    expect(portableGeneratorScript).toContain('"courseforge-serve.cjs"');
+    expect(portableGeneratorScript).toContain('"courseforge-serve.js"');
+    expect(portableGeneratorScript).toContain('"boot-splash.html"');
+    expect(portableGeneratorScript).toContain('"Test-CourseForge-Integrity.ps1"');
+    expect(portableGeneratorScript).toContain('Start-CourseForge.cmd');
+    expect(portableGeneratorScript).toContain('start "" cmd /c powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%SCRIPT_DIR%Start-CourseForge.ps1"');
   });
 
   it("keeps advanced installer lifecycle features in the template", () => {

@@ -222,7 +222,12 @@ export function isDebugLoggingEnabled(): boolean {
     return false;
   }
 
-  return storage.getItem(DEBUG_LOG_ENABLED_KEY) === "true";
+  const storedValue = storage.getItem(DEBUG_LOG_ENABLED_KEY);
+  if (storedValue === null) {
+    return true;
+  }
+
+  return storedValue === "true";
 }
 
 export function setDebugLoggingEnabled(enabled: boolean): void {

@@ -74,12 +74,14 @@ describe("debugLogService", () => {
     await clearDebugLogEntries();
   });
 
-  it("enables and disables debug logging", () => {
-    expect(isDebugLoggingEnabled()).toBe(false);
-    setDebugLoggingEnabled(true);
+  it("defaults debug logging to enabled until the user explicitly disables it", () => {
     expect(isDebugLoggingEnabled()).toBe(true);
+
     setDebugLoggingEnabled(false);
     expect(isDebugLoggingEnabled()).toBe(false);
+
+    setDebugLoggingEnabled(true);
+    expect(isDebugLoggingEnabled()).toBe(true);
   });
 
   it("drops oldest entries when max local size is exceeded", async () => {

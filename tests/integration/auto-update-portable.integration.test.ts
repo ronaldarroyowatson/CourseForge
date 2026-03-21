@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +10,37 @@ import JSZip from "jszip";
 
 const repoRoot = join(__dirname, "..", "..");
 const updaterScriptPath = join(repoRoot, "scripts", "auto-update-portable.ps1");
+const integrityScriptSource = readFileSync(
+  join(repoRoot, "scripts", "installer", "Test-CourseForge-Integrity.ps1"),
+  "utf8"
+);
+
+function buildPortableManifest(version: string, files: Record<string, string>) {
+  const manifestFiles = Object.entries(files)
+    .filter(([filePath]) => filePath !== "manifest.json")
+    .map(([filePath, content]) => ({
+      path: filePath,
+      sizeBytes: Buffer.byteLength(content),
+      sha256: createHash("sha256").update(content).digest("hex"),
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+
+  return JSON.stringify(
+    {
+      name: "CourseForge",
+      version,
+      generatedAtUtc: "2026-03-20T00:00:00.000Z",
+      dependencyVersions: { node: ">=20 <25" },
+      requiredNodeVersion: ">=20 <25",
+      requiredConfigSchemaVersion: "1",
+      requiredDatabaseSchemaVersion: "1",
+      requiredExtensionSchemaVersion: "1",
+      files: manifestFiles,
+    },
+    null,
+    2
+  );
+}
 
 async function createPortableZip(zipPath: string, files: Record<string, string>) {
   const zip = new JSZip();
@@ -210,10 +242,13 @@ describe("portable updater script", () => {
 
     try {
       const zipPath = join(root, "portable.zip");
-      await createPortableZip(zipPath, {
+      const files = {
         "webapp/index.html": "<html><body>updated</body></html>",
         "package-manifest.json": JSON.stringify({ version: "1.2.7" }, null, 2),
-      });
+        "Test-CourseForge-Integrity.ps1": integrityScriptSource,
+      } satisfies Record<string, string>;
+      files["manifest.json"] = buildPortableManifest("1.2.7", files);
+      await createPortableZip(zipPath, files);
 
       const assetServer = await startAssetServer(zipPath);
       server = assetServer.server;
@@ -354,4 +389,199 @@ describe("portable updater script", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform !== "win32")("rejects a downloaded package when manifest.json is missing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-updater-"));
+    let server: ChildProcess | null = null;
+
+    try {
+      const zipPath = join(root, "portable.zip");
+      await createPortableZip(zipPath, {
+        "webapp/index.html": "<html><body>updated</body></html>",
+        "package-manifest.json": JSON.stringify({ version: "1.2.7" }, null, 2),
+        "Test-CourseForge-Integrity.ps1": integrityScriptSource,
+      });
+
+      const assetServer = await startAssetServer(zipPath);
+      server = assetServer.server;
+
+      const releasePath = join(root, "latest.json");
+      writeFileSync(
+        releasePath,
+        JSON.stringify(
+          {
+            tag_name: "v1.2.7",
+            assets: [
+              {
+                name: "CourseForge-1.2.7-portable.zip",
+                browser_download_url: assetServer.url,
+              },
+            ],
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const result = await runUpdater([
+        "-PackageRoot",
+        root,
+        "-CurrentVersion",
+        "1.2.6",
+        "-LatestReleaseJsonPath",
+        releasePath,
+        "-StageOnly",
+      ]);
+
+      const updaterLog = readFileSync(join(root, "updater.log"), "utf8");
+      const statusPayload = JSON.parse(readFileSync(join(root, "updater-status.json"), "utf8")) as {
+        state?: string;
+        lastError?: string;
+      };
+
+      expect(result.status).toBe(0);
+      expect(existsSync(join(root, "pending-update.json"))).toBe(false);
+      expect(statusPayload.state).toBe("error");
+      expect(statusPayload.lastError).toBe("missing-manifest");
+      expect(updaterLog).toContain("Downloaded update is missing manifest.json.");
+    } finally {
+      await closeServer(server);
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 15000);
+
+  it.skipIf(process.platform !== "win32")("rejects a downloaded package when its declared version does not match the release version", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-updater-"));
+    let server: ChildProcess | null = null;
+
+    try {
+      const zipPath = join(root, "portable.zip");
+      const files = {
+        "webapp/index.html": "<html><body>updated</body></html>",
+        "package-manifest.json": JSON.stringify({ version: "1.2.6" }, null, 2),
+        "Test-CourseForge-Integrity.ps1": integrityScriptSource,
+      } satisfies Record<string, string>;
+      files["manifest.json"] = buildPortableManifest("1.2.6", files);
+      await createPortableZip(zipPath, files);
+
+      const assetServer = await startAssetServer(zipPath);
+      server = assetServer.server;
+
+      const releasePath = join(root, "latest.json");
+      writeFileSync(
+        releasePath,
+        JSON.stringify(
+          {
+            tag_name: "v1.2.7",
+            assets: [
+              {
+                name: "CourseForge-1.2.7-portable.zip",
+                browser_download_url: assetServer.url,
+              },
+            ],
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const result = await runUpdater([
+        "-PackageRoot",
+        root,
+        "-CurrentVersion",
+        "1.2.6",
+        "-LatestReleaseJsonPath",
+        releasePath,
+        "-StageOnly",
+      ]);
+
+      const updaterLog = readFileSync(join(root, "updater.log"), "utf8");
+      const statusPayload = JSON.parse(readFileSync(join(root, "updater-status.json"), "utf8")) as {
+        state?: string;
+        lastError?: string;
+      };
+
+      expect(result.status).toBe(0);
+      expect(existsSync(join(root, "pending-update.json"))).toBe(false);
+      expect(statusPayload.state).toBe("error");
+      expect(statusPayload.lastError).toBe("package-version-mismatch");
+      expect(updaterLog).toContain("Downloaded update package version '1.2.6' did not match expected version '1.2.7'.");
+    } finally {
+      await closeServer(server);
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 15000);
+
+  it.skipIf(process.platform !== "win32")("rejects a downloaded package when integrity validation fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-updater-"));
+    let server: ChildProcess | null = null;
+
+    try {
+      const zipPath = join(root, "portable.zip");
+      const files = {
+        "webapp/index.html": "<html><body>updated</body></html>",
+        "package-manifest.json": JSON.stringify({ version: "1.2.7" }, null, 2),
+        "Test-CourseForge-Integrity.ps1": integrityScriptSource,
+      } satisfies Record<string, string>;
+      const manifest = JSON.parse(buildPortableManifest("1.2.7", files)) as {
+        files: Array<{ path: string; sizeBytes: number; sha256: string }>;
+      };
+      const webappEntry = manifest.files.find((entry) => entry.path === "webapp/index.html");
+      if (!webappEntry) {
+        throw new Error("Expected manifest entry for webapp/index.html");
+      }
+      webappEntry.sha256 = "0".repeat(64);
+      files["manifest.json"] = JSON.stringify(manifest, null, 2);
+      await createPortableZip(zipPath, files);
+
+      const assetServer = await startAssetServer(zipPath);
+      server = assetServer.server;
+
+      const releasePath = join(root, "latest.json");
+      writeFileSync(
+        releasePath,
+        JSON.stringify(
+          {
+            tag_name: "v1.2.7",
+            assets: [
+              {
+                name: "CourseForge-1.2.7-portable.zip",
+                browser_download_url: assetServer.url,
+              },
+            ],
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const result = await runUpdater([
+        "-PackageRoot",
+        root,
+        "-CurrentVersion",
+        "1.2.6",
+        "-LatestReleaseJsonPath",
+        releasePath,
+        "-StageOnly",
+      ]);
+
+      const updaterLog = readFileSync(join(root, "updater.log"), "utf8");
+      const statusPayload = JSON.parse(readFileSync(join(root, "updater-status.json"), "utf8")) as {
+        state?: string;
+        lastError?: string;
+      };
+
+      expect(result.status).toBe(0);
+      expect(existsSync(join(root, "pending-update.json"))).toBe(false);
+      expect(statusPayload.state).toBe("error");
+      expect(statusPayload.lastError).toBe("integrity-check-failed");
+      expect(updaterLog).toContain("Downloaded update failed integrity validation.");
+    } finally {
+      await closeServer(server);
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 15000);
 });

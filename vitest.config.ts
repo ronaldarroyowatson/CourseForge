@@ -8,5 +8,6 @@ export default defineConfig({
     setupFiles: ["./tests/integration/setup.ts"],
     globals: true,
     exclude: ["**/node_modules/**", "**/xml.*.test.ts"],
+    testTimeout: 30000,
   },
 });

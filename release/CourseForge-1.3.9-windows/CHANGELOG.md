@@ -6,12 +6,6 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
-## [1.4.0] - 2026-03-22
-
-### Fixed (1.4.0)
-
-- Cloud OCR provider now automatically becomes primary when it becomes available for the first time, allowing users to use cloud extraction immediately without manual settings adjustment. Previous localStorage preferences that set local OCR as primary (from when cloud was unavailable) are now auto-reset.
-
 ## [1.3.9] - 2026-03-21
 
 ### Added (1.3.9)

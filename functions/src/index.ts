@@ -1513,7 +1513,7 @@ export const getAiProviderPolicy = onCall(async (request) => {
   return success("Loaded AI provider policy.", normalized);
 });
 
-export const getAiProviderStatus = onCall(async (request) => {
+export const getAiProviderStatus = onCall({ invoker: "public", secrets: [openAiKeySecret] }, async (request) => {
   const openaiKey = getOpenAiApiKey();
 
   return success("Loaded AI provider status.", {
@@ -1661,7 +1661,7 @@ export const listRecentDebugUploads = onCall(async (request) => {
   return success("Loaded recent debug uploads.", rows);
 });
 
-export const extractScreenshotText = onCall({ secrets: [openAiKeySecret] }, async (request) => {
+export const extractScreenshotText = onCall({ secrets: [openAiKeySecret], invoker: "public" }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to extract screenshot text.");
   }

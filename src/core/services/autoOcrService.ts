@@ -43,6 +43,7 @@ export interface AutoOcrProviderHealthRecord {
 
 const AUTO_OCR_PROVIDER_ORDER_KEY = "courseforge.autoOcr.providerOrder";
 const AUTO_OCR_CIRCUIT_STATE_KEY = "courseforge.autoOcr.circuitState";
+const AUTO_OCR_CLOUD_AVAILABILITY_DETECTION_KEY = "courseforge.autoOcr.cloudAvailableOnce";
 const AUTO_OCR_AVAILABILITY_CACHE_TTL_MS = 3 * 60 * 1000;
 
 const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
@@ -536,6 +537,28 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
       }
 
       const resolvedState: ProviderAvailabilityState = cloudProvider.available ? "available" : "unavailable";
+      
+      // Auto-reset provider order when cloud becomes available for the first time
+      if (resolvedState === "available") {
+        const storage = getStorage();
+        const wasCloudAvailableBefore = storage?.getItem(AUTO_OCR_CLOUD_AVAILABILITY_DETECTION_KEY) === "true";
+        if (!wasCloudAvailableBefore) {
+          storage?.setItem(AUTO_OCR_CLOUD_AVAILABILITY_DETECTION_KEY, "true");
+          const currentOrder = getAutoOcrProviderOrder();
+          if (currentOrder[0] !== "cloud_openai_vision") {
+            setAutoOcrProviderOrder(DEFAULT_PROVIDER_ORDER);
+            void emitOcrDiagnostic("provider_order_auto_reset_on_cloud_availability", {
+              level: "info",
+              traceId,
+              context: {
+                previousOrder: currentOrder,
+                newOrder: DEFAULT_PROVIDER_ORDER,
+              },
+            });
+          }
+        }
+      }
+      
       autoOcrAvailabilityCache = {
         state: resolvedState,
         expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,

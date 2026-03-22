@@ -6,50 +6,6 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
-## [1.4.0] - 2026-03-22
-
-### Fixed (1.4.0)
-
-- Cloud OCR provider now automatically becomes primary when it becomes available for the first time, allowing users to use cloud extraction immediately without manual settings adjustment. Previous localStorage preferences that set local OCR as primary (from when cloud was unavailable) are now auto-reset.
-
-## [1.3.9] - 2026-03-21
-
-### Added (1.3.9)
-
-- File-backed OCR diagnostics endpoint in the packaged local server (`/api/ocr-debug-log`) that writes structured JSONL events to `ocr-debug.log` in the install package root.
-- OCR diagnostics tail endpoint (`/api/ocr-debug-log-tail`) for quick local inspection during live manual reproduction runs.
-- OCR diagnostics tail inclusion in updater diagnostics payload (`/api/updater-diagnostics`) to centralize troubleshooting context.
-
-### Changed (1.3.9)
-
-- Cloud/local OCR pipeline now emits structured diagnostic events with trace IDs across provider health probes, cloud callable execution, fallback transitions, and all-provider failure summaries.
-- Cloud OCR callable failure errors now include traceable context in thrown messages to simplify correlation with local diagnostics logs.
-- Expanded OCR unit coverage to assert diagnostics emission and trace-bearing failure behavior.
-
-### Verified (1.3.9)
-
-- `npx vitest run tests/core/autoOcrService.test.ts --reporter=dot --silent`
-- `npx vitest run tests/integration/update-status-server.integration.test.ts --reporter=dot --silent`
-
-## [1.3.8] - 2026-03-21
-
-### Changed (1.3.8)
-
-- Manual `Check for Updates` now launches the same background StageOnly updater flow used at startup when a newer release is detected, so the next patch is downloaded and staged before restart.
-- The packaged local updater API now returns stage metadata (`stageRequested`, `stageAccepted`, `stageReason`, `stageMessage`, `stagePid`) so the settings UI can explain whether staging started or why it did not.
-- Settings update status messaging now reports background staging kickoff while the existing progress telemetry continues to show bytes, speed, and file counts during manual staging.
-
-### Added (1.3.8)
-
-- Integration coverage for manual-stage response metadata in `tests/integration/update-status-server.integration.test.ts`.
-- Integration coverage for stage-aware manual update messaging in `tests/integration/settings.updater.integration.test.tsx`.
-
-### Verified (1.3.8)
-
-- `npm run typecheck`
-- `npm run test:e2e:autoupdate`
-- `npm run check:installer`
-
 ### Added (Unreleased)
 
 - Integration coverage for launcher staged-update apply/retry behavior (`auto-update-launcher.integration.test.ts`).

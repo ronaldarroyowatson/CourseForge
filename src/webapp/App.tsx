@@ -53,6 +53,11 @@ export function App(): React.JSX.Element {
       <div className="app-shell app-shell--login">
         <main className="app-main app-main--login">
           <section className="placeholder-panel login-panel">
+            <img
+              src="/placeholder-icons/coderabbit-placeholder.svg"
+              alt="CourseForge placeholder icon"
+              className="placeholder-brand-icon"
+            />
             <h2>Loading CourseForge</h2>
             <p>Restoring your persistent session and syncing your workspace.</p>
           </section>

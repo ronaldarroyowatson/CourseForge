@@ -1,7 +1,7 @@
 {
     "name":  "CourseForge",
-    "version":  "1.4.17",
-    "generatedAtUtc":  "2026-03-22T20:16:25.4779234Z",
+    "version":  "1.4.18",
+    "generatedAtUtc":  "2026-03-22T20:40:13.5218950Z",
     "dependencyVersions":  {
                                "node":  "\u003e=20 \u003c25"
                            },
@@ -103,7 +103,7 @@
                   {
                       "path":  "Check-For-CourseForge-Updates.cmd",
                       "sizeBytes":  595,
-                      "sha256":  "cf578d00faabe7b280cb1b238da5182218277db0e87372557d1a2627d79da4fb"
+                      "sha256":  "c2351a39c1d1d2a18d77b2f68b288844f9e3fce48a01439027b42b0b16b3a4ac"
                   },
                   {
                       "path":  "AutoUpdate-CourseForge.ps1",
@@ -117,13 +117,13 @@
                   },
                   {
                       "path":  "CHANGELOG.md",
-                      "sizeBytes":  33533,
-                      "sha256":  "0831ced7426c9ffb13d6b2819af97d19f7ece1a59524530f7b32d816127af214"
+                      "sizeBytes":  36749,
+                      "sha256":  "fd75826e573856de4fa377734cecf4b378bc5a36ec940887db9d6f72f13fb86c"
                   },
                   {
                       "path":  "CourseForge.ico",
-                      "sizeBytes":  41086,
-                      "sha256":  "021bbce86f739cb841c23d340f7e4d76e3c54c619ad175e05e8b12a2c5de6f4b"
+                      "sizeBytes":  26399,
+                      "sha256":  "6874b78913251da0e05dc6f304835a6b0720e466fe77e276d977c8aaf2cc175d"
                   },
                   {
                       "path":  "Start-CourseForge.ps1",
@@ -153,7 +153,7 @@
                   {
                       "path":  "package-manifest.json",
                       "sizeBytes":  1315,
-                      "sha256":  "22db780fa44ca9be60756138c17ca68931dd5c968146366f712b58dae118d149"
+                      "sha256":  "a9deef3bb6a6ad3272732365966dc30fd545e51cafad4f0f955a20ab270bc9a8"
                   },
                   {
                       "path":  "README.md",

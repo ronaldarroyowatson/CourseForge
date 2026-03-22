@@ -21,6 +21,32 @@ $repoName = if ($env:COURSEFORGE_UPDATE_REPO_NAME) { $env:COURSEFORGE_UPDATE_REP
 function New-CourseForgeIcon {
   param([string]$OutputPath)
 
+  $svgSourcePath = Join-Path $repoRoot "src/webapp/public/placeholder-icons/coderabbit-placeholder.svg"
+  $prebuiltIcoPath = Join-Path $repoRoot "src/assets/CourseForge.ico"
+
+  if (-not (Test-Path $svgSourcePath)) {
+    Write-Error "SVG source not found: $svgSourcePath"
+    exit 1
+  }
+
+  $magickPath = Get-Command magick -ErrorAction SilentlyContinue
+  if ($magickPath) {
+    Write-Host "Converting SVG to ICO using ImageMagick..." -ForegroundColor Cyan
+    & magick convert -background transparent -density 384 -define icon:auto-resize=256,128,96,64,48,32,16 $svgSourcePath $OutputPath
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "ICO generated from SVG successfully" -ForegroundColor Green
+      return
+    }
+  }
+
+  if (Test-Path $prebuiltIcoPath) {
+    Write-Host "Using pre-built ICO file..." -ForegroundColor Cyan
+    Copy-Item -Path $prebuiltIcoPath -Destination $OutputPath -Force
+    Write-Host "ICO copied successfully" -ForegroundColor Green
+    return
+  }
+
+  Write-Host "Generating fallback icon using System.Drawing..." -ForegroundColor Yellow
   Add-Type -AssemblyName System.Drawing
 
   $bitmap = New-Object System.Drawing.Bitmap 256, 256
@@ -30,56 +56,23 @@ function New-CourseForgeIcon {
 
   $navy = [System.Drawing.Color]::FromArgb(255, 24, 44, 72)
   $paper = [System.Drawing.Color]::FromArgb(255, 247, 239, 220)
-  $gold = [System.Drawing.Color]::FromArgb(255, 199, 142, 63)
-  $steel = [System.Drawing.Color]::FromArgb(255, 91, 103, 118)
-  $ember = [System.Drawing.Color]::FromArgb(255, 192, 88, 44)
-
   $bookBrush = New-Object System.Drawing.SolidBrush $navy
   $pageBrush = New-Object System.Drawing.SolidBrush $paper
-  $goldBrush = New-Object System.Drawing.SolidBrush $gold
-  $steelBrush = New-Object System.Drawing.SolidBrush $steel
-  $emberBrush = New-Object System.Drawing.SolidBrush $ember
-  $outlinePen = New-Object System.Drawing.Pen $navy, 8
-  $pagePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 214, 196, 154)), 4
-  $steelPen = New-Object System.Drawing.Pen $steel, 14
 
   $graphics.FillRectangle($bookBrush, 30, 54, 196, 148)
   $graphics.FillRectangle($pageBrush, 52, 72, 152, 112)
-  $graphics.DrawLine($pagePen, 128, 70, 128, 184)
-  $graphics.DrawLine($pagePen, 72, 100, 108, 100)
-  $graphics.DrawLine($pagePen, 72, 128, 108, 128)
-  $graphics.DrawLine($pagePen, 72, 156, 108, 156)
-  $graphics.DrawLine($pagePen, 148, 100, 184, 100)
-  $graphics.DrawLine($pagePen, 148, 128, 184, 128)
-  $graphics.DrawLine($pagePen, 148, 156, 184, 156)
-  $graphics.FillRectangle($goldBrush, 118, 48, 20, 162)
-  $graphics.FillRectangle($steelBrush, 144, 84, 62, 18)
-  $graphics.FillRectangle($steelBrush, 170, 58, 12, 72)
-  $graphics.FillRectangle($emberBrush, 118, 132, 104, 16)
-  $graphics.FillPolygon($steelBrush, [System.Drawing.Point[]]@(
-    (New-Object System.Drawing.Point(108, 178)),
-    (New-Object System.Drawing.Point(222, 178)),
-    (New-Object System.Drawing.Point(202, 204)),
-    (New-Object System.Drawing.Point(128, 204))
-  ))
-  $graphics.DrawLine($steelPen, 160, 148, 160, 178)
 
   $icon = [System.Drawing.Icon]::FromHandle($bitmap.GetHicon())
   $stream = [System.IO.File]::Open($OutputPath, [System.IO.FileMode]::Create)
   try {
     $icon.Save($stream)
+    Write-Host "Fallback ICO generated successfully" -ForegroundColor Green
   }
   finally {
     $stream.Dispose()
     $graphics.Dispose()
     $bookBrush.Dispose()
     $pageBrush.Dispose()
-    $goldBrush.Dispose()
-    $steelBrush.Dispose()
-    $emberBrush.Dispose()
-    $outlinePen.Dispose()
-    $pagePen.Dispose()
-    $steelPen.Dispose()
     $icon.Dispose()
     $bitmap.Dispose()
   }

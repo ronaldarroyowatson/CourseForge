@@ -210,7 +210,6 @@ describe("Settings updater communication", () => {
     render(<SettingsPage onBack={() => undefined} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Latest detected by updater service:/i)).toBeInTheDocument();
       expect(screen.getAllByText("v1.2.80").length).toBeGreaterThanOrEqual(1);
     });
 

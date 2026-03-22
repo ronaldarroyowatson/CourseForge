@@ -1,0 +1,34 @@
+{
+    "name":  "CourseForge",
+    "version":  "1.4.17",
+    "packageType":  "windows",
+    "createdAtUtc":  "2026-03-22T20:01:57.7638235Z",
+    "includes":  [
+                     "webapp/",
+                     "extension/",
+                     "AutoUpdate-CourseForge.ps1",
+                     "Check-For-CourseForge-Updates.cmd",
+                     "Start-CourseForge.cmd",
+                     "Start-CourseForge.ps1",
+                     "courseforge-serve.cjs",
+                     "courseforge-serve.js",
+                     "boot-splash.html",
+                     "Test-CourseForge-Integrity.ps1",
+                     "CourseForge-Start.url",
+                     "Install-CourseForge-Windows.ps1",
+                     "Install-CourseForge-Windows.cmd",
+                     "Uninstall-CourseForge-Windows.cmd",
+                     "installer-integrity.json",
+                     "README.md",
+                     "CHANGELOG.md",
+                     "LICENSE"
+                 ],
+    "updates":  {
+                    "provider":  "github-releases",
+                    "owner":  "ronaldarroyowatson",
+                    "repo":  "CourseForge",
+                    "latestEndpoint":  "https://api.github.com/repos/ronaldarroyowatson/CourseForge/releases/latest",
+                    "assetTemplate":  "CourseForge-{version}-portable.zip",
+                    "startupCheck":  true
+                }
+}

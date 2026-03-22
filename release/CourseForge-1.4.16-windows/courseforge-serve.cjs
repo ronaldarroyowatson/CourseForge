@@ -130,12 +130,16 @@ function tailFileLines(filePath, maxLines) {
 
 function readUpdaterProgress() {
   const progressPath = path.join(packageRoot, "updater-status.json");
+  const manifestPath = path.join(packageRoot, "package-manifest.json");
+  const manifest = readJsonFile(manifestPath);
+  const manifestVersion = manifest?.version || null;
+
   const payload = readJsonFile(progressPath);
   if (!payload || typeof payload !== "object") {
     return {
       state: "idle",
       mode: null,
-      currentVersion: null,
+      currentVersion: manifestVersion,
       latestVersion: null,
       assetName: null,
       assetSizeBytes: null,
@@ -147,6 +151,11 @@ function readUpdaterProgress() {
       lastError: null,
       updatedAt: null,
     };
+  }
+
+  // Always fill currentVersion from manifest when the status file doesn't have it
+  if (!payload.currentVersion && manifestVersion) {
+    payload.currentVersion = manifestVersion;
   }
 
   return payload;

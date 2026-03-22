@@ -757,9 +757,17 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
     }
   }
 
-  const detectedLatestByUpdaterService = updaterProgress?.latestVersion
-    || updaterDiagnostics?.lastCheck?.latestVersion
-    || null;
+  const bestLatestVersion = (() => {
+    const a = latestAvailableVersion || null;
+    const b = updaterProgress?.latestVersion || updaterDiagnostics?.lastCheck?.latestVersion || null;
+    if (!a) return b;
+    if (!b) return a;
+    const sa = parseSemver(a);
+    const sb = parseSemver(b);
+    if (!sa) return b;
+    if (!sb) return a;
+    return compareSemver(sb, sa) > 0 ? b : a;
+  })();
 
   return (
     <section className="settings-page placeholder-panel">
@@ -994,10 +1002,11 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
 
         <article className="settings-card">
           <h3>App Updates</h3>
-          <p>Current version: <strong>{formatVersionLabel(currentAppVersion)}</strong></p>
-          <p>Latest available: <strong>{latestAvailableVersion ? formatVersionLabel(latestAvailableVersion) : "Not checked yet"}</strong></p>
-          <p>Latest detected by updater service: <strong>{detectedLatestByUpdaterService ? formatVersionLabel(detectedLatestByUpdaterService) : "No updater detection yet"}</strong></p>
-          <p>The portable and Windows launcher packages update automatically in the background each time you start the app.</p>
+          {currentAppVersion !== "unknown" ? (
+            <p>Current version: <strong>{formatVersionLabel(currentAppVersion)}</strong></p>
+          ) : null}
+          <p>Latest available: <strong>{bestLatestVersion ? formatVersionLabel(bestLatestVersion) : "Not checked yet"}</strong></p>
+          <p className="settings-meta">Updates install automatically on startup.</p>
           {updaterProgress?.message ? (
             <p className="settings-meta">Updater status: {updaterProgress.message}</p>
           ) : null}

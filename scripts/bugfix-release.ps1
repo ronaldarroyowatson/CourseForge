@@ -38,7 +38,10 @@ param(
   [switch]$SkipPackage,
 
   # Skip creating the GitHub release (still commits and tags)
-  [switch]$SkipGitHub
+  [switch]$SkipGitHub,
+
+  # Skip only the Firestore rules tests (use when emulator port is occupied by a stale process)
+  [switch]$SkipRules
 )
 
 $ErrorActionPreference = "Stop"
@@ -99,7 +102,12 @@ if (-not $SkipTests) {
 
   Write-Host ""
   Write-Host "--- [3/3] Full test battery (test:e2e:comprehensive) ---" -ForegroundColor Cyan
-  npm run test:e2e:comprehensive
+  if ($SkipRules) {
+    Write-Host "[WARNING] Skipping Firestore rules tests (-SkipRules). Ensure rules are unchanged." -ForegroundColor Yellow
+    npm run test:e2e:no-rules
+  } else {
+    npm run test:e2e:comprehensive
+  }
   if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Error "TESTS FAILED. Fix all failing tests before releasing."

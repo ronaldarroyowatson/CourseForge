@@ -6,6 +6,19 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-03-22
+
+### Fixed (1.4.6)
+
+- Manual `Check for Updates` now resolves known version state from updater progress and diagnostics before surfacing fetch failures, so equal current/latest versions report "Already up to date" instead of a generic fetch error.
+- App Updates now keeps "Latest detected by updater service" synchronized with confirmed latest-version hints from manual checks and diagnostics, preventing false "No updater detection yet" status when detection already succeeded.
+
+### Verified (1.4.6)
+
+- `npm run test:e2e`
+- `npm run test:e2e:packaged`
+- `npx vitest run tests/integration/settings.updater.integration.test.tsx`
+
 ## [1.4.5] - 2026-03-22
 
 ### Fixed (1.4.5)

@@ -375,6 +375,14 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       setUpdaterDiagnostics(payload);
       if (payload.lastCheck?.latestVersion) {
         setLatestAvailableVersion(payload.lastCheck.latestVersion);
+        setUpdaterProgress((previous) => ({
+          ...(previous || {}),
+          latestVersion: payload.lastCheck?.latestVersion ?? previous?.latestVersion ?? null,
+          state: previous?.state ?? "idle",
+          mode: previous?.mode ?? null,
+          message: previous?.message ?? null,
+          updatedAt: new Date().toISOString(),
+        }));
       }
     } catch {
       // Best effort diagnostics view only.
@@ -494,6 +502,100 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
     }
   }
 
+  async function resolveKnownUpdateVersions(
+    currentVersionHint?: string | null,
+    latestVersionHint?: string | null
+  ): Promise<{ currentVersion: string | null; latestVersion: string | null; alreadyCurrent: boolean }> {
+    let resolvedCurrentVersion = currentVersionHint || currentAppVersion || updaterProgress?.currentVersion || null;
+    let resolvedLatestVersion = latestVersionHint || latestAvailableVersion || updaterProgress?.latestVersion || null;
+
+    let currentSemver = parseSemver(resolvedCurrentVersion || "");
+    let latestSemver = parseSemver(resolvedLatestVersion || "");
+
+    if (!currentSemver || !latestSemver) {
+      try {
+        const progressResponse = await fetch(toNoStoreApiUrl("/api/updater-progress"), { cache: "no-store" });
+        if (progressResponse.ok) {
+          const progressData = await progressResponse.json() as UpdaterProgress;
+          setUpdaterProgress(progressData);
+
+          if (progressData.currentVersion) {
+            setCurrentAppVersion(progressData.currentVersion);
+            if (!parseSemver(resolvedCurrentVersion || "")) {
+              resolvedCurrentVersion = progressData.currentVersion;
+            }
+          }
+
+          if (progressData.latestVersion) {
+            setLatestAvailableVersion(progressData.latestVersion);
+            if (!parseSemver(resolvedLatestVersion || "")) {
+              resolvedLatestVersion = progressData.latestVersion;
+            }
+          }
+
+          if (progressData.releaseUrl) {
+            setLatestReleaseUrl(progressData.releaseUrl);
+          }
+
+          currentSemver = parseSemver(resolvedCurrentVersion || "");
+          latestSemver = parseSemver(resolvedLatestVersion || "");
+        }
+      } catch {
+        // Keep this helper best-effort only.
+      }
+    }
+
+    if (!currentSemver || !latestSemver) {
+      try {
+        const diagnosticsResponse = await fetch(toNoStoreApiUrl("/api/updater-diagnostics"), { cache: "no-store" });
+        if (diagnosticsResponse.ok) {
+          const diagnosticsData = await diagnosticsResponse.json() as UpdaterDiagnostics;
+          setUpdaterDiagnostics(diagnosticsData);
+
+          const diagnosticsLatestVersion = diagnosticsData.lastCheck?.latestVersion || null;
+          const diagnosticsCurrentVersion = diagnosticsData.currentVersion || null;
+
+          if (diagnosticsLatestVersion) {
+            setLatestAvailableVersion(diagnosticsLatestVersion);
+            if (!parseSemver(resolvedLatestVersion || "")) {
+              resolvedLatestVersion = diagnosticsLatestVersion;
+            }
+            setUpdaterProgress((previous) => ({
+              ...(previous || {}),
+              latestVersion: diagnosticsLatestVersion,
+              state: previous?.state ?? "idle",
+              mode: previous?.mode ?? null,
+              message: previous?.message ?? null,
+              updatedAt: new Date().toISOString(),
+            }));
+          }
+
+          if (diagnosticsCurrentVersion) {
+            setCurrentAppVersion(diagnosticsCurrentVersion);
+            if (!parseSemver(resolvedCurrentVersion || "")) {
+              resolvedCurrentVersion = diagnosticsCurrentVersion;
+            }
+          }
+
+          currentSemver = parseSemver(resolvedCurrentVersion || "");
+          latestSemver = parseSemver(resolvedLatestVersion || "");
+        }
+      } catch {
+        // Keep this helper best-effort only.
+      }
+    }
+
+    return {
+      currentVersion: resolvedCurrentVersion,
+      latestVersion: resolvedLatestVersion,
+      alreadyCurrent: Boolean(
+        currentSemver
+        && latestSemver
+        && compareSemver(currentSemver, latestSemver) >= 0
+      ),
+    };
+  }
+
   async function handleCheckForUpdates(): Promise<void> {
     setIsCheckingUpdate(true);
     setUpdateCheckStatus(null);
@@ -543,16 +645,23 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       if (data?.releaseUrl) {
         setLatestReleaseUrl(data.releaseUrl);
       }
+      if (data?.latestVersion || data?.currentVersion || data?.releaseUrl) {
+        setUpdaterProgress((previous) => ({
+          ...(previous || {}),
+          latestVersion: data?.latestVersion ?? previous?.latestVersion ?? null,
+          currentVersion: data?.currentVersion ?? previous?.currentVersion ?? null,
+          releaseUrl: data?.releaseUrl ?? previous?.releaseUrl ?? null,
+          state: previous?.state ?? "idle",
+          mode: previous?.mode ?? null,
+          message: previous?.message ?? null,
+          updatedAt: new Date().toISOString(),
+        }));
+      }
 
-      const resolvedCurrentVersion = data?.currentVersion || currentAppVersion;
-      const knownLatestVersion = data?.latestVersion || latestAvailableVersion || updaterProgress?.latestVersion || null;
-      const knownCurrentSemver = parseSemver(resolvedCurrentVersion);
-      const knownLatestSemver = parseSemver(knownLatestVersion || "");
-      const knownAlreadyCurrent = Boolean(
-        knownCurrentSemver
-        && knownLatestSemver
-        && compareSemver(knownCurrentSemver, knownLatestSemver) >= 0
-      );
+      const knownVersions = await resolveKnownUpdateVersions(data?.currentVersion, data?.latestVersion);
+      const resolvedCurrentVersion = knownVersions.currentVersion || currentAppVersion;
+      const knownLatestVersion = knownVersions.latestVersion;
+      const knownAlreadyCurrent = knownVersions.alreadyCurrent;
 
       if (!response.ok) {
         if (knownAlreadyCurrent) {
@@ -627,17 +736,13 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown request failure";
 
-      const knownLatestVersion = latestAvailableVersion || updaterProgress?.latestVersion || null;
-      const knownCurrentSemver = parseSemver(currentAppVersion);
-      const knownLatestSemver = parseSemver(knownLatestVersion || "");
-      const knownAlreadyCurrent = Boolean(
-        knownCurrentSemver
-        && knownLatestSemver
-        && compareSemver(knownCurrentSemver, knownLatestSemver) >= 0
-      );
+      const knownVersions = await resolveKnownUpdateVersions(currentAppVersion, latestAvailableVersion);
+      const knownLatestVersion = knownVersions.latestVersion;
+      const knownCurrentVersion = knownVersions.currentVersion || currentAppVersion;
+      const knownAlreadyCurrent = knownVersions.alreadyCurrent;
 
       if (knownAlreadyCurrent) {
-        setUpdateCheckStatus(`Already up to date (latest confirmed: ${formatVersionLabel(knownLatestVersion)}). You're running ${formatVersionLabel(currentAppVersion)}.`);
+        setUpdateCheckStatus(`Already up to date (latest confirmed: ${formatVersionLabel(knownLatestVersion)}). You're running ${formatVersionLabel(knownCurrentVersion)}.`);
         return;
       }
 
@@ -647,6 +752,10 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       setIsCheckingUpdate(false);
     }
   }
+
+  const detectedLatestByUpdaterService = updaterProgress?.latestVersion
+    || updaterDiagnostics?.lastCheck?.latestVersion
+    || null;
 
   return (
     <section className="settings-page placeholder-panel">
@@ -883,7 +992,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
           <h3>App Updates</h3>
           <p>Current version: <strong>{formatVersionLabel(currentAppVersion)}</strong></p>
           <p>Latest available: <strong>{latestAvailableVersion ? formatVersionLabel(latestAvailableVersion) : "Not checked yet"}</strong></p>
-          <p>Latest detected by updater service: <strong>{updaterProgress?.latestVersion ? formatVersionLabel(updaterProgress.latestVersion) : "No updater detection yet"}</strong></p>
+          <p>Latest detected by updater service: <strong>{detectedLatestByUpdaterService ? formatVersionLabel(detectedLatestByUpdaterService) : "No updater detection yet"}</strong></p>
           <p>The portable and Windows launcher packages update automatically in the background each time you start the app.</p>
           {updaterProgress?.message ? (
             <p className="settings-meta">Updater status: {updaterProgress.message}</p>

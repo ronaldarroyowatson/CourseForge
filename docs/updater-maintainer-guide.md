@@ -58,6 +58,7 @@ The updater design goal is fail-safe behavior: update failures must never block 
 5. Prefer additive changes over schema-breaking changes.
 6. Never stage/apply payloads before contract validation passes.
 7. Preserve cache and runtime directories during integrity checks (`logs/`, `user-data/`, `ocr-cache/`, `_pending_update/`, `_rollback/`).
+8. Manual check UX must reconcile with diagnostics: before showing fetch-failure messaging, resolve latest/current versions from `updater-status.json` and `updater-check.json` hints so already-current installs are reported as up to date.
 
 ## 6. Test matrix expectations
 
@@ -100,3 +101,4 @@ Critical scenarios to keep covered:
 3. If integrity issues appear, inspect `integrity-status.json` counts and paths.
 4. Re-run manual check from App Updates and inspect `/api/updater-diagnostics` payload.
 5. If packaging appears incomplete, run `npm run check:installer` and compare release artifacts.
+6. If App Updates shows "No updater detection yet" unexpectedly, compare `updaterProgress.latestVersion` with `updaterDiagnostics.lastCheck.latestVersion` and prefer the confirmed diagnostics version for operator triage.

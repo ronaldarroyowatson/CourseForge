@@ -423,4 +423,67 @@ describe("Settings updater communication", () => {
       expect(screen.getByText("Already up to date (latest confirmed: v1.3.2). You're running v1.3.2.")).toBeInTheDocument();
     });
   });
+
+  it("shows up-to-date status when manual check throws Failed to fetch but progress confirms equal versions", async () => {
+    let checkCallCount = 0;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.includes("/api/update-status")) {
+        return jsonResponse({ available: false, currentVersion: "1.4.5" });
+      }
+
+      if (url.includes("/api/check-for-updates")) {
+        checkCallCount += 1;
+        if (checkCallCount === 1) {
+          return jsonResponse({
+            ok: true,
+            available: false,
+            latestVersion: "1.4.5",
+            currentVersion: "1.4.5",
+          });
+        }
+
+        throw new TypeError("Failed to fetch");
+      }
+
+      if (url.includes("/api/updater-progress")) {
+        return jsonResponse({
+          state: "idle",
+          currentVersion: "1.4.5",
+          latestVersion: "1.4.5",
+          message: "No update found",
+        });
+      }
+
+      if (url.includes("/api/updater-diagnostics")) {
+        return jsonResponse({
+          checkedAt: "2026-03-21T00:00:00.000Z",
+          lastCheck: {
+            ok: true,
+            available: false,
+            currentVersion: "1.4.5",
+            latestVersion: "1.4.5",
+          },
+        });
+      }
+
+      return jsonResponse({ error: "not found" }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<SettingsPage onBack={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Current version:")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Check for Updates" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Already up to date (latest confirmed: v1.4.5). You're running v1.4.5.")).toBeInTheDocument();
+    });
+  });
 });

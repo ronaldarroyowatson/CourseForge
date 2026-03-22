@@ -65,6 +65,16 @@ describe("textbookAutoExtractionService", () => {
     expect(metadata.copyrightYear).toBe(2024);
   });
 
+  it("infers Science for Inspire Physical Science with Earth Science cover text", () => {
+    const metadata = extractMetadataFromOcrText([
+      "Student Edition",
+      "Inspire Physical Science with Earth Science",
+      "Mc Graw Hill",
+    ].join("\n"));
+
+    expect(metadata.subject).toBe("Science");
+  });
+
   it("parses TOC lines into chapters and sections", () => {
     const parsed = parseTocFromOcrText([
       "Table of Contents",

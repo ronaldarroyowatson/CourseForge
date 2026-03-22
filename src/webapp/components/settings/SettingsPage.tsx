@@ -35,6 +35,15 @@ function parseSemver(value: string): number[] | null {
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
+function formatVersionLabel(value: string | null | undefined): string {
+  const normalized = (value ?? "").trim();
+  if (!normalized) {
+    return "unknown";
+  }
+
+  return parseSemver(normalized) ? `v${normalized}` : normalized;
+}
+
 function compareSemver(left: number[], right: number[]): number {
   for (let i = 0; i < 3; i += 1) {
     const diff = (left[i] ?? 0) - (right[i] ?? 0);
@@ -547,7 +556,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
 
       if (!response.ok) {
         if (knownAlreadyCurrent) {
-          setUpdateCheckStatus(`Already up to date (latest confirmed: v${knownLatestVersion}). You're running v${resolvedCurrentVersion}.`);
+          setUpdateCheckStatus(`Already up to date (latest confirmed: ${formatVersionLabel(knownLatestVersion)}). You're running ${formatVersionLabel(resolvedCurrentVersion)}.`);
           return;
         }
 
@@ -569,7 +578,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
 
       if (!data || !data.ok) {
         if (knownAlreadyCurrent) {
-          setUpdateCheckStatus(`Already up to date (latest confirmed: v${knownLatestVersion}). You're running v${resolvedCurrentVersion}.`);
+          setUpdateCheckStatus(`Already up to date (latest confirmed: ${formatVersionLabel(knownLatestVersion)}). You're running ${formatVersionLabel(resolvedCurrentVersion)}.`);
           return;
         }
 
@@ -579,7 +588,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       }
 
       if (!data.available) {
-        setUpdateCheckStatus(`Already up to date. You're running v${resolvedCurrentVersion}.`);
+        setUpdateCheckStatus(`Already up to date. You're running ${formatVersionLabel(resolvedCurrentVersion)}.`);
         return;
       }
       const latest = data.latestVersion || null;
@@ -613,7 +622,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
 
         setUpdateCheckStatus(`Update available: v${latest}.`);
       } else {
-        setUpdateCheckStatus(`Already up to date. You're running v${resolvedCurrentVersion}.`);
+        setUpdateCheckStatus(`Already up to date. You're running ${formatVersionLabel(resolvedCurrentVersion)}.`);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown request failure";
@@ -628,7 +637,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       );
 
       if (knownAlreadyCurrent) {
-        setUpdateCheckStatus(`Already up to date (latest confirmed: v${knownLatestVersion}). You're running v${currentAppVersion}.`);
+        setUpdateCheckStatus(`Already up to date (latest confirmed: ${formatVersionLabel(knownLatestVersion)}). You're running ${formatVersionLabel(currentAppVersion)}.`);
         return;
       }
 
@@ -872,9 +881,9 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
 
         <article className="settings-card">
           <h3>App Updates</h3>
-          <p>Current version: <strong>v{currentAppVersion}</strong></p>
-          <p>Latest available: <strong>{latestAvailableVersion ? `v${latestAvailableVersion}` : "Not checked yet"}</strong></p>
-          <p>Latest detected by updater service: <strong>{updaterProgress?.latestVersion ? `v${updaterProgress.latestVersion}` : "No updater detection yet"}</strong></p>
+          <p>Current version: <strong>{formatVersionLabel(currentAppVersion)}</strong></p>
+          <p>Latest available: <strong>{latestAvailableVersion ? formatVersionLabel(latestAvailableVersion) : "Not checked yet"}</strong></p>
+          <p>Latest detected by updater service: <strong>{updaterProgress?.latestVersion ? formatVersionLabel(updaterProgress.latestVersion) : "No updater detection yet"}</strong></p>
           <p>The portable and Windows launcher packages update automatically in the background each time you start the app.</p>
           {updaterProgress?.message ? (
             <p className="settings-meta">Updater status: {updaterProgress.message}</p>
@@ -916,7 +925,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
             <p className="error-text">Updater error: {updaterProgress.lastError}</p>
           ) : null}
           {pendingUpdateVersion ? (
-            <p className="settings-meta">Downloaded update ready: v{pendingUpdateVersion}. It will be applied automatically on your next launch.</p>
+            <p className="settings-meta">Downloaded update ready: {formatVersionLabel(pendingUpdateVersion)}. It will be applied automatically on your next launch.</p>
           ) : null}
           <button
             type="button"

@@ -6,6 +6,19 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-03-22
+
+### Fixed (1.4.4)
+
+- Fixed startup splash redirect deadlock when updater telemetry stayed in stale checking/staging snapshots. Splash startup now ignores stale updater snapshots and continues once app readiness is confirmed.
+- Fixed updater version-label formatting so unknown values no longer render with an invalid `v` prefix (for example `vunknown`).
+
+### Verified (1.4.4)
+
+- `npx vitest run tests/integration/settings.updater.integration.test.tsx`
+- `npm run test:e2e:autoupdate`
+- `npm run check:installer`
+
 ## [1.4.3] - 2026-03-22
 
 ### Added (1.4.3)

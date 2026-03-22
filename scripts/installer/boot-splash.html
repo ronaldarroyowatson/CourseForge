@@ -142,6 +142,8 @@
       const statSpeedEl = document.getElementById("stat-speed");
       const statFilesEl = document.getElementById("stat-files");
       let localProgress = 8;
+      const activeUpdateStates = new Set(["checking", "update-available", "downloading", "extracting", "staging"]);
+      const staleUpdateSnapshotMs = 30000;
 
       function formatBytes(bytes) {
         if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
@@ -165,9 +167,35 @@
         return String(state).replace(/-/g, " ");
       }
 
+      function parseUpdatedAtMs(progress) {
+        if (!progress || !progress.updatedAt) {
+          return null;
+        }
+
+        const parsed = Date.parse(String(progress.updatedAt));
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+
+      function isUpdaterSnapshotStale(progress) {
+        const updatedAtMs = parseUpdatedAtMs(progress);
+        if (updatedAtMs === null) {
+          return false;
+        }
+
+        return (Date.now() - updatedAtMs) > staleUpdateSnapshotMs;
+      }
+
       function isUpdateActive(progress) {
-        const activeStates = new Set(["checking", "update-available", "downloading", "extracting", "staging", "staged"]);
-        return Boolean(progress && activeStates.has(String(progress.state || "")));
+        if (!progress) {
+          return false;
+        }
+
+        const state = String(progress.state || "").toLowerCase();
+        if (!activeUpdateStates.has(state)) {
+          return false;
+        }
+
+        return !isUpdaterSnapshotStale(progress);
       }
 
       function renderUpdaterStats(progress) {
@@ -256,6 +284,8 @@
             }
             if (boot.ready && isUpdateActive(updater)) {
               setStatus("CourseForge is ready", "Finishing update checks before redirect...");
+            } else if (boot.ready && updater && isUpdaterSnapshotStale(updater)) {
+              setStatus("CourseForge is ready", "Updater status is stale; continuing startup...");
             }
           }
 

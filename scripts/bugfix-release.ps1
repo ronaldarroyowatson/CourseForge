@@ -193,6 +193,33 @@ if (-not $SkipPackage) {
   Write-Host "[INFO] Package build skipped (-SkipPackage)." -ForegroundColor Yellow
 }
 
+# ---- Prune old bugfix release folders (keep only current version) ----
+Write-Host ""
+Write-Host "--- Pruning old release builds (keeping only v$newVersion) ---" -ForegroundColor Cyan
+Push-Location $RepoRoot
+
+$oldReleaseFolders = git ls-files "release/" |
+  Where-Object { -not $_.Contains($newVersion) }
+
+if ($oldReleaseFolders.Count -gt 0) {
+  Write-Host "  Removing $($oldReleaseFolders.Count) old release files from git..."
+  $oldReleaseFolders | Set-Content "$RepoRoot\tmp-prune-list.txt"
+  git rm --pathspec-from-file="$RepoRoot\tmp-prune-list.txt" -q
+  if (Test-Path "$RepoRoot\tmp-prune-list.txt") {
+    git rm -q --ignore-unmatch "tmp-prune-list.txt"
+    [System.IO.File]::Delete("$RepoRoot\tmp-prune-list.txt")
+  }
+  # Also clean gitignored files (e.g. updater.log) left in old release dirs
+  Get-ChildItem "$RepoRoot\release" -Directory |
+    Where-Object { $_.Name -notmatch [regex]::Escape($newVersion) } |
+    ForEach-Object { git clean -fdX $_.FullName 2>$null }
+  Write-Host "  Old release builds pruned." -ForegroundColor Green
+} else {
+  Write-Host "  No old release builds to prune." -ForegroundColor Gray
+}
+
+Pop-Location
+
 # ---- Git commit, tag, push ----
 Write-Host ""
 Write-Host "--- Git: commit + tag v$newVersion ---" -ForegroundColor Cyan

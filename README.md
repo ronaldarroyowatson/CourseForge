@@ -2,11 +2,13 @@
 
 CourseForge is a local-first curriculum authoring platform for teachers. It combines a browser extension for quick capture with a full web app for textbook management, sync, moderation, and XML export.
 
-Version `1.3.2` includes OCR resilience hardening and expanded OCR regression coverage in the e2e lane.
+Version `1.4.3` adds full Auto textbook flow trace diagnostics across capture/upload/OCR/save and metadata vision-to-OCR fallback paths.
 
 Quick release note: v1.3.0 improves manual update UX when already current and adds a full updater maintenance handoff guide.
 
 Quick release note: v1.3.2 improves Auto OCR provider fallback resilience, cloud-provider readiness checks, and drag/drop OCR pipeline test coverage.
+
+Quick release note: v1.4.3 adds end-to-end trace IDs and OCR debug sink logging for Auto setup and metadata fallback decisions.
 
 ## What it does
 

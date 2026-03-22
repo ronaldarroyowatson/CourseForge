@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-03-22
+
+### Added (1.4.3)
+
+- Added end-to-end Auto textbook setup trace instrumentation with per-run trace IDs in `AutoTextbookSetupFlow` for capture, upload, OCR, and save lifecycle events.
+- Added metadata extraction pipeline trace instrumentation for vision attempt outcomes, OCR fallback activation, and completion-path summaries.
+- Added mirrored diagnostics emission to the local OCR debug sink (`/api/ocr-debug-log`) and in-app debug history for easier incident correlation.
+
+### Verified (1.4.3)
+
+- `npm run build`
+- `npm run test:e2e`
+- `npm run check:installer`
+
 ## [1.4.2] - 2026-03-22
 
 ### Fixed (1.4.2)

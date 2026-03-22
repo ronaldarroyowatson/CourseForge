@@ -48,6 +48,7 @@ import { useRepositories } from "../../hooks/useRepositories";
 import { useUIStore } from "../../store/uiStore";
 import { t as translate } from "../../../core/services/i18nService";
 import { captureVisibleChromeTab, isChromeOSRuntime, isSmallChromebookViewport } from "../../utils/platform";
+import { getCurrentUser } from "../../../firebase/auth";
 
 type AutoFlowStep = "cover" | "title" | "toc" | "toc-editor";
 
@@ -528,6 +529,57 @@ function createDefaultSelection(image: HTMLImageElement): SelectionRect {
   };
 }
 
+function createAutoFlowTraceId(prefix = "auto-flow"): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function emitAutoFlowDiagnostic(
+  event: string,
+  options: {
+    level?: "info" | "warning" | "error";
+    traceId?: string;
+    context?: Record<string, unknown>;
+  } = {}
+): void {
+  const level = options.level ?? "info";
+  const traceId = options.traceId;
+  const context = {
+    ...(options.context ?? {}),
+    traceId: traceId ?? null,
+  };
+
+  const eventType = level === "error"
+    ? "error"
+    : level === "warning"
+      ? "warning"
+      : "info";
+
+  void appendDebugLogEntry({
+    eventType,
+    message: `Auto flow ${event}`,
+    context,
+  }, getCurrentUser()?.uid ?? null).catch(() => {
+    // Best effort diagnostics.
+  });
+
+  if (typeof fetch === "function") {
+    void fetch("/api/ocr-debug-log", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        event: `auto_flow_${event}`,
+        level,
+        traceId: traceId ?? null,
+        context,
+      }),
+    }).catch(() => {
+      // Best effort diagnostics.
+    });
+  }
+}
+
 export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToManual, testingSeedState }: AutoTextbookSetupFlowProps): React.JSX.Element {
   const language = useUIStore((state) => state.language);
   const chromeOs = useMemo(() => runtime === "extension" && isChromeOSRuntime(), [runtime]);
@@ -601,6 +653,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   const selectionResolverRef = useRef<((value: SelectionRect | null) => void) | null>(null);
   const selectionRectRef = useRef<SelectionRect | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const flowSessionTraceIdRef = useRef<string>(createAutoFlowTraceId("auto-flow-session"));
   const lastMetadataPipelineRef = useRef<MetadataPipelineResult | null>(null);
   const lastMetadataCaptureStepRef = useRef<"cover" | "title">("cover");
   const coverFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -611,6 +664,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingUploadLimitResultRef = useRef<ReturnType<typeof enforceAutoCaptureLimit> | null>(null);
+
+  useEffect(() => {
+    emitAutoFlowDiagnostic("session_started", {
+      traceId: flowSessionTraceIdRef.current,
+      context: {
+        runtime,
+        initialStep: testingSeedState?.step ?? "cover",
+      },
+    });
+  }, [runtime, testingSeedState?.step]);
 
   useEffect(() => {
     let mounted = true;
@@ -1038,9 +1101,27 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   async function captureForStep(targetStep: "cover" | "title" | "toc"): Promise<CaptureResult | null> {
+    const traceId = createAutoFlowTraceId(`auto-flow-${targetStep}`);
+    emitAutoFlowDiagnostic("capture_requested", {
+      traceId,
+      context: {
+        targetStep,
+        usage,
+      },
+    });
+
     const limitResult = enforceAutoCaptureLimit(usage, targetStep, DEFAULT_AUTO_CAPTURE_LIMITS);
     if (!limitResult.allowed) {
       setErrorMessage(limitResult.message ?? "Capture limit reached.");
+      emitAutoFlowDiagnostic("capture_blocked_limit", {
+        level: "warning",
+        traceId,
+        context: {
+          targetStep,
+          usage,
+          limits: DEFAULT_AUTO_CAPTURE_LIMITS,
+        },
+      });
       appendDebugLogEntry({
         eventType: "warning",
         message: "Capture blocked by limit guard.",
@@ -1060,8 +1141,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         message: "Capture started.",
         autoModeStep: targetStep,
       });
+      emitAutoFlowDiagnostic("capture_started", {
+        traceId,
+        context: { targetStep },
+      });
 
       const rawImage = await captureDisplayFrame({ preferChromeTabCapture: chromeOs });
+      emitAutoFlowDiagnostic("frame_captured", {
+        traceId,
+        context: {
+          targetStep,
+          imageBytes: rawImage.length,
+        },
+      });
       const image = await loadImage(rawImage);
       const defaultSelection = createDefaultSelection(image);
       let cropped = "";
@@ -1082,6 +1174,15 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         const selectedRectNatural = convertSelectionToNaturalPixels(selectedRectDisplay, image);
         const hasMeaningfulSelection = selectedRectNatural.width > 6 && selectedRectNatural.height > 6;
         selection = hasMeaningfulSelection ? selectedRectNatural : defaultSelection;
+        emitAutoFlowDiagnostic("selection_applied", {
+          traceId,
+          context: {
+            targetStep,
+            hasMeaningfulSelection,
+            selectedWidth: selection.width,
+            selectedHeight: selection.height,
+          },
+        });
         cropped = await cropToSelectionAndAutoBoundary(rawImage, selection);
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Unknown region capture error.";
@@ -1106,6 +1207,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       if (targetStep === "cover" || targetStep === "title") {
         setIsRunningOcr(true);
+        emitAutoFlowDiagnostic("metadata_pipeline_started", {
+          traceId,
+          context: {
+            targetStep,
+            imageBytes: cropped.length,
+          },
+        });
         pipelineResult = await extractMetadataWithOcrFallbackFromDataUrl(cropped, {
           pageType: targetStep,
           publisherHint: metadataForm.publisher || null,
@@ -1115,14 +1223,39 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         metadataResult = pipelineResult.result;
         ocrText = pipelineResult.originalOcrOutput?.rawText ?? pipelineResult.result.rawText;
         ocrProviderId = pipelineResult.originalOcrOutput?.providerId ?? "vision-primary";
+        emitAutoFlowDiagnostic("metadata_pipeline_completed", {
+          traceId,
+          context: {
+            targetStep,
+            metadataSource: pipelineResult.result.source,
+            originalOcrProviderId: pipelineResult.originalOcrOutput?.providerId ?? null,
+            confidence: pipelineResult.result.confidence,
+          },
+        });
         ocrProviderStatusMessage = `Metadata source: ${pipelineResult.result.source}${pipelineResult.originalOcrOutput ? ` (OCR: ${pipelineResult.originalOcrOutput.providerId})` : ""}`;
         lastCapturedOcrByStepRef.current[targetStep] = ocrText;
       } else {
         setIsRunningOcr(true);
+        emitAutoFlowDiagnostic("toc_ocr_started", {
+          traceId,
+          context: {
+            targetStep,
+            imageBytes: cropped.length,
+          },
+        });
         const ocr = await extractTextFromImageWithFallback(cropped);
         setIsRunningOcr(false);
         ocrText = ocr.text;
         ocrProviderId = ocr.providerId;
+        emitAutoFlowDiagnostic("toc_ocr_completed", {
+          traceId,
+          context: {
+            targetStep,
+            ocrProviderId: ocr.providerId,
+            textLength: ocr.text.length,
+            attempts: ocr.attempts,
+          },
+        });
         ocrProviderStatusMessage = `OCR provider: ${ocr.providerId}`;
       }
 
@@ -1142,6 +1275,15 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           metadataSource: metadataResult?.source,
         },
       });
+      emitAutoFlowDiagnostic("capture_completed", {
+        traceId,
+        context: {
+          targetStep,
+          ocrProviderId,
+          metadataSource: metadataResult?.source ?? null,
+          usageAfterCapture: limitResult.nextUsage,
+        },
+      });
       return {
         imageDataUrl: cropped,
         ocrText,
@@ -1152,6 +1294,14 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     } catch (error) {
       setIsRunningOcr(false);
       const message = error instanceof Error ? error.message : "Unknown capture error.";
+      emitAutoFlowDiagnostic("capture_failed", {
+        level: "error",
+        traceId,
+        context: {
+          targetStep,
+          message,
+        },
+      });
       setErrorMessage("Unable to capture screen. Try again, or use Upload Image as fallback.");
       appendDebugLogEntry({
         eventType: "error",
@@ -1174,14 +1324,42 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   async function processImageFileForStep(file: File, targetStep: "cover" | "title"): Promise<void> {
+    const traceId = createAutoFlowTraceId(`auto-flow-upload-${targetStep}`);
+    emitAutoFlowDiagnostic("upload_started", {
+      traceId,
+      context: {
+        targetStep,
+        fileName: file.name,
+        fileType: file.type,
+        fileSizeBytes: file.size,
+      },
+    });
+
     if (!file.type.startsWith("image/")) {
       setErrorMessage("Please select an image file (JPEG, PNG, WEBP, etc.).");
+      emitAutoFlowDiagnostic("upload_rejected_non_image", {
+        level: "warning",
+        traceId,
+        context: {
+          targetStep,
+          fileType: file.type,
+        },
+      });
       return;
     }
 
     const limitResult = enforceAutoCaptureLimit(usage, targetStep, DEFAULT_AUTO_CAPTURE_LIMITS);
     if (!limitResult.allowed) {
       setErrorMessage(limitResult.message ?? "Capture limit reached.");
+      emitAutoFlowDiagnostic("upload_blocked_limit", {
+        level: "warning",
+        traceId,
+        context: {
+          targetStep,
+          usage,
+          limits: DEFAULT_AUTO_CAPTURE_LIMITS,
+        },
+      });
       appendDebugLogEntry({
         eventType: "warning",
         message: "File upload blocked by limit guard.",
@@ -1203,6 +1381,14 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         reader.readAsDataURL(file);
       });
 
+      emitAutoFlowDiagnostic("upload_read_completed", {
+        traceId,
+        context: {
+          targetStep,
+          imageBytes: dataUrl.length,
+        },
+      });
+
       setIsRunningOcr(true);
       const pipelineResult = await extractMetadataWithOcrFallbackFromDataUrl(dataUrl, {
         pageType: targetStep,
@@ -1212,6 +1398,15 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       const ocrText = pipelineResult.originalOcrOutput?.rawText ?? pipelineResult.result.rawText;
       const ocrProviderId = pipelineResult.originalOcrOutput?.providerId ?? "vision-primary";
+      emitAutoFlowDiagnostic("upload_pipeline_completed", {
+        traceId,
+        context: {
+          targetStep,
+          metadataSource: pipelineResult.result.source,
+          ocrProviderId,
+          confidence: pipelineResult.result.confidence,
+        },
+      });
       setOcrProviderStatus(
         `Metadata source: ${pipelineResult.result.source}${pipelineResult.originalOcrOutput ? ` (OCR: ${pipelineResult.originalOcrOutput.providerId})` : ""}`
       );
@@ -1234,6 +1429,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       pendingUploadLimitResultRef.current = limitResult;
     } catch {
       setIsRunningOcr(false);
+      emitAutoFlowDiagnostic("upload_pipeline_failed", {
+        level: "error",
+        traceId,
+        context: {
+          targetStep,
+        },
+      });
       setErrorMessage("Unable to process image file. Make sure the file is a valid image and try again.");
       appendDebugLogEntry({
         eventType: "error",
@@ -1258,6 +1460,14 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     pendingUploadLimitResultRef.current = null;
 
     const targetStep = uploadPreview.step;
+    emitAutoFlowDiagnostic("upload_preview_confirmed", {
+      traceId: createAutoFlowTraceId(`auto-flow-confirm-${targetStep}`),
+      context: {
+        targetStep,
+        ocrProviderId,
+        textLength: editableOcrText.length,
+      },
+    });
     lastCapturedOcrByStepRef.current[targetStep] = uploadPreview.ocrText;
     setOcrDraft(editableOcrText);
     setModerationAssessment(null);
@@ -1315,8 +1525,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   async function handleCaptureCover(): Promise<void> {
+    emitAutoFlowDiagnostic("ui_capture_cover_clicked", {
+      traceId: createAutoFlowTraceId("auto-flow-ui-cover"),
+      context: { step },
+    });
     const captured = await captureForStep("cover");
     if (!captured) {
+      emitAutoFlowDiagnostic("ui_capture_cover_no_result", {
+        level: "warning",
+        traceId: createAutoFlowTraceId("auto-flow-ui-cover"),
+      });
       return;
     }
 
@@ -1338,8 +1556,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   async function handleCaptureTitle(): Promise<void> {
+    emitAutoFlowDiagnostic("ui_capture_title_clicked", {
+      traceId: createAutoFlowTraceId("auto-flow-ui-title"),
+      context: { step },
+    });
     const captured = await captureForStep("title");
     if (!captured) {
+      emitAutoFlowDiagnostic("ui_capture_title_no_result", {
+        level: "warning",
+        traceId: createAutoFlowTraceId("auto-flow-ui-title"),
+      });
       return;
     }
 
@@ -1359,8 +1585,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   async function handleCaptureToc(): Promise<void> {
+    emitAutoFlowDiagnostic("ui_capture_toc_clicked", {
+      traceId: createAutoFlowTraceId("auto-flow-ui-toc"),
+      context: { step },
+    });
     const captured = await captureForStep("toc");
     if (!captured) {
+      emitAutoFlowDiagnostic("ui_capture_toc_no_result", {
+        level: "warning",
+        traceId: createAutoFlowTraceId("auto-flow-ui-toc"),
+      });
       return;
     }
 
@@ -1461,21 +1695,45 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   async function handleSaveAutoSetup(): Promise<void> {
+    const traceId = createAutoFlowTraceId("auto-flow-save");
+    emitAutoFlowDiagnostic("save_started", {
+      traceId,
+      context: {
+        chapterCount: tocResult.chapters.length,
+        hasCover: Boolean(coverImageDataUrl),
+        duplicateMatchId: duplicateMatch?.id ?? null,
+      },
+    });
     setErrorMessage(null);
 
     const parsedYear = Number(metadataForm.publicationYear);
     if (!Number.isInteger(parsedYear) || parsedYear <= 0) {
       setErrorMessage("Publication year must be a valid whole number.");
+      emitAutoFlowDiagnostic("save_validation_failed", {
+        level: "warning",
+        traceId,
+        context: { reason: "invalid_publication_year", value: metadataForm.publicationYear },
+      });
       return;
     }
 
     if (!metadataForm.title.trim()) {
       setErrorMessage("Title is required before saving.");
+      emitAutoFlowDiagnostic("save_validation_failed", {
+        level: "warning",
+        traceId,
+        context: { reason: "missing_title" },
+      });
       return;
     }
 
     if (!coverImageDataUrl) {
       setErrorMessage("Capture and accept a cover image before saving Auto setup.");
+      emitAutoFlowDiagnostic("save_validation_failed", {
+        level: "warning",
+        traceId,
+        context: { reason: "missing_cover_image" },
+      });
       return;
     }
 
@@ -1540,6 +1798,14 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         setErrorMessage(
           "Capture blocked by image safety checks. This appears to contain explicit imagery without educational context."
         );
+        emitAutoFlowDiagnostic("save_blocked_by_moderation", {
+          level: "warning",
+          traceId,
+          context: {
+            decision: imageModeration.decision,
+            reason: imageModeration.reason,
+          },
+        });
         return;
       }
 
@@ -1557,6 +1823,14 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           isbnRaw: existingDuplicate.isbnRaw,
         });
         setInfoMessage("A textbook with this ISBN already exists. Choose how to apply Auto data, then save again.");
+        emitAutoFlowDiagnostic("save_duplicate_detected", {
+          level: "warning",
+          traceId,
+          context: {
+            duplicateId: existingDuplicate.id,
+            isbn: trimmedIsbn,
+          },
+        });
         return;
       }
 
@@ -1749,8 +2023,20 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       }
 
       onSaved();
+      emitAutoFlowDiagnostic("save_completed", {
+        traceId,
+        context: {
+          chapterCount: tocResult.chapters.length,
+          duplicateResolved: Boolean(duplicateMatch),
+          requiresAdminReview,
+        },
+      });
     } catch {
       setErrorMessage("Unable to save Auto setup. Please verify metadata and try again.");
+      emitAutoFlowDiagnostic("save_failed", {
+        level: "error",
+        traceId,
+      });
       appendDebugLogEntry({
         eventType: "error",
         message: "Auto textbook setup save failed.",

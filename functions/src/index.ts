@@ -137,6 +137,33 @@ function getOpenAiApiKey(): string {
   return "";
 }
 
+async function canAuthenticateOpenAi(apiKey: string): Promise<boolean> {
+  if (!apiKey.trim()) {
+    return false;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, 4000);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/models", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal: controller.signal,
+    });
+
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 interface AdminContentRecord {
   docPath: string;
   id: string;
@@ -1515,13 +1542,14 @@ export const getAiProviderPolicy = onCall(async (request) => {
 
 export const getAiProviderStatus = onCall({ invoker: "public", secrets: [openAiKeySecret] }, async (request) => {
   const openaiKey = getOpenAiApiKey();
+  const cloudOpenAiAvailable = await canAuthenticateOpenAi(openaiKey);
 
   return success("Loaded AI provider status.", {
     providers: [
       {
         id: "cloud_openai_vision" as const,
         label: "Cloud OCR (OpenAI Vision via Firebase Function)",
-        available: Boolean(openaiKey),
+        available: cloudOpenAiAvailable,
       },
       {
         id: "local_tesseract" as const,

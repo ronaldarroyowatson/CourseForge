@@ -2,6 +2,8 @@ import { httpsCallable } from "firebase/functions";
 
 import { functionsClient } from "../../firebase/functions";
 import { extractTextFromImageWithFallback, type AutoOcrProviderId } from "./autoOcrService";
+import { appendDebugLogEntry } from "./debugLogService";
+import { getCurrentUser } from "../../firebase/auth";
 import {
   applyCorrectionRulesToText,
   getEffectiveCorrectionRules,
@@ -11,6 +13,57 @@ import {
 import { extractMetadataFromOcrText, preprocessMetadataOcrText } from "./textbookAutoExtractionService";
 
 const DEFAULT_VISION_CONFIDENCE_THRESHOLD = 0.72;
+
+function createMetadataPipelineTraceId(prefix = "metadata-pipeline"): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function emitMetadataPipelineDiagnostic(
+  event: string,
+  options: {
+    level?: "info" | "warning" | "error";
+    traceId?: string;
+    context?: Record<string, unknown>;
+  } = {}
+): Promise<void> {
+  const level = options.level ?? "info";
+  const traceId = options.traceId;
+  const context = {
+    ...(options.context ?? {}),
+    traceId: traceId ?? null,
+  };
+
+  const eventType = level === "error"
+    ? "error"
+    : level === "warning"
+      ? "warning"
+      : "info";
+
+  void appendDebugLogEntry({
+    eventType,
+    message: `Metadata pipeline ${event}`,
+    context,
+  }, getCurrentUser()?.uid ?? null).catch(() => {
+    // Best effort diagnostics.
+  });
+
+  if (typeof fetch === "function") {
+    void fetch("/api/ocr-debug-log", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        event: `metadata_pipeline_${event}`,
+        level,
+        traceId: traceId ?? null,
+        context,
+      }),
+    }).catch(() => {
+      // Best effort diagnostics.
+    });
+  }
+}
 
 export interface MetadataExtractionContext {
   pageType: MetadataPageType;
@@ -183,16 +236,50 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
   context: MetadataExtractionContext,
   options: { confidenceThreshold?: number } = {}
 ): Promise<MetadataPipelineResult> {
+  const traceId = createMetadataPipelineTraceId();
   const confidenceThreshold = clampConfidence(options.confidenceThreshold, DEFAULT_VISION_CONFIDENCE_THRESHOLD);
+
+  void emitMetadataPipelineDiagnostic("started", {
+    traceId,
+    context: {
+      pageType: context.pageType,
+      imageBytes: imageDataUrl.length,
+      confidenceThreshold,
+    },
+  });
 
   let originalVisionOutput: MetadataResult | null = null;
   try {
+    void emitMetadataPipelineDiagnostic("vision_attempt_started", {
+      traceId,
+      context: { pageType: context.pageType },
+    });
     originalVisionOutput = await extractMetadataFromImageDataUrl(imageDataUrl, context);
+    void emitMetadataPipelineDiagnostic("vision_attempt_succeeded", {
+      traceId,
+      context: {
+        confidence: originalVisionOutput.confidence,
+        hasRequiredFields: metadataHasRequiredFields(originalVisionOutput),
+        source: originalVisionOutput.source,
+      },
+    });
   } catch {
     originalVisionOutput = null;
+    void emitMetadataPipelineDiagnostic("vision_attempt_failed", {
+      level: "warning",
+      traceId,
+      context: { pageType: context.pageType },
+    });
   }
 
   if (originalVisionOutput && originalVisionOutput.confidence >= confidenceThreshold && metadataHasRequiredFields(originalVisionOutput)) {
+    void emitMetadataPipelineDiagnostic("completed", {
+      traceId,
+      context: {
+        path: "vision_only",
+        confidence: originalVisionOutput.confidence,
+      },
+    });
     return {
       result: originalVisionOutput,
       originalVisionOutput,
@@ -200,11 +287,33 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     };
   }
 
+  void emitMetadataPipelineDiagnostic("fallback_to_ocr", {
+    traceId,
+    context: {
+      reason: originalVisionOutput ? "low_confidence_or_missing_fields" : "vision_failed",
+      visionConfidence: originalVisionOutput?.confidence ?? null,
+    },
+  });
+
   const ocrResult = await extractTextFromImageWithFallback(imageDataUrl);
+  void emitMetadataPipelineDiagnostic("ocr_fallback_succeeded", {
+    traceId,
+    context: {
+      ocrProviderId: ocrResult.providerId,
+      rawTextLength: ocrResult.text.length,
+    },
+  });
   const correctedRawText = postProcessOcrText(ocrResult.text, context);
   const ocrMetadata = autoMetadataToMetadataResult(correctedRawText, "ocr");
 
   if (!originalVisionOutput) {
+    void emitMetadataPipelineDiagnostic("completed", {
+      traceId,
+      context: {
+        path: "ocr_only",
+        ocrProviderId: ocrResult.providerId,
+      },
+    });
     return {
       result: ocrMetadata,
       originalVisionOutput: null,
@@ -227,6 +336,16 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     rawText: [originalVisionOutput.rawText, correctedRawText].filter(Boolean).join("\n\n").trim(),
     source: "vision+ocr",
   };
+
+  void emitMetadataPipelineDiagnostic("completed", {
+    traceId,
+    context: {
+      path: "vision_ocr_merged",
+      ocrProviderId: ocrResult.providerId,
+      mergedConfidence: merged.confidence,
+      visionConfidence: originalVisionOutput.confidence,
+    },
+  });
 
   return {
     result: merged,

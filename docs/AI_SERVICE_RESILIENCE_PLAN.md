@@ -69,6 +69,21 @@ Model host support:
   - outage status
 - Firestore-backed shared provider policy so org admins can set defaults.
 
+## Phase 5: Auto Flow Observability (Implemented)
+
+- Auto textbook setup now emits trace-tagged lifecycle diagnostics for:
+  - capture start/finish
+  - upload preview confirmation
+  - OCR + metadata extraction begin/result/failure
+  - save validation + persistence outcomes
+- Metadata extraction now emits trace-tagged diagnostics for:
+  - vision extraction attempt status
+  - vision failure reason and fallback decision
+  - OCR fallback completion + final source summary
+- Diagnostics are mirrored to:
+  - local OCR debug sink (`/api/ocr-debug-log`)
+  - in-app debug history for session-level troubleshooting
+
 ## Failure-Mode Expectations
 
 - Cloud provider unavailable: local OCR continues.
@@ -98,6 +113,7 @@ Live smoke checks should include:
 
 - local OCR extraction against a representative cover image
 - cloud OCR extraction attempt against the same image to validate provider availability and error messaging
+- confirmation that trace IDs appear in `ocr-debug.log` across capture, extraction, fallback (if any), and save
 
 ## Non-Goals
 

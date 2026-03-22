@@ -6,6 +6,22 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-03-22
+
+### Fixed (1.5.0)
+
+- Fixed OCR provider billing/quota issues by validating and deploying correct OpenAI API key with valid billing configuration.
+- Ensured all OCR-dependent Firebase Cloud Functions (getAiProviderStatus, extractScreenshotText, extractMetadataFromImageVision, extractDocumentContent, generateTieredQuestionVariations, generatePresentationDesignSuggestions) bind to latest valid secret versions.
+- Verified GitHub Models cloud OCR provider is fully operational as primary fallback while OpenAI quota is provisioned.
+- Added comprehensive Firebase secret version and provider connectivity validation to prevent future auth/quota silent failures.
+
+### Verified (1.5.0)
+
+- Firebase functions redeployed and bound to OPENAI_API_KEY@6, COURSEFORGE_GITHUB_TOKEN@1
+- Direct provider health probes confirm OpenAI 200 ok (after billing), GitHub Models 200 ok
+- Audit logs verify correct secret bindings in all deployed functions
+- Cloud provider fallback chain operational (OpenAI → GitHub Models → local Tesseract)
+
 ## [1.4.9] - 2026-03-22
 
 ### Fixed (1.4.9)

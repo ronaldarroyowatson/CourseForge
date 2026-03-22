@@ -267,15 +267,14 @@ async function detectExtensionTabReadiness(): Promise<{ hasTabs: boolean; hasKno
 }
 
 function toMetadataFormState(metadata: AutoTextbookMetadata, tocConfidence: number): MetadataFormState {
-  const publicationYear = metadata.copyrightYear ?? new Date().getFullYear();
   return {
     title: metadata.title ?? "",
     subtitle: metadata.subtitle ?? "",
     grade: metadata.gradeBand ?? "",
     gradeBand: metadata.gradeBand ?? "",
-    subject: metadata.subject ?? "Other",
+    subject: metadata.subject ?? "",
     edition: metadata.edition ?? "",
-    publicationYear: publicationYear.toString(),
+    publicationYear: metadata.copyrightYear?.toString() ?? "",
     copyrightYear: metadata.copyrightYear?.toString() ?? "",
     isbnRaw: metadata.isbn ?? "",
     additionalIsbnsCsv: (metadata.additionalIsbns ?? []).join(", "),

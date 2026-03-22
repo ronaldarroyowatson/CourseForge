@@ -1,0 +1,44 @@
+﻿{
+    "generatedAt":  "2026-03-22T10:56:53.1217367-05:00",
+    "imagePath":  "C:\\Users\\ronal\\Documents\\CourseForge\\tmp-smoke\\ocr-smoke-20260322-105645.png",
+    "providers":  [
+                      {
+                          "providerId":  "cloud_openai_vision",
+                          "providerLabel":  "Cloud OCR (OpenAI Vision)",
+                          "endpoint":  "https://api.openai.com/v1/chat/completions",
+                          "model":  "gpt-4o-mini",
+                          "success":  false,
+                          "reasonCode":  "rate_limited",
+                          "message":  "You exceeded your current quota, please check your plan and billing details. For more information on this error, read the docs: https://platform.openai.com/docs/guides/error-codes/api-errors.",
+                          "httpStatus":  429,
+                          "extractedText":  null,
+                          "stage":  {
+                                        "requestPrepared":  true,
+                                        "requestSent":  true,
+                                        "responseReceived":  true,
+                                        "providerExecuted":  true,
+                                        "responseParsed":  false,
+                                        "usableTextValidated":  false
+                                    }
+                      },
+                      {
+                          "providerId":  "cloud_github_models_vision",
+                          "providerLabel":  "Cloud OCR (GitHub Models Vision)",
+                          "endpoint":  "https://models.github.ai/inference/chat/completions",
+                          "model":  "openai/gpt-4.1",
+                          "success":  true,
+                          "reasonCode":  "ok",
+                          "message":  "Provider returned usable OCR text.",
+                          "httpStatus":  200,
+                          "extractedText":  "CourseForge OCR smoke test image\n\nStudent Edition\n\nInspire Physical Science\nwith Earth Science\nMcGraw Hill",
+                          "stage":  {
+                                        "requestPrepared":  true,
+                                        "requestSent":  true,
+                                        "responseReceived":  true,
+                                        "providerExecuted":  true,
+                                        "responseParsed":  true,
+                                        "usableTextValidated":  true
+                                    }
+                      }
+                  ]
+}

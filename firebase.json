@@ -20,6 +20,9 @@
     ]
   },
   "emulators": {
-    "singleProjectMode": true
+    "singleProjectMode": true,
+    "firestore": {
+      "port": 9090
+    }
   }
 }

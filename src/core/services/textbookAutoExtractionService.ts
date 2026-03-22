@@ -386,7 +386,10 @@ export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadat
     }
   }
 
-  metadata.subject = inferSubject(text);
+  const inferredSubject = inferSubject(text);
+  if (inferredSubject) {
+    metadata.subject = inferredSubject;
+  }
 
   return metadata;
 }
@@ -896,14 +899,14 @@ function containsAny(content: string, terms: string[]): boolean {
   return terms.some((term) => content.includes(term));
 }
 
-function inferSubject(text: string): string {
+function inferSubject(text: string): string | undefined {
   const source = text.toLowerCase();
   if (/algebra|geometry|mathematics|math/.test(source)) return "Math";
-  if (/biology|chemistry|physics|earth science|science/.test(source)) return "Science";
+  if (/physical science|earth science|biology|chemistry|physics|science/.test(source)) return "Science";
   if (/history|social studies|government|civics/.test(source)) return "Social Studies";
-  if (/language arts|literature|grammar|reading|english/.test(source)) return "ELA";
+  if (/language arts|literature|grammar|reading/.test(source)) return "ELA";
   if (/computer science|coding|programming/.test(source)) return "Computer Science";
-  return "Other";
+  return undefined;
 }
 
 function normalizeIsbnLike(value: string): string {

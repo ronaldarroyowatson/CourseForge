@@ -654,6 +654,8 @@ function sanitizeDebugLogEntries(value: unknown): DebugLogEntryRecord[] {
     .filter((entry): entry is DebugLogEntryRecord => entry !== null);
 }
 
+const VALID_SUBJECTS = new Set(["ELA", "Math", "Science", "History", "Social Studies", "Art", "Music", "Physical Education", "Computer Science", "Foreign Language", "Other"]);
+
 function sanitizeMetadataResult(value: unknown, source: MetadataResultRecord["source"]): MetadataResultRecord {
   const data = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
   const asText = (field: string): string | null => {
@@ -669,6 +671,9 @@ function sanitizeMetadataResult(value: unknown, source: MetadataResultRecord["so
   const confidenceRaw = typeof data.confidence === "number" ? data.confidence : 0;
   const confidence = Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : 0;
 
+  const rawSubject = asText("subject");
+  const subject = rawSubject && VALID_SUBJECTS.has(rawSubject) ? rawSubject : null;
+
   return {
     title: asText("title"),
     subtitle: asText("subtitle"),
@@ -676,7 +681,7 @@ function sanitizeMetadataResult(value: unknown, source: MetadataResultRecord["so
     publisher: asText("publisher"),
     series: asText("series"),
     gradeLevel: asText("gradeLevel"),
-    subject: asText("subject"),
+    subject,
     confidence,
     rawText: typeof data.rawText === "string" ? data.rawText : "",
     source,
@@ -2302,6 +2307,7 @@ export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret
                 "- Identify publisher if visible.",
                 "- Ignore decorative text and watermarks.",
                 "- confidence must be a number from 0 to 1.",
+                "- For subject, read the actual title and content words carefully. Use exactly one of: ELA, Math, Science, History, Social Studies, Computer Science, Foreign Language, Art, Music, Physical Education. If the title contains words like science, physics, biology, chemistry, earth, or physical science, use Science. If you are not confident, return null for subject.",
                 `- pageType context: ${pageType}.`,
                 publisherHint ? `- publisherHint context: ${publisherHint}.` : "",
               ].filter(Boolean).join("\n"),

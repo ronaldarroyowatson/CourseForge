@@ -5,6 +5,47 @@
 			"label": "noop",
 			"type": "shell",
 			"command": "echo done"
+		},
+		{
+			"label": "bugfix: test (typecheck + build + full battery)",
+			"type": "shell",
+			"command": "npm run bugfix:test",
+			"group": "test",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			},
+			"problemMatcher": ["$tsc"]
+		},
+		{
+			"label": "bugfix: release (prompt for description)",
+			"type": "shell",
+			"command": "powershell -ExecutionPolicy Bypass -File scripts/bugfix-release.ps1 -Description \"${input:fixDescription}\"",
+			"group": "build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "bugfix: dry run (tests only, no publish)",
+			"type": "shell",
+			"command": "powershell -ExecutionPolicy Bypass -File scripts/bugfix-release.ps1 -Description \"${input:fixDescription}\" -DryRun",
+			"group": "test",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			},
+			"problemMatcher": ["$tsc"]
+		}
+	],
+	"inputs": [
+		{
+			"id": "fixDescription",
+			"type": "promptString",
+			"description": "Brief description of the bug fix (used in commit message and release notes)",
+			"default": "Bug fix"
 		}
 	]
 }

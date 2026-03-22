@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-  "version": "1.4.10",
+  "version": "1.4.12",
   "private": true,
   "type": "module",
   "engines": {
@@ -52,7 +52,9 @@
     "deploy:firestore": "firebase deploy --only firestore",
     "deploy:functions": "firebase deploy --only functions",
     "deploy:backend": "firebase deploy --only firestore,functions",
-    "test": "npm run test:core && npm run test:unit && npm run test:integration && npm run test:rules"
+    "test": "npm run test:core && npm run test:unit && npm run test:integration && npm run test:rules",
+    "bugfix:test": "npm run typecheck && npm run build && npm run test:e2e:comprehensive",
+    "bugfix:release": "powershell -ExecutionPolicy Bypass -File scripts/bugfix-release.ps1"
   },
   "dependencies": {
     "@azure/cosmos": "^4.9.1",

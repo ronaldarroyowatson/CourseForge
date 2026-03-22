@@ -2307,7 +2307,7 @@ export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret
                 "- Identify publisher if visible.",
                 "- Ignore decorative text and watermarks.",
                 "- confidence must be a number from 0 to 1.",
-                "- For subject: Ignore brand names and publisher names. ONLY match based on the actual subject words visible in the title. Match only if you see explicit subject keywords: 'science' or 'physics' or 'biology' or 'chemistry' or 'earth' or 'algebra' or 'geometry' or 'history' or 'literature' → return matching subject. Otherwise return null. Do NOT guess based on partial words or brand associations.",
+                "- For subject: Always return null. Subject is filled in by the user.",
                 `- pageType context: ${pageType}.`,
                 publisherHint ? `- publisherHint context: ${publisherHint}.` : "",
               ].filter(Boolean).join("\n"),

@@ -386,10 +386,7 @@ export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadat
     }
   }
 
-  const inferredSubject = inferSubject(text);
-  if (inferredSubject) {
-    metadata.subject = inferredSubject;
-  }
+  // Subject is intentionally not inferred — left blank for the user to fill in.
 
   return metadata;
 }

@@ -501,6 +501,10 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
           providers?: Array<{
             id?: AutoOcrProviderId;
             available?: boolean;
+            availabilityState?: ProviderAvailabilityState;
+            reasonCode?: string;
+            reasonMessage?: string;
+            httpStatus?: number | null;
           }>;
         };
       };
@@ -534,15 +538,38 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
         return "unknown";
       }
 
-      const resolvedState: ProviderAvailabilityState = cloudProvider.available ? "available" : "unavailable";
+      const reasonCode = typeof cloudProvider.reasonCode === "string" ? cloudProvider.reasonCode : "";
+      const reasonMessage = typeof cloudProvider.reasonMessage === "string" ? cloudProvider.reasonMessage.trim() : "";
+      const availabilityState = cloudProvider.availabilityState;
+      const transientReasonCodes = new Set([
+        "probe_timeout",
+        "probe_network_error",
+        "provider_unreachable",
+        "probe_failed",
+      ]);
+
+      let resolvedState: ProviderAvailabilityState;
+      if (cloudProvider.available) {
+        resolvedState = "available";
+      } else if (availabilityState === "unknown" || transientReasonCodes.has(reasonCode)) {
+        resolvedState = "unknown";
+      } else {
+        resolvedState = "unavailable";
+      }
 
       autoOcrAvailabilityCache = {
         state: resolvedState,
         expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+        errorMessage: reasonMessage || undefined,
       };
       void emitOcrDiagnostic("health_probe_completed", {
         traceId,
-        context: { availabilityState: resolvedState },
+        context: {
+          availabilityState: resolvedState,
+          reasonCode: reasonCode || null,
+          reasonMessage: reasonMessage || null,
+          httpStatus: cloudProvider.httpStatus ?? null,
+        },
       });
       return resolvedState;
     } catch (error) {

@@ -299,6 +299,48 @@ describe("autoOcrService", () => {
     });
   });
 
+  it("treats transient backend cloud probe failures as unknown and still attempts cloud OCR", async () => {
+    callableMocks.getAiProviderStatus.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          providers: [
+            {
+              id: "cloud_openai_vision",
+              available: false,
+              availabilityState: "unknown",
+              reasonCode: "probe_timeout",
+              reasonMessage: "OpenAI health probe timed out.",
+              httpStatus: null,
+            },
+            { id: "local_tesseract", available: true },
+          ],
+        },
+      },
+    });
+
+    const health = await getAutoOcrProviderHealth({ forceRefresh: true });
+    const cloud = health.find((provider) => provider.id === "cloud_openai_vision");
+    expect(cloud?.availabilityState).toBe("unknown");
+    expect(cloud?.errorMessage).toBe("OpenAI health probe timed out.");
+
+    callableMocks.extractScreenshotText.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          text: "Chapter 2\nFractions",
+        },
+      },
+    });
+
+    const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+      providerOrder: ["cloud_openai_vision", "local_tesseract"],
+    });
+
+    expect(result.providerId).toBe("cloud_openai_vision");
+    expect(result.text).toContain("Fractions");
+  });
+
   it("marks cloud provider unavailable when no authenticated user is present", async () => {
     authMocks.getCurrentUser.mockReturnValue(null);
     authMocks.waitForAuthStateChange.mockResolvedValue(null);

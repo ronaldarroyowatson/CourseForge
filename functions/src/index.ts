@@ -137,15 +137,58 @@ function getOpenAiApiKey(): string {
   return "";
 }
 
-async function canAuthenticateOpenAi(apiKey: string): Promise<boolean> {
+type OpenAiProviderAvailabilityState = "available" | "unavailable" | "unknown";
+
+interface OpenAiProbeResult {
+  available: boolean;
+  availabilityState: OpenAiProviderAvailabilityState;
+  reasonCode: string;
+  reasonMessage: string;
+  httpStatus: number | null;
+}
+
+async function readResponseSnippet(response: Response): Promise<string> {
+  try {
+    const rawText = (await response.text()).trim();
+    if (!rawText) {
+      return "";
+    }
+
+    try {
+      const parsed = JSON.parse(rawText) as { error?: { message?: unknown }; message?: unknown };
+      const errorMessage = typeof parsed?.error?.message === "string"
+        ? parsed.error.message.trim()
+        : typeof parsed?.message === "string"
+          ? parsed.message.trim()
+          : "";
+      if (errorMessage) {
+        return errorMessage.slice(0, 240);
+      }
+    } catch {
+      // Fall back to truncated plain text response.
+    }
+
+    return rawText.slice(0, 240);
+  } catch {
+    return "";
+  }
+}
+
+async function canAuthenticateOpenAi(apiKey: string): Promise<OpenAiProbeResult> {
   if (!apiKey.trim()) {
-    return false;
+    return {
+      available: false,
+      availabilityState: "unavailable",
+      reasonCode: "missing_api_key",
+      reasonMessage: "OPENAI_API_KEY is not configured on the function runtime.",
+      httpStatus: null,
+    };
   }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();
-  }, 4000);
+  }, 6500);
 
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -168,9 +211,77 @@ async function canAuthenticateOpenAi(apiKey: string): Promise<boolean> {
       }),
     });
 
-    return response.ok || response.status === 429;
-  } catch {
-    return false;
+    if (response.ok) {
+      return {
+        available: true,
+        availabilityState: "available",
+        reasonCode: "ok",
+        reasonMessage: "OpenAI authentication probe succeeded.",
+        httpStatus: response.status,
+      };
+    }
+
+    if (response.status === 429) {
+      return {
+        available: true,
+        availabilityState: "available",
+        reasonCode: "rate_limited",
+        reasonMessage: "OpenAI authentication probe was rate-limited, but credentials are valid.",
+        httpStatus: response.status,
+      };
+    }
+
+    const snippet = await readResponseSnippet(response);
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        available: false,
+        availabilityState: "unavailable",
+        reasonCode: "auth_failed",
+        reasonMessage: snippet || "OpenAI rejected the API key for OCR requests.",
+        httpStatus: response.status,
+      };
+    }
+
+    if (response.status === 400 || response.status === 404 || response.status === 422) {
+      return {
+        available: false,
+        availabilityState: "unavailable",
+        reasonCode: "request_rejected",
+        reasonMessage: snippet || `OpenAI rejected the probe request with status ${response.status}.`,
+        httpStatus: response.status,
+      };
+    }
+
+    if (response.status >= 500) {
+      return {
+        available: false,
+        availabilityState: "unknown",
+        reasonCode: "provider_unreachable",
+        reasonMessage: snippet || `OpenAI returned ${response.status}.`,
+        httpStatus: response.status,
+      };
+    }
+
+    return {
+      available: false,
+      availabilityState: "unknown",
+      reasonCode: "probe_failed",
+      reasonMessage: snippet || `OpenAI health probe failed with status ${response.status}.`,
+      httpStatus: response.status,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const timedOut = message.toLowerCase().includes("abort");
+    return {
+      available: false,
+      availabilityState: timedOut ? "unknown" : "unknown",
+      reasonCode: timedOut ? "probe_timeout" : "probe_network_error",
+      reasonMessage: timedOut
+        ? "OpenAI health probe timed out."
+        : `OpenAI health probe failed: ${message}`,
+      httpStatus: null,
+    };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -1554,19 +1665,29 @@ export const getAiProviderPolicy = onCall(async (request) => {
 
 export const getAiProviderStatus = onCall({ invoker: "public", secrets: [openAiKeySecret] }, async (request) => {
   const openaiKey = getOpenAiApiKey();
-  const cloudOpenAiAvailable = await canAuthenticateOpenAi(openaiKey);
+  const cloudProbe = await canAuthenticateOpenAi(openaiKey);
 
   return success("Loaded AI provider status.", {
     providers: [
       {
         id: "cloud_openai_vision" as const,
         label: "Cloud OCR (OpenAI Vision via Firebase Function)",
-        available: cloudOpenAiAvailable,
+        available: cloudProbe.available,
+        availabilityState: cloudProbe.availabilityState,
+        reasonCode: cloudProbe.reasonCode,
+        reasonMessage: cloudProbe.reasonMessage,
+        httpStatus: cloudProbe.httpStatus,
+        checkedAt: new Date().toISOString(),
       },
       {
         id: "local_tesseract" as const,
         label: "Local OCR (Tesseract)",
         available: true,
+        availabilityState: "available" as const,
+        reasonCode: "local_provider",
+        reasonMessage: "Local OCR is available on-device.",
+        httpStatus: null,
+        checkedAt: new Date().toISOString(),
       },
     ],
   });
@@ -1706,8 +1827,9 @@ export const extractScreenshotText = onCall({ secrets: [openAiKeySecret], invoke
     throw new HttpsError("unauthenticated", "You must be signed in to extract screenshot text.");
   }
 
-  const payload = request.data as { imageDataUrl?: unknown };
+  const payload = request.data as { imageDataUrl?: unknown; debugTraceId?: unknown };
   const imageDataUrl = typeof payload.imageDataUrl === "string" ? payload.imageDataUrl.trim() : "";
+  const debugTraceId = typeof payload.debugTraceId === "string" ? payload.debugTraceId.trim() : "";
 
   if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
     throw new HttpsError("invalid-argument", "A valid image data URL is required.");
@@ -1769,7 +1891,32 @@ export const extractScreenshotText = onCall({ secrets: [openAiKeySecret], invoke
   }
 
   if (!response.ok) {
-    throw new HttpsError("internal", `Cloud OCR provider error: ${response.status} ${response.statusText}`);
+    const providerDetails = await readResponseSnippet(response);
+    console.warn("[OCR] Provider error", {
+      traceId: debugTraceId || null,
+      status: response.status,
+      statusText: response.statusText,
+      providerDetails,
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      throw new HttpsError(
+        "failed-precondition",
+        `Cloud OCR provider authentication failed (${response.status} ${response.statusText}). ${providerDetails}`.trim()
+      );
+    }
+
+    if (response.status === 429) {
+      throw new HttpsError(
+        "resource-exhausted",
+        `Cloud OCR provider rate limit reached (${response.status} ${response.statusText}). ${providerDetails}`.trim()
+      );
+    }
+
+    throw new HttpsError(
+      "internal",
+      `Cloud OCR provider error (${response.status} ${response.statusText}). ${providerDetails}`.trim()
+    );
   }
 
   const json = await response.json() as {
@@ -1885,7 +2032,8 @@ export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret
   });
 
   if (!response.ok) {
-    throw new HttpsError("internal", `Vision provider error: ${response.status} ${response.statusText}`);
+    const providerDetails = await readResponseSnippet(response);
+    throw new HttpsError("internal", `Vision provider error (${response.status} ${response.statusText}). ${providerDetails}`.trim());
   }
 
   const json = await response.json() as {

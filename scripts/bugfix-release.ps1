@@ -246,8 +246,9 @@ if (-not $SkipGitHub) {
   Write-Host ""
   Write-Host "--- Creating GitHub release v$newVersion ---" -ForegroundColor Cyan
 
-  $portableZip = Join-Path $ReleaseDir "CourseForge-$newVersion-portable.zip"
-  $windowsZip  = Join-Path $ReleaseDir "CourseForge-$newVersion-windows.zip"
+  $portableZip    = Join-Path $ReleaseDir "CourseForge-$newVersion-portable.zip"
+  $windowsZip     = Join-Path $ReleaseDir "CourseForge-$newVersion-windows.zip"
+  $installerExe   = Join-Path $ReleaseDir "CourseForge-$newVersion-installer.exe"
 
   $ghArgs = @(
     "release", "create", "v$newVersion",
@@ -262,11 +263,14 @@ if (-not $SkipGitHub) {
     Write-Host "[WARNING] Portable zip not found: $portableZip" -ForegroundColor Yellow
   }
 
-  if (Test-Path $windowsZip) {
+  if (Test-Path $installerExe) {
+    $ghArgs += $installerExe
+    Write-Host "  Attaching: $installerExe"
+  } elseif (Test-Path $windowsZip) {
     $ghArgs += $windowsZip
     Write-Host "  Attaching: $windowsZip"
   } else {
-    Write-Host "[WARNING] Windows zip not found: $windowsZip" -ForegroundColor Yellow
+    Write-Host "[WARNING] Windows installer not found (neither installer.exe nor windows.zip)" -ForegroundColor Yellow
   }
 
   Push-Location $RepoRoot

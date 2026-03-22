@@ -890,27 +890,29 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
         <article className="settings-card">
           <h3>AI Service Resilience</h3>
           <p>Set the priority order for OCR providers. Each is tried in order; the first that succeeds is used.</p>
-          <label>
-            #1 — First choice
-            <select
-              value={ocrProviderOrder[0] ?? "cloud_openai_vision"}
-              onChange={(event) => updatePrimaryOcrProvider(event.target.value as AutoOcrProviderId)}
-            >
-              <option value="cloud_openai_vision">Cloud OCR (OpenAI Vision)</option>
-              <option value="cloud_github_models_vision">Cloud OCR (GitHub Models Vision)</option>
-            </select>
-          </label>
-          <label>
-            #2 — Second choice
-            <select
-              value={ocrProviderOrder.find((providerId) => providerId !== ocrProviderOrder[0] && providerId !== "local_tesseract") ?? "cloud_github_models_vision"}
-              onChange={(event) => updateFallbackOcrProvider(event.target.value as AutoOcrProviderId)}
-            >
-              <option value="cloud_openai_vision">Cloud OCR (OpenAI Vision)</option>
-              <option value="cloud_github_models_vision">Cloud OCR (GitHub Models Vision)</option>
-            </select>
-          </label>
-          <p className="settings-meta">#3 (automatic) — Local OCR (Tesseract)</p>
+          <div className="ocr-provider-choices">
+            <label className="ocr-provider-choice">
+              <span className="ocr-provider-choice__label">#1 — First choice</span>
+              <select
+                value={ocrProviderOrder[0] ?? "cloud_openai_vision"}
+                onChange={(event) => updatePrimaryOcrProvider(event.target.value as AutoOcrProviderId)}
+              >
+                <option value="cloud_openai_vision">Cloud OCR (OpenAI Vision)</option>
+                <option value="cloud_github_models_vision">Cloud OCR (GitHub Models Vision)</option>
+              </select>
+            </label>
+            <label className="ocr-provider-choice">
+              <span className="ocr-provider-choice__label">#2 — Second choice</span>
+              <select
+                value={ocrProviderOrder.find((providerId) => providerId !== ocrProviderOrder[0] && providerId !== "local_tesseract") ?? "cloud_github_models_vision"}
+                onChange={(event) => updateFallbackOcrProvider(event.target.value as AutoOcrProviderId)}
+              >
+                <option value="cloud_openai_vision">Cloud OCR (OpenAI Vision)</option>
+                <option value="cloud_github_models_vision">Cloud OCR (GitHub Models Vision)</option>
+              </select>
+            </label>
+            <p className="ocr-provider-choice__meta">#3 (automatic) — Local OCR (Tesseract)</p>
+          </div>
           <div className="form-actions">
             <button type="button" className="btn-secondary" onClick={() => { void refreshOcrProviderHealth(); }}>
               Refresh Provider Health
@@ -922,18 +924,30 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
               {isUpdatingOcrPolicy ? "Working..." : "Save As Shared Policy"}
             </button>
           </div>
-          {ocrProviderHealth.map((provider) => {
-            const statusText = provider.availabilityState === "unknown"
-              ? `Unknown${provider.errorMessage ? ` — ${provider.errorMessage}` : ""}`
-              : provider.available
-                ? "Available"
-                : `Unavailable${provider.errorMessage ? ` — ${provider.errorMessage}` : ""}`;
-            return (
-              <p key={provider.id} className="settings-meta">
-                {getShortProviderLabel(provider.id)}: {statusText}
-              </p>
-            );
-          })}
+          {ocrProviderHealth.length > 0 ? (
+            <div className="ocr-health-grid">
+              {ocrProviderHealth.map((provider) => {
+                const isOk = provider.available === true;
+                const isUnknown = provider.availabilityState === "unknown";
+                const errorMsg = provider.errorMessage ?? "Unavailable";
+                return (
+                  <div
+                    key={provider.id}
+                    className={`ocr-health-item ${isOk ? "ocr-health-item--ok" : isUnknown ? "ocr-health-item--unknown" : "ocr-health-item--error"}`}
+                  >
+                    <span className="ocr-health-item__name">{getShortProviderLabel(provider.id)}</span>
+                    {isOk ? (
+                      <span className="ocr-health-item__check" aria-label="Available">✓</span>
+                    ) : (
+                      <span className="ocr-health-item__fail" aria-label={isUnknown ? "Unknown" : "Unavailable"}>
+                        {isUnknown ? "?" : `✗ ${errorMsg}`}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
           {ocrProviderStatus ? <p className="settings-meta">{ocrProviderStatus}</p> : null}
         </article>
 

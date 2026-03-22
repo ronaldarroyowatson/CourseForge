@@ -151,17 +151,7 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
               <span className="app-nav-button__arrow" aria-hidden="true">&lt;</span>
               Workspace
             </button>
-          ) : (
-            <button
-              type="button"
-              className="btn-secondary app-nav-button"
-              onClick={() => {
-                navigate("/settings");
-              }}
-            >
-              Settings
-            </button>
-          )}
+          ) : null}
 
           <div>
             <h1>CourseForge</h1>
@@ -170,6 +160,17 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
         </div>
 
         <div className="app-header__right">
+          {!isSettingsView ? (
+            <button
+              type="button"
+              className="app-gear-button"
+              onClick={() => { navigate("/settings"); }}
+              aria-label="Open settings"
+              title="Settings"
+            >
+              ⚙
+            </button>
+          ) : null}
           <button
             type="button"
             className={`theme-toggle ${theme === "light" ? "theme-toggle--light" : "theme-toggle--dark"}`}

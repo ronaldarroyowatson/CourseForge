@@ -1,7 +1,7 @@
 {
     "name":  "CourseForge",
-    "version":  "1.4.20",
-    "generatedAtUtc":  "2026-03-22T22:40:25.6284546Z",
+    "version":  "1.4.21",
+    "generatedAtUtc":  "2026-03-22T23:45:09.6367561Z",
     "dependencyVersions":  {
                                "node":  "\u003e=20 \u003c25"
                            },
@@ -18,7 +18,7 @@
                   {
                       "path":  "webapp\\index.html",
                       "sizeBytes":  659,
-                      "sha256":  "4335b19ab46446168f78bc8296b36236d534ab8b9bc3a87b94919eced6e36f82"
+                      "sha256":  "b4a8b33c0b732a34fdc5c3dcea08909dc7bab76154ce26a6edc188fc3c64d7de"
                   },
                   {
                       "path":  "webapp\\sw.js",
@@ -46,9 +46,9 @@
                       "sha256":  "a5e5b9fd47adca8b0d06cde1045a78fbe814d0af65ac7644ea9551f2123a1d20"
                   },
                   {
-                      "path":  "webapp\\assets\\AdminToolsPage-DcgN1xlH.js",
+                      "path":  "webapp\\assets\\AdminToolsPage-FoVCT6ix.js",
                       "sizeBytes":  51896,
-                      "sha256":  "1b6ca3c01b6c0d865c6a25253a86afb65098602a2f88ca0f27a4274f5723e38a"
+                      "sha256":  "2e3c6e56b24d46a86448f3ce4cc8f648401aade5d1a5d9d242c1d70182c274c7"
                   },
                   {
                       "path":  "webapp\\assets\\vendor-react-Clz7p8np.js",
@@ -71,14 +71,14 @@
                       "sha256":  "d461e878025018238b9562218a111e2325c96aeef9886a74ec9797c147b6cff5"
                   },
                   {
-                      "path":  "webapp\\assets\\index-B2704pmS.js",
-                      "sizeBytes":  274372,
-                      "sha256":  "f1681f75dbf079d02b520f8428653f406f02cbbdc5678ed4d30e23379fcf882e"
+                      "path":  "webapp\\assets\\index-DJ3emz5o.js",
+                      "sizeBytes":  275004,
+                      "sha256":  "1bc1408c099bc669355d5f86e17028cf683477d02e9ce6935fee9547ad2ce5f7"
                   },
                   {
-                      "path":  "webapp\\assets\\index-BR8jWK-v.css",
-                      "sizeBytes":  26483,
-                      "sha256":  "5b12d691bb405bc878b003804c0db85bf9130d4ca942a3f3d5cb23de06558824"
+                      "path":  "webapp\\assets\\index-DS18mbfs.css",
+                      "sizeBytes":  27872,
+                      "sha256":  "c25fbb6fc635318831a5eda607fbe869f17b428ae62a76f921093cac5324240c"
                   },
                   {
                       "path":  "webapp\\assets\\vendor-firebase-CH9njpjx.js",
@@ -108,7 +108,7 @@
                   {
                       "path":  "Check-For-CourseForge-Updates.cmd",
                       "sizeBytes":  595,
-                      "sha256":  "1e58bdb670e032cd40e435e7522facf34c3805b0d8e17ce81606530572bf39d8"
+                      "sha256":  "70fd78efb6dcafe6cb3069eb17cead516ffa9b6f4ec54ac1f83b9914c8880983"
                   },
                   {
                       "path":  "AutoUpdate-CourseForge.ps1",
@@ -122,8 +122,8 @@
                   },
                   {
                       "path":  "CHANGELOG.md",
-                      "sizeBytes":  58332,
-                      "sha256":  "bc76f09363ffe0c0119f878b5203e28043a774dcc4ee75642d72ab23538edc7a"
+                      "sizeBytes":  91229,
+                      "sha256":  "22cd3b0247d8a8debf2eb64403bf8dd52442bad2fe37881a3392e5e236de2959"
                   },
                   {
                       "path":  "CourseForge.ico",
@@ -158,7 +158,7 @@
                   {
                       "path":  "package-manifest.json",
                       "sizeBytes":  1315,
-                      "sha256":  "e2044cbf77be41926ccc713bdee45a19836203c6ebbaefff7b74d1ef7c143daa"
+                      "sha256":  "dbe59a4deaeb4f33d55bcaaba484880a987a52b5e48cad9c9c1127c46b49ffc0"
                   },
                   {
                       "path":  "README.md",

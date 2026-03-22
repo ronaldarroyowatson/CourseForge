@@ -2,6 +2,7 @@ import { httpsCallable } from "firebase/functions";
 
 import { getCurrentUser, waitForAuthStateChange } from "../../firebase/auth";
 import { functionsClient } from "../../firebase/functions";
+import { appendDebugLogEntry } from "./debugLogService";
 
 export type AutoOcrProviderId = "local_tesseract" | "cloud_openai_vision";
 
@@ -63,6 +64,57 @@ let autoOcrAvailabilityCache: {
   errorMessage?: string;
 } | null = null;
 let cloudAvailabilityProbeInFlight: Promise<ProviderAvailabilityState> | null = null;
+
+function createOcrTraceId(prefix = "ocr"): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function emitOcrDiagnostic(
+  event: string,
+  options: {
+    level?: "info" | "warning" | "error";
+    traceId?: string;
+    context?: Record<string, unknown>;
+  } = {}
+): Promise<void> {
+  const level = options.level ?? "info";
+  const traceId = options.traceId;
+  const context = {
+    ...(options.context ?? {}),
+    traceId: traceId ?? null,
+  };
+
+  const eventType = level === "error"
+    ? "error"
+    : level === "warning"
+      ? "warning"
+      : "info";
+
+  void appendDebugLogEntry({
+    eventType,
+    message: `OCR ${event}`,
+    context,
+  }, getCurrentUser()?.uid ?? null).catch(() => {
+    // Best effort diagnostics.
+  });
+
+  if (typeof fetch === "function") {
+    void fetch("/api/ocr-debug-log", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        event,
+        level,
+        traceId: traceId ?? null,
+        context,
+      }),
+    }).catch(() => {
+      // Best effort diagnostics.
+    });
+  }
+}
 
 function normalizeCallableError(error: unknown): { code: string; message: string } {
   if (typeof error === "object" && error !== null) {
@@ -420,6 +472,12 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
     return cloudAvailabilityProbeInFlight;
   }
 
+  const traceId = createOcrTraceId("ocr-health");
+  void emitOcrDiagnostic("health_probe_started", {
+    traceId,
+    context: { forceRefresh: Boolean(options.forceRefresh) },
+  });
+
   cloudAvailabilityProbeInFlight = (async () => {
     const user = getCurrentUser() ?? await waitForAuthStateChange(2500);
     if (!user) {
@@ -428,6 +486,11 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
         expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
         errorMessage: "Sign in is required for Cloud OCR.",
       };
+      void emitOcrDiagnostic("health_probe_no_user", {
+        level: "warning",
+        traceId,
+        context: { availabilityState: "unavailable" },
+      });
       return "unavailable";
     }
 
@@ -449,6 +512,11 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
           expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
           errorMessage: "Cloud OCR status probe returned an invalid payload.",
         };
+        void emitOcrDiagnostic("health_probe_invalid_payload", {
+          level: "warning",
+          traceId,
+          context: { availabilityState: "unknown" },
+        });
         return "unknown";
       }
 
@@ -459,6 +527,11 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
           expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
           errorMessage: "Cloud OCR status probe did not include provider availability.",
         };
+        void emitOcrDiagnostic("health_probe_missing_cloud_provider", {
+          level: "warning",
+          traceId,
+          context: { availabilityState: "unknown" },
+        });
         return "unknown";
       }
 
@@ -467,6 +540,10 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
         state: resolvedState,
         expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
       };
+      void emitOcrDiagnostic("health_probe_completed", {
+        traceId,
+        context: { availabilityState: resolvedState },
+      });
       return resolvedState;
     } catch (error) {
       const normalized = normalizeCallableError(error);
@@ -476,6 +553,15 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
           expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
           errorMessage: "Sign in is required for Cloud OCR.",
         };
+        void emitOcrDiagnostic("health_probe_unauthenticated", {
+          level: "warning",
+          traceId,
+          context: {
+            availabilityState: "unavailable",
+            errorCode: normalized.code,
+            errorMessage: normalized.message,
+          },
+        });
         return "unavailable";
       }
 
@@ -484,6 +570,15 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
         expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
         errorMessage: normalized.message,
       };
+      void emitOcrDiagnostic("health_probe_failed", {
+        level: "warning",
+        traceId,
+        context: {
+          availabilityState: "unknown",
+          errorCode: normalized.code,
+          errorMessage: normalized.message,
+        },
+      });
       return "unknown";
     }
   })();
@@ -496,10 +591,33 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
 }
 
 async function extractWithCloudOpenAiVision(imageDataUrl: string): Promise<string> {
-  const response = await callWithAuthRefreshRetry<{ imageDataUrl: string }, { data: unknown }>(
-    "extractScreenshotText",
-    { imageDataUrl }
-  );
+  const traceId = createOcrTraceId("ocr-cloud");
+  void emitOcrDiagnostic("cloud_extract_started", {
+    traceId,
+    context: {
+      imageBytes: imageDataUrl.length,
+    },
+  });
+
+  let response;
+  try {
+    response = await callWithAuthRefreshRetry<{ imageDataUrl: string; debugTraceId?: string }, { data: unknown }>(
+      "extractScreenshotText",
+      { imageDataUrl, debugTraceId: traceId }
+    );
+  } catch (error) {
+    const normalized = normalizeCallableError(error);
+    void emitOcrDiagnostic("cloud_extract_callable_failed", {
+      level: "error",
+      traceId,
+      context: {
+        errorCode: normalized.code,
+        errorMessage: normalized.message,
+      },
+    });
+    throw new Error(`Cloud OCR callable failed [${traceId}] ${normalized.code}: ${normalized.message}`);
+  }
+
   const payload = response.data as {
     success?: boolean;
     data?: { text?: string };
@@ -507,10 +625,26 @@ async function extractWithCloudOpenAiVision(imageDataUrl: string): Promise<strin
   };
 
   if (payload?.success !== true || !payload.data?.text) {
-    throw new Error(payload?.message ?? "Cloud OCR provider returned an invalid payload.");
+    const message = payload?.message ?? "Cloud OCR provider returned an invalid payload.";
+    void emitOcrDiagnostic("cloud_extract_invalid_payload", {
+      level: "error",
+      traceId,
+      context: {
+        message,
+        hasTextField: Boolean(payload?.data?.text),
+      },
+    });
+    throw new Error(`${message} [${traceId}]`);
   }
 
-  return payload.data.text.trim();
+  const text = payload.data.text.trim();
+  void emitOcrDiagnostic("cloud_extract_completed", {
+    traceId,
+    context: {
+      textLength: text.length,
+    },
+  });
+  return text;
 }
 
 export function getAutoOcrProviders(): AutoOcrProvider[] {
@@ -572,6 +706,7 @@ export async function extractTextFromImageWithFallback(
     providersOverride?: AutoOcrProvider[];
   } = {}
 ): Promise<AutoOcrExtractionResult> {
+  const extractionTraceId = createOcrTraceId("ocr-fallback");
   const preprocessedImage = await Promise.race<string>([
     preprocessImageForOcr(imageDataUrl),
     new Promise<string>((resolve) => {
@@ -582,9 +717,23 @@ export async function extractTextFromImageWithFallback(
   const providerMap = new Map((options.providersOverride ?? getAutoOcrProviders()).map((provider) => [provider.id, provider]));
   const attempts: AutoOcrAttemptResult[] = [];
 
+  void emitOcrDiagnostic("fallback_started", {
+    traceId: extractionTraceId,
+    context: {
+      requestedProviderOrder: providerOrder,
+      imageBytes: imageDataUrl.length,
+      preprocessedImageBytes: preprocessedImage.length,
+    },
+  });
+
   for (const providerId of providerOrder) {
     if (isCircuitOpen(providerId)) {
       attempts.push({ providerId, success: false, errorMessage: "Circuit breaker open for provider cooldown window." });
+      void emitOcrDiagnostic("provider_skipped_circuit_open", {
+        level: "warning",
+        traceId: extractionTraceId,
+        context: { providerId },
+      });
       continue;
     }
 
@@ -592,6 +741,11 @@ export async function extractTextFromImageWithFallback(
     if (!provider) {
       attempts.push({ providerId, success: false, errorMessage: "Provider is not registered." });
       recordProviderFailure(providerId, "Provider is not registered.");
+      void emitOcrDiagnostic("provider_missing", {
+        level: "error",
+        traceId: extractionTraceId,
+        context: { providerId },
+      });
       continue;
     }
 
@@ -605,34 +759,73 @@ export async function extractTextFromImageWithFallback(
     if (!available) {
       attempts.push({ providerId, success: false, errorMessage: "Provider is not available in this environment." });
       recordProviderFailure(providerId, "Provider is not available in this environment.");
+      void emitOcrDiagnostic("provider_unavailable", {
+        level: "warning",
+        traceId: extractionTraceId,
+        context: { providerId },
+      });
       continue;
     }
 
     try {
+      void emitOcrDiagnostic("provider_extract_started", {
+        traceId: extractionTraceId,
+        context: { providerId },
+      });
       const text = await provider.extractText(preprocessedImage);
       if (!text.trim()) {
         attempts.push({ providerId, success: false, errorMessage: "OCR returned empty text." });
         recordProviderFailure(providerId, "OCR returned empty text.");
+        void emitOcrDiagnostic("provider_extract_empty_text", {
+          level: "warning",
+          traceId: extractionTraceId,
+          context: { providerId },
+        });
         continue;
       }
 
       attempts.push({ providerId, success: true });
       recordProviderSuccess(providerId);
+      void emitOcrDiagnostic("provider_extract_succeeded", {
+        traceId: extractionTraceId,
+        context: {
+          providerId,
+          textLength: text.length,
+          attemptsCount: attempts.length,
+        },
+      });
       return {
         text,
         providerId,
         attempts,
       };
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown OCR error.";
       attempts.push({
         providerId,
         success: false,
-        errorMessage: error instanceof Error ? error.message : "Unknown OCR error.",
+        errorMessage: message,
       });
-      recordProviderFailure(providerId, error instanceof Error ? error.message : "Unknown OCR error.");
+      recordProviderFailure(providerId, message);
+      void emitOcrDiagnostic("provider_extract_failed", {
+        level: "error",
+        traceId: extractionTraceId,
+        context: {
+          providerId,
+          errorMessage: message,
+        },
+      });
     }
   }
 
   const summary = attempts.map((attempt) => `${attempt.providerId}: ${attempt.errorMessage ?? "failed"}`).join("; ");
-  throw new Error(`All OCR providers failed. ${summary}`);
+  void emitOcrDiagnostic("fallback_failed", {
+    level: "error",
+    traceId: extractionTraceId,
+    context: {
+      attempts,
+      summary,
+    },
+  });
+  throw new Error(`All OCR providers failed [${extractionTraceId}]. ${summary}`);
 }

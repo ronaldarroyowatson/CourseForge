@@ -25,6 +25,7 @@ const latestReleaseMaxAttempts = Math.max(1, Number(process.env.COURSEFORGE_UPDA
 // pending-update.json is written here by the updater.
 const packageRoot = path.dirname(webappPath);
 const updaterLogPath = path.join(packageRoot, "updater.log");
+const ocrDebugLogPath = path.join(packageRoot, "ocr-debug.log");
 const updaterCheckPath = path.join(packageRoot, "updater-check.json");
 let manualStageProcess = null;
 let hasActiveHeartbeat = false;
@@ -37,6 +38,51 @@ function writeUpdaterLog(message) {
   } catch (error) {
     console.error("[CourseForge server] Failed to append updater log entry:", error);
   }
+}
+
+function appendOcrDebugLog(entry) {
+  const line = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    ...entry,
+  });
+  try {
+    fs.appendFileSync(ocrDebugLogPath, `${line}\n`, "utf8");
+  } catch (error) {
+    console.error("[CourseForge server] Failed to append OCR debug log entry:", error);
+  }
+}
+
+async function readJsonRequestBody(req, maxBytes = 32 * 1024) {
+  return new Promise((resolve, reject) => {
+    let totalBytes = 0;
+    const chunks = [];
+
+    req.on("data", (chunk) => {
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        reject(new Error("request-body-too-large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on("end", () => {
+      if (!chunks.length) {
+        resolve({});
+        return;
+      }
+
+      const text = Buffer.concat(chunks).toString("utf8");
+      try {
+        resolve(JSON.parse(text));
+      } catch {
+        reject(new Error("request-body-invalid-json"));
+      }
+    });
+
+    req.on("error", reject);
+  });
 }
 
 function readJsonFile(filePath) {
@@ -412,7 +458,7 @@ async function fetchLatestReleaseStatus() {
   };
 }
 
-async function handleApiRoute(pathname, url, method, res) {
+async function handleApiRoute(pathname, url, method, req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -489,6 +535,51 @@ async function handleApiRoute(pathname, url, method, res) {
       progress,
       lastCheck,
       updaterLogTail: tailFileLines(updaterLogPath, 80),
+      ocrDebugLogTail: tailFileLines(ocrDebugLogPath, 120),
+    }));
+    return;
+  }
+
+  if (pathname === "/api/ocr-debug-log") {
+    if (method !== "POST") {
+      res.writeHead(405);
+      res.end(JSON.stringify({ error: "method not allowed" }));
+      return;
+    }
+
+    let body;
+    try {
+      body = await readJsonRequestBody(req);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message === "request-body-too-large" ? 413 : 400;
+      res.writeHead(status);
+      res.end(JSON.stringify({ error: message }));
+      return;
+    }
+
+    const payload = typeof body === "object" && body !== null ? body : {};
+    const event = typeof payload.event === "string" ? payload.event.trim() : "unknown";
+    const level = typeof payload.level === "string" ? payload.level.trim().toLowerCase() : "info";
+    const traceId = typeof payload.traceId === "string" ? payload.traceId.trim() : "";
+    const context = typeof payload.context === "object" && payload.context !== null ? payload.context : {};
+
+    appendOcrDebugLog({ event, level, traceId: traceId || null, context });
+    res.writeHead(202);
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if (pathname === "/api/ocr-debug-log-tail") {
+    const requestedLines = Number(url.searchParams.get("lines"));
+    const lineCount = Number.isFinite(requestedLines)
+      ? Math.max(1, Math.min(500, Math.trunc(requestedLines)))
+      : 150;
+
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      path: ocrDebugLogPath,
+      tail: tailFileLines(ocrDebugLogPath, lineCount),
     }));
     return;
   }
@@ -575,7 +666,7 @@ function startServer(finalPort) {
 
       // ── /api/* routes ──
       if (pathname.startsWith("/api/")) {
-        void handleApiRoute(pathname, url, req.method || "GET", res).catch((error) => {
+        void handleApiRoute(pathname, url, req.method || "GET", req, res).catch((error) => {
           console.error("API route error:", error);
           if (pathname === "/api/check-for-updates") {
             const message = error instanceof Error ? error.message : String(error);

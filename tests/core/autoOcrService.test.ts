@@ -40,6 +40,8 @@ const TEST_IMAGE_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6W2NcAAAAASUVORK5CYII=";
 
 const OriginalImage = globalThis.Image;
+const OriginalFetch = globalThis.fetch;
+let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeAll(() => {
   class InstantImage {
@@ -64,6 +66,8 @@ afterAll(() => {
 
 describe("autoOcrService", () => {
   beforeEach(() => {
+    fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
     window.localStorage.clear();
     resetAutoOcrCircuitStateForTests();
     clearAutoOcrAvailabilityCache();
@@ -77,6 +81,10 @@ describe("autoOcrService", () => {
     authMocks.waitForAuthStateChange.mockResolvedValue({
       getIdToken: vi.fn(async () => "token"),
     });
+  });
+
+  afterAll(() => {
+    globalThis.fetch = OriginalFetch;
   });
 
   it("stores and returns normalized provider order", () => {
@@ -403,6 +411,11 @@ describe("autoOcrService", () => {
       providerOrder: ["local_tesseract", "cloud_openai_vision"],
       providersOverride: providers,
     })).rejects.toThrow(/All OCR providers failed/i);
+
+    await expect(extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+      providerOrder: ["local_tesseract", "cloud_openai_vision"],
+      providersOverride: providers,
+    })).rejects.toThrow(/\[ocr-fallback-/i);
   });
 
   describe("cloud OCR Firebase callable response handling", () => {
@@ -505,6 +518,31 @@ describe("autoOcrService", () => {
 
       expect(result.providerId).toBe("local_tesseract");
       expect(result.attempts[0].success).toBe(false);
+    });
+
+    it("emits cloud failure diagnostics to local OCR log endpoint", async () => {
+      callableMocks.extractScreenshotText.mockRejectedValue({
+        code: "internal",
+        message: "Cloud OCR provider error: 429 Too Many Requests",
+      });
+
+      await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        providersOverride: [cloudProvider, localProvider],
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const postedBodies = fetchMock.mock.calls
+        .filter((call) => call[0] === "/api/ocr-debug-log")
+        .map((call) => {
+          const init = call[1] as RequestInit | undefined;
+          return typeof init?.body === "string" ? JSON.parse(init.body) as { event?: string } : {};
+        });
+
+      expect(
+        postedBodies.some((body) => body.event === "provider_extract_failed" || body.event === "cloud_extract_callable_failed")
+      ).toBe(true);
     });
 
     it("fallsback to local when callable throws network error", async () => {

@@ -355,6 +355,15 @@ function deriveReleasesListEndpoint(latestEndpoint) {
   return null;
 }
 
+function addCacheBustParameter(endpoint) {
+  if (!endpoint || typeof endpoint !== "string") {
+    return endpoint;
+  }
+
+  const separator = endpoint.includes("?") ? "&" : "?";
+  return `${endpoint}${separator}cache_bust=${Date.now()}`;
+}
+
 function selectBestStableRelease(releases, currentSemver) {
   if (!Array.isArray(releases) || !releases.length) {
     return null;
@@ -461,6 +470,7 @@ async function fetchLatestReleaseStatus() {
   const headers = {
     Accept: "application/vnd.github+json",
     "User-Agent": "CourseForge-Local-Server",
+    "Cache-Control": "no-cache, no-store, must-revalidate",
   };
 
   const token = process.env.COURSEFORGE_GITHUB_TOKEN || process.env.GITHUB_TOKEN;
@@ -477,12 +487,16 @@ async function fetchLatestReleaseStatus() {
     tokenConfigured: Boolean(token),
   };
 
-  const latestResult = await fetchJsonWithRetries(latestEndpoint, headers);
+  // Add cache-bust parameters to force fresh API responses
+  const cacheBustedLatestEndpoint = addCacheBustParameter(latestEndpoint);
+  const cacheBustedReleasesEndpoint = releasesListEndpoint ? addCacheBustParameter(releasesListEndpoint) : null;
+
+  const latestResult = await fetchJsonWithRetries(cacheBustedLatestEndpoint, headers);
   const currentSemver = parseSemver(currentVersion);
 
   if (!latestResult.response) {
-    if (releasesListEndpoint) {
-      const fallbackResult = await fetchJsonWithRetries(releasesListEndpoint, headers);
+    if (cacheBustedReleasesEndpoint) {
+      const fallbackResult = await fetchJsonWithRetries(cacheBustedReleasesEndpoint, headers);
       if (fallbackResult.ok) {
         const bestRelease = selectBestStableRelease(fallbackResult.body, currentSemver);
         if (bestRelease) {
@@ -563,8 +577,8 @@ async function fetchLatestReleaseStatus() {
   let resolvedReleaseUrl = release.html_url || null;
   let source = "latest";
 
-  if (releasesListEndpoint && currentSemver && (!available || !latestSemver)) {
-    const verificationResult = await fetchJsonWithRetries(releasesListEndpoint, headers);
+  if (cacheBustedReleasesEndpoint && currentSemver && (!available || !latestSemver)) {
+    const verificationResult = await fetchJsonWithRetries(cacheBustedReleasesEndpoint, headers);
     if (verificationResult.ok) {
       const bestRelease = selectBestStableRelease(verificationResult.body, currentSemver);
       if (bestRelease) {
@@ -587,6 +601,10 @@ async function fetchLatestReleaseStatus() {
     diagnostics: {
       ...diagnostics,
       source,
+      latestVersionParsed: latestVersion,
+      latestVersionSemver: latestSemver,
+      currentVersionSemver: currentSemver,
+      comparisonResult: latestSemver && currentSemver ? compareSemver(latestSemver, currentSemver) : null,
     },
   };
 }

@@ -306,7 +306,11 @@ interface AdminContentRecord {
   lastModified: string | null;
 }
 
-type AutoOcrProviderId = "local_tesseract" | "cloud_openai_vision";
+type AutoOcrProviderId = 
+  | "local_tesseract" 
+  | "cloud_openai_vision"
+  | "cloud_azure_foundry_vision"
+  | "cloud_github_models_vision";
 
 interface AiProviderPolicyRecord {
   providerOrder: AutoOcrProviderId[];
@@ -459,7 +463,12 @@ function normalizeAutoOcrProviderOrder(value: unknown): AutoOcrProviderId[] {
   }
 
   const accepted = value
-    .filter((entry): entry is AutoOcrProviderId => entry === "local_tesseract" || entry === "cloud_openai_vision")
+    .filter((entry): entry is AutoOcrProviderId => 
+      entry === "local_tesseract" 
+      || entry === "cloud_openai_vision"
+      || entry === "cloud_azure_foundry_vision"
+      || entry === "cloud_github_models_vision"
+    )
     .filter((entry, index, array) => array.indexOf(entry) === index);
 
   if (!accepted.length) {
@@ -1677,6 +1686,26 @@ export const getAiProviderStatus = onCall({ invoker: "public", secrets: [openAiK
         reasonCode: cloudProbe.reasonCode,
         reasonMessage: cloudProbe.reasonMessage,
         httpStatus: cloudProbe.httpStatus,
+        checkedAt: new Date().toISOString(),
+      },
+      {
+        id: "cloud_azure_foundry_vision" as const,
+        label: "Cloud OCR (Azure Foundry Vision)",
+        available: false,
+        availabilityState: "unavailable" as const,
+        reasonCode: "not_configured",
+        reasonMessage: "Azure Foundry Vision is not yet configured. Contact your administrator.",
+        httpStatus: null,
+        checkedAt: new Date().toISOString(),
+      },
+      {
+        id: "cloud_github_models_vision" as const,
+        label: "Cloud OCR (GitHub Models Vision)",
+        available: false,
+        availabilityState: "unavailable" as const,
+        reasonCode: "not_configured",
+        reasonMessage: "GitHub Models Vision is not yet configured. Contact your administrator.",
+        httpStatus: null,
         checkedAt: new Date().toISOString(),
       },
       {

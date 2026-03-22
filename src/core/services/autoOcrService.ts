@@ -4,7 +4,11 @@ import { getCurrentUser, waitForAuthStateChange } from "../../firebase/auth";
 import { functionsClient } from "../../firebase/functions";
 import { appendDebugLogEntry } from "./debugLogService";
 
-export type AutoOcrProviderId = "local_tesseract" | "cloud_openai_vision";
+export type AutoOcrProviderId = 
+  | "local_tesseract" 
+  | "cloud_openai_vision"
+  | "cloud_azure_foundry_vision"
+  | "cloud_github_models_vision";
 
 export interface AutoOcrProvider {
   id: AutoOcrProviderId;
@@ -256,7 +260,12 @@ function getStorage(): Storage | null {
 }
 
 function normalizeProviderOrder(order: AutoOcrProviderId[]): AutoOcrProviderId[] {
-  const cleaned = order.filter((providerId) => providerId === "local_tesseract" || providerId === "cloud_openai_vision");
+  const cleaned = order.filter((providerId) => 
+    providerId === "local_tesseract" 
+    || providerId === "cloud_openai_vision"
+    || providerId === "cloud_azure_foundry_vision"
+    || providerId === "cloud_github_models_vision"
+  );
   const deduped = [...new Set(cleaned)];
 
   DEFAULT_PROVIDER_ORDER.forEach((providerId) => {
@@ -274,6 +283,8 @@ function getCircuitState(): CircuitState {
     return {
       local_tesseract: { consecutiveFailures: 0, openUntil: 0 },
       cloud_openai_vision: { consecutiveFailures: 0, openUntil: 0 },
+      cloud_azure_foundry_vision: { consecutiveFailures: 0, openUntil: 0 },
+      cloud_github_models_vision: { consecutiveFailures: 0, openUntil: 0 },
     };
   }
 
@@ -282,6 +293,8 @@ function getCircuitState(): CircuitState {
     return {
       local_tesseract: { consecutiveFailures: 0, openUntil: 0 },
       cloud_openai_vision: { consecutiveFailures: 0, openUntil: 0 },
+      cloud_azure_foundry_vision: { consecutiveFailures: 0, openUntil: 0 },
+      cloud_github_models_vision: { consecutiveFailures: 0, openUntil: 0 },
     };
   }
 
@@ -298,11 +311,23 @@ function getCircuitState(): CircuitState {
         openUntil: Number(parsed.cloud_openai_vision?.openUntil ?? 0),
         lastError: parsed.cloud_openai_vision?.lastError,
       },
+      cloud_azure_foundry_vision: {
+        consecutiveFailures: Number(parsed.cloud_azure_foundry_vision?.consecutiveFailures ?? 0),
+        openUntil: Number(parsed.cloud_azure_foundry_vision?.openUntil ?? 0),
+        lastError: parsed.cloud_azure_foundry_vision?.lastError,
+      },
+      cloud_github_models_vision: {
+        consecutiveFailures: Number(parsed.cloud_github_models_vision?.consecutiveFailures ?? 0),
+        openUntil: Number(parsed.cloud_github_models_vision?.openUntil ?? 0),
+        lastError: parsed.cloud_github_models_vision?.lastError,
+      },
     };
   } catch {
     return {
       local_tesseract: { consecutiveFailures: 0, openUntil: 0 },
       cloud_openai_vision: { consecutiveFailures: 0, openUntil: 0 },
+      cloud_azure_foundry_vision: { consecutiveFailures: 0, openUntil: 0 },
+      cloud_github_models_vision: { consecutiveFailures: 0, openUntil: 0 },
     };
   }
 }
@@ -382,6 +407,8 @@ export function resetAutoOcrCircuitStateForTests(): void {
   saveCircuitState({
     local_tesseract: { consecutiveFailures: 0, openUntil: 0 },
     cloud_openai_vision: { consecutiveFailures: 0, openUntil: 0 },
+    cloud_azure_foundry_vision: { consecutiveFailures: 0, openUntil: 0 },
+    cloud_github_models_vision: { consecutiveFailures: 0, openUntil: 0 },
   });
 }
 

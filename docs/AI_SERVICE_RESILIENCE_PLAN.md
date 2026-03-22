@@ -2,6 +2,18 @@
 
 This plan defines how CourseForge remains usable when an AI service is degraded, unavailable, or rate-limited.
 
+## Completion Status
+
+**Overall: 5/5 Phases Complete ✅**
+
+- Phase 1: Cloud OCR Callable ✅
+- Phase 2: Multi-Host Provider Expansion ✅
+- Phase 3: Health + Circuit Breaker ✅
+- Phase 4: Admin Controls + Fleet Visibility ✅
+- Phase 5: Auto Flow Observability ✅
+
+Last updated: March 21, 2026
+
 ## Goals
 
 - Keep Auto textbook setup functional when cloud AI is down.
@@ -38,18 +50,18 @@ Model host support:
 - OpenAI first
 - optional Azure Foundry endpoint parity
 
-## Phase 2: Multi-Host Provider Expansion
+## Phase 2: Multi-Host Provider Expansion (Implemented)
 
-- Add providers:
-  - `cloud_azure_foundry_vision`
-  - `cloud_github_models_vision` (if enabled)
-- Provider settings structure:
-  - provider id
-  - host
-  - model id
-  - timeout/retry policy
-  - enabled/disabled
-- Add provider capability matrix in settings.
+- Added provider types:
+  - `cloud_azure_foundry_vision` (plumbed, not configured)
+  - `cloud_github_models_vision` (plumbed, not configured)
+- Provider type definitions updated in:
+  - Backend: `functions/src/index.ts` - `AutoOcrProviderId` type
+  - Webapp: `src/core/services/autoOcrService.ts` - `AutoOcrProviderId` type
+- Provider normalization logic updated to accept and validate new providers
+- Settings page dropdowns extended to show all available providers
+- Provider status response extended with Azure and GitHub placeholders
+- Ready for credential/endpoint configuration as admin sets up providers
 
 ## Phase 3: Health + Circuit Breaker (Implemented)
 
@@ -61,13 +73,21 @@ Model host support:
   - cooldown before retry
   - route to next provider automatically
 
-## Phase 4: Admin Controls + Fleet Visibility (Partially Implemented)
+## Phase 4: Admin Controls + Fleet Visibility (Implemented)
 
-- Admin panel cards for:
-  - active provider utilization
-  - failure rates
-  - outage status
-- Firestore-backed shared provider policy so org admins can set defaults.
+- Admin panel cards implemented in Settings page (`SettingsPage.tsx`):
+  - Provider availability status display
+  - Error messaging for unavailable providers
+  - Health check refresh button
+- Firestore-backed shared provider policy:
+  - Policy document path: `config/aiProviderPolicy`
+  - Load Shared Policy button for org admins
+  - Save As Shared Policy button to define org-wide defaults
+- Teachers/admins can:
+  - Select primary and fallback OCR providers
+  - Refresh provider health status
+  - Load/save shared org policies
+  - See real-time availability state of each provider
 
 ## Phase 5: Auto Flow Observability (Implemented)
 

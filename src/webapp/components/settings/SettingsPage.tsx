@@ -903,6 +903,8 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
             >
               <option value="local_tesseract">Local OCR (Tesseract)</option>
               <option value="cloud_openai_vision">Cloud OCR (OpenAI Vision)</option>
+              <option value="cloud_azure_foundry_vision">Cloud OCR (Azure Foundry Vision)</option>
+              <option value="cloud_github_models_vision">Cloud OCR (GitHub Models Vision)</option>
             </select>
           </label>
           <label>
@@ -913,6 +915,8 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
             >
               <option value="local_tesseract">Local OCR (Tesseract)</option>
               <option value="cloud_openai_vision">Cloud OCR (OpenAI Vision)</option>
+              <option value="cloud_azure_foundry_vision">Cloud OCR (Azure Foundry Vision)</option>
+              <option value="cloud_github_models_vision">Cloud OCR (GitHub Models Vision)</option>
             </select>
           </label>
           <div className="form-actions">

@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-03-22
+
+### Fixed (1.4.2)
+
+- Enforced user-authoritative OCR provider order: Auto OCR now always executes in the exact local order selected in Settings and only falls back when the primary provider fails.
+- Removed automatic provider-order mutation during cloud availability probes, preventing settings from reverting when navigating between Settings and Auto views.
+- Stopped implicit cloud shared-policy override in runtime execution order. Shared policy is now only applied when explicitly loaded from Settings.
+
 ## [1.4.1] - 2026-03-22
 
 ### Fixed (1.4.1)

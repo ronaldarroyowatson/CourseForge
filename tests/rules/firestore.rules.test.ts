@@ -17,6 +17,23 @@ const OTHER_UID = "other-user";
 
 let rulesEnv: RulesTestEnvironment;
 
+function getEmulatorConnection(): { host: string; port: number } {
+  const configuredHost = process.env.FIRESTORE_EMULATOR_HOST;
+  if (configuredHost) {
+    const [hostPart, portPart] = configuredHost.split(":");
+    const parsedPort = Number.parseInt(portPart ?? "", 10);
+    if (hostPart && Number.isFinite(parsedPort)) {
+      return { host: hostPart, port: parsedPort };
+    }
+  }
+
+  // Keep a deterministic fallback aligned to firebase.json emulator defaults.
+  return {
+    host: "127.0.0.1",
+    port: 9090,
+  };
+}
+
 function nowIso(): string {
   return "2026-03-12T00:00:00.000Z";
 }
@@ -34,13 +51,14 @@ function baseSyncFields() {
 beforeAll(async () => {
   const rulesPath = path.resolve(process.cwd(), "firestore.rules");
   const firestoreRules = readFileSync(rulesPath, "utf8");
+  const emulator = getEmulatorConnection();
 
   rulesEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
     firestore: {
       rules: firestoreRules,
-      host: "127.0.0.1",
-      port: 8080,
+      host: emulator.host,
+      port: emulator.port,
     },
   });
 });
@@ -50,7 +68,9 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
-  await rulesEnv.cleanup();
+  if (rulesEnv) {
+    await rulesEnv.cleanup();
+  }
 });
 
 describe("Firestore rules: users + canonical hierarchy", () => {

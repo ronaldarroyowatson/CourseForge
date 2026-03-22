@@ -1,0 +1,74 @@
+{
+    "generatedAtUtc":  "2026-03-22T21:41:17.9416630Z",
+    "version":  "1.4.19",
+    "files":  [
+                  {
+                      "path":  "AutoUpdate-CourseForge.ps1",
+                      "hash":  "E0AD8832955B9D45E3D5BC288F9D0FE0E549190ED0F62E0FFA1516D3E43258D2"
+                  },
+                  {
+                      "path":  "Check-For-CourseForge-Updates.cmd",
+                      "hash":  "D5DCD328AD8AA152FA44DF4A5515714BDEB078B0AF9CEBC8DB27B647B877B51F"
+                  },
+                  {
+                      "path":  "Start-CourseForge.cmd",
+                      "hash":  "01A372E758DCAD3D6F4135626B51409E1B6E2E1E95086625364CA86E052E9E29"
+                  },
+                  {
+                      "path":  "Start-CourseForge.ps1",
+                      "hash":  "57ED8465047B46FE8CC420B6667F332F82982E44735C6096D9A9583A357DE183"
+                  },
+                  {
+                      "path":  "courseforge-serve.cjs",
+                      "hash":  "0DDBFCEB4A0B40E70904B44FC09E8099D68CFFE90BF3D2C5CFC1BE03B8DE6206"
+                  },
+                  {
+                      "path":  "courseforge-serve.js",
+                      "hash":  "4A3228A2BECF6504A17EAB1EB406D64F4CEACFDADEE84C190E24E84F4D576473"
+                  },
+                  {
+                      "path":  "boot-splash.html",
+                      "hash":  "F46B0B614278381D3DA30FB2651B3D3C8009551F83A3FFE50589876E622CACBE"
+                  },
+                  {
+                      "path":  "Test-CourseForge-Integrity.ps1",
+                      "hash":  "00FF414F56A53146D66FB187BDB774CCDA901F18D5495D70CFF8761999F4768C"
+                  },
+                  {
+                      "path":  "Install-CourseForge-Windows.ps1",
+                      "hash":  "40EB69B4FD6F681FED1100AF1F4084D907C7BD77211CA7D0EDA708D63E98D664"
+                  },
+                  {
+                      "path":  "Install-CourseForge-Windows.cmd",
+                      "hash":  "F8CDAB4A28B7B12CF835877003076D954622E5A23B9A330475218C6538B01FB3"
+                  },
+                  {
+                      "path":  "Uninstall-CourseForge-Windows.cmd",
+                      "hash":  "75DDE22B698B17C1C2329330E51E8EF940078A9F2A01BAD6C9A7BAAE383E9799"
+                  },
+                  {
+                      "path":  "README.md",
+                      "hash":  "0015C0463561732874A193FCBD031E5EB43B7A454DD13ECF233D16E57A831DDC"
+                  },
+                  {
+                      "path":  "CHANGELOG.md",
+                      "hash":  "8A2C64F9CB04DF27BCBAE34D373E25E3C7414B164379CC86D013F8590D981681"
+                  },
+                  {
+                      "path":  "LICENSE",
+                      "hash":  "3156401F63F96D54E0912F6BD2117FF3E9E6577A048726622829DAAC5C52B7D8"
+                  },
+                  {
+                      "path":  "package-manifest.json",
+                      "hash":  "1785516697C9C9D32CBCF5431001427823CFD6B7890D9C41D8CF2607A7D25834"
+                  },
+                  {
+                      "path":  "webapp/index.html",
+                      "hash":  "70161F0DB43BEC20F33F0A404F5A66B3B916140EBEF13D2AA84DB1D1A2D9AFC2"
+                  },
+                  {
+                      "path":  "extension/manifest.json",
+                      "hash":  "489A6EC8BACC2F1E547CA482F8C364208F68455DE0FFA08F1917F9C2932A23DE"
+                  }
+              ]
+}

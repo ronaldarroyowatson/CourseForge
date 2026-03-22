@@ -42,8 +42,8 @@ export function LoginPage(): React.JSX.Element {
       <main className="app-main app-main--login">
         <section className="placeholder-panel login-panel">
           <img
-            src="/placeholder-icons/coderabbit-placeholder.svg"
-            alt="CourseForge placeholder icon"
+            src="/CourseForge.ico"
+            alt="CourseForge icon"
             className="placeholder-brand-icon"
           />
           <h2>Sign in to CourseForge</h2>

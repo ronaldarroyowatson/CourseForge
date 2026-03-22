@@ -1,0 +1,169 @@
+{
+    "name":  "CourseForge",
+    "version":  "1.4.19",
+    "generatedAtUtc":  "2026-03-22T21:41:17.1578076Z",
+    "dependencyVersions":  {
+                               "node":  "\u003e=20 \u003c25"
+                           },
+    "requiredNodeVersion":  "\u003e=20 \u003c25",
+    "requiredConfigSchemaVersion":  "1",
+    "requiredDatabaseSchemaVersion":  "1",
+    "requiredExtensionSchemaVersion":  "1",
+    "files":  [
+                  {
+                      "path":  "webapp\\CourseForge.ico",
+                      "sizeBytes":  26399,
+                      "sha256":  "6874b78913251da0e05dc6f304835a6b0720e466fe77e276d977c8aaf2cc175d"
+                  },
+                  {
+                      "path":  "webapp\\index.html",
+                      "sizeBytes":  659,
+                      "sha256":  "70161f0db43bec20f33f0a404f5a66b3b916140ebef13d2aa84db1d1a2d9afc2"
+                  },
+                  {
+                      "path":  "webapp\\sw.js",
+                      "sizeBytes":  2138,
+                      "sha256":  "4f085a2fb1803c1a779d794e628b7738a9cf60446214e642a936bc75bbc712e2"
+                  },
+                  {
+                      "path":  "extension\\assets\\main-Dc0SwXs9.js",
+                      "sizeBytes":  757309,
+                      "sha256":  "e233a779165de620edecf7a80a57a8779ac1090c0ad44eeb1237c6b1ec4339a1"
+                  },
+                  {
+                      "path":  "extension\\assets\\index-3s0w4ncs.js",
+                      "sizeBytes":  15674,
+                      "sha256":  "4d3246e06264f92981facfe8bb31564ea16229cdaf4759da6c93dea3db8482a8"
+                  },
+                  {
+                      "path":  "extension\\assets\\index.esm-kTnOgSuc.js",
+                      "sizeBytes":  94981,
+                      "sha256":  "b1041f42bf3c3afa83ce3be3da09aef58d7a716c24ed85864d163cd992ac2b7a"
+                  },
+                  {
+                      "path":  "extension\\assets\\main-B4_gyoV-.css",
+                      "sizeBytes":  7557,
+                      "sha256":  "a5e5b9fd47adca8b0d06cde1045a78fbe814d0af65ac7644ea9551f2123a1d20"
+                  },
+                  {
+                      "path":  "webapp\\assets\\AdminToolsPage-CYRalB5o.js",
+                      "sizeBytes":  51896,
+                      "sha256":  "d2c74e197bf5b960126abb9728134295c75bf42103ff2e1f331848663dc3e7af"
+                  },
+                  {
+                      "path":  "webapp\\assets\\vendor-react-Clz7p8np.js",
+                      "sizeBytes":  176068,
+                      "sha256":  "f05e2c9db0311b58d8a897c7684da1732c07ed4cd9f141bc287c9bd924e32b80"
+                  },
+                  {
+                      "path":  "webapp\\assets\\__vite-browser-external-BIHI7g3E.js",
+                      "sizeBytes":  33,
+                      "sha256":  "82507b0bb9ac4affaeb17c40968d830cbd6d14a2ffa04d8994faf1a78e58e1b5"
+                  },
+                  {
+                      "path":  "webapp\\placeholder-icons\\coderabbit-placeholder.svg",
+                      "sizeBytes":  2347,
+                      "sha256":  "3b7ef0311ea8eb64ec28566e53e86279c9d1006870ce223727d16769ed48cdf9"
+                  },
+                  {
+                      "path":  "webapp\\assets\\vendor-GyjXrF5b.js",
+                      "sizeBytes":  397077,
+                      "sha256":  "d461e878025018238b9562218a111e2325c96aeef9886a74ec9797c147b6cff5"
+                  },
+                  {
+                      "path":  "webapp\\assets\\index-CxPt4uTL.js",
+                      "sizeBytes":  273799,
+                      "sha256":  "d9e4267d0b50ec393bbb05086be6b072b076d75d6cd89a2e75bb011e860adb6b"
+                  },
+                  {
+                      "path":  "webapp\\assets\\index-DnM_YBBV.css",
+                      "sizeBytes":  23631,
+                      "sha256":  "26dc8d109bd06739531113a8417684da2b58ff7108545ea95af54564c43d99d7"
+                  },
+                  {
+                      "path":  "webapp\\assets\\vendor-firebase-CH9njpjx.js",
+                      "sizeBytes":  460725,
+                      "sha256":  "718fbb082e5ffced0668ed1b72e29d64d04807c5ce8c3458dbc44987d5979403"
+                  },
+                  {
+                      "path":  "extension\\index.html",
+                      "sizeBytes":  1188,
+                      "sha256":  "a47d1c45a681181287802119a0b9d8ea4b3e02d34d7c2763fda0d76c1bfe68d4"
+                  },
+                  {
+                      "path":  "courseforge-serve.cjs",
+                      "sizeBytes":  29709,
+                      "sha256":  "0ddbfceb4a0b40e70904b44fc09e8099d68cffe90bf3d2c5cfc1be03b8de6206"
+                  },
+                  {
+                      "path":  "courseforge-serve.js",
+                      "sizeBytes":  29330,
+                      "sha256":  "4a3228a2becf6504a17eab1eb406d64f4ceacfdadee84c190e24e84f4d576473"
+                  },
+                  {
+                      "path":  "CourseForge-Start.url",
+                      "sizeBytes":  86,
+                      "sha256":  "99c51597475cf869857bacceb84a5c8c07a776cad95d0d9e70e0e41855e902a8"
+                  },
+                  {
+                      "path":  "Check-For-CourseForge-Updates.cmd",
+                      "sizeBytes":  595,
+                      "sha256":  "3ff96ba90b06e141b47d2420e0b206f7fb4a3c1c45f5006b7a3550ee674caf2e"
+                  },
+                  {
+                      "path":  "AutoUpdate-CourseForge.ps1",
+                      "sizeBytes":  26242,
+                      "sha256":  "e0ad8832955b9d45e3d5bc288f9d0fe0e549190ed0f62e0ffa1516d3e43258d2"
+                  },
+                  {
+                      "path":  "boot-splash.html",
+                      "sizeBytes":  10343,
+                      "sha256":  "f46b0b614278381d3da30fb2651b3d3c8009551f83a3ffe50589876e622cacbe"
+                  },
+                  {
+                      "path":  "CHANGELOG.md",
+                      "sizeBytes":  43486,
+                      "sha256":  "8a2c64f9cb04df27bcbae34d373e25e3c7414b164379cc86d013f8590d981681"
+                  },
+                  {
+                      "path":  "CourseForge.ico",
+                      "sizeBytes":  26399,
+                      "sha256":  "6874b78913251da0e05dc6f304835a6b0720e466fe77e276d977c8aaf2cc175d"
+                  },
+                  {
+                      "path":  "Start-CourseForge.ps1",
+                      "sizeBytes":  29022,
+                      "sha256":  "57ed8465047b46fe8cc420b6667f332f82982e44735c6096d9a9583a357de183"
+                  },
+                  {
+                      "path":  "Test-CourseForge-Integrity.ps1",
+                      "sizeBytes":  4355,
+                      "sha256":  "00ff414f56a53146d66fb187bdb774ccda901f18d5495d70cff8761999f4768c"
+                  },
+                  {
+                      "path":  "extension\\background.js",
+                      "sizeBytes":  695,
+                      "sha256":  "20be133610490b16db693f8d082e680ecd6954dd6418a6ee79314fb6a6dec7eb"
+                  },
+                  {
+                      "path":  "Start-CourseForge.cmd",
+                      "sizeBytes":  1374,
+                      "sha256":  "01a372e758dcad3d6f4135626b51409e1b6e2e1e95086625364ca86e052e9e29"
+                  },
+                  {
+                      "path":  "LICENSE",
+                      "sizeBytes":  1095,
+                      "sha256":  "3156401f63f96d54e0912f6bd2117ff3e9e6577a048726622829daac5c52b7d8"
+                  },
+                  {
+                      "path":  "package-manifest.json",
+                      "sizeBytes":  1315,
+                      "sha256":  "c40f4058090a4c26c09ed256a76925392b47203e83c10553675de8438a868744"
+                  },
+                  {
+                      "path":  "README.md",
+                      "sizeBytes":  14504,
+                      "sha256":  "0015c0463561732874a193fcbd031e5eb43b7a454dd13ecf233d16e57a831ddc"
+                  }
+              ]
+}

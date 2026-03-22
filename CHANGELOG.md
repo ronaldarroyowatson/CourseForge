@@ -6,6 +6,26 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.9] - 2026-03-22
+
+### Fixed (1.4.9)
+
+- Reworked cloud OCR provider execution so CourseForge now evaluates OpenAI Vision and GitHub Models before falling back to local Tesseract.
+- Added structured provider diagnostics across the OCR callable path so failures now report the exact provider, trace id, failure stage, HTTP status, and reason code instead of a vague cloud error.
+- Extended provider health caching to track OpenAI and GitHub separately and treat provider-side `429` responses as currently unavailable, preventing repeated dead-end cloud attempts before fallback.
+- Updated Settings to reflect cloud-first ordering explicitly and keep local OCR as the final fallback instead of a peer option.
+- Added a live smoke test command for cloud OCR that generates a representative textbook-style image, sends it to both cloud providers, and records stage-by-stage results in JSON.
+- Updated the updater integration assertion to allow the cache-busting query parameter that the local server now appends to `/releases/latest`.
+
+### Verified (1.4.9)
+
+- `npm run functions:build:compat`
+- `npm run typecheck`
+- `npx vitest run tests/core/autoOcrService.test.ts`
+- `npm run test:e2e:ocr`
+- `npm run test:e2e`
+- `npm run test:smoke:ocr:cloud`
+
 ## [1.4.6] - 2026-03-22
 
 ### Fixed (1.4.6)

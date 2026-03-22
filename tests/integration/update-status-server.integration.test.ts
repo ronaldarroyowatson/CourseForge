@@ -371,7 +371,7 @@ describe("local update status endpoint", () => {
 
       expect(releaseServer.requests).toHaveLength(1);
       expect(releaseServer.requests[0]?.method).toBe("GET");
-      expect(releaseServer.requests[0]?.path).toBe("/releases/latest");
+      expect(releaseServer.requests[0]?.path?.startsWith("/releases/latest")).toBe(true);
       expect(releaseServer.requests[0]?.headers.accept).toContain("application/vnd.github+json");
       expect(releaseServer.requests[0]?.headers["user-agent"]).toContain("CourseForge-Local-Server");
 

@@ -12,7 +12,7 @@ This plan defines how CourseForge remains usable when an AI service is degraded,
 - Phase 4: Admin Controls + Fleet Visibility ✅
 - Phase 5: Auto Flow Observability ✅
 
-Last updated: March 21, 2026
+Last updated: March 22, 2026
 
 ## Goals
 
@@ -24,12 +24,14 @@ Last updated: March 21, 2026
 ## Current Baseline (Implemented)
 
 - OCR provider abstraction in webapp service layer.
-- Configurable provider order (primary + fallback) stored locally.
+- Configurable provider order (primary cloud + secondary cloud + local fallback) stored locally.
 - Local OCR provider: Tesseract (offline-capable).
-- Cloud OCR provider slot: OpenAI Vision via Firebase callable (`extractScreenshotText`) with runtime readiness check.
+- Cloud OCR providers:
+  - OpenAI Vision via Firebase callable (`extractScreenshotText`)
+  - GitHub Models Vision via the same callable path and provider-specific routing
 - Settings page controls:
-  - primary provider selection
-  - fallback provider selection
+  - primary cloud provider selection
+  - secondary cloud provider selection
   - provider health refresh
 - Auto Mode OCR uses fallback chain automatically.
 
@@ -47,21 +49,22 @@ Security:
 
 Model host support:
 
-- OpenAI first
-- optional Azure Foundry endpoint parity
+- OpenAI Vision
+- GitHub Models Vision
+- local Tesseract fallback after both cloud providers fail
 
 ## Phase 2: Multi-Host Provider Expansion (Implemented)
 
-- Added provider types:
-  - `cloud_azure_foundry_vision` (plumbed, not configured)
-  - `cloud_github_models_vision` (plumbed, not configured)
+- Added live cloud OCR providers:
+  - `cloud_openai_vision`
+  - `cloud_github_models_vision`
 - Provider type definitions updated in:
-  - Backend: `functions/src/index.ts` - `AutoOcrProviderId` type
-  - Webapp: `src/core/services/autoOcrService.ts` - `AutoOcrProviderId` type
-- Provider normalization logic updated to accept and validate new providers
-- Settings page dropdowns extended to show all available providers
-- Provider status response extended with Azure and GitHub placeholders
-- Ready for credential/endpoint configuration as admin sets up providers
+  - Backend: `functions/src/index.ts`
+  - Webapp: `src/core/services/autoOcrService.ts`
+- Provider routing now happens inside the shared Firebase callable using provider-specific request metadata.
+- Provider normalization logic now preserves cloud-first execution and appends local OCR as the last fallback.
+- Provider status probes now return per-provider reason codes, HTTP status, and detailed execution-stage metadata.
+- Extraction failures now surface exact failure stage data (`preflight_credentials`, `provider_request`, `provider_response`, `response_parse`, `response_validate`, and timeout paths).
 
 ## Phase 3: Health + Circuit Breaker (Implemented)
 
@@ -84,7 +87,7 @@ Model host support:
   - Load Shared Policy button for org admins
   - Save As Shared Policy button to define org-wide defaults
 - Teachers/admins can:
-  - Select primary and fallback OCR providers
+  - Select primary and secondary cloud OCR providers
   - Refresh provider health status
   - Load/save shared org policies
   - See real-time availability state of each provider
@@ -106,7 +109,7 @@ Model host support:
 
 ## Failure-Mode Expectations
 
-- Cloud provider unavailable: local OCR continues.
+- Primary cloud provider unavailable: CourseForge records the exact provider failure reason, tries the secondary cloud provider, and only then uses local OCR.
 - Local OCR unavailable (device/browser issue): cloud provider used when configured.
 - All providers unavailable:
   - user sees actionable message
@@ -132,8 +135,10 @@ Automated OCR resilience coverage is now included in the e2e lane via `npm run t
 Live smoke checks should include:
 
 - local OCR extraction against a representative cover image
-- cloud OCR extraction attempt against the same image to validate provider availability and error messaging
+- cloud OCR extraction attempt against the same image to validate provider availability, failure-stage reporting, and usable text output from both cloud providers
 - confirmation that trace IDs appear in `ocr-debug.log` across capture, extraction, fallback (if any), and save
+
+Live smoke automation is now available through `npm run test:smoke:ocr:cloud`, which writes a JSON report under `tmp-smoke/`.
 
 ## Non-Goals
 

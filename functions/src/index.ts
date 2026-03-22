@@ -16,6 +16,7 @@ import {
 dotenv.config();
 
 const openAiKeySecret = defineSecret("OPENAI_API_KEY");
+const githubModelsTokenSecret = defineSecret("COURSEFORGE_GITHUB_TOKEN");
 
 admin.initializeApp();
 
@@ -137,14 +138,52 @@ function getOpenAiApiKey(): string {
   return "";
 }
 
-type OpenAiProviderAvailabilityState = "available" | "unavailable" | "unknown";
+function getGitHubModelsToken(): string {
+  const candidates = [
+    process.env.COURSEFORGE_GITHUB_TOKEN,
+    process.env.GITHUB_TOKEN,
+  ];
 
-interface OpenAiProbeResult {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return "";
+}
+
+type ProviderAvailabilityState = "available" | "unavailable" | "unknown";
+
+interface CloudOcrExecutionDetails {
+  traceId: string;
+  endpoint: string;
+  model: string;
+  requestAcceptedByFunction: boolean;
+  providerRequestPrepared: boolean;
+  providerRequestSent: boolean;
+  providerResponseReceived: boolean;
+  providerExecutionObserved: boolean;
+  failureStage: string | null;
+}
+
+interface CloudOcrProbeResult {
   available: boolean;
-  availabilityState: OpenAiProviderAvailabilityState;
+  availabilityState: ProviderAvailabilityState;
   reasonCode: string;
   reasonMessage: string;
   httpStatus: number | null;
+  details: CloudOcrExecutionDetails;
+}
+
+interface CloudOcrProviderRuntime {
+  id: "cloud_openai_vision" | "cloud_github_models_vision";
+  label: string;
+  endpoint: string;
+  model: string;
+  apiKey: string;
+  missingCredentialReason: string;
+  headers?: Record<string, string>;
 }
 
 async function readResponseSnippet(response: Response): Promise<string> {
@@ -174,14 +213,33 @@ async function readResponseSnippet(response: Response): Promise<string> {
   }
 }
 
-async function canAuthenticateOpenAi(apiKey: string): Promise<OpenAiProbeResult> {
-  if (!apiKey.trim()) {
+function createCloudOcrExecutionDetails(runtime: CloudOcrProviderRuntime, traceId: string): CloudOcrExecutionDetails {
+  return {
+    traceId,
+    endpoint: runtime.endpoint,
+    model: runtime.model,
+    requestAcceptedByFunction: true,
+    providerRequestPrepared: false,
+    providerRequestSent: false,
+    providerResponseReceived: false,
+    providerExecutionObserved: false,
+    failureStage: null,
+  };
+}
+
+async function probeCloudOcrProvider(runtime: CloudOcrProviderRuntime): Promise<CloudOcrProbeResult> {
+  const traceId = `ocr-probe-${runtime.id}-${Date.now()}`;
+  const details = createCloudOcrExecutionDetails(runtime, traceId);
+
+  if (!runtime.apiKey.trim()) {
+    details.failureStage = "preflight_credentials";
     return {
       available: false,
       availabilityState: "unavailable",
-      reasonCode: "missing_api_key",
-      reasonMessage: "OPENAI_API_KEY is not configured on the function runtime.",
+      reasonCode: runtime.id === "cloud_openai_vision" ? "missing_openai_api_key" : "missing_github_models_token",
+      reasonMessage: runtime.missingCredentialReason,
       httpStatus: null,
+      details,
     };
   }
 
@@ -191,15 +249,18 @@ async function canAuthenticateOpenAi(apiKey: string): Promise<OpenAiProbeResult>
   }, 6500);
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    details.providerRequestPrepared = true;
+    details.providerRequestSent = true;
+    const response = await fetch(runtime.endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${runtime.apiKey}`,
+        ...(runtime.headers ?? {}),
       },
       signal: controller.signal,
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: runtime.model,
         messages: [
           {
             role: "user",
@@ -211,35 +272,42 @@ async function canAuthenticateOpenAi(apiKey: string): Promise<OpenAiProbeResult>
       }),
     });
 
+    details.providerResponseReceived = true;
+    details.providerExecutionObserved = true;
+
     if (response.ok) {
       return {
         available: true,
         availabilityState: "available",
         reasonCode: "ok",
-        reasonMessage: "OpenAI authentication probe succeeded.",
+        reasonMessage: `${runtime.label} authentication probe succeeded.`,
         httpStatus: response.status,
+        details,
       };
     }
 
     if (response.status === 429) {
       return {
-        available: true,
-        availabilityState: "available",
+        available: false,
+        availabilityState: "unavailable",
         reasonCode: "rate_limited",
-        reasonMessage: "OpenAI authentication probe was rate-limited, but credentials are valid.",
+        reasonMessage: `${runtime.label} is not currently usable because the provider returned 429 rate limiting or quota exhaustion.`,
         httpStatus: response.status,
+        details,
       };
     }
 
     const snippet = await readResponseSnippet(response);
+    details.failureStage = "provider_response";
 
     if (response.status === 401 || response.status === 403) {
       return {
         available: false,
         availabilityState: "unavailable",
         reasonCode: "auth_failed",
-        reasonMessage: snippet || "OpenAI rejected the API key for OCR requests.",
+        reasonMessage: snippet || `${runtime.label} rejected credentials for OCR requests.`,
         httpStatus: response.status,
+        details,
       };
     }
 
@@ -248,8 +316,9 @@ async function canAuthenticateOpenAi(apiKey: string): Promise<OpenAiProbeResult>
         available: false,
         availabilityState: "unavailable",
         reasonCode: "request_rejected",
-        reasonMessage: snippet || `OpenAI rejected the probe request with status ${response.status}.`,
+        reasonMessage: snippet || `${runtime.label} rejected the probe request with status ${response.status}.`,
         httpStatus: response.status,
+        details,
       };
     }
 
@@ -258,8 +327,9 @@ async function canAuthenticateOpenAi(apiKey: string): Promise<OpenAiProbeResult>
         available: false,
         availabilityState: "unknown",
         reasonCode: "provider_unreachable",
-        reasonMessage: snippet || `OpenAI returned ${response.status}.`,
+        reasonMessage: snippet || `${runtime.label} returned ${response.status}.`,
         httpStatus: response.status,
+        details,
       };
     }
 
@@ -267,24 +337,53 @@ async function canAuthenticateOpenAi(apiKey: string): Promise<OpenAiProbeResult>
       available: false,
       availabilityState: "unknown",
       reasonCode: "probe_failed",
-      reasonMessage: snippet || `OpenAI health probe failed with status ${response.status}.`,
+      reasonMessage: snippet || `${runtime.label} health probe failed with status ${response.status}.`,
       httpStatus: response.status,
+      details,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const timedOut = message.toLowerCase().includes("abort");
+    details.failureStage = timedOut ? "provider_timeout" : "provider_request";
     return {
       available: false,
-      availabilityState: timedOut ? "unknown" : "unknown",
+      availabilityState: "unknown",
       reasonCode: timedOut ? "probe_timeout" : "probe_network_error",
       reasonMessage: timedOut
-        ? "OpenAI health probe timed out."
-        : `OpenAI health probe failed: ${message}`,
+        ? `${runtime.label} health probe timed out.`
+        : `${runtime.label} health probe failed before a provider response: ${message}`,
       httpStatus: null,
+      details,
     };
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+async function canAuthenticateOpenAi(apiKey: string): Promise<CloudOcrProbeResult> {
+  return probeCloudOcrProvider({
+    id: "cloud_openai_vision",
+    label: "Cloud OCR (OpenAI Vision via Firebase Function)",
+    endpoint: "https://api.openai.com/v1/chat/completions",
+    model: "gpt-4o-mini",
+    apiKey,
+    missingCredentialReason: "OPENAI_API_KEY is not configured on the function runtime.",
+  });
+}
+
+async function canAuthenticateGitHubModels(apiKey: string): Promise<CloudOcrProbeResult> {
+  return probeCloudOcrProvider({
+    id: "cloud_github_models_vision",
+    label: "Cloud OCR (GitHub Models Vision)",
+    endpoint: "https://models.github.ai/inference/chat/completions",
+    model: "openai/gpt-4.1",
+    apiKey,
+    missingCredentialReason: "COURSEFORGE_GITHUB_TOKEN or GITHUB_TOKEN is not configured on the function runtime.",
+    headers: {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2026-03-10",
+    },
+  });
 }
 
 interface AdminContentRecord {
@@ -309,7 +408,6 @@ interface AdminContentRecord {
 type AutoOcrProviderId = 
   | "local_tesseract" 
   | "cloud_openai_vision"
-  | "cloud_azure_foundry_vision"
   | "cloud_github_models_vision";
 
 interface AiProviderPolicyRecord {
@@ -437,7 +535,11 @@ const DEBUG_POLICY_DOC_PATH = "config/debugLoggingPolicy";
 const METADATA_CORRECTION_RULES_DOC_PATH = "config/metadataCorrectionRules";
 const METADATA_CORRECTION_LIMITS_DOC_PATH = "config/metadataCorrectionLimits";
 const METADATA_CORRECTION_AUDIT_COLLECTION = "metadataCorrectionAuditLogs";
-const DEFAULT_AUTO_OCR_PROVIDER_ORDER: AutoOcrProviderId[] = ["local_tesseract", "cloud_openai_vision"];
+const DEFAULT_AUTO_OCR_PROVIDER_ORDER: AutoOcrProviderId[] = [
+  "cloud_openai_vision",
+  "cloud_github_models_vision",
+  "local_tesseract",
+];
 const DEFAULT_DEBUG_POLICY: DebugLoggingPolicyRecord = {
   enabledGlobally: true,
   disabledUserIds: [],
@@ -462,26 +564,27 @@ function normalizeAutoOcrProviderOrder(value: unknown): AutoOcrProviderId[] {
     return DEFAULT_AUTO_OCR_PROVIDER_ORDER;
   }
 
-  const accepted = value
-    .filter((entry): entry is AutoOcrProviderId => 
-      entry === "local_tesseract" 
-      || entry === "cloud_openai_vision"
-      || entry === "cloud_azure_foundry_vision"
-      || entry === "cloud_github_models_vision"
-    )
-    .filter((entry, index, array) => array.indexOf(entry) === index);
+  const accepted = value.filter((entry): entry is AutoOcrProviderId => (
+    entry === "local_tesseract"
+    || entry === "cloud_openai_vision"
+    || entry === "cloud_github_models_vision"
+  ));
+  const unique = accepted.filter((entry, index, array) => array.indexOf(entry) === index);
+  const selectedCloudProviders = unique.filter((entry): entry is Exclude<AutoOcrProviderId, "local_tesseract"> => entry !== "local_tesseract");
 
-  if (!accepted.length) {
+  if (!selectedCloudProviders.length) {
     return DEFAULT_AUTO_OCR_PROVIDER_ORDER;
   }
 
+  const normalized: AutoOcrProviderId[] = [...selectedCloudProviders];
   for (const provider of DEFAULT_AUTO_OCR_PROVIDER_ORDER) {
-    if (!accepted.includes(provider)) {
-      accepted.push(provider);
+    if (provider !== "local_tesseract" && !normalized.includes(provider)) {
+      normalized.push(provider);
     }
   }
 
-  return accepted;
+  normalized.push("local_tesseract");
+  return normalized;
 }
 
 function normalizeDebugLoggingPolicy(value: unknown): DebugLoggingPolicyRecord {
@@ -1672,41 +1775,278 @@ export const getAiProviderPolicy = onCall(async (request) => {
   return success("Loaded AI provider policy.", normalized);
 });
 
-export const getAiProviderStatus = onCall({ invoker: "public", secrets: [openAiKeySecret] }, async (request) => {
-  const openaiKey = getOpenAiApiKey();
-  const cloudProbe = await canAuthenticateOpenAi(openaiKey);
+function getCloudOcrProviderRuntime(providerId: AutoOcrProviderId): CloudOcrProviderRuntime | null {
+  if (providerId === "cloud_openai_vision") {
+    return {
+      id: "cloud_openai_vision",
+      label: "Cloud OCR (OpenAI Vision via Firebase Function)",
+      endpoint: "https://api.openai.com/v1/chat/completions",
+      model: "gpt-4o-mini",
+      apiKey: getOpenAiApiKey(),
+      missingCredentialReason: "OPENAI_API_KEY is not configured on the function runtime.",
+    };
+  }
+
+  if (providerId === "cloud_github_models_vision") {
+    return {
+      id: "cloud_github_models_vision",
+      label: "Cloud OCR (GitHub Models Vision)",
+      endpoint: "https://models.github.ai/inference/chat/completions",
+      model: "openai/gpt-4.1",
+      apiKey: getGitHubModelsToken(),
+      missingCredentialReason: "COURSEFORGE_GITHUB_TOKEN or GITHUB_TOKEN is not configured on the function runtime.",
+      headers: {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2026-03-10",
+      },
+    };
+  }
+
+  return null;
+}
+
+function buildCloudOcrErrorDetails(
+  runtime: CloudOcrProviderRuntime,
+  details: CloudOcrExecutionDetails,
+  failure: {
+    reasonCode: string;
+    reasonMessage: string;
+    httpStatus: number | null;
+  }
+): Record<string, unknown> {
+  return {
+    providerId: runtime.id,
+    providerLabel: runtime.label,
+    endpoint: runtime.endpoint,
+    model: runtime.model,
+    reasonCode: failure.reasonCode,
+    reasonMessage: failure.reasonMessage,
+    httpStatus: failure.httpStatus,
+    traceId: details.traceId,
+    failureStage: details.failureStage,
+    requestAcceptedByFunction: details.requestAcceptedByFunction,
+    providerRequestPrepared: details.providerRequestPrepared,
+    providerRequestSent: details.providerRequestSent,
+    providerResponseReceived: details.providerResponseReceived,
+    providerExecutionObserved: details.providerExecutionObserved,
+  };
+}
+
+async function executeCloudOcrExtraction(
+  runtime: CloudOcrProviderRuntime,
+  imageDataUrl: string,
+  traceId: string,
+  userId: string
+): Promise<{ text: string; details: CloudOcrExecutionDetails }> {
+  const details = createCloudOcrExecutionDetails(runtime, traceId);
+
+  if (!runtime.apiKey) {
+    details.failureStage = "preflight_credentials";
+    throw new HttpsError(
+      "failed-precondition",
+      `Cloud OCR is unavailable because ${runtime.missingCredentialReason}`,
+      buildCloudOcrErrorDetails(runtime, details, {
+        reasonCode: runtime.id === "cloud_openai_vision" ? "missing_openai_api_key" : "missing_github_models_token",
+        reasonMessage: runtime.missingCredentialReason,
+        httpStatus: null,
+      })
+    );
+  }
+
+  await consumeOcrRequestQuota(userId);
+  inferImageMimeType(imageDataUrl);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  let response: Response;
+  try {
+    details.providerRequestPrepared = true;
+    details.providerRequestSent = true;
+    response = await fetch(runtime.endpoint, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${runtime.apiKey}`,
+        ...(runtime.headers ?? {}),
+      },
+      body: JSON.stringify({
+        model: runtime.model,
+        messages: [
+          {
+            role: "system",
+            content: "You perform OCR from educational screenshots. Return only the extracted text with original line breaks, no commentary.",
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Extract all readable text from this screenshot. Return plain text only." },
+              { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
+            ],
+          },
+        ],
+        max_tokens: 1800,
+        temperature: 0,
+      }),
+    });
+    details.providerResponseReceived = true;
+    details.providerExecutionObserved = true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    details.failureStage = message.toLowerCase().includes("abort") ? "provider_timeout" : "provider_request";
+    throw new HttpsError(
+      message.toLowerCase().includes("abort") ? "deadline-exceeded" : "internal",
+      message.toLowerCase().includes("abort")
+        ? `${runtime.label} timed out before returning OCR output.`
+        : `${runtime.label} request failed before the provider returned a response: ${message}`,
+      buildCloudOcrErrorDetails(runtime, details, {
+        reasonCode: message.toLowerCase().includes("abort") ? "request_timeout" : "request_failed",
+        reasonMessage: message,
+        httpStatus: null,
+      })
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!response.ok) {
+    details.failureStage = "provider_response";
+    const providerDetails = await readResponseSnippet(response);
+    const reasonMessage = providerDetails || `${runtime.label} returned ${response.status} ${response.statusText}.`;
+    console.warn("[OCR] Provider error", {
+      traceId,
+      providerId: runtime.id,
+      status: response.status,
+      statusText: response.statusText,
+      providerDetails,
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      throw new HttpsError(
+        "failed-precondition",
+        `${runtime.label} authentication failed (${response.status} ${response.statusText}). ${providerDetails}`.trim(),
+        buildCloudOcrErrorDetails(runtime, details, {
+          reasonCode: "auth_failed",
+          reasonMessage,
+          httpStatus: response.status,
+        })
+      );
+    }
+
+    if (response.status === 429) {
+      throw new HttpsError(
+        "resource-exhausted",
+        `${runtime.label} rate limit reached (${response.status} ${response.statusText}). ${providerDetails}`.trim(),
+        buildCloudOcrErrorDetails(runtime, details, {
+          reasonCode: "rate_limited",
+          reasonMessage,
+          httpStatus: response.status,
+        })
+      );
+    }
+
+    throw new HttpsError(
+      response.status >= 500 ? "internal" : "failed-precondition",
+      `${runtime.label} request failed (${response.status} ${response.statusText}). ${providerDetails}`.trim(),
+      buildCloudOcrErrorDetails(runtime, details, {
+        reasonCode: response.status >= 500 ? "provider_error" : "request_rejected",
+        reasonMessage,
+        httpStatus: response.status,
+      })
+    );
+  }
+
+  let json: { choices?: Array<{ message?: { content?: string } }> };
+  try {
+    json = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    details.failureStage = "response_parse";
+    throw new HttpsError(
+      "internal",
+      `${runtime.label} returned a non-JSON OCR response. ${message}`,
+      buildCloudOcrErrorDetails(runtime, details, {
+        reasonCode: "invalid_json",
+        reasonMessage: message,
+        httpStatus: response.status,
+      })
+    );
+  }
+
+  if (!json || typeof json !== "object") {
+    details.failureStage = "response_validate";
+    throw new HttpsError(
+      "internal",
+      `${runtime.label} returned an invalid OCR response envelope.`,
+      buildCloudOcrErrorDetails(runtime, details, {
+        reasonCode: "invalid_response_envelope",
+        reasonMessage: "Expected a JSON object response.",
+        httpStatus: response.status,
+      })
+    );
+  }
+
+  if (!Array.isArray(json.choices) || json.choices.length === 0) {
+    details.failureStage = "response_validate";
+    const jsonStr = JSON.stringify(json).slice(0, 200);
+    throw new HttpsError(
+      "internal",
+      `${runtime.label} response did not include any OCR choices. ${jsonStr}`,
+      buildCloudOcrErrorDetails(runtime, details, {
+        reasonCode: "missing_choices",
+        reasonMessage: jsonStr,
+        httpStatus: response.status,
+      })
+    );
+  }
+
+  const extractedText = json.choices[0]?.message?.content?.trim() ?? "";
+  if (!extractedText) {
+    details.failureStage = "response_validate";
+    throw new HttpsError(
+      "internal",
+      `${runtime.label} returned empty OCR text.`,
+      buildCloudOcrErrorDetails(runtime, details, {
+        reasonCode: "empty_text",
+        reasonMessage: "Provider response content was empty after trimming.",
+        httpStatus: response.status,
+      })
+    );
+  }
+
+  return { text: extractedText, details };
+}
+
+export const getAiProviderStatus = onCall({ invoker: "public", secrets: [openAiKeySecret, githubModelsTokenSecret] }, async (request) => {
+  const [openAiProbe, githubProbe] = await Promise.all([
+    canAuthenticateOpenAi(getOpenAiApiKey()),
+    canAuthenticateGitHubModels(getGitHubModelsToken()),
+  ]);
 
   return success("Loaded AI provider status.", {
     providers: [
       {
         id: "cloud_openai_vision" as const,
         label: "Cloud OCR (OpenAI Vision via Firebase Function)",
-        available: cloudProbe.available,
-        availabilityState: cloudProbe.availabilityState,
-        reasonCode: cloudProbe.reasonCode,
-        reasonMessage: cloudProbe.reasonMessage,
-        httpStatus: cloudProbe.httpStatus,
+        available: openAiProbe.available,
+        availabilityState: openAiProbe.availabilityState,
+        reasonCode: openAiProbe.reasonCode,
+        reasonMessage: openAiProbe.reasonMessage,
+        httpStatus: openAiProbe.httpStatus,
         checkedAt: new Date().toISOString(),
-      },
-      {
-        id: "cloud_azure_foundry_vision" as const,
-        label: "Cloud OCR (Azure Foundry Vision)",
-        available: false,
-        availabilityState: "unavailable" as const,
-        reasonCode: "not_configured",
-        reasonMessage: "Azure Foundry Vision is not yet configured. Contact your administrator.",
-        httpStatus: null,
-        checkedAt: new Date().toISOString(),
+        diagnostics: openAiProbe.details,
       },
       {
         id: "cloud_github_models_vision" as const,
         label: "Cloud OCR (GitHub Models Vision)",
-        available: false,
-        availabilityState: "unavailable" as const,
-        reasonCode: "not_configured",
-        reasonMessage: "GitHub Models Vision is not yet configured. Contact your administrator.",
-        httpStatus: null,
+        available: githubProbe.available,
+        availabilityState: githubProbe.availabilityState,
+        reasonCode: githubProbe.reasonCode,
+        reasonMessage: githubProbe.reasonMessage,
+        httpStatus: githubProbe.httpStatus,
         checkedAt: new Date().toISOString(),
+        diagnostics: githubProbe.details,
       },
       {
         id: "local_tesseract" as const,
@@ -1851,14 +2191,19 @@ export const listRecentDebugUploads = onCall(async (request) => {
   return success("Loaded recent debug uploads.", rows);
 });
 
-export const extractScreenshotText = onCall({ secrets: [openAiKeySecret], invoker: "public" }, async (request) => {
+export const extractScreenshotText = onCall({ secrets: [openAiKeySecret, githubModelsTokenSecret], invoker: "public" }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to extract screenshot text.");
   }
 
-  const payload = request.data as { imageDataUrl?: unknown; debugTraceId?: unknown };
+  const payload = request.data as { imageDataUrl?: unknown; debugTraceId?: unknown; providerId?: unknown };
   const imageDataUrl = typeof payload.imageDataUrl === "string" ? payload.imageDataUrl.trim() : "";
-  const debugTraceId = typeof payload.debugTraceId === "string" ? payload.debugTraceId.trim() : "";
+  const debugTraceId = typeof payload.debugTraceId === "string" && payload.debugTraceId.trim()
+    ? payload.debugTraceId.trim()
+    : `ocr-cloud-${Date.now()}`;
+  const providerId = payload.providerId === "cloud_github_models_vision" || payload.providerId === "cloud_openai_vision"
+    ? payload.providerId
+    : "cloud_openai_vision";
 
   if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
     throw new HttpsError("invalid-argument", "A valid image data URL is required.");
@@ -1868,118 +2213,31 @@ export const extractScreenshotText = onCall({ secrets: [openAiKeySecret], invoke
     throw new HttpsError("invalid-argument", "Screenshot payload is too large. Please crop before retrying.");
   }
 
-  const openaiKey = getOpenAiApiKey();
-  if (!openaiKey) {
-    throw new HttpsError("failed-precondition", "Cloud OCR is unavailable because OPENAI_API_KEY is not configured.");
-  }
-
-  await consumeOcrRequestQuota(request.auth.uid);
-  console.log("[OCR] Starting screenshot text extraction", { userId: request.auth.uid, imageSize: imageDataUrl.length });
-  inferImageMimeType(imageDataUrl);
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-  let response: Response;
-  try {
-    response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${openaiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: "You perform OCR from educational screenshots. Return only the extracted text with original line breaks, no commentary.",
-          },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "Extract all readable text from this screenshot. Return plain text only." },
-              { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
-            ],
-          },
-        ],
-        max_tokens: 1800,
-        temperature: 0,
-      }),
+  const runtime = getCloudOcrProviderRuntime(providerId);
+  if (!runtime) {
+    throw new HttpsError("invalid-argument", `Unsupported OCR provider '${String(payload.providerId ?? "")}'.`, {
+      providerId: payload.providerId ?? null,
+      traceId: debugTraceId,
+      reasonCode: "unsupported_provider",
+      reasonMessage: "The requested OCR provider is not supported by this callable.",
+      failureStage: "provider_select",
     });
-  } catch (error) {
-    clearTimeout(timeoutId);
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.toLowerCase().includes("abort")) {
-      throw new HttpsError("deadline-exceeded", "Cloud OCR request timed out. OpenAI service may be slow or unavailable.");
-    }
-    throw new HttpsError("internal", `Cloud OCR request failed: ${message}`);
-  } finally {
-    clearTimeout(timeoutId);
   }
 
-  if (!response.ok) {
-    const providerDetails = await readResponseSnippet(response);
-    console.warn("[OCR] Provider error", {
-      traceId: debugTraceId || null,
-      status: response.status,
-      statusText: response.statusText,
-      providerDetails,
-    });
+  console.log("[OCR] Starting screenshot text extraction", {
+    traceId: debugTraceId,
+    providerId: runtime.id,
+    userId: request.auth.uid,
+    imageSize: imageDataUrl.length,
+  });
 
-    if (response.status === 401 || response.status === 403) {
-      throw new HttpsError(
-        "failed-precondition",
-        `Cloud OCR provider authentication failed (${response.status} ${response.statusText}). ${providerDetails}`.trim()
-      );
-    }
+  const result = await executeCloudOcrExtraction(runtime, imageDataUrl, debugTraceId, request.auth.uid);
 
-    if (response.status === 429) {
-      throw new HttpsError(
-        "resource-exhausted",
-        `Cloud OCR provider rate limit reached (${response.status} ${response.statusText}). ${providerDetails}`.trim()
-      );
-    }
-
-    throw new HttpsError(
-      "internal",
-      `Cloud OCR provider error (${response.status} ${response.statusText}). ${providerDetails}`.trim()
-    );
-  }
-
-  const json = await response.json() as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-
-  if (!json || typeof json !== "object") {
-    throw new HttpsError("internal", `Cloud OCR: Invalid response format from OpenAI (expected object, got ${typeof json})`);
-  }
-
-  if (!Array.isArray(json.choices) || json.choices.length === 0) {
-    const jsonStr = typeof json === "object" ? JSON.stringify(json).substring(0, 150) : String(json);
-    throw new HttpsError("internal", `Cloud OCR: OpenAI response missing valid choices array. Response: ${jsonStr}`);
-  }
-
-  const firstChoice = json.choices[0];
-  if (!firstChoice || typeof firstChoice !== "object") {
-    throw new HttpsError("internal", "Cloud OCR: Invalid choice object in OpenAI response");
-  }
-
-  if (!firstChoice.message || typeof firstChoice.message !== "object") {
-    throw new HttpsError("internal", "Cloud OCR: OpenAI response choice missing message object");
-  }
-
-  if (typeof firstChoice.message.content !== "string") {
-    throw new HttpsError("internal", "Cloud OCR: OpenAI response message missing content string");
-  }
-
-  const extractedText = firstChoice.message.content.trim();
-  if (!extractedText) {
-    throw new HttpsError("internal", "Cloud OCR provider returned empty text.");
-  }
-
-  return success("Screenshot text extracted.", { text: extractedText });
+  return success("Screenshot text extracted.", {
+    text: result.text,
+    providerId: runtime.id,
+    diagnostics: result.details,
+  });
 });
 
 export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret] }, async (request) => {

@@ -151,7 +151,11 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   const [debugStatus, setDebugStatus] = React.useState<string | null>(null);
   const [isUploadingDebugLog, setIsUploadingDebugLog] = React.useState(false);
   const [debugPolicyStatus, setDebugPolicyStatus] = React.useState<string | null>(null);
-  const [ocrProviderOrder, setOcrProviderOrderState] = React.useState<AutoOcrProviderId[]>(["cloud_openai_vision", "local_tesseract"]);
+  const [ocrProviderOrder, setOcrProviderOrderState] = React.useState<AutoOcrProviderId[]>([
+    "cloud_openai_vision",
+    "cloud_github_models_vision",
+    "local_tesseract",
+  ]);
   const [metadataSharingEnabled, setMetadataSharingEnabled] = React.useState<boolean>(() => isMetadataCorrectionSharingEnabled());
   const [ocrProviderHealth, setOcrProviderHealth] = React.useState<AutoOcrProviderHealthRecord[]>([]);
   const [ocrProviderStatus, setOcrProviderStatus] = React.useState<string | null>(null);
@@ -257,34 +261,34 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
   async function refreshOcrProviderHealth(): Promise<void> {
     const health = await getAutoOcrProviderHealth({ forceRefresh: true });
     setOcrProviderHealth(health);
-    const cloudHealth = health.find((provider) => provider.id === "cloud_openai_vision");
-    const hasUnknown = health.some((provider) => provider.availabilityState === "unknown");
-    if (hasUnknown) {
-      setOcrProviderStatus(cloudHealth?.errorMessage
-        ? `Cloud OCR probe is inconclusive: ${cloudHealth.errorMessage}`
-        : "One or more provider checks were inconclusive. Cloud OCR may still work during extraction.");
+    const cloudProviders = health.filter((provider) => provider.id !== "local_tesseract");
+    const unavailableProviders = cloudProviders.filter((provider) => provider.availabilityState === "unavailable");
+    const unknownProviders = cloudProviders.filter((provider) => provider.availabilityState === "unknown");
+    if (unavailableProviders.length > 0) {
+      setOcrProviderStatus(unavailableProviders.map((provider) => `${provider.label}: ${provider.errorMessage ?? "Unavailable"}`).join(" | "));
       return;
     }
 
-    if (cloudHealth && !cloudHealth.available && cloudHealth.errorMessage) {
-      setOcrProviderStatus(cloudHealth.errorMessage);
+    if (unknownProviders.length > 0) {
+      setOcrProviderStatus(unknownProviders.map((provider) => `${provider.label}: ${provider.errorMessage ?? "Probe inconclusive"}`).join(" | "));
       return;
     }
 
-    setOcrProviderStatus(null);
+    setOcrProviderStatus("Cloud OCR providers are ready. Local OCR remains the final fallback.");
   }
 
   function updatePrimaryOcrProvider(providerId: AutoOcrProviderId): void {
-    const next = setAutoOcrProviderOrder([providerId, ocrProviderOrder[0] === providerId ? ocrProviderOrder[1] ?? "local_tesseract" : ocrProviderOrder[0]]);
+    const secondary = ocrProviderOrder.find((entry) => entry !== providerId && entry !== "local_tesseract") ?? "cloud_github_models_vision";
+    const next = setAutoOcrProviderOrder([providerId, secondary]);
     setOcrProviderOrderState(next);
-    setOcrProviderStatus("OCR provider priority updated.");
+    setOcrProviderStatus("Primary cloud OCR provider updated. Local OCR remains the final fallback.");
   }
 
   function updateFallbackOcrProvider(providerId: AutoOcrProviderId): void {
-    const primary = ocrProviderOrder[0] ?? "local_tesseract";
+    const primary = ocrProviderOrder[0] ?? "cloud_openai_vision";
     const next = setAutoOcrProviderOrder([primary, providerId]);
     setOcrProviderOrderState(next);
-    setOcrProviderStatus("OCR fallback provider updated.");
+    setOcrProviderStatus("Secondary cloud OCR provider updated. Local OCR remains the final fallback.");
   }
 
   React.useEffect(() => {
@@ -894,28 +898,24 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
 
         <article className="settings-card">
           <h3>AI Service Resilience</h3>
-          <p>Choose primary and fallback OCR providers for Auto textbook mode. If one provider is unavailable, CourseForge automatically falls back.</p>
+          <p>Choose the primary and secondary cloud OCR providers for Auto textbook mode. Local OCR is only used after both cloud providers fail or return unusable text.</p>
           <label>
-            Primary OCR Provider
+            Primary Cloud OCR Provider
             <select
-              value={ocrProviderOrder[0] ?? "local_tesseract"}
+              value={ocrProviderOrder[0] ?? "cloud_openai_vision"}
               onChange={(event) => updatePrimaryOcrProvider(event.target.value as AutoOcrProviderId)}
             >
-              <option value="local_tesseract">Local OCR (Tesseract)</option>
               <option value="cloud_openai_vision">Cloud OCR (OpenAI Vision)</option>
-              <option value="cloud_azure_foundry_vision">Cloud OCR (Azure Foundry Vision)</option>
               <option value="cloud_github_models_vision">Cloud OCR (GitHub Models Vision)</option>
             </select>
           </label>
           <label>
-            Fallback OCR Provider
+            Secondary Cloud OCR Provider
             <select
-              value={ocrProviderOrder[1] ?? "local_tesseract"}
+              value={ocrProviderOrder.find((providerId) => providerId !== ocrProviderOrder[0] && providerId !== "local_tesseract") ?? "cloud_github_models_vision"}
               onChange={(event) => updateFallbackOcrProvider(event.target.value as AutoOcrProviderId)}
             >
-              <option value="local_tesseract">Local OCR (Tesseract)</option>
               <option value="cloud_openai_vision">Cloud OCR (OpenAI Vision)</option>
-              <option value="cloud_azure_foundry_vision">Cloud OCR (Azure Foundry Vision)</option>
               <option value="cloud_github_models_vision">Cloud OCR (GitHub Models Vision)</option>
             </select>
           </label>

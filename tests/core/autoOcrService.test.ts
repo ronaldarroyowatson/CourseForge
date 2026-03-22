@@ -97,8 +97,8 @@ describe("autoOcrService", () => {
 
   it("stores and returns normalized provider order", () => {
     const next = setAutoOcrProviderOrder(["cloud_openai_vision", "local_tesseract"]);
-    expect(next).toEqual(["cloud_openai_vision", "local_tesseract"]);
-    expect(getAutoOcrProviderOrder()).toEqual(["cloud_openai_vision", "local_tesseract"]);
+    expect(next).toEqual(["cloud_openai_vision", "cloud_github_models_vision", "local_tesseract"]);
+    expect(getAutoOcrProviderOrder()).toEqual(["cloud_openai_vision", "cloud_github_models_vision", "local_tesseract"]);
   });
 
   it("falls back to secondary provider when primary fails", async () => {
@@ -137,27 +137,33 @@ describe("autoOcrService", () => {
         success: true,
         data: {
           providers: [
-            { id: "cloud_openai_vision", available: true },
+            { id: "cloud_openai_vision", available: true, availabilityState: "available" },
+            { id: "cloud_github_models_vision", available: true, availabilityState: "available" },
             { id: "local_tesseract", available: true },
           ],
         },
       },
     });
     const health = await getAutoOcrProviderHealth();
-    expect(health).toEqual([
-      {
-        id: "local_tesseract",
-        label: "Local OCR (Tesseract)",
-        available: true,
-        availabilityState: "available",
-      },
-      {
-        id: "cloud_openai_vision",
-        label: "Cloud OCR (OpenAI Vision via Firebase Function)",
-        available: true,
-        availabilityState: "available",
-      },
-    ]);
+    expect(health).toHaveLength(3);
+    expect(health.find((provider) => provider.id === "cloud_openai_vision")).toMatchObject({
+      id: "cloud_openai_vision",
+      label: "Cloud OCR (OpenAI Vision via Firebase Function)",
+      available: true,
+      availabilityState: "available",
+    });
+    expect(health.find((provider) => provider.id === "cloud_github_models_vision")).toMatchObject({
+      id: "cloud_github_models_vision",
+      label: "Cloud OCR (GitHub Models Vision via Firebase Function)",
+      available: true,
+      availabilityState: "available",
+    });
+    expect(health.find((provider) => provider.id === "local_tesseract")).toMatchObject({
+      id: "local_tesseract",
+      label: "Local OCR (Tesseract)",
+      available: true,
+      availabilityState: "available",
+    });
 
     const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
       providerOrder: ["cloud_openai_vision", "local_tesseract"],
@@ -290,7 +296,7 @@ describe("autoOcrService", () => {
     const health = await getAutoOcrProviderHealth();
     const cloud = health.find((provider) => provider.id === "cloud_openai_vision");
 
-    expect(cloud).toEqual({
+    expect(cloud).toMatchObject({
       id: "cloud_openai_vision",
       label: "Cloud OCR (OpenAI Vision via Firebase Function)",
       available: false,
@@ -348,7 +354,7 @@ describe("autoOcrService", () => {
     const health = await getAutoOcrProviderHealth({ forceRefresh: true });
     const cloud = health.find((provider) => provider.id === "cloud_openai_vision");
 
-    expect(cloud).toEqual({
+    expect(cloud).toMatchObject({
       id: "cloud_openai_vision",
       label: "Cloud OCR (OpenAI Vision via Firebase Function)",
       available: false,
@@ -397,6 +403,39 @@ describe("autoOcrService", () => {
 
     expect(result.providerId).toBe("cloud_openai_vision");
     expect(result.attempts).toEqual([{ providerId: "cloud_openai_vision", success: true }]);
+  });
+
+  it("uses GitHub cloud OCR when GitHub provider is healthy", async () => {
+    callableMocks.getAiProviderStatus.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          providers: [
+            { id: "cloud_openai_vision", available: false, availabilityState: "unavailable", reasonCode: "auth_failed", reasonMessage: "OpenAI auth failed" },
+            { id: "cloud_github_models_vision", available: true, availabilityState: "available" },
+            { id: "local_tesseract", available: true },
+          ],
+        },
+      },
+    });
+    callableMocks.extractScreenshotText.mockImplementation(async (payload?: { providerId?: string }) => {
+      expect(payload?.providerId).toBe("cloud_github_models_vision");
+      return {
+        data: {
+          success: true,
+          data: {
+            text: "Inspire Physical Science\nwith Earth Science",
+          },
+        },
+      };
+    });
+
+    const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+      providerOrder: ["cloud_github_models_vision", "local_tesseract"],
+    });
+
+    expect(result.providerId).toBe("cloud_github_models_vision");
+    expect(result.text).toContain("Inspire Physical Science");
   });
 
   it("uses the local provider when cloud OCR is reported unavailable", async () => {
@@ -576,7 +615,8 @@ describe("autoOcrService", () => {
           success: true,
           data: {
             providers: [
-              { id: "cloud_openai_vision", available: true },
+              { id: "cloud_openai_vision", available: true, availabilityState: "available" },
+              { id: "cloud_github_models_vision", available: false, availabilityState: "unavailable", reasonCode: "missing_github_models_token", reasonMessage: "GitHub Models token missing" },
               { id: "local_tesseract", available: true },
             ],
           },
@@ -586,10 +626,16 @@ describe("autoOcrService", () => {
       callableMocks.extractScreenshotText.mockRejectedValue({
         code: "internal",
         message: "Cloud OCR provider error: 401 Unauthorized",
+        details: {
+          reasonCode: "auth_failed",
+          reasonMessage: "OpenAI rejected credentials",
+          failureStage: "provider_response",
+          traceId: "ocr-cloud-openai-auth",
+        },
       });
 
       const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
-        providerOrder: ["cloud_openai_vision"],
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
       });
 
       expect(result.providerId).toBe("local_tesseract");
@@ -599,7 +645,7 @@ describe("autoOcrService", () => {
       const cloud = health.find((provider) => provider.id === "cloud_openai_vision");
 
       expect(cloud?.availabilityState).toBe("unavailable");
-      expect(cloud?.errorMessage).toContain("authentication failed");
+      expect(cloud?.errorMessage).toContain("OpenAI rejected credentials");
       expect(callableMocks.getAiProviderStatus).not.toHaveBeenCalled();
     });
 

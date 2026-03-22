@@ -1,7 +1,7 @@
 {
     "name":  "CourseForge",
     "version":  "1.4.7",
-    "generatedAtUtc":  "2026-03-22T04:44:08.6459851Z",
+    "generatedAtUtc":  "2026-03-22T04:59:03.8835925Z",
     "dependencyVersions":  {
                                "node":  "\u003e=20 \u003c25"
                            },
@@ -87,13 +87,13 @@
                   },
                   {
                       "path":  "courseforge-serve.cjs",
-                      "sizeBytes":  28492,
-                      "sha256":  "b10d2f44c2a869667d1697dd4a6269a52ce44b4e553c3aa82caea4e6e9a2caca"
+                      "sizeBytes":  29330,
+                      "sha256":  "4a3228a2becf6504a17eab1eb406d64f4ceacfdadee84c190e24e84f4d576473"
                   },
                   {
                       "path":  "courseforge-serve.js",
-                      "sizeBytes":  28492,
-                      "sha256":  "b10d2f44c2a869667d1697dd4a6269a52ce44b4e553c3aa82caea4e6e9a2caca"
+                      "sizeBytes":  29330,
+                      "sha256":  "4a3228a2becf6504a17eab1eb406d64f4ceacfdadee84c190e24e84f4d576473"
                   },
                   {
                       "path":  "CourseForge-Start.url",
@@ -153,7 +153,7 @@
                   {
                       "path":  "package-manifest.json",
                       "sizeBytes":  1314,
-                      "sha256":  "dc84c84aba0b60062431e0146353f88d93c84a77b3889eed458b1fdc0625967d"
+                      "sha256":  "7cb59d178338e4cbc29443350325e8ecdb3fe521d6d8aaaf5797e1fbdfb5422e"
                   }
               ]
 }

@@ -1,5 +1,5 @@
 {
-    "generatedAtUtc":  "2026-03-22T04:44:09.3623258Z",
+    "generatedAtUtc":  "2026-03-22T04:59:04.6319713Z",
     "version":  "1.4.7",
     "files":  [
                   {
@@ -20,11 +20,11 @@
                   },
                   {
                       "path":  "courseforge-serve.cjs",
-                      "hash":  "B10D2F44C2A869667D1697DD4A6269A52CE44B4E553C3AA82CAEA4E6E9A2CACA"
+                      "hash":  "4A3228A2BECF6504A17EAB1EB406D64F4CEACFDADEE84C190E24E84F4D576473"
                   },
                   {
                       "path":  "courseforge-serve.js",
-                      "hash":  "B10D2F44C2A869667D1697DD4A6269A52CE44B4E553C3AA82CAEA4E6E9A2CACA"
+                      "hash":  "4A3228A2BECF6504A17EAB1EB406D64F4CEACFDADEE84C190E24E84F4D576473"
                   },
                   {
                       "path":  "boot-splash.html",
@@ -60,7 +60,7 @@
                   },
                   {
                       "path":  "package-manifest.json",
-                      "hash":  "9115A634BC2A86DD66779A0B960E5DF99C3E340237CD9CEBC0CF6D5D50268B2D"
+                      "hash":  "30455293ED33DB59F40197F20CF8D841FA47A1CE5BCAEE786C4BE3D0D6EC7338"
                   },
                   {
                       "path":  "webapp/index.html",

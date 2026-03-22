@@ -26,6 +26,14 @@ vi.mock("../../src/firebase/auth", () => ({
   waitForAuthStateChange: authMocks.waitForAuthStateChange,
 }));
 
+vi.mock("tesseract.js", () => ({
+  recognize: vi.fn(async () => ({
+    data: {
+      text: "Fallback text",
+    },
+  })),
+}));
+
 import {
   clearAutoOcrAvailabilityCache,
   extractTextFromImageWithFallback,
@@ -518,6 +526,39 @@ describe("autoOcrService", () => {
 
       expect(result.providerId).toBe("local_tesseract");
       expect(result.attempts[0].success).toBe(false);
+    });
+
+    it("marks cloud health unavailable after cloud authentication failures", async () => {
+      callableMocks.getAiProviderStatus.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            providers: [
+              { id: "cloud_openai_vision", available: true },
+              { id: "local_tesseract", available: true },
+            ],
+          },
+        },
+      });
+
+      callableMocks.extractScreenshotText.mockRejectedValue({
+        code: "internal",
+        message: "Cloud OCR provider error: 401 Unauthorized",
+      });
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision"],
+      });
+
+      expect(result.providerId).toBe("local_tesseract");
+
+      callableMocks.getAiProviderStatus.mockReset();
+      const health = await getAutoOcrProviderHealth();
+      const cloud = health.find((provider) => provider.id === "cloud_openai_vision");
+
+      expect(cloud?.availabilityState).toBe("unavailable");
+      expect(cloud?.errorMessage).toContain("authentication failed");
+      expect(callableMocks.getAiProviderStatus).not.toHaveBeenCalled();
     });
 
     it("emits cloud failure diagnostics to local OCR log endpoint", async () => {

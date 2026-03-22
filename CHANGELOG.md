@@ -6,6 +6,22 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-03-22
+
+### Fixed (1.4.5)
+
+- Hardened manual update checks when GitHub `releases/latest` is stale or inconsistent by adding a verified fallback to the releases list endpoint before reporting "already up to date".
+- Added diagnostics source tagging for update checks (`latest`, `releases-list-verified`, `releases-list-fallback`) to improve triage of update lookup behavior.
+- Improved OCR cloud reliability handling so cloud authentication failures (for example provider-side 401 responses) immediately mark cloud OCR unavailable in local health cache and avoid repeated failing cloud attempts during the cache window.
+- Updated cloud provider status probe logic to validate the same chat-completions model path used by OCR requests, reducing false-positive "available" health states.
+
+### Verified (1.4.5)
+
+- `npx vitest run tests/integration/update-status-server.integration.test.ts`
+- `npx vitest run tests/core/autoOcrService.test.ts`
+- `npm run test:e2e:ocr`
+- `npm run functions:build:compat`
+
 ## [1.4.4] - 2026-03-22
 
 ### Fixed (1.4.4)

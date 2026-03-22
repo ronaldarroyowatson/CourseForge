@@ -129,6 +129,46 @@ async function startReleaseServerWithRecorder(payload: unknown) {
   };
 }
 
+async function startReleaseServerLatestAndList(latestPayload: unknown, listPayload: unknown) {
+  const requests: Array<{ method: string; path: string; headers: http.IncomingHttpHeaders }> = [];
+  const port = await getAvailablePort();
+  const server = http.createServer((req, res) => {
+    const requestPath = req.url || "";
+    requests.push({
+      method: req.method || "GET",
+      path: requestPath,
+      headers: req.headers,
+    });
+
+    if (requestPath.startsWith("/releases/latest")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(latestPayload));
+      return;
+    }
+
+    if (requestPath.startsWith("/releases?")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(listPayload));
+      return;
+    }
+
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("not found");
+  });
+
+  server.listen(port, "127.0.0.1");
+  await once(server, "listening");
+
+  return {
+    latestUrl: `http://127.0.0.1:${port}/releases/latest`,
+    requests,
+    async close() {
+      server.close();
+      await once(server, "close");
+    },
+  };
+}
+
 async function fetchUpdateStatusWithRetry(url: string, timeoutMs = 10000) {
   const startedAt = Date.now();
   let lastError: unknown = null;
@@ -493,6 +533,84 @@ describe("local update status endpoint", () => {
       const updaterLog = readFileSync(join(root, "updater.log"), "utf8");
       expect(updaterLog).toContain("Manual update check requested via /api/check-for-updates.");
       expect(updaterLog).toContain("Manual update check result: ok=false error=Latest release request failed with status 404.");
+    } finally {
+      if (releaseServer) {
+        await releaseServer.close();
+      }
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers when /releases/latest is stale by verifying the releases list", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+    let releaseServer: Awaited<ReturnType<typeof startReleaseServerLatestAndList>> | null = null;
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+
+    try {
+      releaseServer = await startReleaseServerLatestAndList(
+        {
+          tag_name: "v1.4.3",
+          html_url: "https://example.invalid/releases/tag/v1.4.3",
+        },
+        [
+          {
+            tag_name: "v1.4.4",
+            html_url: "https://example.invalid/releases/tag/v1.4.4",
+            draft: false,
+            prerelease: false,
+          },
+          {
+            tag_name: "v1.4.3",
+            html_url: "https://example.invalid/releases/tag/v1.4.3",
+            draft: false,
+            prerelease: false,
+          },
+        ]
+      );
+
+      writeFileSync(
+        join(root, "package-manifest.json"),
+        JSON.stringify(
+          {
+            version: "1.4.3",
+            updates: {
+              latestEndpoint: releaseServer.latestUrl,
+            },
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const port = await getAvailablePort();
+      child = await startStatusServer(root, port);
+
+      const response = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/check-for-updates?skipStage=1`);
+      const payload = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(payload).toMatchObject({
+        ok: true,
+        available: true,
+        currentVersion: "1.4.3",
+        latestVersion: "1.4.4",
+        releaseUrl: "https://example.invalid/releases/tag/v1.4.4",
+        diagnostics: {
+          source: "releases-list-verified",
+        },
+      });
+
+      expect(releaseServer.requests.some((entry) => entry.path.startsWith("/releases/latest"))).toBe(true);
+      expect(releaseServer.requests.some((entry) => entry.path.startsWith("/releases?"))).toBe(true);
     } finally {
       if (releaseServer) {
         await releaseServer.close();

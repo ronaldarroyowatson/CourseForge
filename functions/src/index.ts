@@ -148,15 +148,27 @@ async function canAuthenticateOpenAi(apiKey: string): Promise<boolean> {
   }, 4000);
 
   try {
-    const response = await fetch("https://api.openai.com/v1/models", {
-      method: "GET",
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
       headers: {
+        "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
       signal: controller.signal,
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "user",
+            content: "Respond with: ok",
+          },
+        ],
+        max_tokens: 4,
+        temperature: 0,
+      }),
     });
 
-    return response.ok;
+    return response.ok || response.status === 429;
   } catch {
     return false;
   } finally {

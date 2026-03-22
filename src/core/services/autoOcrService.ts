@@ -607,6 +607,31 @@ async function extractWithCloudOpenAiVision(imageDataUrl: string): Promise<strin
     );
   } catch (error) {
     const normalized = normalizeCallableError(error);
+    const loweredMessage = normalized.message.toLowerCase();
+    const authenticationFailure = loweredMessage.includes("401")
+      || loweredMessage.includes("unauthorized")
+      || loweredMessage.includes("invalid api key")
+      || loweredMessage.includes("invalid_api_key")
+      || loweredMessage.includes("incorrect api key")
+      || loweredMessage.includes("authentication");
+
+    if (authenticationFailure) {
+      autoOcrAvailabilityCache = {
+        state: "unavailable",
+        expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+        errorMessage: "Cloud OCR authentication failed. Check backend OpenAI credentials.",
+      };
+      void emitOcrDiagnostic("cloud_extract_authentication_failed", {
+        level: "warning",
+        traceId,
+        context: {
+          errorCode: normalized.code,
+          errorMessage: normalized.message,
+          availabilityState: "unavailable",
+        },
+      });
+    }
+
     void emitOcrDiagnostic("cloud_extract_callable_failed", {
       level: "error",
       traceId,

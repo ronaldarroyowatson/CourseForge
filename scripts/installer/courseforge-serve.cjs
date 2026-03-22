@@ -342,6 +342,117 @@ function compareSemver(left, right) {
   return 0;
 }
 
+function deriveReleasesListEndpoint(latestEndpoint) {
+  if (!latestEndpoint || typeof latestEndpoint !== "string") {
+    return null;
+  }
+
+  if (latestEndpoint.includes("/releases/latest")) {
+    const [base] = latestEndpoint.split("?");
+    return `${base.replace(/\/releases\/latest$/, "/releases")}?per_page=10`;
+  }
+
+  return null;
+}
+
+function selectBestStableRelease(releases, currentSemver) {
+  if (!Array.isArray(releases) || !releases.length) {
+    return null;
+  }
+
+  let best = null;
+  for (const release of releases) {
+    if (!release || typeof release !== "object") {
+      continue;
+    }
+
+    if (release.draft || release.prerelease) {
+      continue;
+    }
+
+    const candidateVersion = String(release.tag_name || release.name || "").replace(/^v/, "");
+    const candidateSemver = parseSemver(candidateVersion);
+    if (!candidateSemver) {
+      continue;
+    }
+
+    if (currentSemver && compareSemver(candidateSemver, currentSemver) <= 0) {
+      continue;
+    }
+
+    if (!best || compareSemver(candidateSemver, best.semver) > 0) {
+      best = {
+        version: candidateVersion,
+        semver: candidateSemver,
+        releaseUrl: release.html_url || null,
+      };
+    }
+  }
+
+  return best;
+}
+
+async function fetchJsonWithRetries(endpoint, headers) {
+  let response;
+  let lastRequestError = null;
+  for (let attempt = 1; attempt <= latestReleaseMaxAttempts; attempt += 1) {
+    try {
+      response = await fetch(endpoint, {
+        headers,
+        signal: AbortSignal.timeout(latestReleaseRequestTimeoutMs),
+      });
+      break;
+    } catch (error) {
+      lastRequestError = error;
+      if (attempt < latestReleaseMaxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+  }
+
+  if (!response) {
+    return {
+      ok: false,
+      response: null,
+      body: null,
+      error: lastRequestError,
+    };
+  }
+
+  if (!response.ok) {
+    let responseBody = "";
+    try {
+      responseBody = (await response.text()).trim();
+    } catch {
+      responseBody = "";
+    }
+
+    return {
+      ok: false,
+      response,
+      body: responseBody,
+      error: null,
+    };
+  }
+
+  try {
+    const body = await response.json();
+    return {
+      ok: true,
+      response,
+      body,
+      error: null,
+    };
+  } catch {
+    return {
+      ok: false,
+      response,
+      body: null,
+      error: new Error("invalid-json"),
+    };
+  }
+}
+
 async function fetchLatestReleaseStatus() {
   const manifestPath = path.join(packageRoot, "package-manifest.json");
   const manifest = readJsonFile(manifestPath);
@@ -358,31 +469,43 @@ async function fetchLatestReleaseStatus() {
   }
 
   const checkedAt = new Date().toISOString();
+  const releasesListEndpoint = manifest?.updates?.releasesListEndpoint || deriveReleasesListEndpoint(latestEndpoint);
   const diagnostics = {
     checkedAt,
     latestEndpoint,
+    releasesListEndpoint: releasesListEndpoint || null,
     tokenConfigured: Boolean(token),
   };
 
-  let response;
-  let lastRequestError = null;
-  for (let attempt = 1; attempt <= latestReleaseMaxAttempts; attempt += 1) {
-    try {
-      response = await fetch(latestEndpoint, {
-        headers,
-        signal: AbortSignal.timeout(latestReleaseRequestTimeoutMs),
-      });
-      break;
-    } catch (error) {
-      lastRequestError = error;
-      if (attempt < latestReleaseMaxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
+  const latestResult = await fetchJsonWithRetries(latestEndpoint, headers);
+  const currentSemver = parseSemver(currentVersion);
+
+  if (!latestResult.response) {
+    if (releasesListEndpoint) {
+      const fallbackResult = await fetchJsonWithRetries(releasesListEndpoint, headers);
+      if (fallbackResult.ok) {
+        const bestRelease = selectBestStableRelease(fallbackResult.body, currentSemver);
+        if (bestRelease) {
+          return {
+            ok: true,
+            available: true,
+            currentVersion,
+            latestVersion: bestRelease.version,
+            releaseUrl: bestRelease.releaseUrl,
+            checkedAt,
+            error: null,
+            diagnostics: {
+              ...diagnostics,
+              source: "releases-list-fallback",
+              requestAttempts: latestReleaseMaxAttempts,
+              requestTimeoutMs: latestReleaseRequestTimeoutMs,
+            },
+          };
+        }
       }
     }
-  }
 
-  if (!response) {
-    const message = lastRequestError instanceof Error ? lastRequestError.message : String(lastRequestError);
+    const message = latestResult.error instanceof Error ? latestResult.error.message : String(latestResult.error);
     return {
       ok: false,
       available: false,
@@ -399,15 +522,21 @@ async function fetchLatestReleaseStatus() {
     };
   }
 
-  if (!response.ok) {
-    let responseBody = "";
-    try {
-      responseBody = (await response.text()).trim();
-    } catch {
-      responseBody = "";
+  if (!latestResult.ok) {
+    if (latestResult.error && latestResult.error.message === "invalid-json") {
+      return {
+        ok: false,
+        available: false,
+        currentVersion,
+        latestVersion: null,
+        releaseUrl: null,
+        checkedAt,
+        error: "Latest release response was not valid JSON.",
+        diagnostics,
+      };
     }
 
-    const responseBodySnippet = responseBody ? responseBody.slice(0, 220) : null;
+    const responseBodySnippet = latestResult.body ? String(latestResult.body).slice(0, 220) : null;
     return {
       ok: false,
       available: false,
@@ -415,46 +544,50 @@ async function fetchLatestReleaseStatus() {
       latestVersion: null,
       releaseUrl: null,
       checkedAt,
-      error: `Latest release request failed with status ${response.status}.`,
+      error: `Latest release request failed with status ${latestResult.response.status}.`,
       diagnostics: {
         ...diagnostics,
-        responseStatus: response.status,
-        responseStatusText: response.statusText,
+        responseStatus: latestResult.response.status,
+        responseStatusText: latestResult.response.statusText,
         responseBodySnippet,
       },
     };
   }
 
-  let release;
-  try {
-    release = await response.json();
-  } catch {
-    return {
-      ok: false,
-      available: false,
-      currentVersion,
-      latestVersion: null,
-      releaseUrl: null,
-      checkedAt,
-      error: "Latest release response was not valid JSON.",
-      diagnostics,
-    };
-  }
+  const release = latestResult.body;
 
   const latestVersion = String(release.tag_name || release.name || "").replace(/^v/, "");
   const latestSemver = parseSemver(latestVersion);
-  const currentSemver = parseSemver(currentVersion);
-  const available = Boolean(latestSemver && currentSemver && compareSemver(latestSemver, currentSemver) > 0);
+  let available = Boolean(latestSemver && currentSemver && compareSemver(latestSemver, currentSemver) > 0);
+  let resolvedLatestVersion = latestSemver ? latestVersion : null;
+  let resolvedReleaseUrl = release.html_url || null;
+  let source = "latest";
+
+  if (releasesListEndpoint && currentSemver && (!available || !latestSemver)) {
+    const verificationResult = await fetchJsonWithRetries(releasesListEndpoint, headers);
+    if (verificationResult.ok) {
+      const bestRelease = selectBestStableRelease(verificationResult.body, currentSemver);
+      if (bestRelease) {
+        available = true;
+        resolvedLatestVersion = bestRelease.version;
+        resolvedReleaseUrl = bestRelease.releaseUrl;
+        source = "releases-list-verified";
+      }
+    }
+  }
 
   return {
     ok: true,
     available,
     currentVersion,
-    latestVersion: latestSemver ? latestVersion : null,
-    releaseUrl: release.html_url || null,
+    latestVersion: resolvedLatestVersion,
+    releaseUrl: resolvedReleaseUrl,
     checkedAt,
-    error: latestSemver ? null : "Unable to parse latest release version.",
-    diagnostics,
+    error: resolvedLatestVersion ? null : "Unable to parse latest release version.",
+    diagnostics: {
+      ...diagnostics,
+      source,
+    },
   };
 }
 

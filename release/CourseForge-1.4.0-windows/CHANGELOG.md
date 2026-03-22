@@ -6,12 +6,6 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
-## [1.4.1] - 2026-03-22
-
-### Fixed (1.4.1)
-
-- Fixed OCR provider order auto-reset overwriting user preferences. The provider order auto-reset (when cloud becomes available) now only happens if the user hasn't explicitly set a preference yet via settings. Once users set their preferred provider order, the auto-reset respects their choice and does not override it.
-
 ## [1.4.0] - 2026-03-22
 
 ### Fixed (1.4.0)

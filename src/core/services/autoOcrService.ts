@@ -44,6 +44,7 @@ export interface AutoOcrProviderHealthRecord {
 const AUTO_OCR_PROVIDER_ORDER_KEY = "courseforge.autoOcr.providerOrder";
 const AUTO_OCR_CIRCUIT_STATE_KEY = "courseforge.autoOcr.circuitState";
 const AUTO_OCR_CLOUD_AVAILABILITY_DETECTION_KEY = "courseforge.autoOcr.cloudAvailableOnce";
+const AUTO_OCR_USER_PREFERENCE_SET_KEY = "courseforge.autoOcr.userPreferenceSet";
 const AUTO_OCR_AVAILABILITY_CACHE_TTL_MS = 3 * 60 * 1000;
 
 const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
@@ -372,6 +373,7 @@ export function setAutoOcrProviderOrder(order: AutoOcrProviderId[]): AutoOcrProv
   const storage = getStorage();
   if (storage) {
     storage.setItem(AUTO_OCR_PROVIDER_ORDER_KEY, JSON.stringify(normalized));
+    storage.setItem(AUTO_OCR_USER_PREFERENCE_SET_KEY, "true");
   }
 
   return normalized;
@@ -538,11 +540,13 @@ async function getCloudAutoOcrAvailabilityState(options: { forceRefresh?: boolea
 
       const resolvedState: ProviderAvailabilityState = cloudProvider.available ? "available" : "unavailable";
       
-      // Auto-reset provider order when cloud becomes available for the first time
+      // Auto-reset provider order when cloud becomes available for the first time (only if user hasn't set a preference yet)
       if (resolvedState === "available") {
         const storage = getStorage();
         const wasCloudAvailableBefore = storage?.getItem(AUTO_OCR_CLOUD_AVAILABILITY_DETECTION_KEY) === "true";
-        if (!wasCloudAvailableBefore) {
+        const hasUserSetPreference = storage?.getItem(AUTO_OCR_USER_PREFERENCE_SET_KEY) === "true";
+        
+        if (!wasCloudAvailableBefore && !hasUserSetPreference) {
           storage?.setItem(AUTO_OCR_CLOUD_AVAILABILITY_DETECTION_KEY, "true");
           const currentOrder = getAutoOcrProviderOrder();
           if (currentOrder[0] !== "cloud_openai_vision") {

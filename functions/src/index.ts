@@ -2024,6 +2024,10 @@ async function executeCloudOcrExtraction(
 }
 
 export const getAiProviderStatus = onCall({ invoker: "public", secrets: [openAiKeySecret, githubModelsTokenSecret] }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in to check AI provider status.");
+  }
+
   const [openAiProbe, githubProbe] = await Promise.all([
     canAuthenticateOpenAi(getOpenAiApiKey()),
     canAuthenticateGitHubModels(getGitHubModelsToken()),

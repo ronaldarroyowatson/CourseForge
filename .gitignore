@@ -3,5 +3,14 @@ dist/
 build/
 functions/lib/
 .env
+.env.*
+*.env
+*.env.*
+serviceAccountKey*.json
+*serviceaccount*.json
+*.pem
+*.key
+*.p12
+*.pfx
 *.log
 .DS_Store

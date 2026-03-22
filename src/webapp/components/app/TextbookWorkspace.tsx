@@ -40,7 +40,6 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
   const currentUserId = useAuthStore((state) => state.userId);
   const currentUserEmail = useAuthStore((state) => state.userEmail);
   const isAdmin = useAuthStore((state) => state.isAdmin);
-  const { syncStatus, syncMessage } = useUIStore();
   const { fetchChaptersByTextbookId, fetchSectionsByChapterId } = useRepositories();
 
   const [isSigningOut, setIsSigningOut] = React.useState(false);
@@ -688,7 +687,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
   return (
     <div className="app-shell">
       <main className="app-main">
-        <Header />
+        <Header isSettingsView={showSettingsPage} />
 
         {showAdminPage ? (
           <React.Suspense fallback={<section className="placeholder-panel"><p>Loading admin tools...</p></section>}>
@@ -700,11 +699,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
             />
           </React.Suspense>
         ) : showSettingsPage ? (
-          <SettingsPage
-            onBack={() => {
-              navigate("/textbooks");
-            }}
-          />
+          <SettingsPage />
         ) : (
           <>
             <section className="placeholder-panel">
@@ -712,9 +707,6 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
               <p>Set up textbooks, chapters, and sections in sequence, then continue into section content capture.</p>
               <p><strong>Auth:</strong> {currentUserEmail ?? (currentUserId ? `UID: ${currentUserId}` : "Unknown user")}</p>
               {workflowNotice ? <p className="sync-indicator">{workflowNotice}</p> : null}
-              {syncStatus === "syncing" ? <p className="sync-indicator">Syncing...</p> : null}
-              {syncStatus === "synced" ? <p className="sync-indicator sync-indicator--synced">Synced ✓</p> : null}
-              {syncStatus === "error" && syncMessage ? <p className="error-text sync-indicator">Sync issue: {syncMessage}</p> : null}
               <button type="button" onClick={() => { void handleSignOut(); }} disabled={isSigningOut}>
                 {isSigningOut ? "Signing out..." : "Sign out"}
               </button>

@@ -1,6 +1,6 @@
 {
-    "generatedAtUtc":  "2026-03-22T21:41:17.9416630Z",
-    "version":  "1.4.19",
+    "generatedAtUtc":  "2026-03-22T22:40:26.3195754Z",
+    "version":  "1.4.20",
     "files":  [
                   {
                       "path":  "AutoUpdate-CourseForge.ps1",
@@ -8,7 +8,7 @@
                   },
                   {
                       "path":  "Check-For-CourseForge-Updates.cmd",
-                      "hash":  "D5DCD328AD8AA152FA44DF4A5515714BDEB078B0AF9CEBC8DB27B647B877B51F"
+                      "hash":  "469AFE0EDB2D53EF5109F36934F62B6095227C5EBD95D777BE09DACAE5CA2522"
                   },
                   {
                       "path":  "Start-CourseForge.cmd",
@@ -36,7 +36,7 @@
                   },
                   {
                       "path":  "Install-CourseForge-Windows.ps1",
-                      "hash":  "40EB69B4FD6F681FED1100AF1F4084D907C7BD77211CA7D0EDA708D63E98D664"
+                      "hash":  "E2868358D7C9E6556D046A257E482461BD62BAA609B6762E0E79F53FB9EA635D"
                   },
                   {
                       "path":  "Install-CourseForge-Windows.cmd",
@@ -52,7 +52,7 @@
                   },
                   {
                       "path":  "CHANGELOG.md",
-                      "hash":  "8A2C64F9CB04DF27BCBAE34D373E25E3C7414B164379CC86D013F8590D981681"
+                      "hash":  "BC76F09363FFE0C0119F878B5203E28043A774DCC4EE75642D72AB23538EDC7A"
                   },
                   {
                       "path":  "LICENSE",
@@ -60,11 +60,11 @@
                   },
                   {
                       "path":  "package-manifest.json",
-                      "hash":  "1785516697C9C9D32CBCF5431001427823CFD6B7890D9C41D8CF2607A7D25834"
+                      "hash":  "4A2C108D79C553595640DC42AC9035A267D7369CE6F786A29251765F4A0DB0E8"
                   },
                   {
                       "path":  "webapp/index.html",
-                      "hash":  "70161F0DB43BEC20F33F0A404F5A66B3B916140EBEF13D2AA84DB1D1A2D9AFC2"
+                      "hash":  "4335B19AB46446168F78BC8296B36236D534AB8B9BC3A87B94919ECED6E36F82"
                   },
                   {
                       "path":  "extension/manifest.json",

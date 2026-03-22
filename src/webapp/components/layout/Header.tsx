@@ -1,16 +1,20 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { doc, setDoc } from "firebase/firestore";
 import { syncNow } from "../../../core/services/syncService";
+import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 
 /**
  * Header keeps product identity and a short phase status line.
  */
-export function Header(): React.JSX.Element {
+export function Header({ isSettingsView = false }: { isSettingsView?: boolean }): React.JSX.Element {
   const navigate = useNavigate();
   const userId = useAuthStore((state) => state.userId);
   const isAdmin = useAuthStore((state) => state.isAdmin);
+  const theme = useUIStore((state) => state.theme);
+  const toggleTheme = useUIStore((state) => state.toggleTheme);
   const isSyncing = useUIStore((state) => state.isSyncing);
   const syncStatus = useUIStore((state) => state.syncStatus);
   const syncMessage = useUIStore((state) => state.syncMessage);
@@ -83,6 +87,23 @@ export function Header(): React.JSX.Element {
     }
   }
 
+  async function handleThemeToggle(): Promise<void> {
+    toggleTheme();
+
+    if (!userId) {
+      return;
+    }
+
+    try {
+      const nextTheme = useUIStore.getState().theme;
+      await setDoc(doc(firestoreDb, "users", userId), { theme: nextTheme }, { merge: true });
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.warn("Unable to persist theme preference:", error);
+      }
+    }
+  }
+
   function getStatusLabel(): string {
     if (isSyncing || syncStatus === "syncing") {
       return "Syncing...";
@@ -118,28 +139,67 @@ export function Header(): React.JSX.Element {
   return (
     <header className="app-header">
       <div className="app-header__main">
-        <div>
-          <h1>CourseForge</h1>
-          <p>Teacher-guided curriculum builder</p>
+        <div className="app-header__left">
+          {isSettingsView ? (
+            <button
+              type="button"
+              className="app-nav-button app-nav-button--workspace"
+              onClick={() => {
+                navigate("/textbooks");
+              }}
+            >
+              <span className="app-nav-button__arrow" aria-hidden="true">&lt;</span>
+              Workspace
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-secondary app-nav-button"
+              onClick={() => {
+                navigate("/settings");
+              }}
+            >
+              Settings
+            </button>
+          )}
+
+          <div>
+            <h1>CourseForge</h1>
+            <p>Teacher-guided curriculum builder</p>
+          </div>
         </div>
 
-        <div className="app-header__actions">
-          <button type="button" onClick={() => { void handleSyncNow(); }} disabled={isSyncing}>
-            {isSyncing ? "Syncing..." : "Sync Now"}
-          </button>
+        <div className="app-header__right">
           <button
             type="button"
-            className="btn-secondary"
+            className={`theme-toggle ${theme === "light" ? "theme-toggle--light" : "theme-toggle--dark"}`}
             onClick={() => {
-              navigate("/settings");
+              void handleThemeToggle();
             }}
+            aria-label="Toggle theme"
           >
-            Settings
+            <span className="theme-toggle__label">{theme === "dark" ? "Dark Mode" : "Light Mode"}</span>
+            <span className="theme-toggle__track" aria-hidden="true">
+              <span className="theme-toggle__thumb" />
+            </span>
           </button>
+
+          <div className="sync-cluster">
+            <button
+              type="button"
+              className="sync-now-button"
+              onClick={() => {
+                void handleSyncNow();
+              }}
+              disabled={isSyncing}
+            >
+              <span className={`sync-now-button__icon ${isSyncing ? "sync-now-button__icon--spinning" : ""}`} aria-hidden="true">↻</span>
+              <span>{isSyncing ? "Syncing..." : "Sync Now"}</span>
+            </button>
+            <p className={`sync-indicator ${syncStatus === "synced" ? "sync-indicator--synced" : ""}`}>{getStatusLabel()}</p>
+          </div>
         </div>
       </div>
-
-      <p className="sync-indicator">{getStatusLabel()}</p>
       {writeBudgetExceeded ? (
         <p className="error-text sync-indicator">Cloud sync paused to prevent excessive writes. Please review your data or try again later.</p>
       ) : null}

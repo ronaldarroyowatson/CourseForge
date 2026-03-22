@@ -27,7 +27,7 @@ import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 
 interface SettingsPageProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 function parseSemver(value: string): number[] | null {
@@ -53,6 +53,14 @@ function compareSemver(left: number[], right: number[]): number {
   }
 
   return 0;
+}
+
+function getShortProviderLabel(id: AutoOcrProviderId): string {
+  switch (id) {
+    case "cloud_openai_vision": return "Cloud OCR (OpenAI Vision)";
+    case "cloud_github_models_vision": return "Cloud OCR (GitHub Models Vision)";
+    default: return "Local OCR (Tesseract)";
+  }
 }
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -129,14 +137,12 @@ type UpdaterDiagnostics = {
 /**
  * Centralized user preferences for sync safety and appearance.
  */
-export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
+export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element {
   const userId = useAuthStore((state) => state.userId);
-  const theme = useUIStore((state) => state.theme);
   const language = useUIStore((state) => state.language);
   const setLanguage = useUIStore((state) => state.setLanguage);
   const accessibility = useUIStore((state) => state.accessibility);
   const patchAccessibility = useUIStore((state) => state.patchAccessibility);
-  const toggleTheme = useUIStore((state) => state.toggleTheme);
   const automaticRetriesEnabled = useUIStore((state) => state.automaticRetriesEnabled);
   const setAutomaticRetriesEnabled = useUIStore((state) => state.setAutomaticRetriesEnabled);
   const retryCount = useUIStore((state) => state.retryCount);
@@ -219,23 +225,6 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
       setPreferenceStatus(translate(language, "settings", "saved"));
     } catch {
       setPreferenceStatus("Unable to save accessibility preferences right now.");
-    }
-  }
-
-  async function handleThemeToggle(): Promise<void> {
-    toggleTheme();
-
-    if (!userId) {
-      return;
-    }
-
-    try {
-      const nextTheme = useUIStore.getState().theme;
-      await setDoc(doc(firestoreDb, "users", userId), { theme: nextTheme }, { merge: true });
-    } catch (error) {
-      if (import.meta.env.DEV) {
-        console.warn("Unable to persist theme preference:", error);
-      }
     }
   }
 
@@ -773,12 +762,6 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
     <section className="settings-page placeholder-panel">
       <div className="settings-page__header">
         <h2>Settings</h2>
-        <div className="settings-page__header-actions">
-          <button type="button" className="btn-secondary" onClick={() => { void handleThemeToggle(); }}>
-            Theme: {theme === "dark" ? "Dark" : "Light"}
-          </button>
-          <button type="button" className="btn-secondary" onClick={onBack}>Back To Workspace</button>
-        </div>
       </div>
 
       <div className="settings-grid">
@@ -906,9 +889,9 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
 
         <article className="settings-card">
           <h3>AI Service Resilience</h3>
-          <p>Choose the primary and secondary cloud OCR providers for Auto textbook mode. Local OCR is only used after both cloud providers fail or return unusable text.</p>
+          <p>Set the priority order for OCR providers. Each is tried in order; the first that succeeds is used.</p>
           <label>
-            Primary Cloud OCR Provider
+            #1 — First choice
             <select
               value={ocrProviderOrder[0] ?? "cloud_openai_vision"}
               onChange={(event) => updatePrimaryOcrProvider(event.target.value as AutoOcrProviderId)}
@@ -918,7 +901,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
             </select>
           </label>
           <label>
-            Secondary Cloud OCR Provider
+            #2 — Second choice
             <select
               value={ocrProviderOrder.find((providerId) => providerId !== ocrProviderOrder[0] && providerId !== "local_tesseract") ?? "cloud_github_models_vision"}
               onChange={(event) => updateFallbackOcrProvider(event.target.value as AutoOcrProviderId)}
@@ -927,6 +910,7 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
               <option value="cloud_github_models_vision">Cloud OCR (GitHub Models Vision)</option>
             </select>
           </label>
+          <p className="settings-meta">#3 (automatic) — Local OCR (Tesseract)</p>
           <div className="form-actions">
             <button type="button" className="btn-secondary" onClick={() => { void refreshOcrProviderHealth(); }}>
               Refresh Provider Health
@@ -938,16 +922,18 @@ export function SettingsPage({ onBack }: SettingsPageProps): React.JSX.Element {
               {isUpdatingOcrPolicy ? "Working..." : "Save As Shared Policy"}
             </button>
           </div>
-          {ocrProviderHealth.map((provider) => (
-            <p key={provider.id} className="settings-meta">
-              {provider.label}: {provider.availabilityState === "unknown"
-                ? "Unknown (status probe failed)"
-                : provider.available
-                  ? "Available"
-                  : "Unavailable"}
-              {provider.errorMessage ? ` - ${provider.errorMessage}` : ""}
-            </p>
-          ))}
+          {ocrProviderHealth.map((provider) => {
+            const statusText = provider.availabilityState === "unknown"
+              ? `Unknown${provider.errorMessage ? ` — ${provider.errorMessage}` : ""}`
+              : provider.available
+                ? "Available"
+                : `Unavailable${provider.errorMessage ? ` — ${provider.errorMessage}` : ""}`;
+            return (
+              <p key={provider.id} className="settings-meta">
+                {getShortProviderLabel(provider.id)}: {statusText}
+              </p>
+            );
+          })}
           {ocrProviderStatus ? <p className="settings-meta">{ocrProviderStatus}</p> : null}
         </article>
 

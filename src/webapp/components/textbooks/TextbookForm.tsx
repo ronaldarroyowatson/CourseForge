@@ -370,7 +370,7 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
             }}
           >
             <strong>Auto (Recommended)</strong>
-            <span>Capture cover, title page, and TOC pages with guided extraction.</span>
+            <span>Capture cover, copyright page, and TOC pages with guided extraction.</span>
           </button>
           <button
             type="button"

@@ -1,3 +1,5 @@
+import type { RelatedIsbn } from "../models";
+
 export type MetadataPageType = "cover" | "title" | "other";
 
 export interface MetadataResult {
@@ -5,9 +7,16 @@ export interface MetadataResult {
   subtitle: string | null;
   edition: string | null;
   publisher: string | null;
+  publisherLocation?: string | null;
   series: string | null;
   gradeLevel: string | null;
   subject: string | null;
+  copyrightYear?: number | null;
+  isbn?: string | null;
+  additionalIsbns?: string[];
+  relatedIsbns?: RelatedIsbn[];
+  platformUrl?: string | null;
+  mhid?: string | null;
   confidence: number;
   rawText: string;
   source: "vision" | "ocr" | "vision+ocr";
@@ -151,9 +160,22 @@ function normalizeMetadataResult(input: MetadataResult): MetadataResult {
     subtitle: asTrimmed(input.subtitle) ?? null,
     edition: asTrimmed(input.edition) ?? null,
     publisher: asTrimmed(input.publisher) ?? null,
+    publisherLocation: asTrimmed(input.publisherLocation) ?? null,
     series: asTrimmed(input.series) ?? null,
     gradeLevel: asTrimmed(input.gradeLevel) ?? null,
     subject: asTrimmed(input.subject) ?? null,
+    copyrightYear: typeof input.copyrightYear === "number" && Number.isInteger(input.copyrightYear) ? input.copyrightYear : null,
+    isbn: asTrimmed(input.isbn) ?? null,
+    additionalIsbns: Array.isArray(input.additionalIsbns)
+      ? input.additionalIsbns.map((entry) => asTrimmed(entry)).filter((entry): entry is string => Boolean(entry))
+      : undefined,
+    relatedIsbns: Array.isArray(input.relatedIsbns)
+      ? input.relatedIsbns
+          .filter((entry) => entry && typeof entry.isbn === "string" && entry.isbn.trim())
+          .map((entry) => ({ isbn: entry.isbn.trim(), type: entry.type, note: asTrimmed(entry.note) ?? undefined }))
+      : undefined,
+    platformUrl: asTrimmed(input.platformUrl) ?? null,
+    mhid: asTrimmed(input.mhid) ?? null,
     confidence: clampConfidence(input.confidence, 0),
     rawText: typeof input.rawText === "string" ? input.rawText : "",
     source: input.source,

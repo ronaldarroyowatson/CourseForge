@@ -143,6 +143,49 @@ describe("metadataExtractionPipelineService", () => {
     expect(result.originalOcrOutput?.providerId).toBe("local_tesseract");
   });
 
+  it("preserves richer copyright-page metadata when merging vision and OCR", async () => {
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "Inspire Physical Science with Earth Science",
+            publisher: "McGraw-Hill Education",
+            confidence: 0.41,
+            rawText: "Inspire",
+            copyrightYear: 2021,
+            platformUrl: "https://mheducation.com/prek-12",
+          },
+        },
+      },
+    });
+
+    ocrMock.mockResolvedValue({
+      text: [
+        "Inspire Physical Science with Earth Science",
+        "ISBN: 978-0-07-671685-2",
+        "Teacher ISBN: 978-0-07-671700-2",
+        "MHID: 0-07-671685-6",
+        "Columbus, OH 43240",
+      ].join("\n"),
+      providerId: "local_tesseract",
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "title", publisherHint: "McGraw-Hill Education" }
+    );
+
+    expect(result.result.source).toBe("vision+ocr");
+    expect(result.result.copyrightYear).toBe(2021);
+    expect(result.result.platformUrl).toBe("https://mheducation.com/prek-12");
+    expect(result.result.isbn).toBe("9780076716852");
+    expect(result.result.relatedIsbns).toEqual([
+      expect.objectContaining({ isbn: "9780076717002", type: "teacher" }),
+    ]);
+    expect(result.result.mhid).toBe("0-07-671685-6");
+  });
+
   it("falls back to OCR when vision callable throws", async () => {
     callableMock.mockRejectedValue(new Error("vision unavailable"));
     ocrMock.mockResolvedValue({

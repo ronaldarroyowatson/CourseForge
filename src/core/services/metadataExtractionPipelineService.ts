@@ -1,6 +1,7 @@
 import { httpsCallable } from "firebase/functions";
 
 import { functionsClient } from "../../firebase/functions";
+import type { RelatedIsbn } from "../models";
 import { extractTextFromImageWithFallback, type AutoOcrProviderId } from "./autoOcrService";
 import { appendDebugLogEntry } from "./debugLogService";
 import { getCurrentUser } from "../../firebase/auth";
@@ -115,9 +116,22 @@ function normalizeMetadataResult(input: Partial<MetadataResult> & Pick<MetadataR
     subtitle: normalizeTextValue(input.subtitle),
     edition: normalizeTextValue(input.edition),
     publisher: normalizeTextValue(input.publisher),
+    publisherLocation: normalizeTextValue(input.publisherLocation),
     series: normalizeTextValue(input.series),
     gradeLevel: normalizeTextValue(input.gradeLevel),
     subject: normalizeTextValue(input.subject),
+    copyrightYear: typeof input.copyrightYear === "number" && Number.isInteger(input.copyrightYear) ? input.copyrightYear : null,
+    isbn: normalizeTextValue(input.isbn),
+    additionalIsbns: Array.isArray(input.additionalIsbns)
+      ? input.additionalIsbns.map((value) => normalizeTextValue(value)).filter((value): value is string => Boolean(value))
+      : undefined,
+    relatedIsbns: Array.isArray(input.relatedIsbns)
+      ? input.relatedIsbns
+          .filter((entry): entry is RelatedIsbn => Boolean(entry) && typeof entry.isbn === "string" && typeof entry.type === "string")
+          .map((entry) => ({ isbn: entry.isbn.trim(), type: entry.type, note: normalizeTextValue(entry.note) ?? undefined }))
+      : undefined,
+    platformUrl: normalizeTextValue(input.platformUrl),
+    mhid: normalizeTextValue(input.mhid),
     confidence: clampConfidence(input.confidence),
     rawText: typeof input.rawText === "string" ? input.rawText : "",
     source: input.source,
@@ -158,9 +172,16 @@ function autoMetadataToMetadataResult(rawText: string, source: MetadataResult["s
     subtitle: parsed.subtitle ?? null,
     edition: parsed.edition ?? null,
     publisher: parsed.publisher ?? null,
+    publisherLocation: parsed.publisherLocation ?? null,
     series: parsed.seriesName ?? null,
     gradeLevel: parsed.gradeBand ?? null,
     subject: parsed.subject ?? null,
+    copyrightYear: parsed.copyrightYear ?? null,
+    isbn: parsed.isbn ?? null,
+    additionalIsbns: parsed.additionalIsbns,
+    relatedIsbns: parsed.relatedIsbns,
+    platformUrl: parsed.platformUrl ?? null,
+    mhid: parsed.mhid ?? null,
     confidence: source === "ocr" ? 0.58 : 0.66,
     rawText,
     source,
@@ -329,9 +350,16 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     subtitle: originalVisionOutput.subtitle ?? ocrMetadata.subtitle,
     edition: originalVisionOutput.edition ?? ocrMetadata.edition,
     publisher: originalVisionOutput.publisher ?? ocrMetadata.publisher,
+    publisherLocation: originalVisionOutput.publisherLocation ?? ocrMetadata.publisherLocation,
     series: originalVisionOutput.series ?? ocrMetadata.series,
     gradeLevel: originalVisionOutput.gradeLevel ?? ocrMetadata.gradeLevel,
     subject: originalVisionOutput.subject ?? ocrMetadata.subject,
+    copyrightYear: originalVisionOutput.copyrightYear ?? ocrMetadata.copyrightYear,
+    isbn: originalVisionOutput.isbn ?? ocrMetadata.isbn,
+    additionalIsbns: Array.from(new Set([...(originalVisionOutput.additionalIsbns ?? []), ...(ocrMetadata.additionalIsbns ?? [])])),
+    relatedIsbns: Array.from(new Map([...(originalVisionOutput.relatedIsbns ?? []), ...(ocrMetadata.relatedIsbns ?? [])].map((entry) => [`${entry.type}:${entry.isbn}`, entry])).values()),
+    platformUrl: originalVisionOutput.platformUrl ?? ocrMetadata.platformUrl,
+    mhid: originalVisionOutput.mhid ?? ocrMetadata.mhid,
     confidence: Math.max(ocrMetadata.confidence, originalVisionOutput.confidence),
     rawText: [originalVisionOutput.rawText, correctedRawText].filter(Boolean).join("\n\n").trim(),
     source: "vision+ocr",

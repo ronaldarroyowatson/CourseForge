@@ -164,10 +164,13 @@ interface UIStore {
   pendingSyncCount: number;
   pendingChangesCount: number;
   writeCount: number;
+  readCount: number;
   retryCount: number;
   writeBudgetLimit: number;
+  readBudgetLimit: number;
   retryLimit: number;
   writeBudgetExceeded: boolean;
+  readBudgetExceeded: boolean;
   automaticRetriesEnabled: boolean;
   permissionDeniedSyncBlocked: boolean;
   writeLoopBlocked: boolean;
@@ -178,8 +181,10 @@ interface UIStore {
   setPendingSyncCount: (count: number) => void;
   setLastSyncErrorCode: (code: string | null) => void;
   setWriteCount: (count: number) => void;
+  setReadCount: (count: number) => void;
   setRetryCount: (count: number) => void;
   setWriteBudget: (count: number, limit: number, exceeded: boolean) => void;
+  setReadBudget: (count: number, limit: number, exceeded: boolean) => void;
   setRetryLimit: (limit: number) => void;
   setAutomaticRetriesEnabled: (enabled: boolean) => void;
   setPermissionDeniedSyncBlocked: (value: boolean) => void;
@@ -217,10 +222,13 @@ export const useUIStore = create<UIStore>((set) => ({
   pendingSyncCount: 0,
   pendingChangesCount: 0,
   writeCount: 0,
+  readCount: 0,
   retryCount: 0,
   writeBudgetLimit: 500,
+  readBudgetLimit: 5000,
   retryLimit: 3,
   writeBudgetExceeded: false,
+  readBudgetExceeded: false,
   automaticRetriesEnabled: getInitialAutomaticRetriesEnabled(),
   permissionDeniedSyncBlocked: false,
   writeLoopBlocked: false,
@@ -251,12 +259,19 @@ export const useUIStore = create<UIStore>((set) => ({
   setPendingSyncCount: (count: number) => set({ pendingSyncCount: count, pendingChangesCount: count }),
   setLastSyncErrorCode: (code: string | null) => set({ lastSyncErrorCode: code }),
   setWriteCount: (count: number) => set({ writeCount: count }),
+  setReadCount: (count: number) => set({ readCount: count }),
   setRetryCount: (count: number) => set({ retryCount: count }),
   setWriteBudget: (count: number, limit: number, exceeded: boolean) =>
     set({
       writeCount: count,
       writeBudgetLimit: limit,
       writeBudgetExceeded: exceeded,
+    }),
+  setReadBudget: (count: number, limit: number, exceeded: boolean) =>
+    set({
+      readCount: count,
+      readBudgetLimit: limit,
+      readBudgetExceeded: exceeded,
     }),
   setRetryLimit: (limit: number) => set({ retryLimit: limit }),
   setAutomaticRetriesEnabled: (enabled: boolean) => {

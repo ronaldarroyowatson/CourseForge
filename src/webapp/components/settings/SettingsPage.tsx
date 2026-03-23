@@ -17,6 +17,7 @@ import {
   getDebugLogStorageStats,
   isDebugLoggingEnabled,
   isMetadataCorrectionSharingEnabled,
+  readLocalCorrectionRecords,
   setMetadataCorrectionSharingEnabled,
   setDebugLoggingEnabled,
   uploadAndClearDebugLogs,
@@ -134,6 +135,85 @@ type UpdaterDiagnostics = {
   } | null;
 };
 
+type LocalMetadataTrainingStats = {
+  totalCorrections: number;
+  flaggedCorrections: number;
+  acceptedCorrections: number;
+  averageConfidencePct: number;
+  lastCorrectionAt: string | null;
+};
+
+function SyncDonutChart({
+  label,
+  used,
+  limit,
+  exceeded,
+  showWarning = false,
+}: {
+  label: "Writes" | "Reads";
+  used: number;
+  limit: number;
+  exceeded: boolean;
+  showWarning?: boolean;
+}): React.JSX.Element {
+  const r = 36;
+  const cx = 50;
+  const cy = 50;
+  const circumference = 2 * Math.PI * r;
+  const safeLimit = limit > 0 ? limit : 1;
+  const usedFraction = Math.min(used / safeLimit, 1);
+  const usedDash = usedFraction * circumference;
+  const available = Math.max(0, limit - used);
+
+  return (
+    <div className="sync-donut">
+      <svg
+        viewBox="0 0 100 100"
+        className="sync-donut__svg"
+        aria-label={`${label} today: ${used} used of ${limit}`}
+      >
+        {/* Background grey track */}
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border-default)" strokeWidth={12} />
+        {/* Full green ring for available portion base */}
+        <circle
+          cx={cx}
+          cy={cy}
+          r={r}
+          fill="none"
+          stroke="#22c55e"
+          strokeWidth={12}
+          transform="rotate(-90 50 50)"
+        />
+        {/* Red: used */}
+        {usedFraction > 0 && (
+          <circle
+            cx={cx} cy={cy} r={r}
+            fill="none"
+            stroke="#ef4444"
+            strokeWidth={12}
+            strokeDasharray={`${usedDash} ${circumference}`}
+            strokeDashoffset={0}
+            strokeLinecap="butt"
+            transform="rotate(-90 50 50)"
+          />
+        )}
+        {/* Center label */}
+        <text x="50" y="46" textAnchor="middle" fontSize="8" fill="var(--text-primary)" fontWeight="600">{label}</text>
+        <text x="50" y="57" textAnchor="middle" fontSize="8" fill="var(--text-secondary)">Today</text>
+      </svg>
+      <div className="sync-donut__stats">
+        <p className="sync-donut__stat">Used: <strong>{used}</strong></p>
+        <p className="sync-donut__stat">Available: <strong>{available}</strong></p>
+      </div>
+      {showWarning && exceeded && (
+        <p className="error-text sync-donut__warning">
+          Cloud sync paused to prevent excessive writes. Please review your data or try again later.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /**
  * Centralized user preferences for sync safety and appearance.
  */
@@ -150,6 +230,9 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const writeCount = useUIStore((state) => state.writeCount);
   const writeBudgetLimit = useUIStore((state) => state.writeBudgetLimit);
   const writeBudgetExceeded = useUIStore((state) => state.writeBudgetExceeded);
+  const readCount = useUIStore((state) => state.readCount);
+  const readBudgetLimit = useUIStore((state) => state.readBudgetLimit);
+  const readBudgetExceeded = useUIStore((state) => state.readBudgetExceeded);
   const pendingChangesCount = useUIStore((state) => state.pendingChangesCount);
   const syncStatus = useUIStore((state) => state.syncStatus);
   const [debugEnabled, setDebugEnabled] = React.useState<boolean>(() => isDebugLoggingEnabled());
@@ -179,7 +262,60 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const [updaterDiagnostics, setUpdaterDiagnostics] = React.useState<UpdaterDiagnostics | null>(null);
   const [showUpdaterDiagnostics, setShowUpdaterDiagnostics] = React.useState(false);
   const [isLoadingUpdaterDiagnostics, setIsLoadingUpdaterDiagnostics] = React.useState(false);
+  const [showSyncPreferences, setShowSyncPreferences] = React.useState(false);
+  const [showLanguageSettings, setShowLanguageSettings] = React.useState(false);
+  const [showAccessibilitySettings, setShowAccessibilitySettings] = React.useState(false);
+  const [showMetadataLearning, setShowMetadataLearning] = React.useState(false);
+  const [metadataTrainingStats, setMetadataTrainingStats] = React.useState<LocalMetadataTrainingStats>({
+    totalCorrections: 0,
+    flaggedCorrections: 0,
+    acceptedCorrections: 0,
+    averageConfidencePct: 0,
+    lastCorrectionAt: null,
+  });
   const languageOptions = React.useMemo(() => getSupportedLanguages(), []);
+  const ocrHealthById = React.useMemo(() => {
+    return new Map(ocrProviderHealth.map((provider) => [provider.id, provider]));
+  }, [ocrProviderHealth]);
+  const secondChoiceProviderId = ocrProviderOrder.find((providerId) => providerId !== ocrProviderOrder[0] && providerId !== "local_tesseract") ?? "cloud_github_models_vision";
+  const retryVisualTotal = Math.max(1, Math.min(5, retryLimit || 3));
+  const retryVisualUsed = Math.max(0, Math.min(retryVisualTotal, retryCount));
+
+  function refreshMetadataTrainingStats(): void {
+    const corrections = readLocalCorrectionRecords();
+    const totalCorrections = corrections.length;
+    const flaggedCorrections = corrections.filter((record) => record.flagged).length;
+    const acceptedCorrections = corrections.filter((record) => record.reviewStatus === "accepted").length;
+    const averageConfidencePct = totalCorrections > 0
+      ? Math.round((corrections.reduce((sum, record) => sum + (record.finalConfidence ?? 0), 0) / totalCorrections) * 100)
+      : 0;
+    const lastCorrectionAt = totalCorrections > 0
+      ? corrections
+        .map((record) => record.timestamp)
+        .sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? null
+      : null;
+
+    setMetadataTrainingStats({
+      totalCorrections,
+      flaggedCorrections,
+      acceptedCorrections,
+      averageConfidencePct,
+      lastCorrectionAt,
+    });
+  }
+
+  function renderProviderStatusBadge(providerId: AutoOcrProviderId): React.JSX.Element {
+    const providerHealth = ocrHealthById.get(providerId);
+    const isHealthy = providerHealth?.available === true;
+    const statusClass = isHealthy ? "ocr-provider-status ocr-provider-status--ok" : "ocr-provider-status ocr-provider-status--fail";
+
+    return (
+      <span className={statusClass}>
+        <span className="ocr-provider-status__mark" aria-hidden="true">✓</span>
+        <span className="ocr-provider-status__name">{getShortProviderLabel(providerId)}</span>
+      </span>
+    );
+  }
 
   function toNoStoreApiUrl(path: string): string {
     const separator = path.includes("?") ? "&" : "?";
@@ -247,8 +383,8 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     })();
   }
 
-  async function refreshOcrProviderHealth(): Promise<void> {
-    const health = await getAutoOcrProviderHealth({ forceRefresh: true });
+  async function refreshOcrProviderHealth(forceRefresh = false): Promise<void> {
+    const health = await getAutoOcrProviderHealth({ forceRefresh });
     setOcrProviderHealth(health);
     const cloudProviders = health.filter((provider) => provider.id !== "local_tesseract");
     const unavailableProviders = cloudProviders.filter((provider) => provider.availabilityState === "unavailable");
@@ -284,8 +420,9 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     void (async () => {
       const effectiveOrder = await getEffectiveAutoOcrProviderOrder();
       setOcrProviderOrderState(effectiveOrder);
-      await refreshOcrProviderHealth();
+      await refreshOcrProviderHealth(false);
       await refreshDebugStats();
+      refreshMetadataTrainingStats();
       const policy = await getDebugLoggingPolicy();
       setDebugPolicyStatus(policy.enabledGlobally
         ? "Global debug logging is enabled."
@@ -765,126 +902,172 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
       </div>
 
       <div className="settings-grid">
-        <article className="settings-card">
-          <h3>Sync Preferences</h3>
+        <article className={`settings-card settings-card--expandable ${showSyncPreferences ? "settings-card--expanded" : ""}`}>
+          <div className="settings-card__head">
+            <h3>Sync Preferences</h3>
+            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowSyncPreferences((previous) => !previous)}>
+              {showSyncPreferences ? "Hide" : "Show"}
+            </button>
+          </div>
           <p>Automatic retries are off by default to avoid repeated failed writes and quota spikes.</p>
-          <label
-            className="settings-toggle"
-            title="If disabled, autosync still runs, but failed syncs are not retried automatically."
-          >
-            <input
-              type="checkbox"
-              checked={automaticRetriesEnabled}
-              onChange={(event) => {
-                setAutomaticRetriesEnabled(event.target.checked);
-                useUIStore.getState().setRetryCount(0);
-              }}
-            />
-            Enable Automatic Retries
-          </label>
-          {!automaticRetriesEnabled ? (
-            <p className="manual-entry-banner" title="Retries remain off until you re-enable this setting.">
-              Automatic retries are currently disabled.
-            </p>
+          {showSyncPreferences ? (
+            <>
+              <div className="settings-sync-retry-row">
+                <label
+                  className="settings-toggle"
+                  title="If disabled, autosync still runs, but failed syncs are not retried automatically."
+                >
+                  <input
+                    type="checkbox"
+                    checked={automaticRetriesEnabled}
+                    onChange={(event) => {
+                      setAutomaticRetriesEnabled(event.target.checked);
+                      useUIStore.getState().setRetryCount(0);
+                    }}
+                  />
+                  Enable Automatic Retries
+                </label>
+                <div className="settings-retry-meter" aria-label={`Retries used ${retryVisualUsed} of ${retryVisualTotal}`}>
+                  {Array.from({ length: retryVisualTotal }).map((_, index) => {
+                    const isUsed = index < retryVisualUsed;
+                    return (
+                      <span
+                        key={`retry-${index}`}
+                        className={`settings-retry-meter__item ${isUsed ? "settings-retry-meter__item--used" : "settings-retry-meter__item--available"}`}
+                      >
+                        {isUsed ? "✗" : "✓"}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              {!automaticRetriesEnabled ? (
+                <p className="manual-entry-banner" title="Retries remain off until you re-enable this setting.">
+                  Automatic retries are currently disabled.
+                </p>
+              ) : null}
+              <p className="settings-meta">Retries used: {retryCount}/{retryLimit}</p>
+            </>
           ) : null}
-          <p className="settings-meta">Retries used: {retryCount}/{retryLimit}</p>
         </article>
 
-        <article className="settings-card">
-          <h3>{translate(language, "settings", "title")}</h3>
-          <label>
-            {translate(language, "settings", "languageLabel")}
-            <select value={language} onChange={(event) => { void handleLanguageChange(event.target.value); }}>
-              {languageOptions.map((option) => (
-                <option key={option} value={option}>{option.toUpperCase()}</option>
-              ))}
-            </select>
-          </label>
-          <p className="settings-meta">{translate(language, "settings", "languageHint")}</p>
-          <button type="button" className="btn-secondary" onClick={() => { void handleCheckLanguageUpdates(); }}>
-            Check For New Languages
-          </button>
-          {languageRegistryStatus ? <p className="settings-meta">{languageRegistryStatus}</p> : null}
-          {languageRoadmapPreview.length > 0 ? (
-            <p className="settings-meta">Roadmap preview: {languageRoadmapPreview.join(", ")}</p>
+        <article className={`settings-card settings-card--expandable ${showLanguageSettings ? "settings-card--expanded" : ""}`}>
+          <div className="settings-card__head">
+            <h3>{translate(language, "settings", "title")}</h3>
+            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowLanguageSettings((previous) => !previous)}>
+              {showLanguageSettings ? "Hide" : "Show"}
+            </button>
+          </div>
+          <p className="settings-meta">Current language: {language.toUpperCase()}</p>
+          {showLanguageSettings ? (
+            <>
+              <label>
+                {translate(language, "settings", "languageLabel")}
+                <select value={language} onChange={(event) => { void handleLanguageChange(event.target.value); }}>
+                  {languageOptions.map((option) => (
+                    <option key={option} value={option}>{option.toUpperCase()}</option>
+                  ))}
+                </select>
+              </label>
+              <p className="settings-meta">{translate(language, "settings", "languageHint")}</p>
+              <button type="button" className="btn-secondary" onClick={() => { void handleCheckLanguageUpdates(); }}>
+                Check For New Languages
+              </button>
+              {languageRegistryStatus ? <p className="settings-meta">{languageRegistryStatus}</p> : null}
+              {languageRoadmapPreview.length > 0 ? (
+                <p className="settings-meta">Roadmap preview: {languageRoadmapPreview.join(", ")}</p>
+              ) : null}
+            </>
           ) : null}
         </article>
 
-        <article className="settings-card" aria-live="polite">
-          <h3>{translate(language, "settings", "accessibilityTitle")}</h3>
-          <label>
-            {translate(language, "settings", "colorBlindMode")}
-            <select
-              value={accessibility.colorBlindMode ?? "none"}
-              onChange={(event) => {
-                void handleAccessibilityPatch({
-                  colorBlindMode: event.target.value as "protanopia" | "deuteranopia" | "tritanopia" | "none",
-                });
-              }}
-            >
-              <option value="none">None</option>
-              <option value="protanopia">Protanopia</option>
-              <option value="deuteranopia">Deuteranopia</option>
-              <option value="tritanopia">Tritanopia</option>
-            </select>
-          </label>
-          <label className="settings-toggle">
-            <input
-              type="checkbox"
-              checked={Boolean(accessibility.dyslexiaMode)}
-              onChange={(event) => { void handleAccessibilityPatch({ dyslexiaMode: event.target.checked }); }}
-            />
-            {translate(language, "settings", "dyslexiaMode")}
-          </label>
-          <label className="settings-toggle">
-            <input
-              type="checkbox"
-              checked={Boolean(accessibility.dyscalculiaMode)}
-              onChange={(event) => { void handleAccessibilityPatch({ dyscalculiaMode: event.target.checked }); }}
-            />
-            {translate(language, "settings", "dyscalculiaMode")}
-          </label>
-          <label className="settings-toggle">
-            <input
-              type="checkbox"
-              checked={Boolean(accessibility.highContrastMode)}
-              onChange={(event) => { void handleAccessibilityPatch({ highContrastMode: event.target.checked }); }}
-            />
-            {translate(language, "settings", "highContrastMode")}
-          </label>
-          <label>
-            {translate(language, "settings", "fontScale")}: {(accessibility.fontScale ?? 1).toFixed(2)}
-            <input
-              type="range"
-              min={0.8}
-              max={1.8}
-              step={0.05}
-              value={accessibility.fontScale ?? 1}
-              onChange={(event) => { void handleAccessibilityPatch({ fontScale: Number(event.target.value) }); }}
-            />
-          </label>
-          <label>
-            {translate(language, "settings", "uiScale")}: {(accessibility.uiScale ?? 1).toFixed(2)}
-            <input
-              type="range"
-              min={0.85}
-              max={1.3}
-              step={0.05}
-              value={accessibility.uiScale ?? 1}
-              onChange={(event) => { void handleAccessibilityPatch({ uiScale: Number(event.target.value) }); }}
-            />
-          </label>
-          {preferenceStatus ? <p className="settings-meta">{preferenceStatus}</p> : null}
+        <article className={`settings-card settings-card--expandable ${showAccessibilitySettings ? "settings-card--expanded" : ""}`} aria-live="polite">
+          <div className="settings-card__head">
+            <h3>{translate(language, "settings", "accessibilityTitle")}</h3>
+            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowAccessibilitySettings((previous) => !previous)}>
+              {showAccessibilitySettings ? "Hide" : "Show"}
+            </button>
+          </div>
+          <p className="settings-meta">Color mode: {accessibility.colorBlindMode ?? "none"} | Font scale: {(accessibility.fontScale ?? 1).toFixed(2)} | UI scale: {(accessibility.uiScale ?? 1).toFixed(2)}</p>
+          {showAccessibilitySettings ? (
+            <>
+              <label>
+                {translate(language, "settings", "colorBlindMode")}
+                <select
+                  value={accessibility.colorBlindMode ?? "none"}
+                  onChange={(event) => {
+                    void handleAccessibilityPatch({
+                      colorBlindMode: event.target.value as "protanopia" | "deuteranopia" | "tritanopia" | "none",
+                    });
+                  }}
+                >
+                  <option value="none">None</option>
+                  <option value="protanopia">Protanopia</option>
+                  <option value="deuteranopia">Deuteranopia</option>
+                  <option value="tritanopia">Tritanopia</option>
+                </select>
+              </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={Boolean(accessibility.dyslexiaMode)}
+                  onChange={(event) => { void handleAccessibilityPatch({ dyslexiaMode: event.target.checked }); }}
+                />
+                {translate(language, "settings", "dyslexiaMode")}
+              </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={Boolean(accessibility.dyscalculiaMode)}
+                  onChange={(event) => { void handleAccessibilityPatch({ dyscalculiaMode: event.target.checked }); }}
+                />
+                {translate(language, "settings", "dyscalculiaMode")}
+              </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={Boolean(accessibility.highContrastMode)}
+                  onChange={(event) => { void handleAccessibilityPatch({ highContrastMode: event.target.checked }); }}
+                />
+                {translate(language, "settings", "highContrastMode")}
+              </label>
+              <label>
+                {translate(language, "settings", "fontScale")}: {(accessibility.fontScale ?? 1).toFixed(2)}
+                <input
+                  type="range"
+                  min={0.8}
+                  max={1.8}
+                  step={0.05}
+                  value={accessibility.fontScale ?? 1}
+                  onChange={(event) => { void handleAccessibilityPatch({ fontScale: Number(event.target.value) }); }}
+                />
+              </label>
+              <label>
+                {translate(language, "settings", "uiScale")}: {(accessibility.uiScale ?? 1).toFixed(2)}
+                <input
+                  type="range"
+                  min={0.85}
+                  max={1.3}
+                  step={0.05}
+                  value={accessibility.uiScale ?? 1}
+                  onChange={(event) => { void handleAccessibilityPatch({ uiScale: Number(event.target.value) }); }}
+                />
+              </label>
+              {preferenceStatus ? <p className="settings-meta">{preferenceStatus}</p> : null}
+            </>
+          ) : null}
         </article>
 
         <article className="settings-card">
           <h3>Sync Safety Status</h3>
           <p className="settings-meta">Sync status: {syncStatus}</p>
-          <p className="settings-meta">Pending changes: {pendingChangesCount}</p>
-          <p className="settings-meta">Writes today (UTC): {writeCount}/{writeBudgetLimit}</p>
-          {writeBudgetExceeded ? (
-            <p className="error-text">Cloud sync paused to prevent excessive writes. Please review your data or try again later.</p>
-          ) : null}
+          {pendingChangesCount > 0 && (
+            <p className="settings-meta">Pending changes: {pendingChangesCount}</p>
+          )}
+          <div className="sync-safety-donuts">
+            <SyncDonutChart label="Writes" used={writeCount} limit={writeBudgetLimit} exceeded={writeBudgetExceeded} showWarning />
+            <SyncDonutChart label="Reads" used={readCount} limit={readBudgetLimit} exceeded={readBudgetExceeded} />
+          </div>
         </article>
 
         <article className="settings-card">
@@ -892,7 +1075,10 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           <p>Set the priority order for OCR providers. Each is tried in order; the first that succeeds is used.</p>
           <div className="ocr-provider-choices">
             <label className="ocr-provider-choice">
-              <span className="ocr-provider-choice__label">#1 — First choice</span>
+              <div className="ocr-provider-choice__header">
+                <span className="ocr-provider-choice__label">#1 — First choice</span>
+                {renderProviderStatusBadge(ocrProviderOrder[0] ?? "cloud_openai_vision")}
+              </div>
               <select
                 value={ocrProviderOrder[0] ?? "cloud_openai_vision"}
                 onChange={(event) => updatePrimaryOcrProvider(event.target.value as AutoOcrProviderId)}
@@ -902,19 +1088,27 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
               </select>
             </label>
             <label className="ocr-provider-choice">
-              <span className="ocr-provider-choice__label">#2 — Second choice</span>
+              <div className="ocr-provider-choice__header">
+                <span className="ocr-provider-choice__label">#2 — Second choice</span>
+                {renderProviderStatusBadge(secondChoiceProviderId)}
+              </div>
               <select
-                value={ocrProviderOrder.find((providerId) => providerId !== ocrProviderOrder[0] && providerId !== "local_tesseract") ?? "cloud_github_models_vision"}
+                value={secondChoiceProviderId}
                 onChange={(event) => updateFallbackOcrProvider(event.target.value as AutoOcrProviderId)}
               >
                 <option value="cloud_openai_vision">Cloud OCR (OpenAI Vision)</option>
                 <option value="cloud_github_models_vision">Cloud OCR (GitHub Models Vision)</option>
               </select>
             </label>
-            <p className="ocr-provider-choice__meta">#3 (automatic) — Local OCR (Tesseract)</p>
+            <div className="ocr-provider-choice ocr-provider-choice--static">
+              <div className="ocr-provider-choice__header">
+                <span className="ocr-provider-choice__label">#3 (automatic)</span>
+                {renderProviderStatusBadge("local_tesseract")}
+              </div>
+            </div>
           </div>
-          <div className="form-actions">
-            <button type="button" className="btn-secondary" onClick={() => { void refreshOcrProviderHealth(); }}>
+          <div className="form-actions ocr-provider-actions">
+            <button type="button" className="btn-secondary" onClick={() => { void refreshOcrProviderHealth(true); }}>
               Refresh Provider Health
             </button>
             <button type="button" className="btn-secondary" onClick={() => { void handleReloadCloudPolicy(); }} disabled={isUpdatingOcrPolicy}>
@@ -924,26 +1118,16 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
               {isUpdatingOcrPolicy ? "Working..." : "Save As Shared Policy"}
             </button>
           </div>
-          {ocrProviderHealth.length > 0 ? (
-            <div className="ocr-health-grid">
-              {ocrProviderHealth.map((provider) => {
-                const isOk = provider.available === true;
-                const isUnknown = provider.availabilityState === "unknown";
-                const errorMsg = provider.errorMessage ?? "Unavailable";
+          {ocrProviderHealth.some((provider) => provider.available !== true) ? (
+            <div className="ocr-provider-details">
+              {ocrProviderHealth.filter((provider) => provider.available !== true).map((provider) => {
+                const fallbackMessage = provider.availabilityState === "unknown"
+                  ? "Health status is currently unknown."
+                  : "Provider is currently unavailable.";
                 return (
-                  <div
-                    key={provider.id}
-                    className={`ocr-health-item ${isOk ? "ocr-health-item--ok" : isUnknown ? "ocr-health-item--unknown" : "ocr-health-item--error"}`}
-                  >
-                    <span className="ocr-health-item__name">{getShortProviderLabel(provider.id)}</span>
-                    {isOk ? (
-                      <span className="ocr-health-item__check" aria-label="Available">✓</span>
-                    ) : (
-                      <span className="ocr-health-item__fail" aria-label={isUnknown ? "Unknown" : "Unavailable"}>
-                        {isUnknown ? "?" : `✗ ${errorMsg}`}
-                      </span>
-                    )}
-                  </div>
+                  <p key={provider.id} className="ocr-provider-details__item">
+                    {getShortProviderLabel(provider.id)}: {provider.errorMessage ?? fallbackMessage}
+                  </p>
                 );
               })}
             </div>
@@ -951,26 +1135,50 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           {ocrProviderStatus ? <p className="settings-meta">{ocrProviderStatus}</p> : null}
         </article>
 
-        <article className="settings-card">
-          <h3>Metadata Learning</h3>
-          <p>Share corrections to improve extraction accuracy for everyone.</p>
-          <label className="settings-toggle">
-            <input
-              type="checkbox"
-              checked={metadataSharingEnabled}
-              onChange={(event) => {
-                const enabled = event.target.checked;
-                setMetadataCorrectionSharingEnabled(enabled);
-                setMetadataSharingEnabled(enabled);
+        <article className={`settings-card settings-card--expandable settings-card--compact ${showMetadataLearning ? "settings-card--expanded" : ""}`}>
+          <div className="settings-card__head">
+            <h3>Metadata Learning</h3>
+            <button
+              type="button"
+              className="btn-secondary settings-card__toggle"
+              onClick={() => {
+                setShowMetadataLearning((previous) => !previous);
+                refreshMetadataTrainingStats();
               }}
-            />
-            Share corrections to improve accuracy for everyone.
-          </label>
-          <p className="settings-meta">
-            {metadataSharingEnabled
-              ? "Corrections can be synced to shared review queues with safeguards."
-              : "Corrections stay local only and are never uploaded."}
-          </p>
+            >
+              {showMetadataLearning ? "Hide" : "Show"}
+            </button>
+          </div>
+          <p className="settings-meta">Sharing: {metadataSharingEnabled ? "Enabled" : "Disabled"}</p>
+          {showMetadataLearning ? (
+            <>
+              <p>Share corrections to improve extraction accuracy for everyone.</p>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={metadataSharingEnabled}
+                  onChange={(event) => {
+                    const enabled = event.target.checked;
+                    setMetadataCorrectionSharingEnabled(enabled);
+                    setMetadataSharingEnabled(enabled);
+                  }}
+                />
+                Share corrections to improve accuracy for everyone.
+              </label>
+              <p className="settings-meta">
+                {metadataSharingEnabled
+                  ? "Corrections can be synced to shared review queues with safeguards."
+                  : "Corrections stay local only and are never uploaded."}
+              </p>
+              <div className="metadata-training-grid">
+                <p className="settings-meta">Corrections logged: <strong>{metadataTrainingStats.totalCorrections}</strong></p>
+                <p className="settings-meta">Accepted by admin: <strong>{metadataTrainingStats.acceptedCorrections}</strong></p>
+                <p className="settings-meta">Flagged for review: <strong>{metadataTrainingStats.flaggedCorrections}</strong></p>
+                <p className="settings-meta">Avg confidence: <strong>{metadataTrainingStats.averageConfidencePct}%</strong></p>
+              </div>
+              <p className="settings-meta">Last correction: {metadataTrainingStats.lastCorrectionAt ? new Date(metadataTrainingStats.lastCorrectionAt).toLocaleString() : "None yet"}</p>
+            </>
+          ) : null}
         </article>
 
         <article className="settings-card">

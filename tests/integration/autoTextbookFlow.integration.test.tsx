@@ -327,7 +327,7 @@ describe("auto textbook flow integration", () => {
 
     const ocrInput = screen.getByLabelText(/OCR text/i);
     fireEvent.change(ocrInput, { target: { value: "This is fucking explicit text" } });
-    fireEvent.click(screen.getByRole("button", { name: "Run Metadata Extraction" }));
+    fireEvent.click(screen.getByRole("button", { name: "Re-parse OCR Text" }));
 
     expect(screen.getByText(/Capture blocked: detected inappropriate language/i)).toBeInTheDocument();
   });

@@ -129,6 +129,7 @@ export interface Textbook {
   seriesName?: string;
   publisher?: string;
   publisherLocation?: string;
+  mhid?: string;
   authors?: string[];
   tocExtractionConfidence?: number;
   imageModerationState?: "clear" | "pending_admin_review" | "blocked";

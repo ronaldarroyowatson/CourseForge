@@ -33,12 +33,16 @@ function applySyncMetrics(result: {
   writeCount: number;
   writeBudgetLimit: number;
   writeBudgetExceeded: boolean;
+  readCount: number;
+  readBudgetLimit: number;
+  readBudgetExceeded: boolean;
   retryLimit: number;
   errorCode: string | null;
 }): void {
   const ui = useUIStore.getState();
   ui.setPendingSyncCount(result.pendingCount);
   ui.setWriteBudget(result.writeCount, result.writeBudgetLimit, result.writeBudgetExceeded);
+  ui.setReadBudget(result.readCount, result.readBudgetLimit, result.readBudgetExceeded);
   ui.setRetryLimit(result.retryLimit);
 
   if (result.success) {

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { RelatedIsbn, RelatedIsbnType } from "../../../core/models";
 
 import {
   type AutoConflictResolutionMode,
@@ -52,6 +53,8 @@ import { getCurrentUser } from "../../../firebase/auth";
 
 type AutoFlowStep = "cover" | "title" | "toc" | "toc-editor";
 
+const RELATED_ISBN_TYPES: RelatedIsbnType[] = ["student", "teacher", "digital", "workbook", "assessment", "other"];
+
 interface AutoTextbookSetupFlowProps {
   runtime?: "webapp" | "extension";
   onSaved: () => void;
@@ -94,6 +97,10 @@ interface CaptureResult {
   pipelineResult: MetadataPipelineResult | null;
 }
 
+function describeMetadataCaptureStep(step: "cover" | "title"): string {
+  return step === "cover" ? "Cover" : "Copyright page";
+}
+
 interface DuplicateTextbookMatch {
   id: string;
   title: string;
@@ -121,6 +128,8 @@ interface MetadataFormState {
   seriesName: string;
   publisher: string;
   publisherLocation: string;
+  platformUrl: string;
+  mhid: string;
   authorsCsv: string;
   tocExtractionConfidence: string;
 }
@@ -156,6 +165,8 @@ const FORM_TO_METADATA_FIELD: Partial<Record<keyof MetadataFormState, AutoMetada
   seriesName: "seriesName",
   publisher: "publisher",
   publisherLocation: "publisherLocation",
+  platformUrl: "platformUrl",
+  mhid: "mhid",
   authorsCsv: "authors",
 };
 
@@ -281,6 +292,8 @@ function toMetadataFormState(metadata: AutoTextbookMetadata, tocConfidence: numb
     seriesName: metadata.seriesName ?? "",
     publisher: metadata.publisher ?? "",
     publisherLocation: metadata.publisherLocation ?? "",
+    platformUrl: metadata.platformUrl ?? "",
+    mhid: metadata.mhid ?? "",
     authorsCsv: (metadata.authors ?? []).join(", "),
     tocExtractionConfidence: tocConfidence > 0 ? tocConfidence.toFixed(2) : "",
   };
@@ -307,6 +320,8 @@ function fromMetadataFormState(form: MetadataFormState): AutoTextbookMetadata {
     seriesName: form.seriesName.trim() || undefined,
     publisher: form.publisher.trim() || undefined,
     publisherLocation: form.publisherLocation.trim() || undefined,
+    platformUrl: form.platformUrl.trim() || undefined,
+    mhid: form.mhid.trim() || undefined,
     authors: authors.length > 0 ? authors : undefined,
     copyrightYear: form.copyrightYear ? Number(form.copyrightYear) : undefined,
   };
@@ -318,21 +333,35 @@ function metadataResultToAutoMetadata(metadata: MetadataResult): AutoTextbookMet
     subtitle: metadata.subtitle ?? undefined,
     edition: metadata.edition ?? undefined,
     publisher: metadata.publisher ?? undefined,
+    publisherLocation: metadata.publisherLocation ?? undefined,
     seriesName: metadata.series ?? undefined,
     gradeBand: metadata.gradeLevel ?? undefined,
     subject: metadata.subject ?? undefined,
+    copyrightYear: metadata.copyrightYear ?? undefined,
+    isbn: metadata.isbn ?? undefined,
+    additionalIsbns: metadata.additionalIsbns,
+    relatedIsbns: metadata.relatedIsbns,
+    platformUrl: metadata.platformUrl ?? undefined,
+    mhid: metadata.mhid ?? undefined,
   };
 }
 
-function metadataFormToResult(form: MetadataFormState, rawText: string, source: MetadataResult["source"]): MetadataResult {
+function metadataFormToResult(form: MetadataFormState, rawText: string, source: MetadataResult["source"], relatedIsbns: RelatedIsbn[] = []): MetadataResult {
   return {
     title: form.title.trim() || null,
     subtitle: form.subtitle.trim() || null,
     edition: form.edition.trim() || null,
     publisher: form.publisher.trim() || null,
+    publisherLocation: form.publisherLocation.trim() || null,
     series: form.seriesName.trim() || null,
     gradeLevel: form.gradeBand.trim() || null,
     subject: form.subject.trim() || null,
+    copyrightYear: form.copyrightYear ? Number(form.copyrightYear) : null,
+    isbn: form.isbnRaw.trim() || null,
+    additionalIsbns: form.additionalIsbnsCsv.split(",").map((entry) => entry.trim()).filter(Boolean),
+    relatedIsbns: relatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
+    platformUrl: form.platformUrl.trim() || null,
+    mhid: form.mhid.trim() || null,
     confidence: 1,
     rawText,
     source,
@@ -619,6 +648,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     ...(testingSeedState?.metadataForm ?? {}),
   }));
   const [coverImageDataUrl, setCoverImageDataUrl] = useState<string | null>(testingSeedState?.coverImageDataUrl ?? null);
+  const [lastMetadataImageDataUrl, setLastMetadataImageDataUrl] = useState<string | null>(testingSeedState?.coverImageDataUrl ?? null);
+  const [relatedIsbns, setRelatedIsbns] = useState<RelatedIsbn[]>(testingSeedState?.metadataDraft?.relatedIsbns ?? []);
   const [ocrDraft, setOcrDraft] = useState(testingSeedState?.ocrDraft ?? "");
   const [tocResult, setTocResult] = useState<ParsedTocResult>(testingSeedState?.tocResult ?? INITIAL_TOC_RESULT);
   const [tocPages, setTocPages] = useState<TocPage[]>(testingSeedState?.tocPages ?? (testingSeedState?.tocResult ? [{
@@ -638,6 +669,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isTitleDragOver, setIsTitleDragOver] = useState(false);
   const [uploadPreview, setUploadPreview] = useState<UploadPreviewState>({
     open: false,
     step: "cover",
@@ -729,7 +761,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   const stepTitle = useMemo(() => {
     if (step === "cover") return "Auto Setup: Cover";
-    if (step === "title") return "Auto Setup: Title Page";
+    if (step === "title") return "Auto Setup: Copyright Page";
     if (step === "toc") return "Auto Setup: Table of Contents";
     return "Auto Setup: TOC Editor";
   }, [step]);
@@ -740,7 +772,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     }
 
     if (step === "title") {
-      return "Navigate to the title page, then click 'Capture Title Page'.";
+      return "Navigate to the copyright page, then click 'Capture Copyright Page'. CourseForge captures the full page for ownership-proof metadata matching.";
     }
 
     if (step === "toc") {
@@ -771,6 +803,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   function applyMetadataDraft(nextMetadata: AutoTextbookMetadata, tocConfidence = tocResult.confidence): void {
     setMetadataDraft(nextMetadata);
     setMetadataForm(toMetadataFormState(nextMetadata, tocConfidence));
+    setRelatedIsbns(nextMetadata.relatedIsbns ?? []);
+  }
+
+  function addRelatedIsbn(): void {
+    setRelatedIsbns((current) => [...current, { isbn: "", type: "student" }]);
+  }
+
+  function removeRelatedIsbn(index: number): void {
+    setRelatedIsbns((current) => current.filter((_, currentIndex) => currentIndex !== index));
+  }
+
+  function updateRelatedIsbn<K extends keyof RelatedIsbn>(index: number, field: K, value: RelatedIsbn[K]): void {
+    setRelatedIsbns((current) => current.map((entry, currentIndex) => currentIndex === index ? { ...entry, [field]: value } : entry));
   }
 
   function upsertAutoMetadataConfidence(incoming: AutoMetadataConfidenceMap): void {
@@ -1015,6 +1060,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       publisher: result.publisher
         ? { value: result.publisher, confidence: result.confidence, sourceType: "auto" }
         : scored.publisher,
+      publisherLocation: result.publisherLocation
+        ? { value: result.publisherLocation, confidence: result.confidence, sourceType: "auto" }
+        : scored.publisherLocation,
       seriesName: result.series
         ? { value: result.series, confidence: result.confidence, sourceType: "auto" }
         : scored.seriesName,
@@ -1024,6 +1072,12 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       subject: result.subject
         ? { value: result.subject, confidence: result.confidence, sourceType: "auto" }
         : scored.subject,
+      platformUrl: result.platformUrl
+        ? { value: result.platformUrl, confidence: result.confidence, sourceType: "auto" }
+        : scored.platformUrl,
+      mhid: result.mhid
+        ? { value: result.mhid, confidence: result.confidence, sourceType: "auto" }
+        : scored.mhid,
     };
 
     upsertAutoMetadataConfidence(fieldConfidence);
@@ -1157,32 +1211,45 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       const defaultSelection = createDefaultSelection(image);
       let cropped = "";
       let selection = defaultSelection;
+      const requiresManualSelection = targetStep !== "title";
 
       try {
-        const selectedRectDisplay = await requestSelection(rawImage);
-        if (!selectedRectDisplay) {
-          setErrorMessage("Capture was canceled before selecting a region. Try again or upload an image manually.");
-          appendDebugLogEntry({
-            eventType: "error",
-            message: "Capture canceled before region selection.",
-            autoModeStep: targetStep,
-          });
-          return null;
-        }
+        if (requiresManualSelection) {
+          const selectedRectDisplay = await requestSelection(rawImage);
+          if (!selectedRectDisplay) {
+            setErrorMessage("Capture was canceled before selecting a region. Try again or upload a screenshot manually.");
+            appendDebugLogEntry({
+              eventType: "error",
+              message: "Capture canceled before region selection.",
+              autoModeStep: targetStep,
+            });
+            return null;
+          }
 
-        const selectedRectNatural = convertSelectionToNaturalPixels(selectedRectDisplay, image);
-        const hasMeaningfulSelection = selectedRectNatural.width > 6 && selectedRectNatural.height > 6;
-        selection = hasMeaningfulSelection ? selectedRectNatural : defaultSelection;
-        emitAutoFlowDiagnostic("selection_applied", {
-          traceId,
-          context: {
-            targetStep,
-            hasMeaningfulSelection,
-            selectedWidth: selection.width,
-            selectedHeight: selection.height,
-          },
-        });
-        cropped = await cropToSelectionAndAutoBoundary(rawImage, selection);
+          const selectedRectNatural = convertSelectionToNaturalPixels(selectedRectDisplay, image);
+          const hasMeaningfulSelection = selectedRectNatural.width > 6 && selectedRectNatural.height > 6;
+          selection = hasMeaningfulSelection ? selectedRectNatural : defaultSelection;
+          emitAutoFlowDiagnostic("selection_applied", {
+            traceId,
+            context: {
+              targetStep,
+              hasMeaningfulSelection,
+              selectedWidth: selection.width,
+              selectedHeight: selection.height,
+            },
+          });
+          cropped = await cropToSelectionAndAutoBoundary(rawImage, selection);
+        } else {
+          emitAutoFlowDiagnostic("selection_skipped_full_page", {
+            traceId,
+            context: {
+              targetStep,
+              selectedWidth: selection.width,
+              selectedHeight: selection.height,
+            },
+          });
+          cropped = await cropToSelectionAndAutoBoundary(rawImage, selection);
+        }
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Unknown region capture error.";
         setErrorMessage("We couldn't capture that region. Try again or upload a screenshot manually.");
@@ -1476,6 +1543,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     if (targetStep === "cover") {
       setCoverImageDataUrl(imageDataUrl);
     }
+    setLastMetadataImageDataUrl(imageDataUrl);
     lastMetadataCaptureStepRef.current = targetStep;
     if (metadataResult) {
       applyMetadataFromPipelineResult({
@@ -1485,7 +1553,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     } else {
       applyMetadataFromText(editableOcrText, targetStep);
     }
-    setInfoMessage(`${targetStep === "cover" ? "Cover" : "Title page"} image loaded and parsed. Review fields before accepting. (OCR: ${ocrProviderId})`);
+    setInfoMessage(`${describeMetadataCaptureStep(targetStep)} image loaded and parsed. Review fields before accepting. (OCR: ${ocrProviderId})`);
     setUploadPreview((current) => ({ ...current, open: false }));
 
     appendDebugLogEntry({
@@ -1523,6 +1591,24 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     }
   }
 
+  function handleTitleDropZoneDragOver(event: React.DragEvent<HTMLDivElement>): void {
+    event.preventDefault();
+    setIsTitleDragOver(true);
+  }
+
+  function handleTitleDropZoneDragLeave(): void {
+    setIsTitleDragOver(false);
+  }
+
+  function handleTitleDropZoneDrop(event: React.DragEvent<HTMLDivElement>): void {
+    event.preventDefault();
+    setIsTitleDragOver(false);
+    const file = event.dataTransfer.files[0];
+    if (file) {
+      void processImageFileForStep(file, "title");
+    }
+  }
+
   async function handleCaptureCover(): Promise<void> {
     emitAutoFlowDiagnostic("ui_capture_cover_clicked", {
       traceId: createAutoFlowTraceId("auto-flow-ui-cover"),
@@ -1538,6 +1624,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     }
 
     setCoverImageDataUrl(captured.imageDataUrl);
+    setLastMetadataImageDataUrl(captured.imageDataUrl);
     lastCapturedOcrByStepRef.current.cover = captured.ocrText;
     setOcrDraft(captured.ocrText);
     setModerationAssessment(null);
@@ -1569,6 +1656,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     }
 
     lastCapturedOcrByStepRef.current.title = captured.ocrText;
+    setLastMetadataImageDataUrl(captured.imageDataUrl);
     setOcrDraft(captured.ocrText);
     setStep("title");
     if (captured.pipelineResult) {
@@ -1580,7 +1668,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     } else {
       applyMetadataFromText(captured.ocrText, "title");
     }
-    setInfoMessage(`Title page captured and parsed. Review merged metadata. (Source: ${captured.metadataResult?.source ?? `OCR: ${captured.ocrProviderId}`})`);
+    setInfoMessage(`Copyright page captured and parsed. Review merged metadata. (Source: ${captured.metadataResult?.source ?? `OCR: ${captured.ocrProviderId}`})`);
   }
 
   async function handleCaptureToc(): Promise<void> {
@@ -1741,7 +1829,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     const finalMetadataResult = metadataFormToResult(
       metadataForm,
       ocrDraft,
-      latestPipeline?.result.source ?? "ocr"
+      latestPipeline?.result.source ?? "ocr",
+      relatedIsbns
     );
 
     const changedFromOriginal = didMetadataChange(latestPipeline?.result ?? null, finalMetadataResult);
@@ -1755,7 +1844,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         ? { rawText: latestPipeline.originalOcrOutput.rawText }
         : null,
       finalMetadata: finalMetadataResult,
-      imageReference: coverImageDataUrl,
+      imageReference: lastMetadataImageDataUrl ?? coverImageDataUrl,
     });
 
     if (!changedFromOriginal) {
@@ -1846,10 +1935,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         copyrightYear: metadata.copyrightYear,
         isbnRaw: metadataForm.isbnRaw,
         additionalIsbns: metadata.additionalIsbns,
+        relatedIsbns: relatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
         seriesName: metadata.seriesName,
         publisher: metadata.publisher,
         publisherLocation: metadata.publisherLocation,
+        mhid: metadata.mhid,
         authors: metadata.authors,
+        platformUrl: metadata.platformUrl,
         tocExtractionConfidence: Number(metadataForm.tocExtractionConfidence) || tocResult.confidence,
         imageModerationState: requiresAdminReview ? "pending_admin_review" as const : "clear" as const,
         imageModerationReason: requiresAdminReview ? imageModeration.reason : undefined,
@@ -2064,13 +2156,32 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         It is okay to include extra space while capturing; CourseForge will auto-crop page boundaries.
       </p>
 
+      {step === "title" ? (
+        <>
+          <p className="form-hint">
+            Copyright page capture is always treated as full-page to support future ownership verification against stored textbook metadata.
+          </p>
+          <div className="capture-tip-callout">
+            <span className="capture-tip-callout__icon" aria-hidden="true">💡</span>
+            <p className="capture-tip-callout__text">
+              <strong>Best results tip:</strong> Before capturing, zoom in so the copyright page fills most of your screen — small text is harder for OCR to read accurately. If you zoomed out to see the full page and some fields were missed, try re-capturing at a higher zoom level, or drag &amp; drop a close-up screenshot of just the copyright text.
+            </p>
+          </div>
+        </>
+      ) : null}
+
       {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
       {infoMessage ? <p className="success-text">{infoMessage}</p> : null}
       {moderationAssessment?.decision === "review" ? (
         <p className="form-hint">Image safety review triggered: {moderationAssessment.reason}</p>
       ) : null}
-      {ocrProviderStatus ? <p className="form-hint">{ocrProviderStatus}</p> : null}
-      {isRunningOcr ? <p className="form-hint">Running OCR...</p> : null}
+      {ocrProviderStatus && !isRunningOcr ? <p className="form-hint">{ocrProviderStatus}</p> : null}
+      {isRunningOcr ? (
+        <div className="ocr-loading-banner" role="status" aria-live="polite">
+          <span className="ocr-loading-spinner" aria-hidden="true" />
+          <span className="ocr-loading-text">Analyzing image — OCR is reading your page. This usually takes a few seconds&hellip;</span>
+        </div>
+      ) : null}
 
       {step === "cover" ? (
         <div
@@ -2082,6 +2193,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           aria-label="Cover image drop zone"
         >
           <p className="cover-drop-zone__hint">Drag &amp; drop a cover image file here, or use the buttons below.</p>
+        </div>
+      ) : null}
+
+      {step === "title" ? (
+        <div
+          className={`cover-drop-zone${isTitleDragOver ? " cover-drop-zone--active" : ""}`}
+          onDragOver={handleTitleDropZoneDragOver}
+          onDragLeave={handleTitleDropZoneDragLeave}
+          onDrop={handleTitleDropZoneDrop}
+          role="region"
+          aria-label="Copyright page image drop zone"
+        >
+          <p className="cover-drop-zone__hint">Drag &amp; drop a copyright page image file here, or use the buttons below.</p>
         </div>
       ) : null}
 
@@ -2129,7 +2253,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           if (file) void processImageFileForStep(file, "title");
           event.target.value = "";
         }}
-        aria-label="Upload title page image file"
+        aria-label="Upload copyright page image file"
       />
 
       <div className="form-actions">
@@ -2147,10 +2271,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         {step === "title" ? (
           <>
             <button type="button" onClick={() => void handleCaptureTitle()} disabled={isBusy}>
-              Capture Title Page
+              Capture Copyright Page
             </button>
             <button type="button" className="btn-secondary" onClick={() => titleFileInputRef.current?.click()} disabled={isBusy}>
-              Upload Title Page
+              Upload Copyright Page
             </button>
           </>
         ) : null}
@@ -2172,24 +2296,25 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       </div>
 
       <label>
-        OCR text (auto-filled by pipeline; editable)
+        OCR text (editable)
         <textarea
           rows={6}
+          aria-label="OCR text"
           value={ocrDraft}
           onChange={(event) => setOcrDraft(event.target.value)}
-          placeholder="If OCR output needs correction, paste or edit it here before parsing."
+          placeholder="If the OCR misread something, paste or edit it here before parsing."
         />
       </label>
 
       {step === "cover" || step === "title" ? (
         <button type="button" className="btn-secondary" onClick={runMetadataExtraction}>
-          Run Metadata Extraction
+          Re-parse OCR Text
         </button>
       ) : null}
 
       {step === "toc" ? (
         <button type="button" className="btn-secondary" onClick={runTocExtraction}>
-          Parse TOC Capture
+          Re-parse TOC Text
         </button>
       ) : null}
 
@@ -2275,6 +2400,39 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             <input value={metadataForm.additionalIsbnsCsv} onChange={(event) => updateMetadataForm("additionalIsbnsCsv", event.target.value)} />
           </label>
 
+          <fieldset className="form-fieldset">
+            <legend>Related ISBNs (typed)</legend>
+            <p className="form-hint">Use this when the copyright page lists student, teacher, digital, workbook, or assessment ISBNs separately.</p>
+            {relatedIsbns.map((row, index) => (
+              <div key={`auto-related-isbn-${index}`} className="related-isbn-row">
+                <input
+                  value={row.isbn}
+                  onChange={(event) => updateRelatedIsbn(index, "isbn", event.target.value)}
+                  placeholder="ISBN-10 or ISBN-13"
+                  className="related-isbn-input"
+                />
+                <select
+                  value={row.type}
+                  onChange={(event) => updateRelatedIsbn(index, "type", event.target.value as RelatedIsbnType)}
+                  aria-label={`Auto related ISBN type ${index + 1}`}
+                  className="related-isbn-type"
+                >
+                  {RELATED_ISBN_TYPES.map((type) => (
+                    <option key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</option>
+                  ))}
+                </select>
+                <input
+                  value={row.note ?? ""}
+                  onChange={(event) => updateRelatedIsbn(index, "note", event.target.value)}
+                  placeholder="Note (optional)"
+                  className="related-isbn-note"
+                />
+                <button type="button" className="btn-icon btn-danger" onClick={() => removeRelatedIsbn(index)} aria-label="Remove related ISBN" title="Remove">✕</button>
+              </div>
+            ))}
+            <button type="button" className="btn-secondary" onClick={addRelatedIsbn}>+ Add Related ISBN</button>
+          </fieldset>
+
           <label>
             Authors (comma separated)
             {renderConfidenceDot("authors")}
@@ -2291,6 +2449,18 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             Publisher Location
             {renderConfidenceDot("publisherLocation")}
             <input value={metadataForm.publisherLocation} onChange={(event) => updateMetadataForm("publisherLocation", event.target.value)} />
+          </label>
+
+          <label>
+            Publisher URL
+            {renderConfidenceDot("platformUrl")}
+            <input type="url" value={metadataForm.platformUrl} onChange={(event) => updateMetadataForm("platformUrl", event.target.value)} />
+          </label>
+
+          <label>
+            MHID
+            {renderConfidenceDot("mhid")}
+            <input value={metadataForm.mhid} onChange={(event) => updateMetadataForm("mhid", event.target.value)} />
           </label>
 
           <label>
@@ -2390,7 +2560,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                   className="upload-preview-image"
                 />
                 <p className="form-hint upload-preview-provider">OCR provider: {uploadPreview.ocrProviderId}</p>
-                <p className="form-hint upload-preview-provider">Target step: {uploadPreview.step === "cover" ? "Cover" : "Title Page"}</p>
+                <p className="form-hint upload-preview-provider">Target step: {uploadPreview.step === "cover" ? "Cover" : "Copyright Page"}</p>
               </div>
               <div className="upload-preview-ocr-wrap">
                 <label>

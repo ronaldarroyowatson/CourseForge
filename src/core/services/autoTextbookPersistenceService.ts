@@ -1,3 +1,4 @@
+import type { RelatedIsbn } from "../models";
 import { normalizeISBN } from "./isbnService";
 import type { TocChapter } from "./textbookAutoExtractionService";
 
@@ -16,9 +17,11 @@ interface AutoCreateTextbookInput {
   isbnRaw: string;
   isbnNormalized: string;
   additionalIsbns?: string[];
+  relatedIsbns?: RelatedIsbn[];
   seriesName?: string;
   publisher?: string;
   publisherLocation?: string;
+  mhid?: string;
   authors?: string[];
   tocExtractionConfidence?: number;
   imageModerationState?: "clear" | "pending_admin_review" | "blocked";
@@ -27,6 +30,7 @@ interface AutoCreateTextbookInput {
   cloudSyncBlockedReason?: "pending_admin_review" | "user_blocked" | "blocked_content";
   requiresAdminReview?: boolean;
   status?: "draft" | "submitted" | "approved" | "rejected";
+  platformUrl?: string;
   coverDataUrl?: string;
 }
 
@@ -44,9 +48,11 @@ export interface AutoPersistenceMetadata {
   copyrightYear?: number;
   isbnRaw: string;
   additionalIsbns?: string[];
+  relatedIsbns?: RelatedIsbn[];
   seriesName?: string;
   publisher?: string;
   publisherLocation?: string;
+  mhid?: string;
   authors?: string[];
   tocExtractionConfidence?: number;
   imageModerationState?: "clear" | "pending_admin_review" | "blocked";
@@ -55,6 +61,7 @@ export interface AutoPersistenceMetadata {
   cloudSyncBlockedReason?: "pending_admin_review" | "user_blocked" | "blocked_content";
   requiresAdminReview?: boolean;
   status?: "draft" | "submitted" | "approved" | "rejected";
+  platformUrl?: string;
 }
 
 export interface PersistAutoTextbookInput {
@@ -88,9 +95,11 @@ export async function persistAutoTextbook(
     isbnRaw: input.metadata.isbnRaw.trim(),
     isbnNormalized: normalizeISBN(input.metadata.isbnRaw),
     additionalIsbns: input.metadata.additionalIsbns,
+    relatedIsbns: input.metadata.relatedIsbns,
     seriesName: input.metadata.seriesName,
     publisher: input.metadata.publisher,
     publisherLocation: input.metadata.publisherLocation,
+    mhid: input.metadata.mhid,
     authors: input.metadata.authors,
     tocExtractionConfidence: input.metadata.tocExtractionConfidence,
     imageModerationState: input.metadata.imageModerationState,
@@ -99,6 +108,7 @@ export async function persistAutoTextbook(
     cloudSyncBlockedReason: input.metadata.cloudSyncBlockedReason,
     requiresAdminReview: input.metadata.requiresAdminReview,
     status: input.metadata.status,
+    platformUrl: input.metadata.platformUrl,
     coverDataUrl: input.coverDataUrl,
   });
 

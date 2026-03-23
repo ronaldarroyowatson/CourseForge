@@ -1,3 +1,5 @@
+import type { RelatedIsbn, RelatedIsbnType } from "../models";
+
 export type AutoCaptureStep = "cover" | "title" | "toc";
 
 export interface AutoCaptureLimits {
@@ -30,8 +32,11 @@ export interface AutoTextbookMetadata {
   gradeBand?: string;
   isbn?: string;
   additionalIsbns?: string[];
+  relatedIsbns?: RelatedIsbn[];
   seriesName?: string;
   copyrightYear?: number;
+  platformUrl?: string;
+  mhid?: string;
 }
 
 export interface MetadataField<T> {
@@ -134,6 +139,26 @@ const DECORATIVE_TEXT_PATTERNS: RegExp[] = [
   /^\d+\s*$/,
   /^[^a-zA-Z]{3,}$/,
 ];
+
+const RELATED_ISBN_TYPE_PATTERNS: Array<{ type: RelatedIsbnType; pattern: RegExp }> = [
+  { type: "teacher", pattern: /teacher(?:'s)?|instructor/i },
+  { type: "student", pattern: /student(?:'s)?/i },
+  { type: "digital", pattern: /digital|ebook|e-book|online/i },
+  { type: "workbook", pattern: /workbook|practice/i },
+  { type: "assessment", pattern: /assessment|exam|test prep/i },
+];
+
+const SERIES_NAME_STOPWORDS = new Set([
+  "student",
+  "teacher",
+  "edition",
+  "physical",
+  "science",
+  "earth",
+  "with",
+  "grade",
+  "grades",
+]);
 const PROFANITY_TERMS = [
   "f***",
   "f**k",
@@ -342,7 +367,7 @@ export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadat
     metadata.edition = editionMatch[1];
   }
 
-  const copyrightMatch = text.match(/copyright[^\d]{0,8}((?:19|20)\d{2})/i) || text.match(/\b((?:19|20)\d{2})\b/);
+  const copyrightMatch = text.match(/(?:copyright|©)[^\d]{0,12}((?:19|20)\d{2})/i) || text.match(/\b((?:19|20)\d{2})\b/);
   if (copyrightMatch) {
     metadata.copyrightYear = Number(copyrightMatch[1]);
   }
@@ -361,28 +386,53 @@ export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadat
       .filter(Boolean);
   }
 
-  const publisherLine = lines.find((line) => /publisher|press|publications?/i.test(line));
+  const publisherLine = lines.find((line) => /publisher|press|publications?|education|mcgraw|pearson|savvas|houghton/i.test(line));
   if (publisherLine) {
     metadata.publisher = publisherLine;
   }
 
-  const locationMatch = text.match(/([A-Za-z\s]+),\s*([A-Z]{2})\s+\d{5}/);
-  if (locationMatch) {
-    metadata.publisherLocation = `${locationMatch[1].trim()}, ${locationMatch[2]}`;
+  const publisherLocation = extractPublisherLocation(lines);
+  if (publisherLocation) {
+    metadata.publisherLocation = publisherLocation;
   }
 
   const seriesMatch = text.match(/series\s*[:\-]?\s*(.+)/i);
   if (seriesMatch) {
     metadata.seriesName = seriesMatch[1].trim();
+  } else if (candidateTitle) {
+    const inferredSeries = inferSeriesName(candidateTitle);
+    if (inferredSeries) {
+      metadata.seriesName = inferredSeries;
+    }
   }
 
-  const allIsbns = Array.from(new Set((text.match(/(?:97[89][\d\-\s]{10,20}|\b\d{9}[\dXx]\b)/g) ?? [])
-    .map((value) => normalizeIsbnLike(value))
-    .filter((value) => value.length >= 10)));
+  const parsedIsbnInfo = extractIsbnMetadata(lines, text);
+  const allIsbns = parsedIsbnInfo.allIsbns;
   if (allIsbns.length > 0) {
-    metadata.isbn = allIsbns[0];
+    metadata.isbn = parsedIsbnInfo.primaryIsbn ?? allIsbns[0];
     if (allIsbns.length > 1) {
-      metadata.additionalIsbns = allIsbns.slice(1);
+      metadata.additionalIsbns = allIsbns.filter((value) => value !== metadata.isbn);
+    }
+  }
+
+  if (parsedIsbnInfo.relatedIsbns.length > 0) {
+    metadata.relatedIsbns = parsedIsbnInfo.relatedIsbns;
+  }
+
+  const platformUrl = extractPlatformUrl(text);
+  if (platformUrl) {
+    metadata.platformUrl = platformUrl;
+  }
+
+  const mhidMatch = text.match(/\bmhid\b[^A-Z0-9]{0,6}([A-Z0-9\-]{5,})/i);
+  if (mhidMatch) {
+    metadata.mhid = mhidMatch[1].trim();
+  }
+
+  if (!metadata.publisher && metadata.publisherLocation) {
+    const locationLines = metadata.publisherLocation.split("\n").map((line) => line.trim()).filter(Boolean);
+    if (locationLines.length > 0) {
+      metadata.publisher = locationLines[0];
     }
   }
 
@@ -408,6 +458,19 @@ export function mergeAutoMetadata(
     merged.additionalIsbns = Array.from(
       new Set([...(base.additionalIsbns ?? []), ...(incoming.additionalIsbns ?? [])])
     );
+  }
+
+  if (base.relatedIsbns || incoming.relatedIsbns) {
+    const combined = [...(base.relatedIsbns ?? []), ...(incoming.relatedIsbns ?? [])];
+    const seen = new Set<string>();
+    merged.relatedIsbns = combined.filter((entry) => {
+      const key = `${entry.type}:${normalizeIsbnLike(entry.isbn)}`;
+      if (!entry.isbn.trim() || seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
   }
 
   return merged;
@@ -760,8 +823,122 @@ export function scoreMetadataConfidence(rawText: string, metadata: AutoTextbookM
     consistencyScore: metadata.additionalIsbns?.every((value) => isValidIsbn(value)) ? 0.86 : 0.42,
     ambiguityPenalty: metadata.additionalIsbns && metadata.additionalIsbns.some((value) => !isValidIsbn(value)) ? 0.15 : 0,
   }));
+  setField("relatedIsbns", metadata.relatedIsbns, confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: /teacher|student|digital|workbook|assessment/i.test(normalizedText) ? 0.88 : 0.46,
+    consistencyScore: metadata.relatedIsbns?.every((entry) => isValidIsbn(entry.isbn)) ? 0.86 : 0.42,
+    ambiguityPenalty: metadata.relatedIsbns && metadata.relatedIsbns.some((entry) => !isValidIsbn(entry.isbn)) ? 0.15 : 0,
+  }));
+  setField("platformUrl", metadata.platformUrl, confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}/i.test(normalizedText) ? 0.9 : 0.45,
+    consistencyScore: metadata.platformUrl ? 0.86 : 0.42,
+    ambiguityPenalty: metadata.platformUrl && !/^https?:\/\//i.test(metadata.platformUrl) ? 0.04 : 0,
+  }));
+  setField("mhid", metadata.mhid, confidenceFromSignals({
+    ocrSignalScore,
+    classifierScore: /\bmhid\b/i.test(normalizedText) ? 0.94 : 0.4,
+    consistencyScore: metadata.mhid ? 0.84 : 0.4,
+    ambiguityPenalty: 0,
+  }));
 
   return fieldMap;
+}
+
+function inferSeriesName(candidateTitle: string): string | undefined {
+  const tokens = candidateTitle.split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) {
+    return undefined;
+  }
+
+  const firstToken = tokens[0].replace(/[^A-Za-z0-9'-]/g, "");
+  if (firstToken.length < 4) {
+    return undefined;
+  }
+
+  if (SERIES_NAME_STOPWORDS.has(firstToken.toLowerCase())) {
+    return undefined;
+  }
+
+  return /^[A-Z][A-Za-z0-9'-]+$/.test(firstToken) ? firstToken : undefined;
+}
+
+function inferRelatedIsbnType(line: string): RelatedIsbnType {
+  const matched = RELATED_ISBN_TYPE_PATTERNS.find((entry) => entry.pattern.test(line));
+  return matched?.type ?? "other";
+}
+
+function extractIsbnMetadata(lines: string[], text: string): {
+  primaryIsbn?: string;
+  allIsbns: string[];
+  relatedIsbns: RelatedIsbn[];
+} {
+  const labeledEntries: Array<{ isbn: string; type: RelatedIsbnType; line: string }> = [];
+
+  for (const line of lines) {
+    if (!/isbn/i.test(line)) {
+      continue;
+    }
+
+    const matches = line.match(/(?:97[89][\d\-\s]{10,20}|\b\d{9}[\dXx]\b)/g) ?? [];
+    for (const match of matches) {
+      const normalized = normalizeIsbnLike(match);
+      if (normalized.length >= 10) {
+        labeledEntries.push({
+          isbn: normalized,
+          type: inferRelatedIsbnType(line),
+          line,
+        });
+      }
+    }
+  }
+
+  const allIsbns = Array.from(new Set((text.match(/(?:97[89][\d\-\s]{10,20}|\b\d{9}[\dXx]\b)/g) ?? [])
+    .map((value) => normalizeIsbnLike(value))
+    .filter((value) => value.length >= 10)));
+
+  const primaryFromLabels = labeledEntries.find((entry) => entry.type === "student")?.isbn;
+  const primaryIsbn = primaryFromLabels ?? labeledEntries[0]?.isbn ?? allIsbns[0];
+
+  const relatedIsbns = Array.from(new Map(
+    labeledEntries
+      .filter((entry) => entry.isbn !== primaryIsbn)
+      .map((entry) => [`${entry.type}:${entry.isbn}`, { isbn: entry.isbn, type: entry.type, note: entry.line.trim() } satisfies RelatedIsbn])
+  ).values());
+
+  return {
+    primaryIsbn,
+    allIsbns,
+    relatedIsbns,
+  };
+}
+
+function extractPlatformUrl(text: string): string | undefined {
+  const match = text.match(/\b((?:https?:\/\/)?(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}(?:\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]*)?)/i);
+  if (!match) {
+    return undefined;
+  }
+
+  const normalized = match[1].trim().replace(/[),.;]+$/, "");
+  return /^https?:\/\//i.test(normalized) ? normalized : `https://${normalized}`;
+}
+
+function extractPublisherLocation(lines: string[]): string | undefined {
+  const cityStateIndex = lines.findIndex((line) => /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?/.test(line));
+  if (cityStateIndex === -1) {
+    return undefined;
+  }
+
+  const locationLines: string[] = [];
+  for (let index = Math.max(0, cityStateIndex - 3); index <= cityStateIndex; index += 1) {
+    const line = lines[index];
+    if (!line || /^send all inquiries/i.test(line) || /^isbn\b/i.test(line) || /^mhid\b/i.test(line) || /^printed in/i.test(line) || /^copyright/i.test(line) || /^all rights reserved/i.test(line)) {
+      continue;
+    }
+    locationLines.push(line);
+  }
+
+  return locationLines.length > 0 ? locationLines.join("\n") : undefined;
 }
 
 export function isLikelyTocText(rawText: string): boolean {
@@ -809,7 +986,7 @@ export function evaluateAutoCaptureSafety(rawText: string, step: AutoCaptureStep
     return {
       allowed: false,
       reason: "non-book",
-      message: "Capture blocked: this does not look like a textbook cover or title page. Please capture a textbook page.",
+      message: "Capture blocked: this does not look like a textbook cover or copyright page. Please capture a textbook page.",
     };
   }
 
@@ -1112,7 +1289,7 @@ function shouldKeepMetadataLine(value: string, index: number): boolean {
   }
 
   // Preserve structured identifier lines even when alphabetic density is low.
-  if (/\bisbn\b/i.test(value)) {
+  if (/\b(?:isbn|mhid)\b/i.test(value)) {
     return true;
   }
 
@@ -1149,6 +1326,9 @@ function metadataPriorityScore(value: string): number {
     score += 1;
   }
   if (/\bisbn\b/i.test(value)) {
+    score += 2;
+  }
+  if (/\bmhid\b/i.test(value)) {
     score += 2;
   }
 

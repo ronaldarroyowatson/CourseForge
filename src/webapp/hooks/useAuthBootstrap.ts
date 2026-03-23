@@ -123,6 +123,7 @@ export function useAuthBootstrap(): void {
 
           uiStore.setPendingSyncCount(syncResult.pendingCount);
           uiStore.setWriteBudget(syncResult.writeCount, syncResult.writeBudgetLimit, syncResult.writeBudgetExceeded);
+          uiStore.setReadBudget(syncResult.readCount, syncResult.readBudgetLimit, syncResult.readBudgetExceeded);
           uiStore.setRetryLimit(syncResult.retryLimit);
 
           if (syncResult.throttled) {

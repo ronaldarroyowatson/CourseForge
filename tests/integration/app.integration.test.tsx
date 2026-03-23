@@ -17,6 +17,9 @@ type SyncNowMockResult = {
   writeBudgetExceeded: boolean;
   writeCount: number;
   writeBudgetLimit: number;
+  readCount: number;
+  readBudgetLimit: number;
+  readBudgetExceeded: boolean;
   retryLimit: number;
   errorCode: string | null;
   pendingCount: number;
@@ -70,6 +73,9 @@ const syncMocks = vi.hoisted(() => ({
     writeBudgetExceeded: false,
     writeCount: 0,
     writeBudgetLimit: 500,
+    readCount: 0,
+    readBudgetLimit: 5000,
+    readBudgetExceeded: false,
     retryLimit: 3,
     errorCode: null,
     pendingCount: 0,
@@ -119,9 +125,12 @@ function resetStores(): void {
     pendingChangesCount: 0,
     retryCount: 0,
     writeCount: 0,
+    readCount: 0,
     writeBudgetLimit: 500,
+    readBudgetLimit: 5000,
     retryLimit: 3,
     writeBudgetExceeded: false,
+    readBudgetExceeded: false,
     automaticRetriesEnabled: false,
     permissionDeniedSyncBlocked: false,
     writeLoopBlocked: false,
@@ -272,6 +281,9 @@ describe("App admin/auth integration", () => {
         writeBudgetExceeded: false,
         writeCount: 0,
         writeBudgetLimit: 500,
+        readCount: 0,
+        readBudgetLimit: 5000,
+        readBudgetExceeded: false,
         retryLimit: 3,
         errorCode: "permission-denied",
         pendingCount: 0,
@@ -286,6 +298,9 @@ describe("App admin/auth integration", () => {
         writeBudgetExceeded: false,
         writeCount: 0,
         writeBudgetLimit: 500,
+        readCount: 0,
+        readBudgetLimit: 5000,
+        readBudgetExceeded: false,
         retryLimit: 3,
         errorCode: "permission-denied",
         pendingCount: 0,
@@ -331,6 +346,9 @@ describe("App admin/auth integration", () => {
         writeBudgetExceeded: false,
         writeCount: 0,
         writeBudgetLimit: 500,
+        readCount: 0,
+        readBudgetLimit: 5000,
+        readBudgetExceeded: false,
         retryLimit: 3,
         errorCode: "permission-denied",
         pendingCount: 0,
@@ -345,6 +363,9 @@ describe("App admin/auth integration", () => {
         writeBudgetExceeded: false,
         writeCount: 0,
         writeBudgetLimit: 500,
+        readCount: 0,
+        readBudgetLimit: 5000,
+        readBudgetExceeded: false,
         retryLimit: 3,
         errorCode: null,
         pendingCount: 0,

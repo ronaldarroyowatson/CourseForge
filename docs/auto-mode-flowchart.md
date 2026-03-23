@@ -54,17 +54,17 @@ flowchart TD
 
     CoverOCR --> TitleStep
 
-    subgraph TITLE["Step 2 – Title Page Capture"]
-        TitleStep([Prompt: capture title page])
+    subgraph TITLE["Step 2 – Copyright Page Capture"]
+        TitleStep([Prompt: capture copyright page])
         TitleStep --> LogCaptureStart2[/LOG: auto_capture_start\nstep = title/]
-        LogCaptureStart2 --> CaptureTitle[autoCaptureService:\ncapture title page]
+        LogCaptureStart2 --> CaptureTitle[autoCaptureService:\ncapture copyright page]
         CaptureTitle --> CropSuccess2{Auto-crop\nsucceeded?}
         CropSuccess2 -- Yes --> LogCropOK2[/LOG: auto_crop_success/]
         CropSuccess2 -- No  --> LogCropFail2[/LOG: auto_crop_failure/]
         LogCropFail2 --> ManualCrop2[User adjusts crop]
         ManualCrop2 --> CropDone2
         LogCropOK2  --> CropDone2
-        CropDone2 --> TitleOCR[autoOcrService:\nrun OCR on title page]
+        CropDone2 --> TitleOCR[autoOcrService:\nrun OCR on copyright page]
         TitleOCR --> OCRSuccess1{OCR\nsucceeded?}
         OCRSuccess1 -- Yes --> LogOCROK1[/LOG: ocr_success/]
         OCRSuccess1 -- No  --> LogOCRFail1[/LOG: ocr_failure/]
@@ -181,7 +181,7 @@ flowchart TD
 
 ---
 
-### Stage 3 – Title Page Capture
+### Stage 3 – Copyright Page Capture
 
 | Task | Service | Debug Event |
 | --- | --- | --- |

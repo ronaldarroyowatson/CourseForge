@@ -208,7 +208,7 @@ Handles image acquisition from the browser tab or file system. Responsible for:
 
 - Tab screenshot capture (extension context)
 - File/drag-drop capture (webapp context)
-- Auto-crop of textbook covers, title pages, and TOC pages
+- Auto-crop of textbook covers, copyright pages, and TOC pages
 - Returns a `CaptureResult` with `imageDataUrl`, dimensions, and `dpi` estimate
 
 ### 3.2 `ocrExtractionService` / `autoOcrService`

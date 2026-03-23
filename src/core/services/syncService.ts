@@ -38,9 +38,11 @@ const WRITE_LOOP_WINDOW_MS = 500;
 const SYNC_THROTTLE_MS = 5000;
 // Session budget guardrail to avoid runaway browser-side sync writes.
 const DEFAULT_WRITE_BUDGET_LIMIT = Number(viteEnv?.VITE_SYNC_WRITE_BUDGET ?? "500");
+const DEFAULT_READ_BUDGET_LIMIT = Number(viteEnv?.VITE_SYNC_READ_BUDGET ?? "5000");
 const DEFAULT_RETRY_LIMIT = 3;
 const WRITE_BUDGET_WARNING = "Cloud sync paused to prevent excessive writes. Please review your data or try again later.";
 const WRITE_BUDGET_STORAGE_KEY = "courseforge.sync.writeBudgetDaily";
+const READ_BUDGET_STORAGE_KEY = "courseforge.sync.readBudgetDaily";
 
 const recentWrites = new Map<string, number>();
 let lastSyncAttemptAt = 0;
@@ -48,6 +50,9 @@ let writeLoopTriggered = false;
 let writeBudgetExceeded = false;
 let sessionWriteCount = 0;
 let writeBudgetDateKey = "";
+let readBudgetExceeded = false;
+let sessionReadCount = 0;
+let readBudgetDateKey = "";
 let syncContext: { uid: string | null; isAdmin: boolean | null } = { uid: null, isAdmin: null };
 
 function getUtcDateKey(now = new Date()): string {
@@ -125,6 +130,76 @@ function refreshDailyWriteBudgetState(): void {
   sessionWriteCount = 0;
   writeBudgetExceeded = false;
   persistDailyWriteBudgetState();
+}
+
+function readDailyReadBudgetState(): { dateKey: string; readCount: number; exceeded: boolean } | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(READ_BUDGET_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as { dateKey?: unknown; readCount?: unknown; exceeded?: unknown };
+    if (typeof parsed.dateKey !== "string") {
+      return null;
+    }
+
+    const parsedReadCount = Number(parsed.readCount ?? 0);
+    const safeReadCount = Number.isFinite(parsedReadCount) && parsedReadCount >= 0
+      ? Math.floor(parsedReadCount)
+      : 0;
+
+    return {
+      dateKey: parsed.dateKey,
+      readCount: safeReadCount,
+      exceeded: Boolean(parsed.exceeded),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistDailyReadBudgetState(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      READ_BUDGET_STORAGE_KEY,
+      JSON.stringify({
+        dateKey: readBudgetDateKey,
+        readCount: sessionReadCount,
+        exceeded: readBudgetExceeded,
+      })
+    );
+  } catch {
+    // Best effort persistence only.
+  }
+}
+
+function refreshDailyReadBudgetState(): void {
+  const currentDateKey = getUtcDateKey();
+  if (readBudgetDateKey === currentDateKey) {
+    return;
+  }
+
+  const persisted = readDailyReadBudgetState();
+  if (persisted && persisted.dateKey === currentDateKey) {
+    readBudgetDateKey = persisted.dateKey;
+    sessionReadCount = persisted.readCount;
+    readBudgetExceeded = persisted.exceeded || persisted.readCount >= DEFAULT_READ_BUDGET_LIMIT;
+    return;
+  }
+
+  readBudgetDateKey = currentDateKey;
+  sessionReadCount = 0;
+  readBudgetExceeded = false;
+  persistDailyReadBudgetState();
 }
 
 interface UserCloudSyncPolicy {
@@ -255,6 +330,15 @@ function hasWriteBudgetCapacity(path: string, payload: unknown): boolean {
   return true;
 }
 
+async function trackedGetDocs<T>(request: Promise<{ docs: T[] }>): Promise<{ docs: T[] }> {
+  const snapshot = await request;
+  refreshDailyReadBudgetState();
+  sessionReadCount += snapshot.docs.length;
+  readBudgetExceeded = sessionReadCount >= DEFAULT_READ_BUDGET_LIMIT;
+  persistDailyReadBudgetState();
+  return snapshot;
+}
+
 export function consumeWriteLoopTriggered(): boolean {
   const wasTriggered = writeLoopTriggered;
   writeLoopTriggered = false;
@@ -271,6 +355,9 @@ export function resetSyncSafetyStateForTests(): void {
   writeBudgetExceeded = false;
   sessionWriteCount = 0;
   writeBudgetDateKey = getUtcDateKey();
+  readBudgetExceeded = false;
+  sessionReadCount = 0;
+  readBudgetDateKey = getUtcDateKey();
 }
 
 /**
@@ -403,8 +490,8 @@ async function fetchCanonicalTextbookDocs(
 ): Promise<Array<{ ref: { path: string }; id: string; data: () => Record<string, unknown> }>> {
   return getCachedCanonicalDocs(`textbooks:${userId}`, async () => {
     const [byUserId, byOwnerId] = await Promise.all([
-      getDocs(query(collection(firestoreDb, "textbooks"), where("userId", "==", userId))),
-      getDocs(query(collection(firestoreDb, "textbooks"), where("ownerId", "==", userId))),
+      trackedGetDocs(getDocs(query(collection(firestoreDb, "textbooks"), where("userId", "==", userId)))),
+      trackedGetDocs(getDocs(query(collection(firestoreDb, "textbooks"), where("ownerId", "==", userId)))),
     ]);
     return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
   });
@@ -416,7 +503,7 @@ async function fetchCanonicalChapterDocs(
   return getCachedCanonicalDocs(`chapters:${userId}`, async () => {
     const textbookDocs = await fetchCanonicalTextbookDocs(userId);
     const chapterSnapshots = await Promise.all(
-      textbookDocs.map((textbookDoc) => getDocs(collection(firestoreDb, `${textbookDoc.ref.path}/chapters`)))
+      textbookDocs.map((textbookDoc) => trackedGetDocs(getDocs(collection(firestoreDb, `${textbookDoc.ref.path}/chapters`))))
     );
     return chapterSnapshots.flatMap((snapshot) => snapshot.docs);
   });
@@ -428,7 +515,7 @@ async function fetchCanonicalSectionDocs(
   return getCachedCanonicalDocs(`sections:${userId}`, async () => {
     const chapterDocs = await fetchCanonicalChapterDocs(userId);
     const sectionSnapshots = await Promise.all(
-      chapterDocs.map((chapterDoc) => getDocs(collection(firestoreDb, `${chapterDoc.ref.path}/sections`)))
+      chapterDocs.map((chapterDoc) => trackedGetDocs(getDocs(collection(firestoreDb, `${chapterDoc.ref.path}/sections`))))
     );
     return sectionSnapshots.flatMap((snapshot) => snapshot.docs);
   });
@@ -441,7 +528,7 @@ async function fetchCanonicalSectionChildDocs(
   return getCachedCanonicalDocs(`${collectionName}:${userId}`, async () => {
     const sectionDocs = await fetchCanonicalSectionDocs(userId);
     const childSnapshots = await Promise.all(
-      sectionDocs.map((sectionDoc) => getDocs(collection(firestoreDb, `${sectionDoc.ref.path}/${collectionName}`)))
+      sectionDocs.map((sectionDoc) => trackedGetDocs(getDocs(collection(firestoreDb, `${sectionDoc.ref.path}/${collectionName}`))))
     );
     return childSnapshots.flatMap((snapshot) => snapshot.docs);
   });
@@ -453,8 +540,8 @@ async function fetchCollectionGroupWithCanonicalFallback(
 ): Promise<Array<{ ref: { path: string }; id: string; data: () => Record<string, unknown> }>> {
   try {
     const [byUserId, byOwnerId] = await Promise.all([
-      getDocs(query(collectionGroup(firestoreDb, groupName), where("userId", "==", userId))),
-      getDocs(query(collectionGroup(firestoreDb, groupName), where("ownerId", "==", userId))),
+      trackedGetDocs(getDocs(query(collectionGroup(firestoreDb, groupName), where("userId", "==", userId)))),
+      trackedGetDocs(getDocs(query(collectionGroup(firestoreDb, groupName), where("ownerId", "==", userId)))),
     ]);
     return mergeDocsByPath(byUserId.docs, byOwnerId.docs);
   } catch (error) {
@@ -917,7 +1004,7 @@ export function isTextbookCloudSyncBlocked(textbook: CourseForgeEntityMap["textb
 
 async function getUserCloudSyncPolicy(userId: string): Promise<UserCloudSyncPolicy> {
   try {
-    const snapshot = await getDocs(query(collection(firestoreDb, "users"), where("uid", "==", userId)));
+    const snapshot = await trackedGetDocs(getDocs(query(collection(firestoreDb, "users"), where("uid", "==", userId))));
     const userDoc = snapshot.docs[0];
     if (!userDoc) {
       return { isBlocked: false, reason: null };
@@ -1235,6 +1322,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
   writeBudgetExceeded: boolean;
   writeCount: number;
   writeBudgetLimit: number;
+  readCount: number;
+  readBudgetLimit: number;
+  readBudgetExceeded: boolean;
   retryLimit: number;
   errorCode: string | null;
   pendingCount: number;
@@ -1244,6 +1334,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
   const getUser = deps.getCurrentUserFn ?? getCurrentUser;
   const runSyncUserData = deps.syncUserDataFn ?? syncUserData;
   refreshDailyWriteBudgetState();
+  refreshDailyReadBudgetState();
 
   if (now - lastSyncAttemptAt < SYNC_THROTTLE_MS) {
     const pending = await getPending();
@@ -1257,6 +1348,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBudgetExceeded,
       writeCount: sessionWriteCount,
       writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      readCount: sessionReadCount,
+      readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
+      readBudgetExceeded,
       retryLimit: DEFAULT_RETRY_LIMIT,
       errorCode: null,
       pendingCount: pending.pendingCount,
@@ -1278,6 +1372,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBudgetExceeded,
       writeCount: sessionWriteCount,
       writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      readCount: sessionReadCount,
+      readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
+      readBudgetExceeded,
       retryLimit: DEFAULT_RETRY_LIMIT,
       errorCode: null,
       pendingCount: pending.pendingCount,
@@ -1296,6 +1393,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBudgetExceeded: true,
       writeCount: sessionWriteCount,
       writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      readCount: sessionReadCount,
+      readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
+      readBudgetExceeded,
       retryLimit: DEFAULT_RETRY_LIMIT,
       errorCode: null,
       pendingCount: pending.pendingCount,
@@ -1317,6 +1417,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
         writeBudgetExceeded: true,
         writeCount: sessionWriteCount,
         writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+        readCount: sessionReadCount,
+        readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
+        readBudgetExceeded,
         retryLimit: DEFAULT_RETRY_LIMIT,
         errorCode: null,
         pendingCount: pending.pendingCount,
@@ -1333,6 +1436,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBudgetExceeded: false,
       writeCount: sessionWriteCount,
       writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      readCount: sessionReadCount,
+      readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
+      readBudgetExceeded,
       retryLimit: DEFAULT_RETRY_LIMIT,
       errorCode: null,
       pendingCount: pending.pendingCount,
@@ -1353,6 +1459,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBudgetExceeded,
       writeCount: sessionWriteCount,
       writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      readCount: sessionReadCount,
+      readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
+      readBudgetExceeded,
       retryLimit: DEFAULT_RETRY_LIMIT,
       errorCode,
       pendingCount: pending.pendingCount,
@@ -1379,13 +1488,13 @@ export async function findCloudTextbookByISBN(userId: string, isbnInput: string)
   }
 
   const [rawByUserId, rawByOwnerId, normalizedByUserId, normalizedByOwnerId] = await Promise.all([
-    getDocs(query(textbooksRef, where("userId", "==", userId), where("isbnRaw", "==", raw))),
-    getDocs(query(textbooksRef, where("ownerId", "==", userId), where("isbnRaw", "==", raw))),
+    trackedGetDocs(getDocs(query(textbooksRef, where("userId", "==", userId), where("isbnRaw", "==", raw)))),
+    trackedGetDocs(getDocs(query(textbooksRef, where("ownerId", "==", userId), where("isbnRaw", "==", raw)))),
     normalized
-      ? getDocs(query(textbooksRef, where("userId", "==", userId), where("isbnNormalized", "==", normalized)))
+      ? trackedGetDocs(getDocs(query(textbooksRef, where("userId", "==", userId), where("isbnNormalized", "==", normalized))))
       : Promise.resolve(null),
     normalized
-      ? getDocs(query(textbooksRef, where("ownerId", "==", userId), where("isbnNormalized", "==", normalized)))
+      ? trackedGetDocs(getDocs(query(textbooksRef, where("ownerId", "==", userId), where("isbnNormalized", "==", normalized))))
       : Promise.resolve(null),
   ]);
 

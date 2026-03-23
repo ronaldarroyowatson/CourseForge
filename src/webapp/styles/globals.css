@@ -195,27 +195,39 @@ body {
 
 .app-header__right {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+}
+
+.app-header__controls {
+  display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
 .app-gear-button {
-  border: 1px solid var(--border-default);
-  border-radius: 50%;
-  background: var(--button-bg);
-  color: var(--text-primary);
-  width: 2.3rem;
-  height: 2.3rem;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  min-height: 2.3rem;
+  padding: 0 0.2rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.15rem;
   cursor: pointer;
   flex-shrink: 0;
+  transition: color 0.15s ease;
+}
+
+.app-gear-button__icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  display: block;
 }
 
 .app-gear-button:hover {
-  background: var(--button-bg-hover);
+  color: var(--text-primary);
 }
 
 .app-nav-button {
@@ -298,9 +310,8 @@ body {
 }
 
 .sync-cluster {
-  display: grid;
-  justify-items: end;
-  gap: 0.25rem;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .sync-now-button {
@@ -856,6 +867,112 @@ body {
   font-size: 0.9rem;
 }
 
+.settings-card--expandable .settings-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.settings-card__toggle {
+  min-width: 5.5rem;
+}
+
+.settings-card--expandable:not(.settings-card--expanded) {
+  padding-bottom: 1rem;
+}
+
+.settings-card--expanded {
+  grid-column: 1 / -1;
+}
+
+.settings-card--compact.settings-card--expanded {
+  grid-column: auto;
+}
+
+.settings-sync-retry-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.settings-retry-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: var(--button-bg);
+}
+
+.settings-retry-meter__item {
+  font-size: 0.9rem;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.settings-retry-meter__item--available {
+  color: #1f9d55;
+}
+
+.settings-retry-meter__item--used {
+  color: #c43f3f;
+}
+
+.metadata-training-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.3rem 0.8rem;
+  margin-top: 0.4rem;
+}
+
+/* Sync safety donut charts */
+.sync-safety-donuts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.7rem;
+  align-items: start;
+}
+
+.sync-donut {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0;
+  width: 100%;
+}
+
+.sync-donut__svg {
+  width: min(100%, 280px);
+  height: auto;
+  aspect-ratio: 1 / 1;
+  display: block;
+}
+
+.sync-donut__stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  align-items: center;
+}
+
+.sync-donut__stat {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+}
+
+.sync-donut__warning {
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0;
+  text-align: center;
+  max-width: 18rem;
+}
+
 /* OCR provider choices — centered stacked column */
 .ocr-provider-choices {
   display: flex;
@@ -868,9 +985,17 @@ body {
 .ocr-provider-choice {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 0.3rem;
   font-size: 0.9rem;
+  width: min(100%, 520px);
+}
+
+.ocr-provider-choice__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .ocr-provider-choice__label {
@@ -885,6 +1010,50 @@ body {
   margin: 0;
   font-size: 0.82rem;
   color: var(--text-secondary);
+}
+
+.ocr-provider-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.ocr-provider-status__mark {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.ocr-provider-status--ok .ocr-provider-status__mark {
+  color: #22c55e;
+}
+
+.ocr-provider-status--fail .ocr-provider-status__mark {
+  color: #ef4444;
+}
+
+.ocr-provider-status__name {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.ocr-provider-actions {
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.ocr-provider-details {
+  margin-top: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ocr-provider-details__item {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
 }
 
 /* OCR health 2x2 grid */
@@ -1282,13 +1451,16 @@ body {
 
   .app-header__left,
   .app-header__right,
+  .app-header__controls,
   .sync-cluster {
-    justify-items: stretch;
+    justify-content: stretch;
+    align-items: stretch;
   }
 
   .theme-toggle,
   .sync-now-button,
-  .app-nav-button {
+  .app-nav-button,
+  .app-gear-button {
     width: 100%;
     justify-content: center;
   }
@@ -1704,6 +1876,90 @@ body {
   background: var(--danger, #c0392b);
   color: #fff;
   border-color: var(--danger, #c0392b);
+}
+
+/* ============================================================
+   OCR loading banner
+   ============================================================ */
+
+.ocr-loading-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--cf-surface-strong);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  margin: 0.5rem 0;
+}
+
+.ocr-loading-spinner {
+  display: inline-block;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid var(--border-default);
+  border-top-color: var(--cf-accent);
+  border-radius: 50%;
+  animation: sync-spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+
+.ocr-loading-text {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* ============================================================
+   OCR draft advanced details
+   ============================================================ */
+
+.ocr-draft-details {
+  margin: 0.5rem 0;
+}
+
+.ocr-draft-details summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  user-select: none;
+  padding: 0.3rem 0;
+}
+
+.ocr-draft-details summary:hover {
+  color: var(--cf-accent);
+}
+
+.ocr-draft-details[open] summary {
+  margin-bottom: 0.5rem;
+}
+
+/* ============================================================
+   Capture tip callout
+   ============================================================ */
+
+.capture-tip-callout {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  background: rgba(31, 111, 182, 0.07);
+  border: 1px solid rgba(31, 111, 182, 0.22);
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+  margin: 0.5rem 0;
+}
+
+.capture-tip-callout__icon {
+  font-size: 1.1rem;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.capture-tip-callout__text {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
 }
 
 @media (max-width: 768px) {

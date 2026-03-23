@@ -53,6 +53,7 @@ export interface CreateTextbookInput {
   seriesName?: string;
   publisher?: string;
   publisherLocation?: string;
+  mhid?: string;
   authors?: string[];
   tocExtractionConfidence?: number;
   imageModerationState?: "clear" | "pending_admin_review" | "blocked";
@@ -146,6 +147,7 @@ function buildTextbookFromInput(input: CreateTextbookInput, resolvedCoverUrl?: s
     seriesName: input.seriesName,
     publisher: input.publisher,
     publisherLocation: input.publisherLocation,
+    mhid: input.mhid,
     authors: input.authors,
     tocExtractionConfidence: input.tocExtractionConfidence,
     imageModerationState: input.imageModerationState,

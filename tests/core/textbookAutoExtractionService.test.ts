@@ -75,6 +75,36 @@ describe("textbookAutoExtractionService", () => {
     expect(metadata.subject).toBeUndefined();
   });
 
+  it("extracts rich metadata from a copyright page", () => {
+    const metadata = extractMetadataFromOcrText([
+      "Student Edition",
+      "Inspire Physical Science with Earth Science",
+      "mheducation.com/prek-12",
+      "McGraw-Hill Education",
+      "Copyright © 2021 McGraw-Hill Education",
+      "Send all inquiries to:",
+      "McGraw-Hill Education",
+      "STEM Learning Solutions Center",
+      "8787 Orion Place",
+      "Columbus, OH 43240",
+      "ISBN: 978-0-07-671685-2",
+      "Teacher ISBN: 978-0-07-671700-2",
+      "MHID: 0-07-671685-6",
+      "Printed in the United States of America.",
+    ].join("\n"));
+
+    expect(metadata.title).toBe("Inspire Physical Science With Earth Science");
+    expect(metadata.seriesName).toBe("Inspire");
+    expect(metadata.copyrightYear).toBe(2021);
+    expect(metadata.isbn).toBe("9780076716852");
+    expect(metadata.relatedIsbns).toEqual([
+      expect.objectContaining({ isbn: "9780076717002", type: "teacher" }),
+    ]);
+    expect(metadata.publisherLocation).toContain("Columbus, OH 43240");
+    expect(metadata.platformUrl).toBe("https://mheducation.com/prek-12");
+    expect(metadata.mhid).toBe("0-07-671685-6");
+  });
+
   it("parses TOC lines into chapters and sections", () => {
     const parsed = parseTocFromOcrText([
       "Table of Contents",

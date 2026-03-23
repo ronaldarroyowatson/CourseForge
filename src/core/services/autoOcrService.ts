@@ -56,6 +56,7 @@ const AUTO_OCR_PROVIDER_ORDER_KEY = "courseforge.autoOcr.providerOrder";
 const AUTO_OCR_CIRCUIT_STATE_KEY = "courseforge.autoOcr.circuitState";
 const AUTO_OCR_USER_PREFERENCE_SET_KEY = "courseforge.autoOcr.userPreferenceSet";
 const AUTO_OCR_AVAILABILITY_CACHE_TTL_MS = 3 * 60 * 1000;
+const AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS = 15 * 60 * 1000;
 
 const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000;
@@ -547,6 +548,15 @@ function createUniformCloudCacheEntry(
   };
 }
 
+function normalizeProbeProviderIds(providerIds?: CloudAutoOcrProviderId[]): CloudAutoOcrProviderId[] {
+  if (!providerIds?.length) {
+    return [...CLOUD_PROVIDER_ORDER];
+  }
+
+  const deduped = [...new Set(providerIds.filter((providerId) => CLOUD_PROVIDER_ORDER.includes(providerId)))];
+  return deduped.length ? deduped : [...CLOUD_PROVIDER_ORDER];
+}
+
 function resolveCloudAvailabilityState(reasonCode: string, available?: boolean, availabilityState?: ProviderAvailabilityState): ProviderAvailabilityState {
   const transientReasonCodes = new Set([
     "probe_timeout",
@@ -570,13 +580,19 @@ function resolveCloudAvailabilityState(reasonCode: string, available?: boolean, 
 }
 
 async function refreshCloudAvailabilityCache(
-  options: { forceRefresh?: boolean } = {}
+  options: { forceRefresh?: boolean; providerIds?: CloudAutoOcrProviderId[] } = {}
 ): Promise<Partial<Record<CloudAutoOcrProviderId, CloudProviderAvailabilityCacheEntry>>> {
+  const targetProviders = normalizeProbeProviderIds(options.providerIds);
+  const now = Date.now();
   const hasWarmCache = !options.forceRefresh
     && autoOcrAvailabilityCache
-    && CLOUD_PROVIDER_ORDER.every((providerId) => {
+    && targetProviders.some((providerId) => {
       const entry = autoOcrAvailabilityCache?.[providerId];
-      return entry && entry.expiresAt > Date.now();
+      return Boolean(entry && entry.expiresAt > now);
+    })
+    && targetProviders.every((providerId) => {
+      const entry = autoOcrAvailabilityCache?.[providerId];
+      return !entry || entry.expiresAt > now;
     });
 
   if (hasWarmCache) {
@@ -590,7 +606,7 @@ async function refreshCloudAvailabilityCache(
   const traceId = createOcrTraceId("ocr-health");
   void emitOcrDiagnostic("health_probe_started", {
     traceId,
-    context: { forceRefresh: Boolean(options.forceRefresh) },
+    context: { forceRefresh: Boolean(options.forceRefresh), providerIds: targetProviders },
   });
 
   cloudAvailabilityProbeInFlight = (async () => {
@@ -606,7 +622,10 @@ async function refreshCloudAvailabilityCache(
     }
 
     try {
-      const response = await callWithAuthRefreshRetry<{}, { data: unknown }>("getAiProviderStatus", {});
+      const response = await callWithAuthRefreshRetry<{ providerIds?: CloudAutoOcrProviderId[] }, { data: unknown }>(
+        "getAiProviderStatus",
+        { providerIds: targetProviders }
+      );
       const payload = response.data as {
         success?: boolean;
         data?: {
@@ -632,14 +651,19 @@ async function refreshCloudAvailabilityCache(
         return autoOcrAvailabilityCache;
       }
 
-      const nextCache: Partial<Record<CloudAutoOcrProviderId, CloudProviderAvailabilityCacheEntry>> = {};
-      CLOUD_PROVIDER_ORDER.forEach((providerId) => {
+      const nextCache: Partial<Record<CloudAutoOcrProviderId, CloudProviderAvailabilityCacheEntry>> = {
+        ...(autoOcrAvailabilityCache ?? {}),
+      };
+      targetProviders.forEach((providerId) => {
         const provider = payload.data?.providers?.find((entry) => entry.id === providerId);
         const reasonCode = typeof provider?.reasonCode === "string" ? provider.reasonCode : "missing_provider_status";
         const reasonMessage = typeof provider?.reasonMessage === "string" ? provider.reasonMessage.trim() : "Cloud OCR status probe did not include provider availability.";
+        const ttlMs = reasonCode === "rate_limited"
+          ? AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS
+          : AUTO_OCR_AVAILABILITY_CACHE_TTL_MS;
         nextCache[providerId] = {
           state: resolveCloudAvailabilityState(reasonCode, provider?.available, provider?.availabilityState),
-          expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+          expiresAt: Date.now() + ttlMs,
           errorMessage: reasonMessage || undefined,
           reasonCode,
           httpStatus: provider?.httpStatus ?? null,
@@ -699,8 +723,10 @@ async function refreshCloudAvailabilityCache(
 }
 
 async function isCloudVisionConfigured(providerId: CloudAutoOcrProviderId): Promise<boolean> {
-  const cache = await refreshCloudAvailabilityCache();
-  const status = cache[providerId]?.state ?? "unknown";
+  const cacheEntry = getCachedCloudAvailability(providerId);
+  const status = cacheEntry && cacheEntry.expiresAt > Date.now()
+    ? cacheEntry.state
+    : "unknown";
   return status !== "unavailable";
 }
 
@@ -716,9 +742,13 @@ function updateCloudAvailabilityFromCallableError(providerId: CloudAutoOcrProvid
     state = "unavailable";
   }
 
+  const ttlMs = lowerReasonCode === "rate_limited"
+    ? AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS
+    : AUTO_OCR_AVAILABILITY_CACHE_TTL_MS;
+
   setCachedCloudAvailability(providerId, {
     state,
-    expiresAt: Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
+    expiresAt: Date.now() + ttlMs,
     errorMessage,
     reasonCode,
     httpStatus: error.details?.httpStatus ?? null,
@@ -897,6 +927,7 @@ export async function extractTextFromImageWithFallback(
     }),
   ]);
   const providerOrder = normalizeExecutionProviderOrder(options.providerOrder ?? await getEffectiveAutoOcrProviderOrder());
+  const primaryCloudProviderId = providerOrder.find((providerId): providerId is CloudAutoOcrProviderId => isCloudProviderId(providerId)) ?? null;
   const providerMap = new Map((options.providersOverride ?? getAutoOcrProviders()).map((provider) => [provider.id, provider]));
   const attempts: AutoOcrAttemptResult[] = [];
 
@@ -930,6 +961,15 @@ export async function extractTextFromImageWithFallback(
         context: { providerId },
       });
       continue;
+    }
+
+    if (
+      isCloudProviderId(providerId)
+      && primaryCloudProviderId
+      && providerId !== primaryCloudProviderId
+      && attempts.some((attempt) => attempt.providerId === primaryCloudProviderId && !attempt.success)
+    ) {
+      await refreshCloudAvailabilityCache({ forceRefresh: true, providerIds: [providerId] });
     }
 
     let available = false;

@@ -459,9 +459,16 @@ interface MetadataResultRecord {
   subtitle: string | null;
   edition: string | null;
   publisher: string | null;
+  publisherLocation?: string | null;
   series: string | null;
   gradeLevel: string | null;
   subject: string | null;
+  copyrightYear?: number | null;
+  isbn?: string | null;
+  additionalIsbns?: string[];
+  relatedIsbns?: Array<{ isbn: string; type: string; note?: string }>;
+  platformUrl?: string | null;
+  mhid?: string | null;
   confidence: number;
   rawText: string;
   source: "vision" | "ocr" | "vision+ocr";
@@ -679,9 +686,22 @@ function sanitizeMetadataResult(value: unknown, source: MetadataResultRecord["so
     subtitle: asText("subtitle"),
     edition: asText("edition"),
     publisher: asText("publisher"),
+    publisherLocation: asText("publisherLocation"),
     series: asText("series"),
     gradeLevel: asText("gradeLevel"),
     subject,
+    copyrightYear: typeof data.copyrightYear === "number" && Number.isInteger(data.copyrightYear) ? data.copyrightYear : null,
+    isbn: asText("isbn"),
+    additionalIsbns: Array.isArray(data.additionalIsbns)
+      ? data.additionalIsbns.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim())
+      : undefined,
+    relatedIsbns: Array.isArray(data.relatedIsbns)
+      ? data.relatedIsbns
+          .filter((entry): entry is { isbn: string; type: string; note?: string } => Boolean(entry) && typeof (entry as { isbn?: unknown }).isbn === "string" && typeof (entry as { type?: unknown }).type === "string")
+          .map((entry) => ({ isbn: entry.isbn.trim(), type: entry.type.trim(), note: typeof entry.note === "string" && entry.note.trim() ? entry.note.trim() : undefined }))
+      : undefined,
+    platformUrl: asText("platformUrl"),
+    mhid: asText("mhid"),
     confidence,
     rawText: typeof data.rawText === "string" ? data.rawText : "",
     source,
@@ -2028,46 +2048,71 @@ export const getAiProviderStatus = onCall({ invoker: "public", secrets: [openAiK
     throw new HttpsError("unauthenticated", "You must be signed in to check AI provider status.");
   }
 
-  const [openAiProbe, githubProbe] = await Promise.all([
-    canAuthenticateOpenAi(getOpenAiApiKey()),
-    canAuthenticateGitHubModels(getGitHubModelsToken()),
-  ]);
+  const payload = request.data as { providerIds?: unknown } | undefined;
+  const requestedProviderIds = Array.isArray(payload?.providerIds)
+    ? payload?.providerIds.filter((providerId): providerId is AutoOcrProviderId => (
+      providerId === "cloud_openai_vision" || providerId === "cloud_github_models_vision"
+    ))
+    : [];
+  const providerIdsToProbe = requestedProviderIds.length > 0
+    ? [...new Set(requestedProviderIds)]
+    : ["cloud_openai_vision", "cloud_github_models_vision"];
+
+  const providers: Array<{
+    id: AutoOcrProviderId;
+    label: string;
+    available: boolean;
+    availabilityState: "available" | "unavailable" | "unknown";
+    reasonCode: string;
+    reasonMessage: string;
+    httpStatus: number | null;
+    checkedAt: string;
+    diagnostics?: unknown;
+  }> = [];
+
+  if (providerIdsToProbe.includes("cloud_openai_vision")) {
+    const openAiProbe = await canAuthenticateOpenAi(getOpenAiApiKey());
+    providers.push({
+      id: "cloud_openai_vision" as const,
+      label: "Cloud OCR (OpenAI Vision via Firebase Function)",
+      available: openAiProbe.available,
+      availabilityState: openAiProbe.availabilityState,
+      reasonCode: openAiProbe.reasonCode,
+      reasonMessage: openAiProbe.reasonMessage,
+      httpStatus: openAiProbe.httpStatus,
+      checkedAt: new Date().toISOString(),
+      diagnostics: openAiProbe.details,
+    });
+  }
+
+  if (providerIdsToProbe.includes("cloud_github_models_vision")) {
+    const githubProbe = await canAuthenticateGitHubModels(getGitHubModelsToken());
+    providers.push({
+      id: "cloud_github_models_vision" as const,
+      label: "Cloud OCR (GitHub Models Vision)",
+      available: githubProbe.available,
+      availabilityState: githubProbe.availabilityState,
+      reasonCode: githubProbe.reasonCode,
+      reasonMessage: githubProbe.reasonMessage,
+      httpStatus: githubProbe.httpStatus,
+      checkedAt: new Date().toISOString(),
+      diagnostics: githubProbe.details,
+    });
+  }
+
+  providers.push({
+    id: "local_tesseract" as const,
+    label: "Local OCR (Tesseract)",
+    available: true,
+    availabilityState: "available" as const,
+    reasonCode: "local_provider",
+    reasonMessage: "Local OCR is available on-device.",
+    httpStatus: null,
+    checkedAt: new Date().toISOString(),
+  });
 
   return success("Loaded AI provider status.", {
-    providers: [
-      {
-        id: "cloud_openai_vision" as const,
-        label: "Cloud OCR (OpenAI Vision via Firebase Function)",
-        available: openAiProbe.available,
-        availabilityState: openAiProbe.availabilityState,
-        reasonCode: openAiProbe.reasonCode,
-        reasonMessage: openAiProbe.reasonMessage,
-        httpStatus: openAiProbe.httpStatus,
-        checkedAt: new Date().toISOString(),
-        diagnostics: openAiProbe.details,
-      },
-      {
-        id: "cloud_github_models_vision" as const,
-        label: "Cloud OCR (GitHub Models Vision)",
-        available: githubProbe.available,
-        availabilityState: githubProbe.availabilityState,
-        reasonCode: githubProbe.reasonCode,
-        reasonMessage: githubProbe.reasonMessage,
-        httpStatus: githubProbe.httpStatus,
-        checkedAt: new Date().toISOString(),
-        diagnostics: githubProbe.details,
-      },
-      {
-        id: "local_tesseract" as const,
-        label: "Local OCR (Tesseract)",
-        available: true,
-        availabilityState: "available" as const,
-        reasonCode: "local_provider",
-        reasonMessage: "Local OCR is available on-device.",
-        httpStatus: null,
-        checkedAt: new Date().toISOString(),
-      },
-    ],
+    providers,
   });
 });
 
@@ -2295,7 +2340,7 @@ export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret
       messages: [
         {
           role: "system",
-          content: "You extract textbook metadata from cover and title-page images. Return strict JSON only, no markdown fences.",
+          content: "You extract textbook metadata from cover and copyright-page images. Return strict JSON only, no markdown fences.",
         },
         {
           role: "user",
@@ -2304,11 +2349,17 @@ export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret
               type: "text",
               text: [
                 "Read this textbook image and return JSON with keys:",
-                "title, subtitle, edition, publisher, series, gradeLevel, subject, confidence, rawText.",
+                "title, subtitle, edition, publisher, publisherLocation, series, gradeLevel, subject, copyrightYear, isbn, additionalIsbns, relatedIsbns, platformUrl, mhid, confidence, rawText.",
                 "Rules:",
                 "- Identify the main title and subtitle if present.",
                 "- Identify labels like Teacher's Edition when relevant.",
                 "- Identify publisher if visible.",
+                "- Identify publisherLocation when the page includes a mailing or business address.",
+                "- Identify copyrightYear when clearly labeled.",
+                "- Identify isbn and additionalIsbns when visible.",
+                "- relatedIsbns must be an array of objects with keys isbn, type, and optional note. Use types student, teacher, digital, workbook, assessment, or other.",
+                "- Identify platformUrl when the publisher website is visible.",
+                "- Identify mhid when explicitly labeled.",
                 "- Ignore decorative text and watermarks.",
                 "- confidence must be a number from 0 to 1.",
                 "- For subject: Always return null. Subject is filled in by the user.",

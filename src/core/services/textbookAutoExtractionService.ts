@@ -133,11 +133,26 @@ const DECORATIVE_TEXT_PATTERNS: RegExp[] = [
   /printed in/i,
   /scan(ned|ning)? by/i,
   /watermark/i,
-  /www\./i,
-  /http(s)?:\/\//i,
   /^page\s+\d+$/i,
   /^\d+\s*$/,
   /^[^a-zA-Z]{3,}$/,
+];
+
+const LEGAL_BOILERPLATE_PATTERNS: RegExp[] = [
+  /all rights reserved/i,
+  /reproduced or distributed/i,
+  /stored in a database/i,
+  /retrieval system/i,
+  /prior written consent/i,
+  /network storage or transmission/i,
+  /broadcast for distance learning/i,
+];
+
+const ADDRESS_LINE_HINTS = [
+  /\b(?:street|st\.?|avenue|ave\.?|road|rd\.?|drive|dr\.?|lane|ln\.?|place|pl\.?|boulevard|blvd\.?|way|suite|ste\.?|center|centre|building|floor)\b/i,
+  /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?$/,
+  /\b\d{3,6}\s+[A-Za-z0-9.'-]+\b/,
+  /\b(?:education|learning solutions|publishing|press|publications?)\b/i,
 ];
 
 const RELATED_ISBN_TYPE_PATTERNS: Array<{ type: RelatedIsbnType; pattern: RegExp }> = [
@@ -343,20 +358,26 @@ export function detectPageBoundaryFromRgba(
 }
 
 export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadata {
+  const rawLines = rawText
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => normalizeDecorativeNoise(line))
+    .map((line) => collapseRepeatedWords(line))
+    .filter(Boolean);
   const text = preprocessMetadataOcrText(rawText);
   const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
 
   const metadata: AutoTextbookMetadata = {};
 
   const candidateTitle = lines.find(
-    (line) => !/^isbn\b/i.test(line) && !/copyright/i.test(line) && !/edition/i.test(line) && line.length > 4
+    (line) => isLikelyTitleCandidate(line)
   );
   if (candidateTitle) {
     metadata.title = toTitleCase(candidateTitle);
   }
 
   if (lines.length > 1) {
-    const subtitleLine = lines.find((line) => line !== candidateTitle && line.length > 8 && !/^by\b/i.test(line));
+    const subtitleLine = lines.find((line) => line !== candidateTitle && isLikelySubtitleCandidate(line));
     if (subtitleLine) {
       metadata.subtitle = subtitleLine;
     }
@@ -391,7 +412,7 @@ export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadat
     metadata.publisher = publisherLine;
   }
 
-  const publisherLocation = extractPublisherLocation(lines);
+  const publisherLocation = extractPublisherLocation(rawLines);
   if (publisherLocation) {
     metadata.publisherLocation = publisherLocation;
   }
@@ -419,9 +440,16 @@ export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadat
     metadata.relatedIsbns = parsedIsbnInfo.relatedIsbns;
   }
 
-  const platformUrl = extractPlatformUrl(text);
+  const platformUrl = extractPlatformUrl(rawText);
   if (platformUrl) {
     metadata.platformUrl = platformUrl;
+  }
+
+  if (!metadata.gradeBand) {
+    const gradeBandFromUrl = inferGradeBandFromUrl(metadata.platformUrl);
+    if (gradeBandFromUrl) {
+      metadata.gradeBand = gradeBandFromUrl;
+    }
   }
 
   const mhidMatch = text.match(/\bmhid\b[^A-Z0-9]{0,6}([A-Z0-9\-]{5,})/i);
@@ -929,16 +957,61 @@ function extractPublisherLocation(lines: string[]): string | undefined {
     return undefined;
   }
 
-  const locationLines: string[] = [];
-  for (let index = Math.max(0, cityStateIndex - 3); index <= cityStateIndex; index += 1) {
+  const locationLines: string[] = [lines[cityStateIndex]];
+  for (let index = cityStateIndex - 1; index >= Math.max(0, cityStateIndex - 5); index -= 1) {
     const line = lines[index];
-    if (!line || /^send all inquiries/i.test(line) || /^isbn\b/i.test(line) || /^mhid\b/i.test(line) || /^printed in/i.test(line) || /^copyright/i.test(line) || /^all rights reserved/i.test(line)) {
+    if (!line) {
       continue;
     }
-    locationLines.push(line);
+
+    if (
+      /^send all inquiries/i.test(line)
+      || /^isbn\b/i.test(line)
+      || /^mhid\b/i.test(line)
+      || /^printed in/i.test(line)
+      || /^copyright/i.test(line)
+      || isLikelyLegaleseLine(line)
+    ) {
+      continue;
+    }
+
+    if (!isLikelyAddressLine(line)) {
+      // Stop once we leave the likely address block.
+      break;
+    }
+
+    locationLines.unshift(line);
   }
 
-  return locationLines.length > 0 ? locationLines.join("\n") : undefined;
+  return Array.from(new Set(locationLines)).join("\n");
+}
+
+function inferGradeBandFromUrl(url: string | undefined): string | undefined {
+  if (!url) {
+    return undefined;
+  }
+
+  const lowered = url.toLowerCase();
+  if (/\bpre\s*-?k\s*[-_/]\s*12\b|\/prek-?12\b/.test(lowered)) {
+    return "Pre-K-12";
+  }
+
+  const bandMatch = lowered.match(/\b([pk]\s*-?\s*\d{1,2})\b|\b(\d{1,2}\s*-\s*\d{1,2})\b/i);
+  if (!bandMatch) {
+    return undefined;
+  }
+
+  const rawBand = (bandMatch[1] ?? bandMatch[2] ?? "").replace(/\s+/g, "");
+  if (!rawBand) {
+    return undefined;
+  }
+
+  return rawBand
+    .replace(/^p/i, "Pre-K")
+    .replace(/^k/i, "K")
+    .replace(/pre-k(\d)/i, "Pre-K-$1")
+    .replace(/k(\d)/i, "K-$1")
+    .replace(/(\d)-(\d)/, "$1-$2");
 }
 
 export function isLikelyTocText(rawText: string): boolean {
@@ -1289,7 +1362,7 @@ function shouldKeepMetadataLine(value: string, index: number): boolean {
   }
 
   // Preserve structured identifier lines even when alphabetic density is low.
-  if (/\b(?:isbn|mhid)\b/i.test(value)) {
+  if (/\b(?:isbn|mhid)\b/i.test(value) || /\b(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,}\/)/i.test(value)) {
     return true;
   }
 
@@ -1331,8 +1404,86 @@ function metadataPriorityScore(value: string): number {
   if (/\bmhid\b/i.test(value)) {
     score += 2;
   }
+  if (/\b(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,}\/)/i.test(value)) {
+    score += 4;
+  }
+  if (/,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?$/.test(value) || /\b(?:street|st\.?|avenue|ave\.?|road|rd\.?|drive|dr\.?|place|pl\.?|suite|ste\.?|center)\b/i.test(value)) {
+    score += 3;
+  }
+  if (isLikelyLegaleseLine(value)) {
+    score -= 6;
+  }
 
   return score;
+}
+
+function isLikelyLegaleseLine(value: string): boolean {
+  return LEGAL_BOILERPLATE_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function isLikelyAddressLine(value: string): boolean {
+  if (isLikelyLegaleseLine(value)) {
+    return false;
+  }
+
+  return ADDRESS_LINE_HINTS.some((pattern) => pattern.test(value));
+}
+
+function isLikelyTitleCandidate(line: string): boolean {
+  if (!line || line.length < 4 || line.length > 90) {
+    return false;
+  }
+
+  const wordCount = line.split(/\s+/).filter(Boolean).length;
+  if (wordCount < 2 || wordCount > 12) {
+    return false;
+  }
+
+  if (
+    /^isbn\b/i.test(line)
+    || /^mhid\b/i.test(line)
+    || /^by\b/i.test(line)
+    || /\bedition\b/i.test(line)
+    || /^send all inquiries/i.test(line)
+    || /^printed in/i.test(line)
+    || /copyright/i.test(line)
+    || /\b(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,}\/)/i.test(line)
+    || isLikelyLegaleseLine(line)
+    || isLikelyAddressLine(line)
+    || /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?/.test(line)
+  ) {
+    return false;
+  }
+
+  // Short publisher-name lines are usually organization identifiers, not titles.
+  if (wordCount <= 5 && /\b(?:publisher|press|publishing|publications?|education)\b/i.test(line)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isLikelySubtitleCandidate(line: string): boolean {
+  if (!line || line.length < 6 || line.length > 100) {
+    return false;
+  }
+
+  if (
+    /^by\b/i.test(line)
+    || /^isbn\b/i.test(line)
+    || /^mhid\b/i.test(line)
+    || /^send all inquiries/i.test(line)
+    || /^printed in/i.test(line)
+    || /copyright/i.test(line)
+    || /\b(?:publisher|press|publications?|education)\b/i.test(line)
+    || /\b(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,}\/)/i.test(line)
+    || isLikelyLegaleseLine(line)
+    || isLikelyAddressLine(line)
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 export function preprocessMetadataOcrText(rawText: string): string {

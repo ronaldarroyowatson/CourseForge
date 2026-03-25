@@ -101,8 +101,29 @@ describe("textbookAutoExtractionService", () => {
       expect.objectContaining({ isbn: "9780076717002", type: "teacher" }),
     ]);
     expect(metadata.publisherLocation).toContain("Columbus, OH 43240");
+    expect(metadata.publisherLocation).not.toContain("reproduced or distributed");
     expect(metadata.platformUrl).toBe("https://mheducation.com/prek-12");
+    expect(metadata.gradeBand).toBe("Pre-K-12");
     expect(metadata.mhid).toBe("0-07-671685-6");
+  });
+
+  it("does not treat legal boilerplate as title/subtitle", () => {
+    const metadata = extractMetadataFromOcrText([
+      "Copyright © 2021 McGraw-Hill Education",
+      "All rights reserved. No part of this publication may be reproduced or distributed in any form or by any means.",
+      "Send all inquiries to:",
+      "McGraw-Hill Education",
+      "STEM Learning Solutions Center",
+      "8787 Orion Place",
+      "Columbus, OH 43240",
+      "mheducation.com/prek-12",
+      "ISBN: 978-0-07-671685-2",
+    ].join("\n"));
+
+    expect(metadata.title).toBeUndefined();
+    expect(metadata.subtitle).toBeUndefined();
+    expect(metadata.platformUrl).toBe("https://mheducation.com/prek-12");
+    expect(metadata.publisherLocation).toBe("McGraw-Hill Education\nSTEM Learning Solutions Center\n8787 Orion Place\nColumbus, OH 43240");
   });
 
   it("parses TOC lines into chapters and sections", () => {

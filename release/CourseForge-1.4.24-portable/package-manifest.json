@@ -1,0 +1,32 @@
+{
+    "name":  "CourseForge",
+    "version":  "1.4.24",
+    "packageType":  "portable",
+    "createdAtUtc":  "2026-03-25T00:06:03.5587938Z",
+    "includes":  [
+                     "webapp/",
+                     "extension/",
+                     "AutoUpdate-CourseForge.ps1",
+                     "Check-For-CourseForge-Updates.cmd",
+                     "Start-CourseForge.cmd",
+                     "Start-CourseForge.ps1",
+                     "courseforge-serve.cjs",
+                     "courseforge-serve.js",
+                     "boot-splash.html",
+                     "Test-CourseForge-Integrity.ps1",
+                     "CourseForge-Start.url",
+                     "CourseForge.ico",
+                     "manifest.json",
+                     "README.md",
+                     "CHANGELOG.md",
+                     "LICENSE"
+                 ],
+    "updates":  {
+                    "provider":  "github-releases",
+                    "owner":  "ronaldarroyowatson",
+                    "repo":  "CourseForge",
+                    "latestEndpoint":  "https://api.github.com/repos/ronaldarroyowatson/CourseForge/releases/latest",
+                    "assetTemplate":  "CourseForge-{version}-portable.zip",
+                    "startupCheck":  true
+                }
+}

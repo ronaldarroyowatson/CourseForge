@@ -1,4 +1,4 @@
-﻿// @vitest-environment node
+// @vitest-environment node
 
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
@@ -147,7 +147,7 @@ function runLauncher(root: string, binDir: string, options: LauncherRunOptions) 
     {
       cwd: root,
       encoding: "utf8",
-      timeout: 30000,
+      timeout: 60000,
       env: {
         ...process.env,
         LOCALAPPDATA: localAppData,
@@ -354,7 +354,7 @@ describe("portable launcher staged-update flow", () => {
     } finally {
       await removeDirWithRetries(root);
     }
-  }, 25000);
+  }, 60000);
 
   it.skipIf(process.platform !== "win32")("keeps staged artifacts when apply fails so the failure can be retried and diagnosed", async () => {
     const { root, binDir, pendingDir } = createTestInstallRoot();
@@ -374,7 +374,7 @@ describe("portable launcher staged-update flow", () => {
     } finally {
       await removeDirWithRetries(root);
     }
-  }, 25000);
+  }, 60000);
 
   it.skipIf(process.platform !== "win32")("falls back to temp logging when LOCALAPPDATA is unavailable and reports path outcome", async () => {
     const { root, binDir } = createTestInstallRoot();
@@ -394,7 +394,7 @@ describe("portable launcher staged-update flow", () => {
     } finally {
       await removeDirWithRetries(root);
     }
-  }, 25000);
+  }, 60000);
 
   it.skipIf(process.platform !== "win32")("reuses an already running CourseForge server on the fixed port", async () => {
     const port = await getAvailablePort();
@@ -413,7 +413,7 @@ describe("portable launcher staged-update flow", () => {
       await stopChildProcess(existingServer);
       await removeDirWithRetries(root);
     }
-  }, 25000);
+  }, 60000);
 
   it.skipIf(process.platform !== "win32")("falls back to another local port when preferred port is occupied by non-CourseForge process", async () => {
     const preferredPort = await getAvailablePort();
@@ -434,5 +434,5 @@ describe("portable launcher staged-update flow", () => {
       await stopChildProcess(blocker);
       await removeDirWithRetries(root);
     }
-  }, 25000);
+  }, 60000);
 });

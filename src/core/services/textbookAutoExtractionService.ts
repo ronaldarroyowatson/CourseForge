@@ -464,7 +464,12 @@ export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadat
     }
   }
 
-  // Subject is intentionally not inferred — left blank for the user to fill in.
+  if (!metadata.subject) {
+    const inferredSubject = inferSubject(text);
+    if (inferredSubject) {
+      metadata.subject = inferredSubject;
+    }
+  }
 
   return metadata;
 }
@@ -983,7 +988,10 @@ function extractPublisherLocation(lines: string[]): string | undefined {
     locationLines.unshift(line);
   }
 
-  return Array.from(new Set(locationLines)).join("\n");
+  let result = Array.from(new Set(locationLines)).join("\n");
+  // Strip "Send all inquiries to:" directive that sometimes leads the block.
+  result = result.replace(/^\s*send all inquiries to:\s*/i, "").trim();
+  return result || undefined;
 }
 
 function inferGradeBandFromUrl(url: string | undefined): string | undefined {

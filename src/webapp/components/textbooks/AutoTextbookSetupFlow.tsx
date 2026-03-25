@@ -608,6 +608,25 @@ function emitAutoFlowDiagnostic(
   }
 }
 
+function buildExtractionFieldList(meta: AutoTextbookMetadata): string[] {
+  const found: string[] = [];
+  if (meta.title) found.push("Title");
+  if (meta.subtitle) found.push("Subtitle");
+  if (meta.isbn) found.push("ISBN");
+  if (meta.mhid) found.push("MHID");
+  if (meta.publisher) found.push("Publisher");
+  if (meta.publisherLocation) found.push("Publisher Location");
+  if (meta.platformUrl) found.push("Publisher URL");
+  if (meta.copyrightYear) found.push("Copyright Year");
+  if (meta.gradeBand) found.push("Grade Band");
+  if (meta.subject) found.push("Subject");
+  if (meta.edition) found.push("Edition");
+  if (meta.seriesName) found.push("Series");
+  if (meta.authors?.length) found.push("Authors");
+  if (meta.additionalIsbns?.length) found.push("Additional ISBNs");
+  return found;
+}
+
 export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToManual, testingSeedState }: AutoTextbookSetupFlowProps): React.JSX.Element {
   const language = useUIStore((state) => state.language);
   const chromeOs = useMemo(() => runtime === "extension" && isChromeOSRuntime(), [runtime]);
@@ -662,6 +681,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [ocrProviderStatus, setOcrProviderStatus] = useState<string | null>(null);
+  const [lastExtractionFields, setLastExtractionFields] = useState<string[]>([]);
   const [duplicateMatch, setDuplicateMatch] = useState<DuplicateTextbookMatch | null>(null);
   const [conflictResolutionMode, setConflictResolutionMode] = useState<AutoConflictResolutionMode>("overwrite_auto");
   const [moderationAssessment, setModerationAssessment] = useState<ImageModerationAssessment | null>(null);
@@ -1027,8 +1047,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     const merged = mergeAutoMetadata(metadataDraft, parsed);
     upsertAutoMetadataConfidence(scoreMetadataConfidence(cleanedText, parsed));
     applyMetadataDraft(merged);
+    setLastExtractionFields(buildExtractionFieldList(parsed));
     setErrorMessage(null);
-    setInfoMessage("Metadata extracted automatically. Review and edit fields before accepting.");
+    setInfoMessage("Metadata extracted. Review and correct the fields below before accepting.");
     appendDebugLogEntry({
       eventType: "metadata_extracted",
       message: "Metadata extracted from OCR draft.",
@@ -1083,8 +1104,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     upsertAutoMetadataConfidence(fieldConfidence);
     applyMetadataDraft(merged);
     setOcrDraft(result.rawText);
+    setLastExtractionFields(buildExtractionFieldList(metadataResultToAutoMetadata(result)));
     setErrorMessage(null);
-    setInfoMessage("Metadata extracted automatically. Review and edit fields before accepting.");
+    setInfoMessage("Metadata extracted. Review and correct the fields below before accepting.");
     appendDebugLogEntry({
       eventType: "metadata_extracted",
       message: "Metadata extracted from vision-first pipeline.",
@@ -2183,6 +2205,22 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         </div>
       ) : null}
 
+      {(step === "cover" || step === "title") && !isRunningOcr && lastExtractionFields.length > 0 ? (
+        <div className="extraction-summary" aria-label="Extraction result summary">
+          <p className="extraction-summary__header">
+            <strong>Fields extracted this capture ({lastExtractionFields.length}):</strong>
+          </p>
+          <ul className="extraction-summary__list">
+            {lastExtractionFields.map((field) => (
+              <li key={field} className="extraction-summary__item">
+                <span className="extraction-summary__check" aria-hidden="true">✓</span> {field}
+              </li>
+            ))}
+          </ul>
+          <p className="form-hint extraction-summary__hint">Scroll down to review and correct each field before clicking <strong>Accept</strong>.</p>
+        </div>
+      ) : null}
+
       {step === "cover" ? (
         <div
           className={`cover-drop-zone${isDragOver ? " cover-drop-zone--active" : ""}`}
@@ -2316,6 +2354,28 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         <button type="button" className="btn-secondary" onClick={runTocExtraction}>
           Re-parse TOC Text
         </button>
+      ) : null}
+
+      {step === "toc" && tocResult.chapters.length > 0 ? (
+        <div className="toc-capture-summary" aria-label="TOC capture summary">
+          <p className="toc-capture-summary__header">
+            <strong>Detected:</strong> {tocResult.chapters.length} chapter{tocResult.chapters.length !== 1 ? "s" : ""},{" "}
+            {tocResult.chapters.reduce((sum, ch) => sum + ch.sections.length, 0)} section{tocResult.chapters.reduce((sum, ch) => sum + ch.sections.length, 0) !== 1 ? "s" : ""}
+            {tocResult.confidence > 0 ? ` (confidence: ${Math.round(tocResult.confidence * 100)}%)` : ""}
+          </p>
+          <ol className="toc-capture-summary__list">
+            {tocResult.chapters.map((chapter, index) => (
+              <li key={`toc-preview-${chapter.chapterNumber}-${index}`} className="toc-capture-summary__chapter">
+                <span className="toc-capture-summary__chapter-num">{chapter.chapterNumber}.</span>
+                {" "}{chapter.title}
+                {chapter.sections.length > 0 ? (
+                  <span className="toc-capture-summary__section-count"> ({chapter.sections.length} section{chapter.sections.length !== 1 ? "s" : ""})</span>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+          <p className="form-hint">Review the list above. Use the TOC editor to correct any errors after clicking <strong>Finish TOC</strong>.</p>
+        </div>
       ) : null}
 
       {coverImageDataUrl ? (

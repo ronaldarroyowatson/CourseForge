@@ -1962,6 +1962,91 @@ body {
   margin: 0;
 }
 
+/* ============================================================
+   Extraction summary panel (copyright/cover step)
+   ============================================================ */
+
+.extraction-summary {
+  background: rgba(22, 160, 80, 0.08);
+  border: 1px solid rgba(22, 160, 80, 0.3);
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+  margin: 0.5rem 0;
+}
+
+.extraction-summary__header {
+  margin: 0 0 0.4rem;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.extraction-summary__list {
+  margin: 0 0 0.4rem;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+}
+
+.extraction-summary__item {
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.extraction-summary__check {
+  color: #16a050;
+  font-weight: bold;
+}
+
+.extraction-summary__hint {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+}
+
+/* ============================================================
+   TOC capture summary panel
+   ============================================================ */
+
+.toc-capture-summary {
+  background: rgba(22, 160, 80, 0.08);
+  border: 1px solid rgba(22, 160, 80, 0.3);
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+  margin: 0.5rem 0;
+}
+
+.toc-capture-summary__header {
+  margin: 0 0 0.4rem;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.toc-capture-summary__list {
+  margin: 0 0 0.4rem;
+  padding-left: 1.2rem;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.toc-capture-summary__chapter {
+  margin-bottom: 0.15rem;
+}
+
+.toc-capture-summary__chapter-num {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.toc-capture-summary__section-count {
+  color: var(--text-muted, var(--text-secondary));
+  font-size: 0.8rem;
+}
+
 @media (max-width: 768px) {
   .textbook-entry-mode-grid {
     grid-template-columns: 1fr;

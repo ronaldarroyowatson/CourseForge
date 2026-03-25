@@ -58,21 +58,21 @@ describe("textbookAutoExtractionService", () => {
     expect(metadata.edition).toContain("Edition");
     expect(metadata.authors).toContain("Maria Chen");
     expect(metadata.publisher).toContain("Northbridge");
-    expect(metadata.subject).toBeUndefined();
+    expect(metadata.subject).toBe("Math");
     expect(metadata.gradeBand).toContain("7");
     expect(metadata.isbn).toBe("9781402894626");
     expect(metadata.seriesName).toBe("STEM Core");
     expect(metadata.copyrightYear).toBe(2024);
   });
 
-  it("leaves subject blank (not inferred) for Inspire Physical Science with Earth Science", () => {
+  it("infers subject as Science for Inspire Physical Science with Earth Science", () => {
     const metadata = extractMetadataFromOcrText([
       "Student Edition",
       "Inspire Physical Science with Earth Science",
       "Mc Graw Hill",
     ].join("\n"));
 
-    expect(metadata.subject).toBeUndefined();
+    expect(metadata.subject).toBe("Science");
   });
 
   it("extracts rich metadata from a copyright page", () => {

@@ -250,6 +250,73 @@ function clearPersistedCaptureUsage(draftKey: string): void {
   }
 }
 
+// ── Auto Session Draft — resumable workflow across page reloads ───────────────
+
+const AUTO_SESSION_DRAFT_KEY = "courseforge.autoSessionDraft.v1";
+const AUTO_SESSION_MAX_AGE_MS = 86_400_000; // 24 hours
+
+interface AutoSessionDraft {
+  version: 1;
+  savedAt: number;
+  /** Compact base64 data URL; may be null if cover not yet captured. */
+  coverImageDataUrl: string | null;
+  /** Original raw OCR text (before any user editing). */
+  rawOcrText: string;
+  /** Snapshot of key metadata fields so the resume card is informative. */
+  metadataTitle: string;
+  metadataSubject: string;
+  metadataPublisher: string;
+  step: AutoFlowStep;
+  stepsCompleted: { cover: boolean; copyright: boolean };
+}
+
+function readAutoSessionDraft(): AutoSessionDraft | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem(AUTO_SESSION_DRAFT_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as AutoSessionDraft;
+    if (parsed?.version !== 1) {
+      return null;
+    }
+
+    if (Date.now() - parsed.savedAt > AUTO_SESSION_MAX_AGE_MS) {
+      window.localStorage.removeItem(AUTO_SESSION_DRAFT_KEY);
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveAutoSessionDraft(draft: AutoSessionDraft): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(AUTO_SESSION_DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // Ignore quota or serialization errors; resumability is best-effort.
+  }
+}
+
+function clearAutoSessionDraft(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.removeItem(AUTO_SESSION_DRAFT_KEY);
+}
+
 async function detectExtensionTabReadiness(): Promise<{ hasTabs: boolean; hasKnownTextbookTab: boolean }> {
   try {
     const extensionApi = (globalThis as { chrome?: { tabs?: { query?: (queryInfo: Record<string, unknown>) => Promise<Array<{ url?: string }>> } } }).chrome;
@@ -715,6 +782,18 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingUploadLimitResultRef = useRef<ReturnType<typeof enforceAutoCaptureLimit> | null>(null);
+  // Scroll target — metadata fields section revealed after successful OCR.
+  const metadataFormRef = useRef<HTMLDivElement>(null);
+
+  // ── Raw OCR / parsed metadata two-section state ──────────────────────────
+  // rawOcrText: original, unedited OCR output shown read-only for transparency.
+  // ocrDraft: editable copy the user can correct before re-parsing.
+  const [rawOcrText, setRawOcrText] = useState(testingSeedState?.ocrDraft ?? "");
+  const [isRawOcrExpanded, setIsRawOcrExpanded] = useState(false);
+
+  // ── Resumable session ─────────────────────────────────────────────────────
+  // Initialise from localStorage on first mount; cleared on submit or discard.
+  const [resumableDraft, setResumableDraft] = useState<AutoSessionDraft | null>(() => readAutoSessionDraft());
 
   useEffect(() => {
     emitAutoFlowDiagnostic("session_started", {
@@ -776,6 +855,31 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   useEffect(() => {
     setDuplicateMatch(null);
   }, [metadataForm.isbnRaw]);
+
+  // Persist a lightweight session snapshot so the user can resume after a
+  // page reload.  Only save when there is something meaningful to recover.
+  useEffect(() => {
+    if (!coverImageDataUrl && !rawOcrText && !metadataForm.title) {
+      return;
+    }
+
+    const draft: AutoSessionDraft = {
+      version: 1,
+      savedAt: Date.now(),
+      coverImageDataUrl,
+      rawOcrText,
+      metadataTitle: metadataForm.title,
+      metadataSubject: metadataForm.subject,
+      metadataPublisher: metadataForm.publisher,
+      step,
+      stepsCompleted: {
+        cover: Boolean(coverImageDataUrl),
+        copyright: Boolean(lastCapturedOcrByStepRef.current.title),
+      },
+    };
+
+    saveAutoSessionDraft(draft);
+  }, [coverImageDataUrl, rawOcrText, metadataForm.title, metadataForm.subject, metadataForm.publisher, step]);
 
   const canFinishToc = tocResult.chapters.length > 0;
 
@@ -896,6 +1000,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           : `Confidence ${rounded} percent from ${sourceType}`}
       />
     );
+  }
+
+  /** Smooth-scroll the viewport so the metadata fields are centred. */
+  function scrollToMetadata(): void {
+    window.requestAnimationFrame(() => {
+      metadataFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   }
 
   async function requestSelection(imageDataUrl: string): Promise<SelectionRect | null> {
@@ -1557,6 +1668,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       },
     });
     lastCapturedOcrByStepRef.current[targetStep] = uploadPreview.ocrText;
+    // Store the original raw OCR text separately from the editable draft.
+    setRawOcrText(uploadPreview.ocrText);
     setOcrDraft(editableOcrText);
     setModerationAssessment(null);
     if (pipelineResult) {
@@ -1577,6 +1690,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     }
     setInfoMessage(`${describeMetadataCaptureStep(targetStep)} image loaded and parsed. Review fields before accepting. (OCR: ${ocrProviderId})`);
     setUploadPreview((current) => ({ ...current, open: false }));
+    // Scroll the user down to the extracted metadata fields.
+    scrollToMetadata();
 
     appendDebugLogEntry({
       eventType: "auto_capture_complete",
@@ -1648,6 +1763,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     setCoverImageDataUrl(captured.imageDataUrl);
     setLastMetadataImageDataUrl(captured.imageDataUrl);
     lastCapturedOcrByStepRef.current.cover = captured.ocrText;
+    setRawOcrText(captured.ocrText);
     setOcrDraft(captured.ocrText);
     setModerationAssessment(null);
     setStep("cover");
@@ -1661,6 +1777,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       applyMetadataFromText(captured.ocrText, "cover");
     }
     setInfoMessage(`Cover captured and parsed. Review the metadata fields before accepting. (Source: ${captured.metadataResult?.source ?? `OCR: ${captured.ocrProviderId}`})`);
+    scrollToMetadata();
   }
 
   async function handleCaptureTitle(): Promise<void> {
@@ -1679,6 +1796,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
     lastCapturedOcrByStepRef.current.title = captured.ocrText;
     setLastMetadataImageDataUrl(captured.imageDataUrl);
+    setRawOcrText(captured.ocrText);
     setOcrDraft(captured.ocrText);
     setStep("title");
     if (captured.pipelineResult) {
@@ -1691,6 +1809,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       applyMetadataFromText(captured.ocrText, "title");
     }
     setInfoMessage(`Copyright page captured and parsed. Review merged metadata. (Source: ${captured.metadataResult?.source ?? `OCR: ${captured.ocrProviderId}`})`);
+    scrollToMetadata();
   }
 
   async function handleCaptureToc(): Promise<void> {
@@ -2100,6 +2219,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       }
 
       clearPersistedCaptureUsage(draftKeyRef.current);
+      clearAutoSessionDraft();
       appendDebugLogEntry({
         eventType: "user_action",
         message: "Auto textbook setup saved.",
@@ -2163,6 +2283,72 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   return (
     <section className={`panel auto-textbook-flow${compactChromeLayout ? " auto-textbook-flow--chromeos-compact" : ""}`}>
       <h3>{stepTitle}</h3>
+
+      {/* ── Session resume card — shown when a prior session exists ── */}
+      {resumableDraft !== null && !coverImageDataUrl ? (
+        <div className="auto-session-resume" role="complementary" aria-label="Resume previous Auto session">
+          <p className="auto-session-resume__title">Auto Mode — Session In Progress</p>
+          <div className="auto-session-resume__body">
+            {resumableDraft.coverImageDataUrl ? (
+              <img
+                src={resumableDraft.coverImageDataUrl}
+                alt="Previous cover thumbnail"
+                className="auto-session-resume__thumb"
+              />
+            ) : null}
+            <div>
+              <p className="auto-session-resume__meta">
+                {resumableDraft.metadataTitle
+                  ? <strong>{resumableDraft.metadataTitle}</strong>
+                  : <em>Untitled</em>}
+                {" "}· Saved {new Date(resumableDraft.savedAt).toLocaleTimeString()}
+              </p>
+              <p className="auto-session-resume__meta">
+                Completed: {[
+                  resumableDraft.stepsCompleted.cover && "Cover",
+                  resumableDraft.stepsCompleted.copyright && "Copyright",
+                ].filter(Boolean).join(", ") || "None yet"}
+              </p>
+            </div>
+          </div>
+          <div className="auto-session-resume__actions">
+            <button
+              type="button"
+              onClick={() => {
+                if (resumableDraft.coverImageDataUrl) {
+                  setCoverImageDataUrl(resumableDraft.coverImageDataUrl);
+                  setLastMetadataImageDataUrl(resumableDraft.coverImageDataUrl);
+                }
+                if (resumableDraft.rawOcrText) {
+                  setRawOcrText(resumableDraft.rawOcrText);
+                  setOcrDraft(resumableDraft.rawOcrText);
+                }
+                setMetadataForm((current) => ({
+                  ...current,
+                  title: resumableDraft.metadataTitle || current.title,
+                  subject: resumableDraft.metadataSubject || current.subject,
+                  publisher: resumableDraft.metadataPublisher || current.publisher,
+                }));
+                setStep(resumableDraft.step);
+                setResumableDraft(null);
+              }}
+              disabled={isBusy}
+            >
+              Resume Session
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                clearAutoSessionDraft();
+                setResumableDraft(null);
+              }}
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {chromeOs ? (
         <p className="form-hint">{translate(language, "autoMode", "chromeOsBanner")}</p>
@@ -2344,8 +2530,26 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         />
       </label>
 
-      {step === "cover" || step === "title" ? (
-        <button type="button" className="btn-secondary" onClick={runMetadataExtraction}>
+      {/* ── Raw OCR collapsible section (item #5 / #9) ───────────── */}
+      {rawOcrText ? (
+        <div className="ocr-raw-section">
+          <button
+            type="button"
+            className="btn-text ocr-raw-section__label"
+            onClick={() => setIsRawOcrExpanded((v) => !v)}
+            aria-expanded={isRawOcrExpanded}
+          >
+            {isRawOcrExpanded ? "▾" : "▸"} Raw OCR Output
+          </button>
+          {isRawOcrExpanded ? (
+            <pre className="ocr-raw-section__pre">{rawOcrText}</pre>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Standalone re-parse button — only shown when no cover thumbnail is present yet */}
+      {(step === "cover" || step === "title") && !coverImageDataUrl ? (
+        <button type="button" className="btn-secondary" onClick={runMetadataExtraction} disabled={isBusy}>
           Re-parse OCR Text
         </button>
       ) : null}
@@ -2379,14 +2583,21 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       ) : null}
 
       {coverImageDataUrl ? (
-        <div className="cover-preview-row">
-          <img src={coverImageDataUrl} alt="Auto-cropped cover" className="cover-preview-thumb" />
-          <button type="button" className="btn-secondary" onClick={() => void handleCaptureCover()} disabled={isBusy}>
-            Retake
-          </button>
-          <button type="button" className="btn-secondary" onClick={() => coverFileInputRef.current?.click()} disabled={isBusy}>
-            Upload New
-          </button>
+        <div className="cover-action-row">
+          <img src={coverImageDataUrl} alt="Auto-cropped cover" className="cover-action-row__thumb" />
+          <div className="cover-action-row__btns">
+            <button type="button" className="btn-secondary" onClick={() => void handleCaptureCover()} disabled={isBusy}>
+              Retake
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => coverFileInputRef.current?.click()} disabled={isBusy}>
+              Upload New
+            </button>
+            {step === "cover" || step === "title" ? (
+              <button type="button" className="btn-secondary btn-reparse" onClick={runMetadataExtraction} disabled={isBusy}>
+                Re-parse OCR Text
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -2397,6 +2608,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       ) : null}
 
       {step !== "toc-editor" ? (
+        <div ref={metadataFormRef} className="metadata-fields-section">
         <div className="form-grid">
           <label>
             Title
@@ -2528,6 +2740,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             {renderConfidenceDot("seriesName")}
             <input value={metadataForm.seriesName} onChange={(event) => updateMetadataForm("seriesName", event.target.value)} />
           </label>
+        </div>
         </div>
       ) : null}
 

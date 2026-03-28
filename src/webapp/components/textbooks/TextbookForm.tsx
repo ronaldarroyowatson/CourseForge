@@ -126,6 +126,18 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
     return stopStream;
   }, [stopStream]);
 
+  // Full-screen auto workspace — add/remove body class (item #1)
+  useEffect(() => {
+    if (entryMode === "auto") {
+      document.body.classList.add("body--auto-workspace");
+    } else {
+      document.body.classList.remove("body--auto-workspace");
+    }
+    return () => {
+      document.body.classList.remove("body--auto-workspace");
+    };
+  }, [entryMode]);
+
   const isEditMode = selectedTextbook !== null;
   const showManualForm = isEditMode || entryMode === "manual";
 
@@ -388,15 +400,19 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
       ) : null}
 
       {!isEditMode && entryMode === "auto" ? (
-        <AutoTextbookSetupFlow
-          runtime={runtime}
-          onSaved={onSaved}
-          onSwitchToManual={() => {
-            setEntryMode("manual");
-            setErrorMessage(null);
-            setSuccessMessage(null);
-          }}
-        />
+        <div className="auto-workspace-panel">
+          <div className="auto-workspace-panel__inner">
+            <AutoTextbookSetupFlow
+              runtime={runtime}
+              onSaved={onSaved}
+              onSwitchToManual={() => {
+                setEntryMode("manual");
+                setErrorMessage(null);
+                setSuccessMessage(null);
+              }}
+            />
+          </div>
+        </div>
       ) : null}
 
       {showManualForm && isManualEntryMode ? (

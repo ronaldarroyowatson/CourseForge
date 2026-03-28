@@ -164,6 +164,27 @@ function postProcessOcrText(rawText: string, context: MetadataExtractionContext)
   });
 }
 
+/**
+ * Cross-validates the subject field from vision output against OCR-derived text.
+ * Prevents the vision model from overriding a clearly science-subject text with "ELA"
+ * (or another non-science category) when the raw OCR contains strong science keywords.
+ */
+function crossValidateSubject(
+  visionSubject: string | null,
+  ocrRawText: string,
+  ocrSubject: string | null
+): string | null {
+  if (!visionSubject) return ocrSubject;
+  const lower = ocrRawText.toLowerCase();
+  const hasStrongScienceKeywords = /physical science|earth science|life science|biology|chemistry|physics|anatomy|geology/.test(lower);
+  const visionIsScienceCategory = /science/i.test(visionSubject);
+  if (hasStrongScienceKeywords && !visionIsScienceCategory) {
+    // OCR text clearly indicates a science subject — trust OCR subject over vision's guess
+    return ocrSubject ?? visionSubject;
+  }
+  return visionSubject;
+}
+
 function autoMetadataToMetadataResult(rawText: string, source: MetadataResult["source"]): MetadataResult {
   const parsed = extractMetadataFromOcrText(rawText);
 
@@ -353,7 +374,7 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     publisherLocation: originalVisionOutput.publisherLocation ?? ocrMetadata.publisherLocation,
     series: originalVisionOutput.series ?? ocrMetadata.series,
     gradeLevel: originalVisionOutput.gradeLevel ?? ocrMetadata.gradeLevel,
-    subject: originalVisionOutput.subject ?? ocrMetadata.subject,
+    subject: crossValidateSubject(originalVisionOutput.subject, ocrResult.text, ocrMetadata.subject),
     copyrightYear: originalVisionOutput.copyrightYear ?? ocrMetadata.copyrightYear,
     isbn: originalVisionOutput.isbn ?? ocrMetadata.isbn,
     additionalIsbns: Array.from(new Set([...(originalVisionOutput.additionalIsbns ?? []), ...(ocrMetadata.additionalIsbns ?? [])])),

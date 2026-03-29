@@ -11,9 +11,134 @@ import {
   type MetadataPageType,
   type MetadataResult,
 } from "./metadataCorrectionLearning";
-import { extractMetadataFromOcrText, preprocessMetadataOcrText } from "./textbookAutoExtractionService";
+import { extractMetadataFromOcrText } from "./textbookAutoExtractionService";
 
 const DEFAULT_VISION_CONFIDENCE_THRESHOLD = 0.72;
+const METADATA_PIPELINE_RUNTIME_STATUS_KEY = "courseforge.metadataPipeline.runtime.v1";
+
+export interface MetadataPipelineRuntimeStatus {
+  updatedAt: string;
+  traceId: string | null;
+  pageType: MetadataPageType | null;
+  stage: "idle" | "started" | "vision_attempt" | "vision_failed" | "fallback_to_ocr" | "ocr_succeeded" | "completed";
+  path: "vision_only" | "ocr_only" | "vision_ocr_merged" | null;
+  secondaryAgent: {
+    name: string;
+    attempted: boolean;
+    succeeded: boolean;
+    lastError: string | null;
+  };
+  ocr: {
+    providerId: AutoOcrProviderId | null;
+    rawTextLength: number;
+  };
+  parsedFieldsCount: number;
+  parsedFields: string[];
+}
+
+const DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS: MetadataPipelineRuntimeStatus = {
+  updatedAt: new Date(0).toISOString(),
+  traceId: null,
+  pageType: null,
+  stage: "idle",
+  path: null,
+  secondaryAgent: {
+    name: "extractMetadataFromImageVision (OpenAI gpt-4o-mini)",
+    attempted: false,
+    succeeded: false,
+    lastError: null,
+  },
+  ocr: {
+    providerId: null,
+    rawTextLength: 0,
+  },
+  parsedFieldsCount: 0,
+  parsedFields: [],
+};
+
+function getStorage(): Storage | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.localStorage;
+}
+
+function summarizeMetadataFields(metadata: MetadataResult): string[] {
+  return [
+    metadata.title ? "title" : null,
+    metadata.subtitle ? "subtitle" : null,
+    metadata.edition ? "edition" : null,
+    metadata.publisher ? "publisher" : null,
+    metadata.publisherLocation ? "publisherLocation" : null,
+    metadata.series ? "series" : null,
+    metadata.gradeLevel ? "gradeLevel" : null,
+    metadata.subject ? "subject" : null,
+    metadata.copyrightYear ? "copyrightYear" : null,
+    metadata.isbn ? "isbn" : null,
+    metadata.additionalIsbns && metadata.additionalIsbns.length > 0 ? "additionalIsbns" : null,
+    metadata.relatedIsbns && metadata.relatedIsbns.length > 0 ? "relatedIsbns" : null,
+    metadata.platformUrl ? "platformUrl" : null,
+    metadata.mhid ? "mhid" : null,
+  ].filter((value): value is string => Boolean(value));
+}
+
+function updateMetadataPipelineRuntimeStatus(patch: Partial<MetadataPipelineRuntimeStatus>): void {
+  const storage = getStorage();
+  if (!storage) {
+    return;
+  }
+
+  const current = readMetadataPipelineRuntimeStatus();
+  const next: MetadataPipelineRuntimeStatus = {
+    ...current,
+    ...patch,
+    secondaryAgent: {
+      ...current.secondaryAgent,
+      ...(patch.secondaryAgent ?? {}),
+    },
+    ocr: {
+      ...current.ocr,
+      ...(patch.ocr ?? {}),
+    },
+    updatedAt: new Date().toISOString(),
+  };
+
+  storage.setItem(METADATA_PIPELINE_RUNTIME_STATUS_KEY, JSON.stringify(next));
+}
+
+export function readMetadataPipelineRuntimeStatus(): MetadataPipelineRuntimeStatus {
+  const storage = getStorage();
+  if (!storage) {
+    return DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS;
+  }
+
+  const raw = storage.getItem(METADATA_PIPELINE_RUNTIME_STATUS_KEY);
+  if (!raw) {
+    return DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<MetadataPipelineRuntimeStatus>;
+    return {
+      ...DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS,
+      ...parsed,
+      secondaryAgent: {
+        ...DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS.secondaryAgent,
+        ...(parsed.secondaryAgent ?? {}),
+      },
+      ocr: {
+        ...DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS.ocr,
+        ...(parsed.ocr ?? {}),
+      },
+      parsedFields: Array.isArray(parsed.parsedFields)
+        ? parsed.parsedFields.filter((value): value is string => typeof value === "string")
+        : [],
+    };
+  } catch {
+    return DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS;
+  }
+}
 
 function createMetadataPipelineTraceId(prefix = "metadata-pipeline"): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -156,7 +281,7 @@ function removeRepeatedAdjacentWords(value: string): string {
 }
 
 function postProcessOcrText(rawText: string, context: MetadataExtractionContext): string {
-  const cleaned = preprocessMetadataOcrText(rawText);
+  const cleaned = rawText.replace(/\r/g, "\n");
   const deduped = removeRepeatedAdjacentWords(cleaned);
   const normalized = normalizeWhitespace(deduped);
   return applyCorrectionRulesToText(normalized, getEffectiveCorrectionRules(), {
@@ -306,6 +431,24 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
       confidenceThreshold,
     },
   });
+  updateMetadataPipelineRuntimeStatus({
+    traceId,
+    pageType: context.pageType,
+    stage: "started",
+    path: null,
+    secondaryAgent: {
+      name: DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS.secondaryAgent.name,
+      attempted: false,
+      succeeded: false,
+      lastError: null,
+    },
+    ocr: {
+      providerId: null,
+      rawTextLength: 0,
+    },
+    parsedFieldsCount: 0,
+    parsedFields: [],
+  });
 
   let originalVisionOutput: MetadataResult | null = null;
   try {
@@ -314,6 +457,15 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
       context: { pageType: context.pageType },
     });
     originalVisionOutput = await extractMetadataFromImageDataUrl(imageDataUrl, context);
+    updateMetadataPipelineRuntimeStatus({
+      stage: "vision_attempt",
+      secondaryAgent: {
+        name: DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS.secondaryAgent.name,
+        attempted: true,
+        succeeded: true,
+        lastError: null,
+      },
+    });
     void emitMetadataPipelineDiagnostic("vision_attempt_succeeded", {
       traceId,
       context: {
@@ -324,6 +476,15 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     });
   } catch {
     originalVisionOutput = null;
+    updateMetadataPipelineRuntimeStatus({
+      stage: "vision_failed",
+      secondaryAgent: {
+        name: DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS.secondaryAgent.name,
+        attempted: true,
+        succeeded: false,
+        lastError: "Vision metadata extraction failed.",
+      },
+    });
     void emitMetadataPipelineDiagnostic("vision_attempt_failed", {
       level: "warning",
       traceId,
@@ -333,6 +494,13 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
 
   if (originalVisionOutput && originalVisionOutput.confidence >= confidenceThreshold && metadataHasRequiredFields(originalVisionOutput)) {
     const crossValidatedVisionOutput = crossValidateVisionSubjectFromRawText(originalVisionOutput);
+    const parsedFields = summarizeMetadataFields(crossValidatedVisionOutput);
+    updateMetadataPipelineRuntimeStatus({
+      stage: "completed",
+      path: "vision_only",
+      parsedFieldsCount: parsedFields.length,
+      parsedFields,
+    });
     void emitMetadataPipelineDiagnostic("completed", {
       traceId,
       context: {
@@ -355,8 +523,18 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
       visionConfidence: originalVisionOutput?.confidence ?? null,
     },
   });
+  updateMetadataPipelineRuntimeStatus({
+    stage: "fallback_to_ocr",
+  });
 
   const ocrResult = await extractTextFromImageWithFallback(imageDataUrl);
+  updateMetadataPipelineRuntimeStatus({
+    stage: "ocr_succeeded",
+    ocr: {
+      providerId: ocrResult.providerId,
+      rawTextLength: ocrResult.text.length,
+    },
+  });
   void emitMetadataPipelineDiagnostic("ocr_fallback_succeeded", {
     traceId,
     context: {
@@ -368,6 +546,13 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
   const ocrMetadata = autoMetadataToMetadataResult(correctedRawText, "ocr");
 
   if (!originalVisionOutput) {
+    const parsedFields = summarizeMetadataFields(ocrMetadata);
+    updateMetadataPipelineRuntimeStatus({
+      stage: "completed",
+      path: "ocr_only",
+      parsedFieldsCount: parsedFields.length,
+      parsedFields,
+    });
     void emitMetadataPipelineDiagnostic("completed", {
       traceId,
       context: {
@@ -404,6 +589,13 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     rawText: [originalVisionOutput.rawText, correctedRawText].filter(Boolean).join("\n\n").trim(),
     source: "vision+ocr",
   };
+  const parsedFields = summarizeMetadataFields(merged);
+  updateMetadataPipelineRuntimeStatus({
+    stage: "completed",
+    path: "vision_ocr_merged",
+    parsedFieldsCount: parsedFields.length,
+    parsedFields,
+  });
 
   void emitMetadataPipelineDiagnostic("completed", {
     traceId,

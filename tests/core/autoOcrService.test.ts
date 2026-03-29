@@ -187,6 +187,25 @@ describe("autoOcrService", () => {
     expect(result.text).toContain("Inspire Physical Science");
   });
 
+  it("passes the original image to cloud OCR providers", async () => {
+    const cloudExtract = vi.fn(async () => "Cloud OCR full page text");
+
+    const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+      providerOrder: ["cloud_openai_vision"],
+      providersOverride: [
+        {
+          id: "cloud_openai_vision",
+          label: "Cloud OCR (OpenAI Vision via Firebase Function)",
+          isAvailable: async () => true,
+          extractText: cloudExtract,
+        },
+      ],
+    });
+
+    expect(result.providerId).toBe("cloud_openai_vision");
+    expect(cloudExtract).toHaveBeenCalledWith(TEST_IMAGE_DATA_URL);
+  });
+
   it("caches provider availability status within the session TTL", async () => {
     callableMocks.getAiProviderStatus.mockResolvedValue({
       data: {

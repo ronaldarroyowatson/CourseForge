@@ -15,7 +15,10 @@ vi.mock("../../src/firebase/functions", () => ({
   functionsClient: {},
 }));
 
-import { extractMetadataWithOcrFallbackFromDataUrl } from "../../src/core/services/metadataExtractionPipelineService";
+import {
+  extractMetadataWithOcrFallbackFromDataUrl,
+  readMetadataPipelineRuntimeStatus,
+} from "../../src/core/services/metadataExtractionPipelineService";
 
 describe("metadataExtractionPipelineService", () => {
   beforeEach(() => {
@@ -238,6 +241,30 @@ describe("metadataExtractionPipelineService", () => {
     expect(result.result.source).toBe("ocr");
     expect(result.originalVisionOutput).toBeNull();
     expect(result.originalOcrOutput?.providerId).toBe("cloud_openai_vision");
+  });
+
+  it("persists pipeline runtime telemetry for OCR fallback path", async () => {
+    callableMock.mockRejectedValue(new Error("vision unavailable"));
+    ocrMock.mockResolvedValue({
+      text: "Inspire Physical Science\nwith Earth Science\nISBN: 978-0-07-671685-2",
+      providerId: "cloud_openai_vision",
+    });
+
+    await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "title", publisherHint: "McGraw-Hill Education" }
+    );
+
+    const runtime = readMetadataPipelineRuntimeStatus();
+    expect(runtime.pageType).toBe("title");
+    expect(runtime.stage).toBe("completed");
+    expect(runtime.path).toBe("ocr_only");
+    expect(runtime.secondaryAgent.attempted).toBe(true);
+    expect(runtime.secondaryAgent.succeeded).toBe(false);
+    expect(runtime.ocr.providerId).toBe("cloud_openai_vision");
+    expect(runtime.ocr.rawTextLength).toBeGreaterThan(10);
+    expect(runtime.parsedFieldsCount).toBeGreaterThan(0);
+    expect(runtime.parsedFields).toContain("title");
   });
 
   it("preserves raw OCR and returns parsed metadata for downstream form mapping", async () => {

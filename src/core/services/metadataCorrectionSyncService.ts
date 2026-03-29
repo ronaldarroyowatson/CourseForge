@@ -54,6 +54,12 @@ const QUEUE_KEY = "courseforge.metadataCorrections.uploadQueue.v1";
 const LAST_UPLOAD_AT_KEY = "courseforge.metadataCorrections.lastUploadAt.v1";
 const DAILY_COUNTER_KEY = "courseforge.metadataCorrections.dailyCount.v1";
 const UPLOADED_IDS_KEY = "courseforge.metadataCorrections.uploadedIds.v1";
+const METADATA_CORRECTION_SYNC_RUNTIME_KEY = "courseforge.metadataCorrections.syncRuntime.v1";
+
+export interface MetadataCorrectionSyncRuntimeState extends SyncMetadataResult {
+  updatedAt: string;
+  optedIn: boolean;
+}
 
 const DEFAULT_SYNC_SAFEGUARDS: SyncSafeguardConfig = {
   dailyUploadLimit: 25,
@@ -143,6 +149,14 @@ function readLastUploadAt(): number {
 
 function writeLastUploadAt(timestamp: number): void {
   writeJson(LAST_UPLOAD_AT_KEY, timestamp);
+}
+
+function writeSyncRuntimeState(state: MetadataCorrectionSyncRuntimeState): void {
+  writeJson(METADATA_CORRECTION_SYNC_RUNTIME_KEY, state);
+}
+
+export function readMetadataCorrectionSyncRuntimeState(): MetadataCorrectionSyncRuntimeState | null {
+  return readJson<MetadataCorrectionSyncRuntimeState | null>(METADATA_CORRECTION_SYNC_RUNTIME_KEY, null);
 }
 
 function applyLocalSafeguardsToRecord(
@@ -481,13 +495,15 @@ export async function syncMetadataCorrectionLearning(
   };
 
   if (!input.optedIn) {
-    return {
+    const result = {
       pushed: 0,
       pulledRulesVersion: null,
       queuedCount: readQueue().length,
       blockedReason: "opted-out",
       message: "Correction sharing is disabled. Data will stay local.",
     };
+    writeSyncRuntimeState({ ...result, optedIn: input.optedIn, updatedAt: new Date().toISOString() });
+    return result;
   }
 
   const localRecords = readLocalCorrectionRecords();
@@ -511,25 +527,29 @@ export async function syncMetadataCorrectionLearning(
     writeDailyCounter(normalizedDailyCounter);
     const fetchedRules = await fetchCloudCorrectionRules({ apiBaseUrl: input.apiBaseUrl, signal: input.signal });
     getEffectiveCorrectionRules();
-    return {
+    const result = {
       pushed: 0,
       pulledRulesVersion: fetchedRules?.version ?? null,
       queuedCount: readQueue().length,
       blockedReason: "daily-limit",
       message: "You’ve reached today’s learning contribution limit. Try again tomorrow.",
     };
+    writeSyncRuntimeState({ ...result, optedIn: input.optedIn, updatedAt: new Date().toISOString() });
+    return result;
   }
 
   if (now - lastUploadAt < minIntervalMs) {
     const fetchedRules = await fetchCloudCorrectionRules({ apiBaseUrl: input.apiBaseUrl, signal: input.signal });
     getEffectiveCorrectionRules();
-    return {
+    const result = {
       pushed: 0,
       pulledRulesVersion: fetchedRules?.version ?? null,
       queuedCount: readQueue().length,
       blockedReason: "rate-limit",
       message: "Learning samples queued locally and will upload shortly.",
     };
+    writeSyncRuntimeState({ ...result, optedIn: input.optedIn, updatedAt: new Date().toISOString() });
+    return result;
   }
 
   const currentQueue = readQueue();
@@ -537,25 +557,29 @@ export async function syncMetadataCorrectionLearning(
   if (!nextRecordId) {
     const fetchedRules = await fetchCloudCorrectionRules({ apiBaseUrl: input.apiBaseUrl, signal: input.signal });
     getEffectiveCorrectionRules();
-    return {
+    const result = {
       pushed: 0,
       pulledRulesVersion: fetchedRules?.version ?? null,
       queuedCount: 0,
       blockedReason: null,
       message: null,
     };
+    writeSyncRuntimeState({ ...result, optedIn: input.optedIn, updatedAt: new Date().toISOString() });
+    return result;
   }
 
   const record = sanitizedRecords.find((entry) => entry.id === nextRecordId);
   if (!record) {
     writeQueue(currentQueue.slice(1));
-    return {
+    const result = {
       pushed: 0,
       pulledRulesVersion: null,
       queuedCount: currentQueue.length - 1,
       blockedReason: "stale-queue",
       message: "Cleared stale learning queue entries.",
     };
+    writeSyncRuntimeState({ ...result, optedIn: input.optedIn, updatedAt: new Date().toISOString() });
+    return result;
   }
 
   // Flagged records are intentionally held for admin review instead of auto-upload.
@@ -563,13 +587,15 @@ export async function syncMetadataCorrectionLearning(
     writeQueue(currentQueue.slice(1));
     const fetchedRules = await fetchCloudCorrectionRules({ apiBaseUrl: input.apiBaseUrl, signal: input.signal });
     getEffectiveCorrectionRules();
-    return {
+    const result = {
       pushed: 0,
       pulledRulesVersion: fetchedRules?.version ?? null,
       queuedCount: currentQueue.length - 1,
       blockedReason: "flagged",
       message: "A correction sample was flagged for review and held back from auto-upload.",
     };
+    writeSyncRuntimeState({ ...result, optedIn: input.optedIn, updatedAt: new Date().toISOString() });
+    return result;
   }
 
   const pushResult = await pushCorrectionsUpload([record], {
@@ -594,7 +620,7 @@ export async function syncMetadataCorrectionLearning(
 
   getEffectiveCorrectionRules();
 
-  return {
+  const result = {
     pushed: pushResult?.acceptedCount ?? 0,
     pulledRulesVersion: fetchedRules?.version ?? null,
     queuedCount: readQueue().length,
@@ -603,4 +629,6 @@ export async function syncMetadataCorrectionLearning(
       ? null
       : "Unable to upload learning samples right now. They are queued locally.",
   };
+  writeSyncRuntimeState({ ...result, optedIn: input.optedIn, updatedAt: new Date().toISOString() });
+  return result;
 }

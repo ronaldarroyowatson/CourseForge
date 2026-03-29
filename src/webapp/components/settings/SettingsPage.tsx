@@ -22,6 +22,8 @@ import {
   setDebugLoggingEnabled,
   uploadAndClearDebugLogs,
 } from "../../../core/services";
+import { readMetadataPipelineRuntimeStatus, type MetadataPipelineRuntimeStatus } from "../../../core/services/metadataExtractionPipelineService";
+import { readMetadataCorrectionSyncRuntimeState, type MetadataCorrectionSyncRuntimeState } from "../../../core/services/metadataCorrectionSyncService";
 import { getSupportedLanguages, t as translate } from "../../../core/services/i18nService";
 import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
@@ -147,12 +149,15 @@ type LocalMetadataTrainingStats = {
 function describeMetadataPipelineHealth(input: {
   metadataSharingEnabled: boolean;
   stats: LocalMetadataTrainingStats;
+  syncRuntime: MetadataCorrectionSyncRuntimeState | null;
+  pipelineRuntime: MetadataPipelineRuntimeStatus;
   ocrProviderHealth: AutoOcrProviderHealthRecord[];
   ocrProviderStatus: string | null;
 }): {
   cloudStatus: string;
   learningStatus: string;
   syncStatus: string;
+  secondaryAgentStatus: string;
 } {
   const cloudProviders = input.ocrProviderHealth.filter((provider) => provider.id !== "local_tesseract");
   const availableCloudProviders = cloudProviders.filter((provider) => provider.available === true);
@@ -170,16 +175,25 @@ function describeMetadataPipelineHealth(input: {
 
   const syncStatus = !input.metadataSharingEnabled
     ? "Sync is disabled. Correction samples stay on this device only."
+    : input.syncRuntime?.blockedReason
+      ? `Sync status: ${input.syncRuntime.blockedReason}. ${input.syncRuntime.message ?? "Waiting for next retry."}`
     : input.stats.flaggedCorrections > 0
       ? `${input.stats.flaggedCorrections} correction sample${input.stats.flaggedCorrections === 1 ? " is" : "s are"} held for review before upload.`
       : input.stats.pendingCorrections > 0
         ? `${input.stats.pendingCorrections} correction sample${input.stats.pendingCorrections === 1 ? " is" : "s are"} queued locally for sync.`
         : "No correction samples are waiting to sync.";
 
+  const secondaryAgentStatus = input.pipelineRuntime.secondaryAgent.attempted
+    ? input.pipelineRuntime.secondaryAgent.succeeded
+      ? `Secondary metadata agent (${input.pipelineRuntime.secondaryAgent.name}) processed the last capture successfully. Parsed fields: ${input.pipelineRuntime.parsedFieldsCount}.`
+      : `Secondary metadata agent (${input.pipelineRuntime.secondaryAgent.name}) failed on the last attempt: ${input.pipelineRuntime.secondaryAgent.lastError ?? "unknown error"}.`
+    : `Secondary metadata agent (${input.pipelineRuntime.secondaryAgent.name}) has not processed a capture in this session yet.`;
+
   return {
     cloudStatus,
     learningStatus,
     syncStatus,
+    secondaryAgentStatus,
   };
 }
 
@@ -314,6 +328,8 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     averageConfidencePct: 0,
     lastCorrectionAt: null,
   });
+  const [metadataSyncRuntime, setMetadataSyncRuntime] = React.useState<MetadataCorrectionSyncRuntimeState | null>(null);
+  const [metadataPipelineRuntime, setMetadataPipelineRuntime] = React.useState<MetadataPipelineRuntimeStatus>(() => readMetadataPipelineRuntimeStatus());
   const languageOptions = React.useMemo(() => getSupportedLanguages(), []);
   const ocrHealthById = React.useMemo(() => {
     return new Map(ocrProviderHealth.map((provider) => [provider.id, provider]));
@@ -321,9 +337,11 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const metadataPipelineHealth = React.useMemo(() => describeMetadataPipelineHealth({
     metadataSharingEnabled,
     stats: metadataTrainingStats,
+    syncRuntime: metadataSyncRuntime,
+    pipelineRuntime: metadataPipelineRuntime,
     ocrProviderHealth,
     ocrProviderStatus,
-  }), [metadataSharingEnabled, metadataTrainingStats, ocrProviderHealth, ocrProviderStatus]);
+  }), [metadataSharingEnabled, metadataTrainingStats, metadataSyncRuntime, metadataPipelineRuntime, ocrProviderHealth, ocrProviderStatus]);
   const secondChoiceProviderId = ocrProviderOrder.find((providerId) => providerId !== ocrProviderOrder[0] && providerId !== "local_tesseract") ?? "cloud_github_models_vision";
   const retryVisualTotal = Math.max(1, Math.min(5, retryLimit || 3));
   const retryVisualUsed = Math.max(0, Math.min(retryVisualTotal, retryCount));
@@ -351,6 +369,8 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
       averageConfidencePct,
       lastCorrectionAt,
     });
+    setMetadataSyncRuntime(readMetadataCorrectionSyncRuntimeState());
+    setMetadataPipelineRuntime(readMetadataPipelineRuntimeStatus());
   }
 
   function renderProviderStatusBadge(providerId: AutoOcrProviderId): React.JSX.Element {
@@ -1228,6 +1248,13 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
               </div>
               <p className="settings-meta">Last correction: {metadataTrainingStats.lastCorrectionAt ? new Date(metadataTrainingStats.lastCorrectionAt).toLocaleString() : "None yet"}</p>
               <p className="settings-meta">Cloud OCR health: {metadataPipelineHealth.cloudStatus}</p>
+              <p className="settings-meta">Secondary metadata agent: {metadataPipelineHealth.secondaryAgentStatus}</p>
+              <p className="settings-meta">
+                Last pipeline path: <strong>{metadataPipelineRuntime.path ?? "none"}</strong>
+                {metadataPipelineRuntime.ocr.providerId ? ` | OCR provider: ${metadataPipelineRuntime.ocr.providerId}` : ""}
+                {metadataPipelineRuntime.ocr.rawTextLength > 0 ? ` | OCR chars: ${metadataPipelineRuntime.ocr.rawTextLength}` : ""}
+              </p>
+              <p className="settings-meta">Pipeline trace: {metadataPipelineRuntime.traceId ?? "none"}</p>
               <p className="settings-meta">Local learning: {metadataPipelineHealth.learningStatus}</p>
               <p className="settings-meta">Correction sync: {metadataPipelineHealth.syncStatus}</p>
             </>

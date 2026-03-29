@@ -920,12 +920,20 @@ export async function extractTextFromImageWithFallback(
   } = {}
 ): Promise<AutoOcrExtractionResult> {
   const extractionTraceId = createOcrTraceId("ocr-fallback");
-  const preprocessedImage = await Promise.race<string>([
-    preprocessImageForOcr(imageDataUrl),
-    new Promise<string>((resolve) => {
-      setTimeout(() => resolve(imageDataUrl), 1500);
-    }),
-  ]);
+  let preprocessedImage: string | null = null;
+  async function getLocalPreparedImage(): Promise<string> {
+    if (preprocessedImage) {
+      return preprocessedImage;
+    }
+
+    preprocessedImage = await Promise.race<string>([
+      preprocessImageForOcr(imageDataUrl),
+      new Promise<string>((resolve) => {
+        setTimeout(() => resolve(imageDataUrl), 1500);
+      }),
+    ]);
+    return preprocessedImage;
+  }
   const providerOrder = normalizeExecutionProviderOrder(options.providerOrder ?? await getEffectiveAutoOcrProviderOrder());
   const primaryCloudProviderId = providerOrder.find((providerId): providerId is CloudAutoOcrProviderId => isCloudProviderId(providerId)) ?? null;
   const providerMap = new Map((options.providersOverride ?? getAutoOcrProviders()).map((provider) => [provider.id, provider]));
@@ -936,7 +944,6 @@ export async function extractTextFromImageWithFallback(
     context: {
       requestedProviderOrder: providerOrder,
       imageBytes: imageDataUrl.length,
-      preprocessedImageBytes: preprocessedImage.length,
     },
   });
 
@@ -996,7 +1003,10 @@ export async function extractTextFromImageWithFallback(
         traceId: extractionTraceId,
         context: { providerId },
       });
-      const text = await provider.extractText(preprocessedImage);
+      const providerImage = providerId === "local_tesseract"
+        ? await getLocalPreparedImage()
+        : imageDataUrl;
+      const text = await provider.extractText(providerImage);
       if (!text.trim()) {
         attempts.push({ providerId, success: false, errorMessage: "OCR returned empty text." });
         recordProviderFailure(providerId, "OCR returned empty text.");
@@ -1014,6 +1024,7 @@ export async function extractTextFromImageWithFallback(
         traceId: extractionTraceId,
         context: {
           providerId,
+          imageBytesUsed: providerImage.length,
           textLength: text.length,
           attemptsCount: attempts.length,
         },

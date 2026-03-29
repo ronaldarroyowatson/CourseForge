@@ -1901,17 +1901,17 @@ async function executeCloudOcrExtraction(
         messages: [
           {
             role: "system",
-            content: "You perform OCR from educational screenshots. Return only the extracted text with original line breaks, no commentary.",
+            content: "You perform OCR from educational screenshots. Transcribe every readable character from the entire page. Preserve line breaks and include all columns, headers, footers, legal notices, addresses, URLs, ISBN/MHID lines, and image-credit text. Return only plain extracted text with no commentary.",
           },
           {
             role: "user",
             content: [
-              { type: "text", text: "Extract all readable text from this screenshot. Return plain text only." },
+              { type: "text", text: "Extract ALL readable text from this screenshot. Do not summarize. Do not omit legal or side-column text. Return plain text only." },
               { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
             ],
           },
         ],
-        max_tokens: 1800,
+        max_tokens: 3600,
         temperature: 0,
       }),
     });

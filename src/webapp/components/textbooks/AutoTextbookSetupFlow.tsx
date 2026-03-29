@@ -486,6 +486,7 @@ function fromMetadataFormState(form: MetadataFormState): AutoTextbookMetadata {
 }
 
 function metadataResultToAutoMetadata(metadata: MetadataResult): AutoTextbookMetadata {
+  const inferredSubject = metadata.subject ?? extractMetadataFromOcrText(metadata.rawText).subject ?? null;
   return {
     title: metadata.title ?? undefined,
     subtitle: metadata.subtitle ?? undefined,
@@ -494,7 +495,7 @@ function metadataResultToAutoMetadata(metadata: MetadataResult): AutoTextbookMet
     publisherLocation: metadata.publisherLocation ?? undefined,
     seriesName: metadata.series ?? undefined,
     gradeBand: metadata.gradeLevel ?? undefined,
-    subject: metadata.subject ?? undefined,
+    subject: inferredSubject ?? undefined,
     copyrightYear: metadata.copyrightYear ?? undefined,
     isbn: metadata.isbn ?? undefined,
     additionalIsbns: metadata.additionalIsbns,
@@ -876,6 +877,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   // Scroll target — metadata fields section revealed after successful OCR.
   const metadataFormRef = useRef<HTMLDivElement>(null);
   const activeSessionDraftIdRef = useRef<string>(createAutoFlowTraceId("auto-draft"));
+  const lastCorrectionSignatureRef = useRef<string | null>(null);
 
   // ── Raw OCR / parsed metadata two-section state ──────────────────────────
   // rawOcrText: original, unedited OCR output shown read-only for transparency.
@@ -1322,10 +1324,87 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       context: {
         source: result.source,
         confidence: result.confidence,
+        extractedFields: buildExtractionFieldList(metadataResultToAutoMetadata(result)),
         hasTitle: Boolean(result.title),
         hasPublisher: Boolean(result.publisher),
       },
     });
+  }
+
+  function queueCorrectionLearningSample(trigger: "accept_cover" | "accept_title" | "save"): void {
+    const latestPipeline = lastMetadataPipelineRef.current;
+    if (!latestPipeline) {
+      return;
+    }
+
+    const finalMetadataResult = metadataFormToResult(
+      metadataForm,
+      ocrDraft,
+      latestPipeline.result.source ?? "ocr",
+      relatedIsbns
+    );
+
+    const signature = [
+      trigger,
+      lastMetadataCaptureStepRef.current,
+      finalMetadataResult.title ?? "",
+      finalMetadataResult.subtitle ?? "",
+      finalMetadataResult.subject ?? "",
+      finalMetadataResult.publisher ?? "",
+      finalMetadataResult.rawText.length,
+    ].join("|");
+
+    if (lastCorrectionSignatureRef.current === signature) {
+      return;
+    }
+
+    lastCorrectionSignatureRef.current = signature;
+    const savedRecord = saveCorrectionRecord({
+      pageType: lastMetadataCaptureStepRef.current,
+      publisher: finalMetadataResult.publisher,
+      series: finalMetadataResult.series,
+      subject: finalMetadataResult.subject,
+      originalVisionOutput: latestPipeline.originalVisionOutput ?? null,
+      originalOcrOutput: latestPipeline.originalOcrOutput
+        ? { rawText: latestPipeline.originalOcrOutput.rawText }
+        : null,
+      finalMetadata: finalMetadataResult,
+      imageReference: lastMetadataImageDataUrl ?? coverImageDataUrl,
+    });
+
+    appendDebugLogEntry({
+      eventType: "user_action",
+      message: "Metadata correction sample logged.",
+      autoModeStep: lastMetadataCaptureStepRef.current,
+      context: {
+        trigger,
+        correctionId: savedRecord.id,
+        flagged: savedRecord.flagged,
+        finalConfidence: savedRecord.finalConfidence,
+        parsedFields: buildExtractionFieldList(metadataResultToAutoMetadata(savedRecord.finalMetadata)),
+      },
+    });
+
+    if (isMetadataCorrectionSharingEnabled()) {
+      void syncMetadataCorrectionLearning({
+        optedIn: true,
+        maxPushRecords: trigger === "save" ? 30 : 10,
+      }).then((syncResult) => {
+        if (syncResult.message) {
+          setInfoMessage(syncResult.message);
+        }
+      });
+    }
+  }
+
+  function handleAcceptCoverStep(): void {
+    queueCorrectionLearningSample("accept_cover");
+    setStep("title");
+  }
+
+  function handleAcceptTitleStep(): void {
+    queueCorrectionLearningSample("accept_title");
+    setStep("toc");
   }
 
   function applyTocFromText(rawText: string): void {
@@ -2099,18 +2178,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     );
 
     const changedFromOriginal = didMetadataChange(latestPipeline?.result ?? null, finalMetadataResult);
-    saveCorrectionRecord({
-      pageType: lastMetadataCaptureStepRef.current,
-      publisher: metadata.publisher ?? null,
-      series: metadata.seriesName ?? null,
-      subject: metadata.subject ?? null,
-      originalVisionOutput: latestPipeline?.originalVisionOutput ?? null,
-      originalOcrOutput: latestPipeline?.originalOcrOutput
-        ? { rawText: latestPipeline.originalOcrOutput.rawText }
-        : null,
-      finalMetadata: finalMetadataResult,
-      imageReference: lastMetadataImageDataUrl ?? coverImageDataUrl,
-    });
+    queueCorrectionLearningSample("save");
 
     if (!changedFromOriginal) {
       appendDebugLogEntry({
@@ -2895,13 +2963,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       {step === "cover" ? (
         <div className="form-actions">
-          <button type="button" onClick={() => setStep("title")} disabled={isBusy || !coverImageDataUrl}>Accept</button>
+          <button type="button" onClick={handleAcceptCoverStep} disabled={isBusy || !coverImageDataUrl}>Accept</button>
         </div>
       ) : null}
 
       {step === "title" ? (
         <div className="form-actions">
-          <button type="button" onClick={() => setStep("toc")} disabled={isBusy}>Accept</button>
+          <button type="button" onClick={handleAcceptTitleStep} disabled={isBusy}>Accept</button>
           <button type="button" className="btn-secondary" onClick={() => void handleCaptureTitle()} disabled={isBusy}>Retake</button>
         </div>
       ) : null}

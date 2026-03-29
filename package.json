@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-  "version": "1.4.32",
+  "version": "1.4.33",
   "private": true,
   "type": "module",
   "engines": {
@@ -31,7 +31,7 @@
     "test:e2e:autoupdate": "vitest run tests/integration/auto-update-portable.integration.test.ts tests/integration/auto-update-launcher.integration.test.ts tests/integration/update-status-server.integration.test.ts tests/integration/settings.updater.integration.test.tsx",
     "test:e2e": "npm run test:e2e:ocr && npm run test:e2e:webapp && npm run test:e2e:extension && npm run test:e2e:autoupdate",
     "test:e2e:comprehensive": "npm run test:e2e && npm run test:core && npm run test:unit && npm run test:integration && npm run test:rules",
-      "test:e2e:no-rules": "npm run test:e2e && npm run test:core && npm run test:unit && npm run test:integration",
+    "test:e2e:no-rules": "npm run test:e2e && npm run test:core && npm run test:unit && npm run test:integration",
     "test:smoke:ocr:cloud": "powershell -ExecutionPolicy Bypass -File scripts/smoke-cloud-ocr.ps1",
     "test:e2e:packaged": "npm run test:e2e:autoupdate && npm run test:installer && npm run check:installer",
     "test:real-sync": "tsx tests/realSyncTest.ts",

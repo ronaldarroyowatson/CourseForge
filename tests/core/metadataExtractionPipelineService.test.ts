@@ -309,4 +309,240 @@ describe("metadataExtractionPipelineService", () => {
     expect(result.result.publisher).toContain("McGraw");
     expect(result.result.isbn).toBe("9780076716852");
   });
+
+  // Phase 2: Enhanced Metadata Parsing Agent Tests
+  describe("Phase 2: Vision agent field mapping and validation", () => {
+    it("correctly maps ISBN from vision model output with hyphens", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "The Nature of Science",
+              isbn: "978-0-07-671685-2",  // With hyphens - should be normalized by sanitization
+              confidence: 0.85,
+              rawText: "The Nature of Science\nISBN: 978-0-07-671685-2",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      // Should normalize to 13-digit ISBN without hyphens via sanitizeMetadataResult
+      expect(result.result.isbn).toBe("9780076716852");
+    });
+
+    it("correctly maps ISBN from vision model output without formatting", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Algebra",
+              isbn: "9780076716852",  // No hyphens - should pass through
+              confidence: 0.85,
+              rawText: "Algebra\n9780076716852",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      expect(result.result.isbn).toBe("9780076716852");
+    });
+
+    it("correctly maps copyrightYear when vision returns it as a number", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Science Textbook",
+              copyrightYear: 2021,  // As number
+              confidence: 0.85,
+              rawText: "Copyright © 2021",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      expect(result.result.copyrightYear).toBe(2021);
+    });
+
+    it("correctly maps copyrightYear when vision returns it as a string", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Science Textbook",
+              copyrightYear: "2021",  // As string - sanitization should convert to number
+              confidence: 0.85,
+              rawText: "Copyright © 2021",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      // Sanitization should convert string to number
+      expect(result.result.copyrightYear).toBe(2021);
+    });
+
+    it("correctly maps publisherLocation from vision model output", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Inspire Physical Science",
+              publisher: "McGraw-Hill Education",
+              publisherLocation: "8787 Orion Place\nColumbus, OH 43240",
+              confidence: 0.85,
+              rawText: "Inspire Physical Science\nMcGraw-Hill Education\n8787 Orion Place\nColumbus, OH 43240",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: "McGraw-Hill Education" }
+      );
+
+      expect(result.result.publisherLocation).toBeDefined();
+      expect(result.result.publisherLocation).toContain("Columbus, OH 43240");
+    });
+
+    it("correctly maps platformUrl from vision model output", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Science Textbook",
+              platformUrl: "https://mheducation.com/prek-12",
+              confidence: 0.85,
+              rawText: "mheducation.com/prek-12",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      expect(result.result.platformUrl).toBe("https://mheducation.com/prek-12");
+    });
+
+    it("correctly handles multiple related ISBNs with types", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Inspire Physical Science",
+              isbn: "9780076716852",  // Already normalized
+              relatedIsbns: [
+                { isbn: "978-0-07-671700-2", type: "teacher", note: "Teacher Edition" },
+                { isbn: "978-0-07-671722-4", type: "digital", note: "Online Access" },
+              ],
+              confidence: 0.85,
+              rawText: "ISBNs listed",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      expect(result.result.isbn).toBe("9780076716852");
+      expect(result.result.relatedIsbns).toHaveLength(2);
+      expect(result.result.relatedIsbns).toContainEqual(
+        expect.objectContaining({ isbn: "9780076717002", type: "teacher" })
+      );
+    });
+
+    it("normalizes ISBNs in additionalIsbns array", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Textbook",
+              isbn: "9780076716852",
+              additionalIsbns: [
+                "978-0-07-671700-2",  // With hyphens - should be normalized
+                "978-0-07-671722-4",  // With hyphens - should be normalized
+              ],
+              confidence: 0.85,
+              rawText: "Multiple ISBNs",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      expect(result.result.additionalIsbns).toEqual([
+        "9780076717002",  // Normalized
+        "9780076717224",  // Normalized
+      ]);
+    });
+
+    it("handles malformed ISBN in related ISBNs (filters invalid ones)", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Textbook",
+              isbn: "9780076716852",
+              relatedIsbns: [
+                { isbn: "978-0-07-671700-2", type: "teacher" },
+                { isbn: "invalid-isbn-123", type: "digital" },  // Invalid - should be filtered
+                { isbn: "9780076717222", type: "workbook" },
+              ],
+              confidence: 0.85,
+              rawText: "ISBNs with one invalid",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      // Should filter out the invalid ISBN (less than 10 digits after normalization)
+      expect(result.result.relatedIsbns?.length).toBeLessThanOrEqual(2);
+      expect(result.result.relatedIsbns?.some((x) => x.isbn === "9780076717222")).toBe(true);
+    });
+  });
 });

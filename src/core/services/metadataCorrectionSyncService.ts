@@ -218,6 +218,7 @@ async function pushCorrectionsUpload(
 
   const base = normalizeApiBaseUrl(input.apiBaseUrl);
 
+  // Primary: Firebase Cloud Function callable
   try {
     const callable = httpsCallable(functionsClient, "correctionsUpload");
     const callableResponse = await callable({ corrections });
@@ -235,36 +236,43 @@ async function pushCorrectionsUpload(
         rejectedCount: typeof callablePayload.data?.rejectedCount === "number" ? callablePayload.data.rejectedCount : 0,
       };
     }
-  } catch {
-    // Fall through to REST endpoint for local/dev stubs.
+  } catch (error) {
+    // Log but continue to fallback
+    console.debug("[metadataCorrectionSyncService] Cloud Function callable failed, attempting fallback", error);
   }
 
-  try {
-    const response = await fetch(`${base}/api/corrections/upload`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ corrections }),
-      signal: input.signal,
-    });
+  // Secondary: REST endpoint for local/dev stubs
+  if (base) {
+    try {
+      const response = await fetch(`${base}/api/corrections/upload`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ corrections }),
+        signal: input.signal,
+      });
 
-    if (!response.ok) {
-      return null;
+      if (!response.ok) {
+        console.debug("[metadataCorrectionSyncService] REST endpoint failed", response.status, response.statusText);
+        return null;
+      }
+
+      const payload = await response.json() as {
+        acceptedCount?: unknown;
+        rejectedCount?: unknown;
+      };
+
+      return {
+        acceptedCount: typeof payload.acceptedCount === "number" ? payload.acceptedCount : corrections.length,
+        rejectedCount: typeof payload.rejectedCount === "number" ? payload.rejectedCount : 0,
+      };
+    } catch (error) {
+      console.debug("[metadataCorrectionSyncService] REST endpoint error", error);
     }
-
-    const payload = await response.json() as {
-      acceptedCount?: unknown;
-      rejectedCount?: unknown;
-    };
-
-    return {
-      acceptedCount: typeof payload.acceptedCount === "number" ? payload.acceptedCount : corrections.length,
-      rejectedCount: typeof payload.rejectedCount === "number" ? payload.rejectedCount : 0,
-    };
-  } catch {
-    return null;
   }
+
+  return null;
 }
 
 export async function fetchCloudCorrectionRules(

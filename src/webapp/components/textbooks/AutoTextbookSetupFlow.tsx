@@ -252,10 +252,13 @@ function clearPersistedCaptureUsage(draftKey: string): void {
 
 // ── Auto Session Draft — resumable workflow across page reloads ───────────────
 
-const AUTO_SESSION_DRAFT_KEY = "courseforge.autoSessionDraft.v1";
+const AUTO_SESSION_DRAFTS_KEY = "courseforge.autoSessionDrafts.v2";
+const AUTO_SESSION_DRAFT_KEY = "courseforge.autoSessionDraft.v1"; // legacy key
 const AUTO_SESSION_MAX_AGE_MS = 86_400_000; // 24 hours
+const MAX_AUTO_SESSION_DRAFTS = 3;
 
 interface AutoSessionDraft {
+  id: string;
   version: 1;
   savedAt: number;
   /** Compact base64 data URL; may be null if cover not yet captured. */
@@ -270,50 +273,138 @@ interface AutoSessionDraft {
   stepsCompleted: { cover: boolean; copyright: boolean };
 }
 
-function readAutoSessionDraft(): AutoSessionDraft | null {
-  if (typeof window === "undefined") {
-    return null;
+function isAutoSessionDraft(value: unknown): value is AutoSessionDraft {
+  if (!value || typeof value !== "object") {
+    return false;
   }
 
-  const raw = window.localStorage.getItem(AUTO_SESSION_DRAFT_KEY);
-  if (!raw) {
-    return null;
+  const draft = value as Partial<AutoSessionDraft>;
+  return (
+    typeof draft.id === "string"
+    && draft.version === 1
+    && typeof draft.savedAt === "number"
+    && (typeof draft.coverImageDataUrl === "string" || draft.coverImageDataUrl === null)
+    && typeof draft.rawOcrText === "string"
+    && typeof draft.metadataTitle === "string"
+    && typeof draft.metadataSubject === "string"
+    && typeof draft.metadataPublisher === "string"
+    && (draft.step === "cover" || draft.step === "title" || draft.step === "toc" || draft.step === "toc-editor")
+    && typeof draft.stepsCompleted?.cover === "boolean"
+    && typeof draft.stepsCompleted?.copyright === "boolean"
+  );
+}
+
+function normalizeAutoSessionDrafts(drafts: AutoSessionDraft[]): AutoSessionDraft[] {
+  const now = Date.now();
+  const deduped = new Map<string, AutoSessionDraft>();
+  for (const draft of drafts) {
+    if (!isAutoSessionDraft(draft)) {
+      continue;
+    }
+
+    if (now - draft.savedAt > AUTO_SESSION_MAX_AGE_MS) {
+      continue;
+    }
+
+    const existing = deduped.get(draft.id);
+    if (!existing || existing.savedAt < draft.savedAt) {
+      deduped.set(draft.id, draft);
+    }
+  }
+
+  return Array.from(deduped.values())
+    .sort((a, b) => b.savedAt - a.savedAt)
+    .slice(0, MAX_AUTO_SESSION_DRAFTS);
+}
+
+function readAutoSessionDrafts(): AutoSessionDraft[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const rawV2 = window.localStorage.getItem(AUTO_SESSION_DRAFTS_KEY);
+
+  try {
+    if (rawV2) {
+      const parsed = JSON.parse(rawV2) as unknown;
+      if (Array.isArray(parsed)) {
+        const normalized = normalizeAutoSessionDrafts(parsed as AutoSessionDraft[]);
+        window.localStorage.setItem(AUTO_SESSION_DRAFTS_KEY, JSON.stringify(normalized));
+        return normalized;
+      }
+    }
+  } catch {
+    // Fall through to legacy migration path.
+  }
+
+  // Legacy migration from single-draft v1 key.
+  const rawLegacy = window.localStorage.getItem(AUTO_SESSION_DRAFT_KEY);
+  if (!rawLegacy) {
+    return [];
   }
 
   try {
-    const parsed = JSON.parse(raw) as AutoSessionDraft;
-    if (parsed?.version !== 1) {
-      return null;
-    }
-
-    if (Date.now() - parsed.savedAt > AUTO_SESSION_MAX_AGE_MS) {
+    const parsedLegacy = JSON.parse(rawLegacy) as Omit<AutoSessionDraft, "id">;
+    if (!parsedLegacy || parsedLegacy.version !== 1) {
       window.localStorage.removeItem(AUTO_SESSION_DRAFT_KEY);
-      return null;
+      return [];
     }
 
-    return parsed;
+    if (Date.now() - parsedLegacy.savedAt > AUTO_SESSION_MAX_AGE_MS) {
+      window.localStorage.removeItem(AUTO_SESSION_DRAFT_KEY);
+      return [];
+    }
+
+    const migrated: AutoSessionDraft = {
+      id: createAutoFlowTraceId("auto-draft"),
+      ...parsedLegacy,
+    };
+
+    const normalized = normalizeAutoSessionDrafts([migrated]);
+    window.localStorage.setItem(AUTO_SESSION_DRAFTS_KEY, JSON.stringify(normalized));
+    window.localStorage.removeItem(AUTO_SESSION_DRAFT_KEY);
+    return normalized;
   } catch {
-    return null;
+    return [];
   }
 }
 
-function saveAutoSessionDraft(draft: AutoSessionDraft): void {
+function saveAutoSessionDraft(draft: AutoSessionDraft): AutoSessionDraft[] {
   if (typeof window === "undefined") {
-    return;
+    return [];
   }
 
   try {
-    window.localStorage.setItem(AUTO_SESSION_DRAFT_KEY, JSON.stringify(draft));
+    const existing = readAutoSessionDrafts().filter((entry) => entry.id !== draft.id);
+    const merged = normalizeAutoSessionDrafts([draft, ...existing]);
+    window.localStorage.setItem(AUTO_SESSION_DRAFTS_KEY, JSON.stringify(merged));
+    return merged;
   } catch {
     // Ignore quota or serialization errors; resumability is best-effort.
+    return readAutoSessionDrafts();
   }
 }
 
-function clearAutoSessionDraft(): void {
+function deleteAutoSessionDraft(draftId: string): AutoSessionDraft[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const remaining = readAutoSessionDrafts().filter((entry) => entry.id !== draftId);
+    window.localStorage.setItem(AUTO_SESSION_DRAFTS_KEY, JSON.stringify(remaining));
+    return remaining;
+  } catch {
+    return readAutoSessionDrafts();
+  }
+}
+
+function clearAllAutoSessionDrafts(): void {
   if (typeof window === "undefined") {
     return;
   }
 
+  window.localStorage.removeItem(AUTO_SESSION_DRAFTS_KEY);
   window.localStorage.removeItem(AUTO_SESSION_DRAFT_KEY);
 }
 
@@ -784,6 +875,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   const pendingUploadLimitResultRef = useRef<ReturnType<typeof enforceAutoCaptureLimit> | null>(null);
   // Scroll target — metadata fields section revealed after successful OCR.
   const metadataFormRef = useRef<HTMLDivElement>(null);
+  const activeSessionDraftIdRef = useRef<string>(createAutoFlowTraceId("auto-draft"));
 
   // ── Raw OCR / parsed metadata two-section state ──────────────────────────
   // rawOcrText: original, unedited OCR output shown read-only for transparency.
@@ -791,9 +883,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   const [rawOcrText, setRawOcrText] = useState(testingSeedState?.ocrDraft ?? "");
   const [isRawOcrExpanded, setIsRawOcrExpanded] = useState(false);
 
-  // ── Resumable session ─────────────────────────────────────────────────────
-  // Initialise from localStorage on first mount; cleared on submit or discard.
-  const [resumableDraft, setResumableDraft] = useState<AutoSessionDraft | null>(() => readAutoSessionDraft());
+  // ── Resumable sessions (max 3) ────────────────────────────────────────────
+  const [resumableDrafts, setResumableDrafts] = useState<AutoSessionDraft[]>(() => readAutoSessionDrafts());
+  const currentSessionHasWork = Boolean(coverImageDataUrl || rawOcrText || metadataForm.title.trim());
+  const isSessionCapacityReached = resumableDrafts.length >= MAX_AUTO_SESSION_DRAFTS && !currentSessionHasWork;
 
   useEffect(() => {
     emitAutoFlowDiagnostic("session_started", {
@@ -860,10 +953,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   // page reload.  Only save when there is something meaningful to recover.
   useEffect(() => {
     if (!coverImageDataUrl && !rawOcrText && !metadataForm.title) {
+      const remaining = deleteAutoSessionDraft(activeSessionDraftIdRef.current);
+      setResumableDrafts(remaining);
       return;
     }
 
     const draft: AutoSessionDraft = {
+      id: activeSessionDraftIdRef.current,
       version: 1,
       savedAt: Date.now(),
       coverImageDataUrl,
@@ -878,7 +974,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       },
     };
 
-    saveAutoSessionDraft(draft);
+    const nextDrafts = saveAutoSessionDraft(draft);
+    setResumableDrafts(nextDrafts.filter((entry) => entry.id !== activeSessionDraftIdRef.current));
   }, [coverImageDataUrl, rawOcrText, metadataForm.title, metadataForm.subject, metadataForm.publisher, step]);
 
   const canFinishToc = tocResult.chapters.length > 0;
@@ -1523,6 +1620,11 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   async function processImageFileForStep(file: File, targetStep: "cover" | "title"): Promise<void> {
+    if (isSessionCapacityReached) {
+      setErrorMessage("You already have 3 unfinished Auto captures. Delete one draft or finish one before starting another.");
+      return;
+    }
+
     const traceId = createAutoFlowTraceId(`auto-flow-upload-${targetStep}`);
     emitAutoFlowDiagnostic("upload_started", {
       traceId,
@@ -1712,6 +1814,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   function handleCoverDropZoneDragOver(event: React.DragEvent<HTMLDivElement>): void {
     event.preventDefault();
+    if (isSessionCapacityReached) {
+      return;
+    }
     setIsDragOver(true);
   }
 
@@ -1721,6 +1826,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   function handleCoverDropZoneDrop(event: React.DragEvent<HTMLDivElement>): void {
     event.preventDefault();
+    if (isSessionCapacityReached) {
+      setErrorMessage("Queue full: finish or delete one of the 3 in-progress auto captures before starting another.");
+      return;
+    }
     setIsDragOver(false);
     const file = event.dataTransfer.files[0];
     if (file) {
@@ -1730,6 +1839,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   function handleTitleDropZoneDragOver(event: React.DragEvent<HTMLDivElement>): void {
     event.preventDefault();
+    if (isSessionCapacityReached) {
+      return;
+    }
     setIsTitleDragOver(true);
   }
 
@@ -1739,6 +1851,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   function handleTitleDropZoneDrop(event: React.DragEvent<HTMLDivElement>): void {
     event.preventDefault();
+    if (isSessionCapacityReached) {
+      setErrorMessage("Queue full: finish or delete one of the 3 in-progress auto captures before starting another.");
+      return;
+    }
     setIsTitleDragOver(false);
     const file = event.dataTransfer.files[0];
     if (file) {
@@ -1747,6 +1863,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   async function handleCaptureCover(): Promise<void> {
+    if (isSessionCapacityReached) {
+      setErrorMessage("You already have 3 unfinished Auto captures. Delete one draft or finish one before starting another.");
+      return;
+    }
     emitAutoFlowDiagnostic("ui_capture_cover_clicked", {
       traceId: createAutoFlowTraceId("auto-flow-ui-cover"),
       context: { step },
@@ -1781,6 +1901,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   async function handleCaptureTitle(): Promise<void> {
+    if (isSessionCapacityReached) {
+      setErrorMessage("You already have 3 unfinished Auto captures. Delete one draft or finish one before starting another.");
+      return;
+    }
     emitAutoFlowDiagnostic("ui_capture_title_clicked", {
       traceId: createAutoFlowTraceId("auto-flow-ui-title"),
       context: { step },
@@ -2219,7 +2343,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       }
 
       clearPersistedCaptureUsage(draftKeyRef.current);
-      clearAutoSessionDraft();
+      setResumableDrafts(deleteAutoSessionDraft(activeSessionDraftIdRef.current));
+      activeSessionDraftIdRef.current = createAutoFlowTraceId("auto-draft");
       appendDebugLogEntry({
         eventType: "user_action",
         message: "Auto textbook setup saved.",
@@ -2284,71 +2409,96 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     <section className={`panel auto-textbook-flow${compactChromeLayout ? " auto-textbook-flow--chromeos-compact" : ""}`}>
       <h3>{stepTitle}</h3>
 
-      {/* ── Session resume card — shown when a prior session exists ── */}
-      {resumableDraft !== null && !coverImageDataUrl ? (
-        <div className="auto-session-resume" role="complementary" aria-label="Resume previous Auto session">
-          <p className="auto-session-resume__title">Auto Mode — Session In Progress</p>
-          <div className="auto-session-resume__body">
-            {resumableDraft.coverImageDataUrl ? (
-              <img
-                src={resumableDraft.coverImageDataUrl}
-                alt="Previous cover thumbnail"
-                className="auto-session-resume__thumb"
-              />
-            ) : null}
-            <div>
-              <p className="auto-session-resume__meta">
-                {resumableDraft.metadataTitle
-                  ? <strong>{resumableDraft.metadataTitle}</strong>
-                  : <em>Untitled</em>}
-                {" "}· Saved {new Date(resumableDraft.savedAt).toLocaleTimeString()}
-              </p>
-              <p className="auto-session-resume__meta">
-                Completed: {[
-                  resumableDraft.stepsCompleted.cover && "Cover",
-                  resumableDraft.stepsCompleted.copyright && "Copyright",
-                ].filter(Boolean).join(", ") || "None yet"}
-              </p>
-            </div>
-          </div>
+      {/* ── Session queue (max 3 unfinished auto captures) ─────────────── */}
+      <div className="auto-session-resume" role="complementary" aria-label="Resume previous Auto sessions">
+        <p className="auto-session-resume__title">Auto Mode Queue ({resumableDrafts.length}/{MAX_AUTO_SESSION_DRAFTS})</p>
+        <div className="auto-session-slots" aria-label="Auto capture queue slots">
+          {Array.from({ length: MAX_AUTO_SESSION_DRAFTS }).map((_, index) => {
+            const draft = resumableDrafts[index] ?? null;
+            if (!draft) {
+              return (
+                <div key={`auto-slot-empty-${index}`} className="auto-session-slot auto-session-slot--empty" aria-label={`Queue slot ${index + 1} empty`}>
+                  <span className="auto-session-slot__placeholder" aria-hidden="true">📘</span>
+                  <p className="auto-session-slot__hint">Empty slot</p>
+                </div>
+              );
+            }
+
+            return (
+              <div key={draft.id} className="auto-session-slot" aria-label={`Queue slot ${index + 1} in progress`}>
+                {draft.coverImageDataUrl ? (
+                  <img src={draft.coverImageDataUrl} alt="Queued cover thumbnail" className="auto-session-resume__thumb" />
+                ) : (
+                  <span className="auto-session-slot__placeholder" aria-hidden="true">📘</span>
+                )}
+                <p className="auto-session-resume__meta">
+                  {draft.metadataTitle ? <strong>{draft.metadataTitle}</strong> : <em>Untitled</em>}
+                </p>
+                <p className="auto-session-resume__meta">Saved {new Date(draft.savedAt).toLocaleTimeString()}</p>
+                <p className="auto-session-resume__meta">
+                  Completed: {[
+                    draft.stepsCompleted.cover && "Cover",
+                    draft.stepsCompleted.copyright && "Copyright",
+                  ].filter(Boolean).join(", ") || "None yet"}
+                </p>
+                <div className="auto-session-resume__actions">
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => {
+                      activeSessionDraftIdRef.current = draft.id;
+                      setCoverImageDataUrl(draft.coverImageDataUrl);
+                      setLastMetadataImageDataUrl(draft.coverImageDataUrl);
+                      setRawOcrText(draft.rawOcrText);
+                      setOcrDraft(draft.rawOcrText);
+                      setMetadataForm((current) => ({
+                        ...current,
+                        title: draft.metadataTitle || current.title,
+                        subject: draft.metadataSubject || current.subject,
+                        publisher: draft.metadataPublisher || current.publisher,
+                      }));
+                      setStep(draft.step);
+                      setResumableDrafts(deleteAutoSessionDraft(draft.id));
+                    }}
+                  >
+                    Resume
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={isBusy}
+                    onClick={() => {
+                      setResumableDrafts(deleteAutoSessionDraft(draft.id));
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {isSessionCapacityReached ? (
+          <p className="error-text">
+            Queue full: finish or delete one of the 3 in-progress auto captures before starting another.
+          </p>
+        ) : null}
+        {resumableDrafts.length > 0 ? (
           <div className="auto-session-resume__actions">
             <button
               type="button"
-              onClick={() => {
-                if (resumableDraft.coverImageDataUrl) {
-                  setCoverImageDataUrl(resumableDraft.coverImageDataUrl);
-                  setLastMetadataImageDataUrl(resumableDraft.coverImageDataUrl);
-                }
-                if (resumableDraft.rawOcrText) {
-                  setRawOcrText(resumableDraft.rawOcrText);
-                  setOcrDraft(resumableDraft.rawOcrText);
-                }
-                setMetadataForm((current) => ({
-                  ...current,
-                  title: resumableDraft.metadataTitle || current.title,
-                  subject: resumableDraft.metadataSubject || current.subject,
-                  publisher: resumableDraft.metadataPublisher || current.publisher,
-                }));
-                setStep(resumableDraft.step);
-                setResumableDraft(null);
-              }}
-              disabled={isBusy}
-            >
-              Resume Session
-            </button>
-            <button
-              type="button"
               className="btn-secondary"
+              disabled={isBusy}
               onClick={() => {
-                clearAutoSessionDraft();
-                setResumableDraft(null);
+                clearAllAutoSessionDrafts();
+                setResumableDrafts([]);
               }}
             >
-              Discard
+              Delete All Drafts
             </button>
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       {chromeOs ? (
         <p className="form-hint">{translate(language, "autoMode", "chromeOsBanner")}</p>
@@ -2409,7 +2559,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       {step === "cover" ? (
         <div
-          className={`cover-drop-zone${isDragOver ? " cover-drop-zone--active" : ""}`}
+          className={`cover-drop-zone${isDragOver ? " cover-drop-zone--active" : ""}${isSessionCapacityReached ? " cover-drop-zone--disabled" : ""}`}
           onDragOver={handleCoverDropZoneDragOver}
           onDragLeave={handleCoverDropZoneDragLeave}
           onDrop={handleCoverDropZoneDrop}
@@ -2422,7 +2572,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       {step === "title" ? (
         <div
-          className={`cover-drop-zone${isTitleDragOver ? " cover-drop-zone--active" : ""}`}
+          className={`cover-drop-zone${isTitleDragOver ? " cover-drop-zone--active" : ""}${isSessionCapacityReached ? " cover-drop-zone--disabled" : ""}`}
           onDragOver={handleTitleDropZoneDragOver}
           onDragLeave={handleTitleDropZoneDragLeave}
           onDrop={handleTitleDropZoneDrop}
@@ -2461,7 +2611,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         className="cover-file-input"
         onChange={(event) => {
           const file = event.target.files?.[0];
-          if (file) void processImageFileForStep(file, "cover");
+          if (file && !isSessionCapacityReached) void processImageFileForStep(file, "cover");
           event.target.value = "";
         }}
         aria-label="Upload cover image file"
@@ -2474,7 +2624,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         className="cover-file-input"
         onChange={(event) => {
           const file = event.target.files?.[0];
-          if (file) void processImageFileForStep(file, "title");
+          if (file && !isSessionCapacityReached) void processImageFileForStep(file, "title");
           event.target.value = "";
         }}
         aria-label="Upload copyright page image file"
@@ -2483,10 +2633,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       <div className="form-actions">
         {step === "cover" ? (
           <>
-            <button type="button" onClick={() => void handleCaptureCover()} disabled={isBusy}>
+            <button type="button" onClick={() => void handleCaptureCover()} disabled={isBusy || isSessionCapacityReached}>
               Capture Cover
             </button>
-            <button type="button" className="btn-secondary" onClick={() => coverFileInputRef.current?.click()} disabled={isBusy}>
+            <button type="button" className="btn-secondary" onClick={() => coverFileInputRef.current?.click()} disabled={isBusy || isSessionCapacityReached}>
               Upload Image
             </button>
           </>
@@ -2494,10 +2644,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
         {step === "title" ? (
           <>
-            <button type="button" onClick={() => void handleCaptureTitle()} disabled={isBusy}>
+            <button type="button" onClick={() => void handleCaptureTitle()} disabled={isBusy || isSessionCapacityReached}>
               Capture Copyright Page
             </button>
-            <button type="button" className="btn-secondary" onClick={() => titleFileInputRef.current?.click()} disabled={isBusy}>
+            <button type="button" className="btn-secondary" onClick={() => titleFileInputRef.current?.click()} disabled={isBusy || isSessionCapacityReached}>
               Upload Copyright Page
             </button>
           </>

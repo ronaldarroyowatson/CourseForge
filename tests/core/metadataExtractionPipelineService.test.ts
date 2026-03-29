@@ -203,4 +203,47 @@ describe("metadataExtractionPipelineService", () => {
     expect(result.originalVisionOutput).toBeNull();
     expect(result.originalOcrOutput?.providerId).toBe("cloud_openai_vision");
   });
+
+  it("preserves raw OCR and returns parsed metadata for downstream form mapping", async () => {
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "",
+            subject: "",
+            publisher: "",
+            confidence: 0.2,
+            rawText: "",
+          },
+        },
+      },
+    });
+
+    const rawOcrText = [
+      "Inspire Physical Science",
+      "with Earth Science",
+      "McGraw Hill Education",
+      "Student Edition",
+      "Grade 8",
+      "ISBN: 978-0-07-671685-2",
+    ].join("\n");
+
+    ocrMock.mockResolvedValue({
+      text: rawOcrText,
+      providerId: "cloud_openai_vision",
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "cover", publisherHint: null }
+    );
+
+    expect(result.originalOcrOutput?.rawText).toBe(rawOcrText);
+    expect(result.originalOcrOutput?.providerId).toBe("cloud_openai_vision");
+    expect(result.result.title).toContain("Inspire Physical Science");
+    expect(result.result.subject).toBe("Science");
+    expect(result.result.publisher).toContain("McGraw");
+    expect(result.result.isbn).toBe("9780076716852");
+  });
 });

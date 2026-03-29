@@ -2255,6 +2255,13 @@ body.body--auto-workspace .placeholder-panel {
   animation: cf-drop-pulse 0.8s ease-in-out infinite;
 }
 
+.cover-drop-zone--disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+  animation: none;
+  box-shadow: none;
+}
+
 /* ============================================================
    Button Animations — hover scale + click shrink, all buttons
    ============================================================ */
@@ -2454,6 +2461,45 @@ button:not(:disabled):active {
   display: flex;
   gap: 0.4rem;
   flex-wrap: wrap;
+}
+
+.auto-session-slots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.auto-session-slot {
+  border: 1px solid var(--cf-border);
+  border-radius: 8px;
+  padding: 0.55rem;
+  display: grid;
+  gap: 0.3rem;
+  background: color-mix(in srgb, var(--cf-surface-muted) 70%, transparent);
+}
+
+.auto-session-slot--empty {
+  border-style: dashed;
+  align-items: center;
+  justify-items: center;
+  opacity: 0.85;
+}
+
+.auto-session-slot__placeholder {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.auto-session-slot__hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 900px) {
+  .auto-session-slots {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ============================================================

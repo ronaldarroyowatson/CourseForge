@@ -9,6 +9,8 @@ import { AutoTextbookSetupFlow } from "../../src/webapp/components/textbooks/Aut
 import { TextbookForm } from "../../src/webapp/components/textbooks/TextbookForm";
 import { useUIStore } from "../../src/webapp/store/uiStore";
 
+const AUTO_SESSION_DRAFTS_KEY = "courseforge.autoSessionDrafts.v2";
+
 const metadataPipelineMocks = vi.hoisted(() => ({
   extractMetadataWithOcrFallbackFromDataUrl: vi.fn(async () => ({
     result: {
@@ -124,6 +126,8 @@ describe("auto textbook flow integration", () => {
 
     // Keep integration tests deterministic by opting out of metadata-learning uploads.
     window.localStorage.setItem(METADATA_CORRECTION_STORAGE_KEYS.optedIn, "false");
+    window.localStorage.removeItem(AUTO_SESSION_DRAFTS_KEY);
+    window.localStorage.removeItem("courseforge.autoSessionDraft.v1");
     metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl.mockClear();
   });
 
@@ -212,16 +216,77 @@ describe("auto textbook flow integration", () => {
         expect(metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl).toHaveBeenCalledTimes(1);
       });
 
-      const confirmButton = screen.queryByRole("button", { name: /Confirm & Apply/i });
-      if (confirmButton) {
-        fireEvent.click(confirmButton);
-      }
-
       expect(screen.getByText(/Metadata source: ocr/i)).toBeInTheDocument();
       expect(screen.getByText(/OCR: cloud_openai_vision/i)).toBeInTheDocument();
     } finally {
       fileReaderReadAsDataUrl.mockRestore();
     }
+  });
+
+  it("limits unfinished auto captures to three queue slots and allows deleting a draft to reopen capacity", async () => {
+    const now = Date.now();
+    window.localStorage.setItem(
+      AUTO_SESSION_DRAFTS_KEY,
+      JSON.stringify([
+        {
+          id: "draft-1",
+          version: 1,
+          savedAt: now,
+          coverImageDataUrl: "data:image/png;base64,a",
+          rawOcrText: "Book One",
+          metadataTitle: "Book One",
+          metadataSubject: "Science",
+          metadataPublisher: "Pub A",
+          step: "cover",
+          stepsCompleted: { cover: true, copyright: false },
+        },
+        {
+          id: "draft-2",
+          version: 1,
+          savedAt: now - 1000,
+          coverImageDataUrl: "data:image/png;base64,b",
+          rawOcrText: "Book Two",
+          metadataTitle: "Book Two",
+          metadataSubject: "Math",
+          metadataPublisher: "Pub B",
+          step: "title",
+          stepsCompleted: { cover: true, copyright: true },
+        },
+        {
+          id: "draft-3",
+          version: 1,
+          savedAt: now - 2000,
+          coverImageDataUrl: "data:image/png;base64,c",
+          rawOcrText: "Book Three",
+          metadataTitle: "Book Three",
+          metadataSubject: "ELA",
+          metadataPublisher: "Pub C",
+          step: "cover",
+          stepsCompleted: { cover: true, copyright: false },
+        },
+      ])
+    );
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+      />
+    );
+
+    expect(screen.getByText(/Auto Mode Queue \(3\/3\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Queue full:/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Capture Cover" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Upload Image" })).toBeDisabled();
+
+    const deleteButtons = screen.getAllByRole("button", { name: "Delete" });
+    fireEvent.click(deleteButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Auto Mode Queue \(2\/3\)/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Queue full:/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Capture Cover" })).not.toBeDisabled();
   });
 
   it("propagates manual sourceType when saving textbook in manual mode", async () => {

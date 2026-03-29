@@ -81,3 +81,13 @@ Examples:
 - `reasonCode=unusable_text`: smoke test received text that did not contain the expected textbook keywords
 
 When a cloud provider is marked unavailable, CourseForge keeps that state in the provider-health cache for the TTL window to avoid repeating dead-end calls before trying the next provider.
+
+## Metadata Interpretation Safeguards
+
+OCR text is post-processed before metadata is mapped into CourseForge fields:
+
+- section-heading lines such as `Module 1`, `Unit 2`, `Chapter 3`, or `Lesson 4` are prevented from replacing textbook title/subtitle values
+- URL-only lines are excluded from publisher detection
+- high-confidence vision subject guesses are cross-checked against the raw OCR/page text so explicit textbook signals like `Physical Science` and `Earth Science` override incidental terms from surrounding copy
+
+This safeguard set is regression-tested against the Inspire Physical Science copyright-page screenshot content, including mixed-column OCR ordering, copyright text, address block, ISBN, MHID, and the `mheducation.com/prek-12` URL.

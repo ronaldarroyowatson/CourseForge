@@ -596,6 +596,7 @@ function Open-BootSplash {
   }
 
   $templatePath = Join-Path $scriptDir "boot-splash.html"
+  $iconPath = Join-Path $scriptDir "CourseForge.ico"
   if (-not (Test-Path $templatePath)) {
     Write-LauncherLog "Boot splash template not found at $templatePath"
     return $false
@@ -607,7 +608,15 @@ function Open-BootSplash {
     $splashPath = Join-Path $runtimeSplashDir ("boot-splash-" + [Guid]::NewGuid().ToString("N") + ".html")
 
     $content = Get-Content -Path $templatePath -Raw
+    $iconUrl = ""
+    if (Test-Path $iconPath) {
+      $iconUrl = [System.Uri]::new($iconPath).AbsoluteUri
+    }
+    else {
+      Write-LauncherLog "WARNING: Boot splash icon not found at $iconPath"
+    }
     $content = $content.Replace("__TARGET_URL__", $Url)
+    $content = $content.Replace("__ICON_URL__", $iconUrl)
     Set-Content -Path $splashPath -Value $content -Encoding ASCII
 
     Start-Process $splashPath | Out-Null

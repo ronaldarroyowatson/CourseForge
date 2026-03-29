@@ -137,11 +137,51 @@ type UpdaterDiagnostics = {
 
 type LocalMetadataTrainingStats = {
   totalCorrections: number;
+  pendingCorrections: number;
   flaggedCorrections: number;
   acceptedCorrections: number;
   averageConfidencePct: number;
   lastCorrectionAt: string | null;
 };
+
+function describeMetadataPipelineHealth(input: {
+  metadataSharingEnabled: boolean;
+  stats: LocalMetadataTrainingStats;
+  ocrProviderHealth: AutoOcrProviderHealthRecord[];
+  ocrProviderStatus: string | null;
+}): {
+  cloudStatus: string;
+  learningStatus: string;
+  syncStatus: string;
+} {
+  const cloudProviders = input.ocrProviderHealth.filter((provider) => provider.id !== "local_tesseract");
+  const availableCloudProviders = cloudProviders.filter((provider) => provider.available === true);
+  const unavailableCloudProviders = cloudProviders.filter((provider) => provider.availabilityState === "unavailable");
+
+  const cloudStatus = unavailableCloudProviders.length > 0
+    ? `Cloud OCR degraded: ${unavailableCloudProviders.map((provider) => provider.label).join(", ")} unavailable. Local OCR remains the fallback.`
+    : availableCloudProviders.length > 0
+      ? input.ocrProviderStatus ?? "Cloud OCR providers are ready. Local OCR remains the final fallback."
+      : "Cloud OCR status is still being probed. Local OCR will be used if cloud checks fail.";
+
+  const learningStatus = input.stats.totalCorrections > 0
+    ? `Local learning has ${input.stats.totalCorrections} correction sample${input.stats.totalCorrections === 1 ? "" : "s"} recorded.`
+    : "Local learning has not recorded any correction samples yet.";
+
+  const syncStatus = !input.metadataSharingEnabled
+    ? "Sync is disabled. Correction samples stay on this device only."
+    : input.stats.flaggedCorrections > 0
+      ? `${input.stats.flaggedCorrections} correction sample${input.stats.flaggedCorrections === 1 ? " is" : "s are"} held for review before upload.`
+      : input.stats.pendingCorrections > 0
+        ? `${input.stats.pendingCorrections} correction sample${input.stats.pendingCorrections === 1 ? " is" : "s are"} queued locally for sync.`
+        : "No correction samples are waiting to sync.";
+
+  return {
+    cloudStatus,
+    learningStatus,
+    syncStatus,
+  };
+}
 
 function SyncDonutChart({
   label,
@@ -268,6 +308,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const [showMetadataLearning, setShowMetadataLearning] = React.useState(false);
   const [metadataTrainingStats, setMetadataTrainingStats] = React.useState<LocalMetadataTrainingStats>({
     totalCorrections: 0,
+    pendingCorrections: 0,
     flaggedCorrections: 0,
     acceptedCorrections: 0,
     averageConfidencePct: 0,
@@ -277,6 +318,12 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const ocrHealthById = React.useMemo(() => {
     return new Map(ocrProviderHealth.map((provider) => [provider.id, provider]));
   }, [ocrProviderHealth]);
+  const metadataPipelineHealth = React.useMemo(() => describeMetadataPipelineHealth({
+    metadataSharingEnabled,
+    stats: metadataTrainingStats,
+    ocrProviderHealth,
+    ocrProviderStatus,
+  }), [metadataSharingEnabled, metadataTrainingStats, ocrProviderHealth, ocrProviderStatus]);
   const secondChoiceProviderId = ocrProviderOrder.find((providerId) => providerId !== ocrProviderOrder[0] && providerId !== "local_tesseract") ?? "cloud_github_models_vision";
   const retryVisualTotal = Math.max(1, Math.min(5, retryLimit || 3));
   const retryVisualUsed = Math.max(0, Math.min(retryVisualTotal, retryCount));
@@ -284,6 +331,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   function refreshMetadataTrainingStats(): void {
     const corrections = readLocalCorrectionRecords();
     const totalCorrections = corrections.length;
+    const pendingCorrections = corrections.filter((record) => record.reviewStatus === "pending" && !record.flagged).length;
     const flaggedCorrections = corrections.filter((record) => record.flagged).length;
     const acceptedCorrections = corrections.filter((record) => record.reviewStatus === "accepted").length;
     const averageConfidencePct = totalCorrections > 0
@@ -297,6 +345,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
 
     setMetadataTrainingStats({
       totalCorrections,
+      pendingCorrections,
       flaggedCorrections,
       acceptedCorrections,
       averageConfidencePct,
@@ -1172,11 +1221,15 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
               </p>
               <div className="metadata-training-grid">
                 <p className="settings-meta">Corrections logged: <strong>{metadataTrainingStats.totalCorrections}</strong></p>
+                <p className="settings-meta">Queued locally: <strong>{metadataTrainingStats.pendingCorrections}</strong></p>
                 <p className="settings-meta">Accepted by admin: <strong>{metadataTrainingStats.acceptedCorrections}</strong></p>
                 <p className="settings-meta">Flagged for review: <strong>{metadataTrainingStats.flaggedCorrections}</strong></p>
                 <p className="settings-meta">Avg confidence: <strong>{metadataTrainingStats.averageConfidencePct}%</strong></p>
               </div>
               <p className="settings-meta">Last correction: {metadataTrainingStats.lastCorrectionAt ? new Date(metadataTrainingStats.lastCorrectionAt).toLocaleString() : "None yet"}</p>
+              <p className="settings-meta">Cloud OCR health: {metadataPipelineHealth.cloudStatus}</p>
+              <p className="settings-meta">Local learning: {metadataPipelineHealth.learningStatus}</p>
+              <p className="settings-meta">Correction sync: {metadataPipelineHealth.syncStatus}</p>
             </>
           ) : null}
         </article>

@@ -1,5 +1,5 @@
 import React from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsPage } from "../../src/webapp/components/settings/SettingsPage";
@@ -23,7 +23,7 @@ const coreServiceMocks = vi.hoisted(() => ({
   })),
   isDebugLoggingEnabled: vi.fn(() => false),
   isMetadataCorrectionSharingEnabled: vi.fn(() => false),
-  readLocalCorrectionRecords: vi.fn(() => []),
+  readLocalCorrectionRecords: vi.fn<() => unknown[]>(() => []),
   setMetadataCorrectionSharingEnabled: vi.fn(),
   setDebugLoggingEnabled: vi.fn(),
   uploadAndClearDebugLogs: vi.fn(async () => ({ uploadedCount: 0 })),
@@ -152,6 +152,92 @@ describe("Settings updater communication", () => {
   beforeEach(() => {
     resetStores();
     vi.restoreAllMocks();
+    coreServiceMocks.readLocalCorrectionRecords.mockReturnValue([]);
+    coreServiceMocks.isMetadataCorrectionSharingEnabled.mockReturnValue(false);
+    ocrMocks.getAutoOcrProviderHealth.mockResolvedValue([
+      { id: "cloud_openai_vision", label: "Cloud OCR (OpenAI Vision)", available: true },
+      { id: "local_tesseract", label: "Local OCR (Tesseract)", available: true },
+    ]);
+  });
+
+  it("shows metadata learning health based on local corrections and OCR provider readiness", async () => {
+    coreServiceMocks.isMetadataCorrectionSharingEnabled.mockReturnValue(true);
+    coreServiceMocks.readLocalCorrectionRecords.mockReturnValue([
+      {
+        id: "sample-1",
+        timestamp: "2026-03-22T12:00:00.000Z",
+        pageType: "title",
+        publisher: "McGraw-Hill Education",
+        series: "Inspire",
+        subject: "Science",
+        originalVisionOutput: null,
+        originalOcrOutput: { rawText: "Inspire Physical Science with Earth Science" },
+        finalMetadata: {
+          title: "Inspire Physical Science",
+          subtitle: "with Earth Science",
+          edition: null,
+          publisher: "McGraw-Hill Education",
+          publisherLocation: null,
+          series: "Inspire",
+          gradeLevel: null,
+          subject: "Science",
+          copyrightYear: 2021,
+          isbn: null,
+          confidence: 0.93,
+          rawText: "Inspire Physical Science with Earth Science",
+          source: "ocr",
+        },
+        imageReference: null,
+        flagged: false,
+        finalConfidence: 0.93,
+        errorScore: 0.07,
+        reviewStatus: "pending",
+      },
+      {
+        id: "sample-2",
+        timestamp: "2026-03-22T13:00:00.000Z",
+        pageType: "title",
+        publisher: "McGraw-Hill Education",
+        series: "Inspire",
+        subject: "Science",
+        originalVisionOutput: null,
+        originalOcrOutput: { rawText: "Module 1 The Nature of Science" },
+        finalMetadata: {
+          title: "Inspire Physical Science",
+          subtitle: "with Earth Science",
+          edition: null,
+          publisher: "McGraw-Hill Education",
+          publisherLocation: null,
+          series: "Inspire",
+          gradeLevel: null,
+          subject: "Science",
+          copyrightYear: 2021,
+          isbn: null,
+          confidence: 0.52,
+          rawText: "Module 1 The Nature of Science",
+          source: "ocr",
+        },
+        imageReference: null,
+        flagged: true,
+        reasonFlagged: "Final confidence below 0.65.",
+        finalConfidence: 0.52,
+        errorScore: 0.48,
+        reviewStatus: "pending",
+      },
+    ]);
+
+    render(<SettingsPage onBack={() => undefined} />);
+
+    const metadataLearningCard = screen.getByText("Metadata Learning").closest("article");
+    expect(metadataLearningCard).not.toBeNull();
+    fireEvent.click(within(metadataLearningCard as HTMLElement).getByRole("button", { name: "Show" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Queued locally:", { exact: false })).toBeInTheDocument();
+      expect(screen.getByText("Cloud OCR health: Cloud OCR providers are ready. Local OCR remains the final fallback.")).toBeInTheDocument();
+      expect(screen.getByText("Local learning: Local learning has 2 correction samples recorded.")).toBeInTheDocument();
+      expect(screen.getByText("Correction sync: 1 correction sample is held for review before upload.")).toBeInTheDocument();
+    });
   });
 
   it("makes a manual check call, reads latest release data, and reports updater detection state", async () => {

@@ -369,15 +369,16 @@ export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadat
 
   const metadata: AutoTextbookMetadata = {};
 
-  const candidateTitle = lines.find(
-    (line) => isLikelyTitleCandidate(line)
+  const candidateTitleIndex = lines.findIndex(
+    (line, index) => isLikelyTitleCandidate(line) && isLikelyContextualTitleCandidate(lines, index)
   );
+  const candidateTitle = candidateTitleIndex >= 0 ? lines[candidateTitleIndex] : undefined;
   if (candidateTitle) {
     metadata.title = toTitleCase(candidateTitle);
   }
 
   if (lines.length > 1) {
-    const subtitleLine = lines.find((line) => line !== candidateTitle && isLikelySubtitleCandidate(line));
+    const subtitleLine = lines.find((line, index) => index !== candidateTitleIndex && line !== candidateTitle && isLikelySubtitleCandidate(line));
     if (subtitleLine) {
       metadata.subtitle = subtitleLine;
     }
@@ -407,7 +408,13 @@ export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadat
       .filter(Boolean);
   }
 
-  const publisherLine = lines.find((line) => /publisher|press|publications?|education|mcgraw|pearson|savvas|houghton/i.test(line));
+  const publisherLine = lines.find((line) => {
+    if (/\b(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,}\/)/i.test(line)) {
+      return false;
+    }
+
+    return /publisher|press|publications?|education|mcgraw|pearson|savvas|houghton/i.test(line);
+  });
   if (publisherLine) {
     metadata.publisher = publisherLine;
   }
@@ -478,10 +485,21 @@ export function mergeAutoMetadata(
   base: AutoTextbookMetadata,
   incoming: AutoTextbookMetadata
 ): AutoTextbookMetadata {
+  const preserveBaseTitle = Boolean(base.title) && incoming.title !== undefined && isSectionMetadataPair(incoming.title, incoming.subtitle);
+  const preserveBaseSubtitle = Boolean(base.subtitle) && incoming.subtitle !== undefined && isSectionMetadataPair(incoming.title, incoming.subtitle);
+
   const merged: AutoTextbookMetadata = {
     ...base,
     ...incoming,
   };
+
+  if (preserveBaseTitle) {
+    merged.title = base.title;
+  }
+
+  if (preserveBaseSubtitle) {
+    merged.subtitle = base.subtitle;
+  }
 
   if (base.authors || incoming.authors) {
     merged.authors = Array.from(new Set([...(base.authors ?? []), ...(incoming.authors ?? [])]));
@@ -1156,12 +1174,50 @@ function containsAny(content: string, terms: string[]): boolean {
 
 function inferSubject(text: string): string | undefined {
   const source = text.toLowerCase();
-  if (/algebra|geometry|mathematics|math/.test(source)) return "Math";
-  if (/physical science|earth science|biology|chemistry|physics|science/.test(source)) return "Science";
-  if (/history|social studies|government|civics/.test(source)) return "Social Studies";
-  if (/language arts|literature|grammar|reading/.test(source)) return "ELA";
-  if (/computer science|coding|programming/.test(source)) return "Computer Science";
+  const scienceScore = countSubjectSignals(source, [
+    /physical science/g,
+    /earth science/g,
+    /life science/g,
+    /biology/g,
+    /chemistry/g,
+    /physics/g,
+    /\bscience\b/g,
+  ]);
+  const mathScore = countSubjectSignals(source, [
+    /algebra/g,
+    /geometry/g,
+    /mathematics/g,
+    /\bmath\b/g,
+  ]);
+  const socialStudiesScore = countSubjectSignals(source, [
+    /history/g,
+    /social studies/g,
+    /government/g,
+    /civics/g,
+  ]);
+  const elaScore = countSubjectSignals(source, [
+    /language arts/g,
+    /literature/g,
+    /grammar/g,
+    /reading/g,
+    /english/g,
+  ]);
+  const computerScienceScore = countSubjectSignals(source, [
+    /computer science/g,
+    /coding/g,
+    /programming/g,
+  ]);
+
+  if (scienceScore > 0 && scienceScore >= mathScore) return "Science";
+  if (mathScore > 0) return "Math";
+  if (socialStudiesScore > 0) return "Social Studies";
+  if (elaScore > 0) return "ELA";
+  if (computerScienceScore > 0) return "Computer Science";
   return undefined;
+}
+
+function countSubjectSignals(source: string, patterns: RegExp[]): number {
+  return patterns.reduce((total, pattern) => total + (source.match(pattern)?.length ?? 0), 0);
 }
 
 function normalizeIsbnLike(value: string): string {
@@ -1437,6 +1493,43 @@ function isLikelyAddressLine(value: string): boolean {
   return ADDRESS_LINE_HINTS.some((pattern) => pattern.test(value));
 }
 
+function isLikelySectionHeadingLine(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  return /^(?:module|unit|chapter|lesson|section|part)\s+[a-z0-9ivx]+(?:\b|\s*[:\-.])/i.test(normalized)
+    || /^(?:[a-z0-9ivx]+\s*[:\-.]\s*)?(?:module|unit|chapter|lesson|section|part)\b/i.test(normalized);
+}
+
+function isLikelyContextualTitleCandidate(lines: string[], index: number): boolean {
+  const current = lines[index];
+  if (!current) {
+    return false;
+  }
+
+  const previous = index > 0 ? lines[index - 1] : null;
+  const next = index < lines.length - 1 ? lines[index + 1] : null;
+
+  if (previous && isLikelySectionHeadingLine(previous)) {
+    return false;
+  }
+
+  if (next && isLikelySectionHeadingLine(next)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isSectionMetadataPair(title?: string, subtitle?: string): boolean {
+  return Boolean(
+    (title && isLikelySectionHeadingLine(title))
+    || (subtitle && isLikelySectionHeadingLine(subtitle))
+  );
+}
+
 function isLikelyTitleCandidate(line: string): boolean {
   if (!line || line.length < 4 || line.length > 90) {
     return false;
@@ -1451,11 +1544,13 @@ function isLikelyTitleCandidate(line: string): boolean {
     /^isbn\b/i.test(line)
     || /^mhid\b/i.test(line)
     || /^by\b/i.test(line)
+    || /^(?:front|back)\s+cover\b/i.test(line)
     || /\bedition\b/i.test(line)
     || /^send all inquiries/i.test(line)
     || /^printed in/i.test(line)
     || /copyright/i.test(line)
     || /\b(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,}\/)/i.test(line)
+    || isLikelySectionHeadingLine(line)
     || isLikelyLegaleseLine(line)
     || isLikelyAddressLine(line)
     || /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?/.test(line)
@@ -1480,9 +1575,11 @@ function isLikelySubtitleCandidate(line: string): boolean {
     /^by\b/i.test(line)
     || /^isbn\b/i.test(line)
     || /^mhid\b/i.test(line)
+    || /^(?:front|back)\s+cover\b/i.test(line)
     || /^send all inquiries/i.test(line)
     || /^printed in/i.test(line)
     || /copyright/i.test(line)
+    || isLikelySectionHeadingLine(line)
     || /\b(?:publisher|press|publications?|education)\b/i.test(line)
     || /\b(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,}\/)/i.test(line)
     || isLikelyLegaleseLine(line)

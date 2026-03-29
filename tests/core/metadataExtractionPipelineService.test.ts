@@ -49,6 +49,42 @@ describe("metadataExtractionPipelineService", () => {
     expect(ocrMock).not.toHaveBeenCalled();
   });
 
+  it("cross-validates a high-confidence vision subject against screenshot raw text", async () => {
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "Inspire Physical Science",
+            subtitle: "with Earth Science",
+            publisher: "McGraw-Hill Education",
+            subject: "ELA",
+            confidence: 0.93,
+            rawText: [
+              "Inspire Physical Science",
+              "with Earth Science",
+              "mheducation.com/prek-12",
+              "McGraw Hill",
+              "Science, Technology, Engineering, and Mathematics (STEM)",
+              "Copyright © 2021 McGraw-Hill Education",
+              "ISBN: 978-0-07-671685-2",
+              "MHID: 0-07-671685-6",
+            ].join("\n"),
+          },
+        },
+      },
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "title", publisherHint: "McGraw-Hill Education" }
+    );
+
+    expect(result.result.source).toBe("vision");
+    expect(result.result.subject).toBe("Science");
+    expect(ocrMock).not.toHaveBeenCalled();
+  });
+
   it("falls back to OCR when vision response is low confidence", async () => {
     callableMock.mockResolvedValue({
       data: {

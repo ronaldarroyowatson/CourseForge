@@ -106,6 +106,18 @@ Model host support:
 - Diagnostics are mirrored to:
   - local OCR debug sink (`/api/ocr-debug-log`)
   - in-app debug history for session-level troubleshooting
+- Metadata-learning observability now surfaces in Settings:
+  - local correction count
+  - queued local correction count
+  - flagged-for-review count
+  - cloud OCR readiness summary
+  - local learning and correction-sync status summaries
+
+## Metadata Guardrails
+
+- Copyright-page parsing now suppresses `Module`, `Unit`, `Chapter`, `Lesson`, and similar section headings so they do not overwrite textbook title/subtitle fields.
+- Vision-first metadata now cross-validates subject labels against raw page text before returning a high-confidence vision-only result.
+- Publisher detection ignores URL-only lines so domain text like `mheducation.com/prek-12` is not promoted into the publisher field.
 
 ## Failure-Mode Expectations
 
@@ -128,6 +140,10 @@ Automated OCR resilience coverage is now included in the e2e lane via `npm run t
 - `tests/core/metadataExtractionPipelineService.test.ts`
   - validates vision-first path
   - validates fallback to OCR when vision throws or is insufficient
+  - validates subject correction on high-confidence vision output when raw text clearly indicates a different textbook subject
+- `tests/core/textbookAutoExtractionService.test.ts`
+  - validates mixed-column copyright-page extraction using the Inspire Physical Science screenshot text
+  - validates section-heading suppression so module/unit text does not overwrite textbook metadata
 - `tests/integration/autoTextbookFlow.integration.test.tsx`
   - validates dropped-cover image processing triggers OCR pipeline
   - validates OCR provider/source status is surfaced in Auto setup UI

@@ -185,6 +185,23 @@ function crossValidateSubject(
   return visionSubject;
 }
 
+function crossValidateVisionSubjectFromRawText(metadata: MetadataResult): MetadataResult {
+  if (!metadata.rawText.trim()) {
+    return metadata;
+  }
+
+  const rawTextSubject = autoMetadataToMetadataResult(metadata.rawText, "ocr").subject;
+  const subject = crossValidateSubject(metadata.subject, metadata.rawText, rawTextSubject);
+  if (subject === metadata.subject) {
+    return metadata;
+  }
+
+  return {
+    ...metadata,
+    subject,
+  };
+}
+
 function autoMetadataToMetadataResult(rawText: string, source: MetadataResult["source"]): MetadataResult {
   const parsed = extractMetadataFromOcrText(rawText);
 
@@ -315,15 +332,17 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
   }
 
   if (originalVisionOutput && originalVisionOutput.confidence >= confidenceThreshold && metadataHasRequiredFields(originalVisionOutput)) {
+    const crossValidatedVisionOutput = crossValidateVisionSubjectFromRawText(originalVisionOutput);
     void emitMetadataPipelineDiagnostic("completed", {
       traceId,
       context: {
         path: "vision_only",
-        confidence: originalVisionOutput.confidence,
+        confidence: crossValidatedVisionOutput.confidence,
+        subject: crossValidatedVisionOutput.subject,
       },
     });
     return {
-      result: originalVisionOutput,
+      result: crossValidatedVisionOutput,
       originalVisionOutput,
       originalOcrOutput: null,
     };

@@ -7,6 +7,7 @@ import {
   enforceAutoCaptureLimit,
   evaluateAutoCaptureSafety,
   extractMetadataFromOcrText,
+  mergeAutoMetadata,
   mergeParsedToc,
   parseTocFromOcrText,
   scoreMetadataConfidence,
@@ -107,6 +108,39 @@ describe("textbookAutoExtractionService", () => {
     expect(metadata.mhid).toBe("0-07-671685-6");
   });
 
+  it("extracts screenshot copyright-page metadata from mixed-column OCR text", () => {
+    const metadata = extractMetadataFromOcrText([
+      "Inspire Physical Science",
+      "with Earth Science",
+      "FRONT COVER: William Clemente/EyeEm/Getty Images. BACK COVER: William Clemente/EyeEm/Getty Images.",
+      "mheducation.com/prek-12",
+      "STEM",
+      "McGraw-Hill is committed to providing instructional materials in Science, Technology, Engineering, and Mathematics (STEM) that give all students a solid foundation, one that prepares them for college and careers in the 21st century.",
+      "McGraw Hill",
+      "Copyright © 2021 McGraw-Hill Education",
+      "All rights reserved. No part of this publication may be reproduced or distributed in any form or by any means, or stored in a database or retrieval system, without the prior written consent of McGraw-Hill Education, including, but not limited to, network storage or transmission, or broadcast for distance learning.",
+      "Send all inquiries to:",
+      "McGraw-Hill Education",
+      "STEM Learning Solutions Center",
+      "8787 Orion Place",
+      "Columbus, OH 43240",
+      "ISBN: 978-0-07-671685-2",
+      "MHID: 0-07-671685-6",
+      "Printed in the United States of America.",
+    ].join("\n"));
+
+    expect(metadata.title).toBe("Inspire Physical Science");
+    expect(metadata.subtitle).toBe("with Earth Science");
+    expect(metadata.subject).toBe("Science");
+    expect(metadata.publisher).toBe("McGraw Hill");
+    expect(metadata.platformUrl).toBe("https://mheducation.com/prek-12");
+    expect(metadata.gradeBand).toBe("Pre-K-12");
+    expect(metadata.copyrightYear).toBe(2021);
+    expect(metadata.isbn).toBe("9780076716852");
+    expect(metadata.mhid).toBe("0-07-671685-6");
+    expect(metadata.publisherLocation).toBe("McGraw-Hill Education\nSTEM Learning Solutions Center\n8787 Orion Place\nColumbus, OH 43240");
+  });
+
   it("does not treat legal boilerplate as title/subtitle", () => {
     const metadata = extractMetadataFromOcrText([
       "Copyright © 2021 McGraw-Hill Education",
@@ -124,6 +158,36 @@ describe("textbookAutoExtractionService", () => {
     expect(metadata.subtitle).toBeUndefined();
     expect(metadata.platformUrl).toBe("https://mheducation.com/prek-12");
     expect(metadata.publisherLocation).toBe("McGraw-Hill Education\nSTEM Learning Solutions Center\n8787 Orion Place\nColumbus, OH 43240");
+  });
+
+  it("does not promote module headings into textbook metadata", () => {
+    const metadata = extractMetadataFromOcrText([
+      "Student Edition",
+      "Module 1",
+      "The Nature of Science",
+      "Inspire Physical Science with Earth Science",
+      "McGraw-Hill Education",
+    ].join("\n"));
+
+    expect(metadata.title).toBe("Inspire Physical Science With Earth Science");
+    expect(metadata.subtitle).not.toBe("Module 1");
+  });
+
+  it("preserves cover metadata when later OCR looks like section metadata", () => {
+    const merged = mergeAutoMetadata(
+      {
+        title: "Inspire Physical Science With Earth Science",
+        subtitle: "Student Edition",
+        subject: "Science",
+      },
+      {
+        title: "The Nature of Science",
+        subtitle: "Module 1",
+      }
+    );
+
+    expect(merged.title).toBe("Inspire Physical Science With Earth Science");
+    expect(merged.subtitle).toBe("Student Edition");
   });
 
   it("parses TOC lines into chapters and sections", () => {

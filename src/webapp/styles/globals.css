@@ -2224,7 +2224,7 @@ body.body--auto-workspace .placeholder-panel {
 
 @keyframes cf-drop-pulse {
   0%, 100% { border-color: var(--cf-accent); }
-  50% { border-color: color-mix(in srgb, var(--cf-accent) 55%, transparent); }
+  50% { border-color: var(--cf-border-strong); }
 }
 
 .cover-drop-zone {

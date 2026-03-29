@@ -2537,7 +2537,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             type="button"
             className="btn-text ocr-raw-section__label"
             onClick={() => setIsRawOcrExpanded((v) => !v)}
-            aria-expanded={isRawOcrExpanded}
           >
             {isRawOcrExpanded ? "▾" : "▸"} Raw OCR Output
           </button>

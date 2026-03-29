@@ -2203,11 +2203,9 @@ body {
   margin: 0 auto;
 }
 
-body.body--auto-workspace .workflow-card-stack,
-body.body--auto-workspace .placeholder-panel {
-  visibility: hidden;
-  pointer-events: none;
-}
+/* Keep underlying workflow mounted while auto overlay is active.
+   The fixed auto panel visually covers it, so explicit hiding here
+   can unintentionally hide the overlay itself due to ancestor visibility. */
 
 /* ============================================================
    Drop Zone — animated, inviting, interactive
@@ -2277,6 +2275,8 @@ button {
 
 button:not(:disabled):hover {
   transform: scale(1.04);
+  position: relative;
+  z-index: 2;
 }
 
 button:not(:disabled):active {
@@ -2311,6 +2311,11 @@ button:not(:disabled):active {
 
 .workflow-card {
   transition: transform 0.28s ease, opacity 0.28s ease, box-shadow 0.28s ease;
+}
+
+/* Allow active card controls to lift beyond rounded card edges on hover. */
+.workflow-card--active {
+  overflow: visible;
 }
 
 /* ============================================================

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { signInWithGoogle } from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
+import courseForgeIcon from "../../../assets/CourseForge.ico";
 
 /**
  * Login screen for users without an active Firebase session.
@@ -42,7 +43,7 @@ export function LoginPage(): React.JSX.Element {
       <main className="app-main app-main--login">
         <section className="placeholder-panel login-panel">
           <img
-            src="/CourseForge.ico"
+            src={courseForgeIcon}
             alt="CourseForge icon"
             className="placeholder-brand-icon"
           />

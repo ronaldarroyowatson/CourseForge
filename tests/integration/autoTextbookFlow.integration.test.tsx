@@ -126,6 +126,7 @@ describe("auto textbook flow integration", () => {
 
     // Keep integration tests deterministic by opting out of metadata-learning uploads.
     window.localStorage.setItem(METADATA_CORRECTION_STORAGE_KEYS.optedIn, "false");
+    window.localStorage.removeItem(METADATA_CORRECTION_STORAGE_KEYS.corrections);
     window.localStorage.removeItem(AUTO_SESSION_DRAFTS_KEY);
     window.localStorage.removeItem("courseforge.autoSessionDraft.v1");
     metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl.mockClear();

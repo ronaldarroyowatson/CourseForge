@@ -675,6 +675,31 @@ function sanitizeMetadataResult(value: unknown, source: MetadataResultRecord["so
     return trimmed ? trimmed : null;
   };
 
+  // Enhanced ISBN extraction: handle various formats
+  const extractIsbn = (): string | null => {
+    const raw = asText("isbn");
+    if (!raw) {
+      return null;
+    }
+    // Remove common separators and convert to standard format
+    const normalized = raw.replace(/[^0-9Xx]/g, "").toUpperCase();
+    return (normalized.length === 10 || normalized.length === 13) ? normalized : null;
+  };
+
+  // Enhanced copyright year extraction: handle both string and number
+  const extractCopyrightYear = (): number | null => {
+    if (typeof data.copyrightYear === "number" && Number.isInteger(data.copyrightYear)) {
+      return data.copyrightYear;
+    }
+    if (typeof data.copyrightYear === "string") {
+      const parsed = Number.parseInt(data.copyrightYear.trim(), 10);
+      if (Number.isInteger(parsed) && parsed >= 1900 && parsed <= new Date().getFullYear() + 5) {
+        return parsed;
+      }
+    }
+    return null;
+  };
+
   const confidenceRaw = typeof data.confidence === "number" ? data.confidence : 0;
   const confidence = Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : 0;
 
@@ -690,15 +715,24 @@ function sanitizeMetadataResult(value: unknown, source: MetadataResultRecord["so
     series: asText("series"),
     gradeLevel: asText("gradeLevel"),
     subject,
-    copyrightYear: typeof data.copyrightYear === "number" && Number.isInteger(data.copyrightYear) ? data.copyrightYear : null,
-    isbn: asText("isbn"),
+    copyrightYear: extractCopyrightYear(),
+    isbn: extractIsbn(),
     additionalIsbns: Array.isArray(data.additionalIsbns)
-      ? data.additionalIsbns.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim())
+      ? data.additionalIsbns.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => {
+          const normalized = entry.replace(/[^0-9Xx]/g, "").toUpperCase();
+          return (normalized.length === 10 || normalized.length === 13) ? normalized : null;
+        }).filter((x): x is string => x !== null)
       : undefined,
     relatedIsbns: Array.isArray(data.relatedIsbns)
       ? data.relatedIsbns
           .filter((entry): entry is { isbn: string; type: string; note?: string } => Boolean(entry) && typeof (entry as { isbn?: unknown }).isbn === "string" && typeof (entry as { type?: unknown }).type === "string")
-          .map((entry) => ({ isbn: entry.isbn.trim(), type: entry.type.trim(), note: typeof entry.note === "string" && entry.note.trim() ? entry.note.trim() : undefined }))
+          .map((entry) => {
+            const normalizedIsbn = entry.isbn.replace(/[^0-9Xx]/g, "").toUpperCase();
+            return (normalizedIsbn.length === 10 || normalizedIsbn.length === 13) 
+              ? { isbn: normalizedIsbn, type: entry.type.trim(), note: typeof entry.note === "string" && entry.note.trim() ? entry.note.trim() : undefined }
+              : null;
+          })
+          .filter((x): x is { isbn: string; type: string; note?: string } => x !== null)
       : undefined,
     platformUrl: asText("platformUrl"),
     mhid: asText("mhid"),
@@ -1901,17 +1935,20 @@ async function executeCloudOcrExtraction(
         messages: [
           {
             role: "system",
-            content: "You perform OCR from educational screenshots. Return only the extracted text with original line breaks, no commentary.",
+            content: "You perform OCR from educational screenshots. Transcribe every readable character from the entire page. Preserve line breaks and include all columns, headers, footers, legal notices, addresses, URLs, ISBN/MHID lines, and image-credit text. For multi-column layouts, read left column top-to-bottom first, then right column top-to-bottom. Do not skip any section, sidebar, or inset box. Return only plain extracted text with no commentary.",
           },
           {
             role: "user",
             content: [
-              { type: "text", text: "Extract all readable text from this screenshot. Return plain text only." },
+              {
+                type: "text",
+                text: "Extract ALL readable text from this screenshot. Important:\n- Include URL or domain text near the top (e.g. mheducation.com/prek-12)\n- Include all legal/copyright paragraphs verbatim\n- Include any 'Send all inquiries to:' address block with every address line, city, state, ZIP\n- Include all ISBN and MHID lines\n- Include any text in right-hand columns or boxes (e.g. STEM descriptions)\n- Include printing/edition codes at the bottom\nDo not summarize. Do not omit any section. Return plain text only.",
+              },
               { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
             ],
           },
         ],
-        max_tokens: 1800,
+        max_tokens: 3600,
         temperature: 0,
       }),
     });
@@ -2340,7 +2377,7 @@ export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret
       messages: [
         {
           role: "system",
-          content: "You extract textbook metadata from cover and copyright-page images. Return strict JSON only, no markdown fences.",
+          content: "You are a specialized textbook metadata extractor. Extract textbook metadata from cover and copyright-page images with high precision. Return strict JSON only, no markdown fences or extra text.",
         },
         {
           role: "user",
@@ -2348,30 +2385,43 @@ export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret
             {
               type: "text",
               text: [
-                "Read this textbook image and return JSON with keys:",
+                "Extract textbook metadata from this image. Return JSON with these fields (all as strings except confidence/numbers, or null if not found):",
                 "title, subtitle, edition, publisher, publisherLocation, series, gradeLevel, subject, copyrightYear, isbn, additionalIsbns, relatedIsbns, platformUrl, mhid, confidence, rawText.",
-                "Rules:",
-                "- Identify the main title and subtitle if present.",
-                "- Identify labels like Teacher's Edition when relevant.",
-                "- Identify publisher if visible.",
-                "- Identify publisherLocation when the page includes a mailing or business address.",
-                "- Identify copyrightYear when clearly labeled.",
-                "- Identify isbn and additionalIsbns when visible.",
-                "- relatedIsbns must be an array of objects with keys isbn, type, and optional note. Use types student, teacher, digital, workbook, assessment, or other.",
-                "- Identify platformUrl when the publisher website is visible.",
-                "- Identify mhid when explicitly labeled.",
-                "- Ignore decorative text and watermarks.",
-                "- confidence must be a number from 0 to 1.",
-                "- For subject: Always return null. Subject is filled in by the user.",
-                `- pageType context: ${pageType}.`,
-                publisherHint ? `- publisherHint context: ${publisherHint}.` : "",
+                "",
+                "CRITICAL EXTRACTION RULES:",
+                "1. TITLE: Main title of the textbook (not subtitle or edition)",
+                "2. SUBTITLE: Secondary subtitle if present (e.g., 'with Earth Science')",
+                "3. EDITION: Edition information (e.g., '3rd Edition')",
+                "4. PUBLISHER: Publisher name (e.g., 'McGraw-Hill Education', 'Pearson')",
+                "5. PUBLISHER LOCATION: Full mailing/business address including street address, city, state, ZIP code",
+                "6. SERIES: Series name if identifiable from title start word",
+                "7. GRADE LEVEL: Grade span (e.g., 'Grades 7-9', 'Pre-K-12', '8')",
+                "8. SUBJECT: Primary subject area (e.g., 'Science', 'Math', 'English', 'Social Studies') - set to null, we fill this separately",
+                "9. COPYRIGHT YEAR: Year from copyright line (e.g., 2021), must be 4 digits",
+                "10. ISBN: Primary ISBN-13 or ISBN-10 (REQUIRED - look for 978/979 prefix or 10-digit with checksum)",
+                "11. ADDITIONAL ISBNS: Other ISBN numbers on page (array of strings)",
+                "12. RELATED ISBNS: Array of {isbn, type, note} where type is: student|teacher|digital|workbook|assessment|other",
+                "13. PLATFORM URL: Publisher website URL (e.g., 'https://mheducation.com', starts with http/www or .com/.edu etc)",
+                "14. MHID: McGraw-Hill ID if present",
+                "15. rawText: All visible text from image (preserve line breaks)",
+                "",
+                "FIELD EXTRACTION DETAILS:",
+                "- For PUBLISHER LOCATION: Look for 'Send all inquiries to:' section or address blocks with street + city, state ZIP",
+                "- For COPYRIGHT PAGE images, always extract address if visible",
+                "- For ISBN: Never skip - search entire image for 10-13 digit sequences, ISBN labels",
+                "- For platformUrl: Look for domain names, website text, typically 'mheducation.com' or similar",
+                "- For copyrightYear: Extract from 'Copyright © YYYY' or '© YYYY'",
+                "- confidence: 0.0-1.0 based on overall extraction quality",
+                "",
+                `- pageType context: ${pageType} (use this to focus extraction on relevant fields)`,
+                publisherHint ? `- publisherHint context: ${publisherHint} (verified publisher name for this book)` : "",
               ].filter(Boolean).join("\n"),
             },
             { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
           ],
         },
       ],
-      max_tokens: 1200,
+      max_tokens: 1500,
       temperature: 0,
       response_format: {
         type: "json_object",

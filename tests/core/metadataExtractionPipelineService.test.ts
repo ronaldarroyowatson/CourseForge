@@ -15,7 +15,10 @@ vi.mock("../../src/firebase/functions", () => ({
   functionsClient: {},
 }));
 
-import { extractMetadataWithOcrFallbackFromDataUrl } from "../../src/core/services/metadataExtractionPipelineService";
+import {
+  extractMetadataWithOcrFallbackFromDataUrl,
+  readMetadataPipelineRuntimeStatus,
+} from "../../src/core/services/metadataExtractionPipelineService";
 
 describe("metadataExtractionPipelineService", () => {
   beforeEach(() => {
@@ -47,6 +50,116 @@ describe("metadataExtractionPipelineService", () => {
     expect(result.result.source).toBe("vision");
     expect(result.result.title).toBe("Algebra 1");
     expect(ocrMock).not.toHaveBeenCalled();
+  });
+
+  it("cross-validates a high-confidence vision subject against screenshot raw text", async () => {
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "Inspire Physical Science",
+            subtitle: "with Earth Science",
+            publisher: "McGraw-Hill Education",
+            subject: "ELA",
+            confidence: 0.93,
+            rawText: [
+              "Inspire Physical Science",
+              "with Earth Science",
+              "mheducation.com/prek-12",
+              "McGraw Hill",
+              "Science, Technology, Engineering, and Mathematics (STEM)",
+              "Copyright © 2021 McGraw-Hill Education",
+              "ISBN: 978-0-07-671685-2",
+              "MHID: 0-07-671685-6",
+            ].join("\n"),
+          },
+        },
+      },
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "title", publisherHint: "McGraw-Hill Education" }
+    );
+
+    expect(result.result.source).toBe("vision");
+    expect(result.result.subject).toBe("Science");
+    expect(ocrMock).not.toHaveBeenCalled();
+  });
+
+  it("infers grade level from platform URL for high-confidence vision-only metadata", async () => {
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "Inspire Physical Science",
+            publisher: "McGraw-Hill Education",
+            confidence: 0.93,
+            platformUrl: "mheducation.com/prek-12",
+            rawText: "Inspire Physical Science\nmheducation.com/prek-12",
+          },
+        },
+      },
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "cover", publisherHint: "McGraw-Hill Education" }
+    );
+
+    expect(result.result.source).toBe("vision");
+    expect(result.result.gradeLevel).toBe("Pre-K-12");
+    expect(ocrMock).not.toHaveBeenCalled();
+  });
+
+  it("forces OCR fallback for copyright-like pages when vision misses critical fields", async () => {
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "STEM",
+            publisher: "McGraw-Hill Education",
+            confidence: 0.96,
+            copyrightYear: "2021",
+            rawText: [
+              "Copyright 2021 McGraw-Hill Education",
+              "All rights reserved. No part of this publication may be reproduced.",
+              "Send all inquiries to:",
+              "mheducation.com/prek-12",
+              "STEM",
+            ].join("\n"),
+          },
+        },
+      },
+    });
+
+    ocrMock.mockResolvedValue({
+      text: [
+        "mheducation.com/prek-12",
+        "Send all inquiries to:",
+        "McGraw-Hill Education",
+        "STEM Learning Solutions Center",
+        "8787 Orion Place",
+        "Columbus, OH 43240",
+        "ISBN: 978-0-07-671685-2",
+        "Copyright © 2021 McGraw-Hill Education",
+      ].join("\n"),
+      providerId: "cloud_github_models_vision",
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "title", publisherHint: "McGraw-Hill Education" }
+    );
+
+    expect(ocrMock).toHaveBeenCalledTimes(1);
+    expect(result.result.source).toBe("vision+ocr");
+    expect(result.result.isbn).toBe("9780076716852");
+    expect(result.result.publisherLocation).toContain("Columbus, OH 43240");
+    expect(result.result.platformUrl).toContain("mheducation.com/prek-12");
   });
 
   it("falls back to OCR when vision response is low confidence", async () => {
@@ -204,6 +317,30 @@ describe("metadataExtractionPipelineService", () => {
     expect(result.originalOcrOutput?.providerId).toBe("cloud_openai_vision");
   });
 
+  it("persists pipeline runtime telemetry for OCR fallback path", async () => {
+    callableMock.mockRejectedValue(new Error("vision unavailable"));
+    ocrMock.mockResolvedValue({
+      text: "Inspire Physical Science\nwith Earth Science\nISBN: 978-0-07-671685-2",
+      providerId: "cloud_openai_vision",
+    });
+
+    await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "title", publisherHint: "McGraw-Hill Education" }
+    );
+
+    const runtime = readMetadataPipelineRuntimeStatus();
+    expect(runtime.pageType).toBe("title");
+    expect(runtime.stage).toBe("completed");
+    expect(runtime.path).toBe("ocr_only");
+    expect(runtime.secondaryAgent.attempted).toBe(true);
+    expect(runtime.secondaryAgent.succeeded).toBe(false);
+    expect(runtime.ocr.providerId).toBe("cloud_openai_vision");
+    expect(runtime.ocr.rawTextLength).toBeGreaterThan(10);
+    expect(runtime.parsedFieldsCount).toBeGreaterThan(0);
+    expect(runtime.parsedFields).toContain("title");
+  });
+
   it("preserves raw OCR and returns parsed metadata for downstream form mapping", async () => {
     callableMock.mockResolvedValue({
       data: {
@@ -245,5 +382,393 @@ describe("metadataExtractionPipelineService", () => {
     expect(result.result.subject).toBe("Science");
     expect(result.result.publisher).toContain("McGraw");
     expect(result.result.isbn).toBe("9780076716852");
+  });
+
+  // Phase 2: Enhanced Metadata Parsing Agent Tests
+  describe("Phase 2: Vision agent field mapping and validation", () => {
+    it("correctly maps ISBN from vision model output with hyphens", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "The Nature of Science",
+              isbn: "978-0-07-671685-2",  // With hyphens - should be normalized by sanitization
+              confidence: 0.85,
+              rawText: "The Nature of Science\nISBN: 978-0-07-671685-2",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      // Should normalize to 13-digit ISBN without hyphens via sanitizeMetadataResult
+      expect(result.result.isbn).toBe("9780076716852");
+    });
+
+    it("correctly maps ISBN from vision model output without formatting", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Algebra",
+              isbn: "9780076716852",  // No hyphens - should pass through
+              confidence: 0.85,
+              rawText: "Algebra\n9780076716852",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      expect(result.result.isbn).toBe("9780076716852");
+    });
+
+    it("correctly maps copyrightYear when vision returns it as a number", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Science Textbook",
+              copyrightYear: 2021,  // As number
+              confidence: 0.85,
+              rawText: "Copyright © 2021",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      expect(result.result.copyrightYear).toBe(2021);
+    });
+
+    it("correctly maps copyrightYear when vision returns it as a string", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Science Textbook",
+              copyrightYear: "2021",  // As string - sanitization should convert to number
+              confidence: 0.85,
+              rawText: "Copyright © 2021",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      // Sanitization should convert string to number
+      expect(result.result.copyrightYear).toBe(2021);
+    });
+
+    it("correctly maps publisherLocation from vision model output", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Inspire Physical Science",
+              publisher: "McGraw-Hill Education",
+              publisherLocation: "8787 Orion Place\nColumbus, OH 43240",
+              confidence: 0.85,
+              rawText: "Inspire Physical Science\nMcGraw-Hill Education\n8787 Orion Place\nColumbus, OH 43240",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: "McGraw-Hill Education" }
+      );
+
+      expect(result.result.publisherLocation).toBeDefined();
+      expect(result.result.publisherLocation).toContain("Columbus, OH 43240");
+    });
+
+    it("correctly maps platformUrl from vision model output", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Science Textbook",
+              platformUrl: "https://mheducation.com/prek-12",
+              confidence: 0.85,
+              rawText: "mheducation.com/prek-12",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      expect(result.result.platformUrl).toBe("https://mheducation.com/prek-12");
+    });
+
+    it("correctly handles multiple related ISBNs with types", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Inspire Physical Science",
+              isbn: "9780076716852",  // Already normalized
+              relatedIsbns: [
+                { isbn: "978-0-07-671700-2", type: "teacher", note: "Teacher Edition" },
+                { isbn: "978-0-07-671722-4", type: "digital", note: "Online Access" },
+              ],
+              confidence: 0.85,
+              rawText: "ISBNs listed",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      expect(result.result.isbn).toBe("9780076716852");
+      expect(result.result.relatedIsbns).toHaveLength(2);
+      expect(result.result.relatedIsbns).toContainEqual(
+        expect.objectContaining({ isbn: "9780076717002", type: "teacher" })
+      );
+    });
+
+    it("normalizes ISBNs in additionalIsbns array", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Textbook",
+              isbn: "9780076716852",
+              additionalIsbns: [
+                "978-0-07-671700-2",  // With hyphens - should be normalized
+                "978-0-07-671722-4",  // With hyphens - should be normalized
+              ],
+              confidence: 0.85,
+              rawText: "Multiple ISBNs",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      expect(result.result.additionalIsbns).toEqual([
+        "9780076717002",  // Normalized
+        "9780076717224",  // Normalized
+      ]);
+    });
+
+    it("handles malformed ISBN in related ISBNs (filters invalid ones)", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Textbook",
+              isbn: "9780076716852",
+              relatedIsbns: [
+                { isbn: "978-0-07-671700-2", type: "teacher" },
+                { isbn: "invalid-isbn-123", type: "digital" },  // Invalid - should be filtered
+                { isbn: "9780076717222", type: "workbook" },
+              ],
+              confidence: 0.85,
+              rawText: "ISBNs with one invalid",
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null }
+      );
+
+      // Should filter out the invalid ISBN (less than 10 digits after normalization)
+      expect(result.result.relatedIsbns?.length).toBeLessThanOrEqual(2);
+      expect(result.result.relatedIsbns?.some((x) => x.isbn === "9780076717222")).toBe(true);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Permanent validation suite: McGraw-Hill copyright page — pipeline path
+  // Verifies Agent A (OCR) output flows correctly through Agent B (vision/parser)
+  // and populates all required metadata fields every time.
+  // ────────────────────────────────────────────────────────────────────────────
+  describe("McGraw-Hill copyright page — pipeline permanent validation", () => {
+    const MCGRAW_FULL_OCR_TEXT = [
+      "mheducation.com/prek-12",
+      "McGraw Hill",
+      "Copyright © 2021 McGraw-Hill Education",
+      "All rights reserved. No part of this publication may be reproduced or distributed in any form or by any means, or stored in a database or retrieval system, without the prior written consent of McGraw-Hill Education, including, but not limited to, network storage or transmission, or broadcast for distance learning.",
+      "Send all inquiries to:",
+      "McGraw-Hill Education",
+      "STEM Learning Solutions Center",
+      "8787 Orion Place",
+      "Columbus, OH 43240",
+      "ISBN: 978-0-07-671685-2",
+      "MHID: 0-07-671685-6",
+      "Printed in the United States of America.",
+      "3 4 5 6 7 8 LWI 24 23 22 21",
+      "STEM",
+      "McGraw-Hill is committed to providing instructional materials in Science, Technology, Engineering, and Mathematics (STEM) that give all students a solid foundation, one that prepares them for college and careers in the 21st century.",
+    ].join("\n");
+
+    it("pipeline (vision low-confidence → OCR fallback): extracts isbn from copyright page", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: { title: "", confidence: 0.2, rawText: "" },
+          },
+        },
+      });
+      ocrMock.mockResolvedValue({ text: MCGRAW_FULL_OCR_TEXT, providerId: "cloud_openai_vision" });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: "McGraw-Hill Education" }
+      );
+
+      expect(result.result.isbn).toBe("9780076716852");
+    });
+
+    it("pipeline (vision low-confidence → OCR fallback): extracts copyrightYear from copyright page", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: { title: "", confidence: 0.2, rawText: "" },
+          },
+        },
+      });
+      ocrMock.mockResolvedValue({ text: MCGRAW_FULL_OCR_TEXT, providerId: "cloud_openai_vision" });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: "McGraw-Hill Education" }
+      );
+
+      expect(result.result.copyrightYear).toBe(2021);
+    });
+
+    it("pipeline (vision low-confidence → OCR fallback): extracts platformUrl from copyright page", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: { title: "", confidence: 0.2, rawText: "" },
+          },
+        },
+      });
+      ocrMock.mockResolvedValue({ text: MCGRAW_FULL_OCR_TEXT, providerId: "cloud_openai_vision" });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: "McGraw-Hill Education" }
+      );
+
+      expect(result.result.platformUrl).toBe("https://mheducation.com/prek-12");
+    });
+
+    it("pipeline (vision low-confidence → OCR fallback): extracts gradeBand from copyright page URL", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: { title: "", confidence: 0.2, rawText: "" },
+          },
+        },
+      });
+      ocrMock.mockResolvedValue({ text: MCGRAW_FULL_OCR_TEXT, providerId: "cloud_openai_vision" });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: "McGraw-Hill Education" }
+      );
+
+      expect(result.result.gradeLevel).toBe("Pre-K-12");
+    });
+
+    it("pipeline (vision low-confidence → OCR fallback): extracts publisherLocation from copyright page", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: { title: "", confidence: 0.2, rawText: "" },
+          },
+        },
+      });
+      ocrMock.mockResolvedValue({ text: MCGRAW_FULL_OCR_TEXT, providerId: "cloud_openai_vision" });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: "McGraw-Hill Education" }
+      );
+
+      expect(result.result.publisherLocation).toBeDefined();
+      expect(result.result.publisherLocation).toContain("Columbus, OH 43240");
+    });
+
+    it("pipeline (vision succeeds with all fields): isbn, copyrightYear, platformUrl, gradeBand all set", async () => {
+      callableMock.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            metadata: {
+              title: "Inspire Physical Science",
+              publisher: "McGraw-Hill Education",
+              isbn: "978-0-07-671685-2",
+              copyrightYear: "2021",
+              platformUrl: "mheducation.com/prek-12",
+              publisherLocation: "McGraw-Hill Education\nSTEM Learning Solutions Center\n8787 Orion Place\nColumbus, OH 43240",
+              gradeLevel: "Pre-K-12",
+              confidence: 0.92,
+              rawText: MCGRAW_FULL_OCR_TEXT,
+            },
+          },
+        },
+      });
+
+      const result = await extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: "McGraw-Hill Education" }
+      );
+
+      expect(result.result.isbn).toBe("9780076716852");
+      expect(result.result.copyrightYear).toBe(2021);
+      expect(result.result.platformUrl).toContain("mheducation.com/prek-12");
+      expect(result.result.publisherLocation).toContain("Columbus, OH 43240");
+    });
   });
 });

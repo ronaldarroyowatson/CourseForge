@@ -52,9 +52,128 @@ $PkgPath    = Join-Path $RepoRoot "package.json"
 $ChangelogPath = Join-Path $RepoRoot "CHANGELOG.md"
 $ReleaseDir = Join-Path $RepoRoot "release"
 $ReleaseNotesDir = Join-Path $RepoRoot "docs\releases"
+$Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+$MainChangelogReleaseCount = 12
+$ArchivePageReleaseCount = 50
+
+function Read-Utf8File {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  return [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
+}
+
+function Write-Utf8File {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Content
+  )
+
+  [System.IO.File]::WriteAllText($Path, $Content, $Utf8NoBom)
+}
+
+function Split-ChangelogContent {
+  param([Parameter(Mandatory = $true)][string]$Content)
+
+  $normalized = $Content -replace "`r`n", "`n"
+  $headerMarker = "## [Unreleased]"
+  $headerIndex = $normalized.IndexOf($headerMarker)
+  if ($headerIndex -lt 0) {
+    throw "Could not find '## [Unreleased]' section in CHANGELOG.md."
+  }
+
+  $header = $normalized.Substring(0, $headerIndex).TrimEnd("`n")
+  $sectionsText = $normalized.Substring($headerIndex)
+  $matches = [regex]::Matches($sectionsText, '(?ms)^## \[(?<title>[^\]]+)\]\n.*?(?=^## \[|\z)')
+  if ($matches.Count -eq 0) {
+    throw "Could not parse CHANGELOG.md sections."
+  }
+
+  $unreleased = $null
+  $releases = New-Object System.Collections.Generic.List[string]
+  foreach ($match in $matches) {
+    $section = $match.Value.TrimEnd()
+    if ($match.Groups['title'].Value -eq 'Unreleased') {
+      $unreleased = $section
+      continue
+    }
+
+    $releases.Add($section)
+  }
+
+  if (-not $unreleased) {
+    throw "Could not parse the Unreleased section from CHANGELOG.md."
+  }
+
+  return [pscustomobject]@{
+    Header = $header
+    Unreleased = $unreleased
+    Releases = @($releases)
+  }
+}
+
+function Publish-ChangelogPages {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Content
+  )
+
+  $parts = Split-ChangelogContent -Content $Content
+  $recentReleases = @($parts.Releases | Select-Object -First $MainChangelogReleaseCount)
+  $archivedReleases = @($parts.Releases | Select-Object -Skip $MainChangelogReleaseCount)
+  $repoDir = Split-Path -Parent $Path
+  $generatedArchiveNames = New-Object System.Collections.Generic.List[string]
+
+  if ($archivedReleases.Count -gt 0) {
+    $pageNumber = 1
+    for ($index = 0; $index -lt $archivedReleases.Count; $index += $ArchivePageReleaseCount) {
+      $count = [Math]::Min($ArchivePageReleaseCount, $archivedReleases.Count - $index)
+      $pageEntries = $archivedReleases[$index..($index + $count - 1)]
+      $pageName = "CHANGELOG-page-$pageNumber.md"
+      $pagePath = Join-Path $repoDir $pageName
+      $generatedArchiveNames.Add($pageName) | Out-Null
+
+      $pageContent = @(
+        "# Changelog Archive Page $pageNumber",
+        "",
+        "Older CourseForge release notes continued from CHANGELOG.md.",
+        "",
+        ($pageEntries -join "`n`n")
+      ) -join "`n"
+
+      Write-Utf8File -Path $pagePath -Content $pageContent
+      $pageNumber += 1
+    }
+  }
+
+  Get-ChildItem $repoDir -File -Filter "CHANGELOG-page-*.md" |
+    Where-Object { $generatedArchiveNames -notcontains $_.Name } |
+    Remove-Item -Force
+
+  $mainSections = New-Object System.Collections.Generic.List[string]
+  $mainSections.Add($parts.Header.TrimEnd()) | Out-Null
+  $mainSections.Add($parts.Unreleased.TrimEnd()) | Out-Null
+
+  if ($generatedArchiveNames.Count -gt 0) {
+    $archiveLines = @(
+      "### Archive Pages",
+      "",
+      "Older release entries are continued in the following paged changelog files:",
+      ""
+    )
+    $archiveLines += $generatedArchiveNames | ForEach-Object { "- $_" }
+    $mainSections.Add(($archiveLines -join "`n")) | Out-Null
+  }
+
+  foreach ($section in $recentReleases) {
+    $mainSections.Add($section.TrimEnd()) | Out-Null
+  }
+
+  $finalContent = (($mainSections -join "`n`n").TrimEnd() + "`n") -replace "`n", "`r`n"
+  Write-Utf8File -Path $Path -Content $finalContent
+}
 
 # ---- Read current version ----
-$pkgRaw  = Get-Content $PkgPath -Raw
+$pkgRaw  = Read-Utf8File $PkgPath
 $pkg     = $pkgRaw | ConvertFrom-Json
 $current = $pkg.version
 
@@ -133,7 +252,7 @@ Write-Host ""
 Write-Host "--- Bumping version $current -> $newVersion ---" -ForegroundColor Cyan
 # Replace only the exact "version": "<current>" line to avoid matching version strings in dependencies
 $pkgUpdated = $pkgRaw -replace ('"version": "' + [regex]::Escape($current) + '"'), ('"version": "' + $newVersion + '"')
-[System.IO.File]::WriteAllText($PkgPath, $pkgUpdated, (New-Object System.Text.UTF8Encoding $false))
+Write-Utf8File -Path $PkgPath -Content $pkgUpdated
 
 # ---- Create release notes doc ----
 Write-Host "--- Creating docs/releases/$newVersion.md ---" -ForegroundColor Cyan
@@ -158,11 +277,11 @@ $Description
 
 - Released $today
 "@
-[System.IO.File]::WriteAllText($releaseNotesPath, $notesContent, (New-Object System.Text.UTF8Encoding $false))
+Write-Utf8File -Path $releaseNotesPath -Content $notesContent
 
 # ---- Update CHANGELOG ----
 Write-Host "--- Updating CHANGELOG.md ---" -ForegroundColor Cyan
-$changelog = Get-Content $ChangelogPath -Raw
+$changelog = Read-Utf8File $ChangelogPath
 
 $newEntry = @"
 
@@ -177,7 +296,7 @@ $newEntry = @"
 # Insert the new entry right after "## [Unreleased]"
 if ($changelog -match '## \[Unreleased\]') {
   $changelog = $changelog -replace '(## \[Unreleased\])', "`$1$newEntry"
-  [System.IO.File]::WriteAllText($ChangelogPath, $changelog, (New-Object System.Text.UTF8Encoding $false))
+  Publish-ChangelogPages -Path $ChangelogPath -Content $changelog
 } else {
   Write-Host "[WARNING] Could not find '## [Unreleased]' section in CHANGELOG.md. Skipping CHANGELOG update." -ForegroundColor Yellow
 }

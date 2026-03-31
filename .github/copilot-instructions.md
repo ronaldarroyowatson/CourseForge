@@ -66,10 +66,29 @@ Before marking any bug fix complete, confirm:
 
 ## Project Conventions
 
-- Source root: `src/`
-- Version in: `package.json` (root)
-- Release zips: `release/CourseForge-<version>-portable.zip` and `release/CourseForge-<version>-windows.zip`
-- Release notes: `docs/releases/<version>.md`
-- CHANGELOG: `CHANGELOG.md` (root)
-- Git tags: `v<version>` (e.g. `v1.4.11`)
-- GitHub owner: `ronaldarroyowatson` / repo: `CourseForge`
+
+---
+
+## Changelog Size Management
+
+`bugfix-release.ps1` automatically keeps `CHANGELOG.md` under **300 KB** using a two-tier system:
+
+| Setting | Value | Meaning |
+|---------|-------|---------|
+| `$MainChangelogReleaseCount` | 12 | Maximum recent releases kept in `CHANGELOG.md` |
+| `$ArchivePageReleaseCount` | 50 | Releases per archive page |
+| `$MaxChangelogSizeKB` | 300 | Hard size ceiling for `CHANGELOG.md` |
+
+**How it works on every release:**
+1. The current `CHANGELOG.md` size is reported before the new entry is inserted.
+2. A warning is shown if the file is already >80% of the 300 KB limit.
+3. After inserting the new entry, `Publish-ChangelogPages` builds the main file with the 12 most recent releases.
+4. If the built content exceeds 300 KB, entries are moved to archive pages **two-at-a-time** until it fits.
+5. Archived entries are written to `CHANGELOG-page-1.md`, `CHANGELOG-page-2.md`, … at the repo root.
+6. Stale archive pages from previous runs are automatically deleted.
+7. The final size and entry counts are printed for every run.
+
+**Rules:**
+- `CHANGELOG.md` always retains the `## [Unreleased]` section and an archive page index block.
+- Archive pages are tracked by git — they are the permanent historical record.
+- Never manually edit `CHANGELOG-page-N.md` files; they are fully regenerated each release.

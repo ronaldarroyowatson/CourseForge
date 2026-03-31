@@ -486,22 +486,23 @@ function fromMetadataFormState(form: MetadataFormState): AutoTextbookMetadata {
 }
 
 function metadataResultToAutoMetadata(metadata: MetadataResult): AutoTextbookMetadata {
-  const inferredSubject = metadata.subject ?? extractMetadataFromOcrText(metadata.rawText).subject ?? null;
+  const rawExtracted = extractMetadataFromOcrText(metadata.rawText);
+  const inferredSubject = metadata.subject ?? rawExtracted.subject ?? null;
   return {
-    title: metadata.title ?? undefined,
-    subtitle: metadata.subtitle ?? undefined,
-    edition: metadata.edition ?? undefined,
-    publisher: metadata.publisher ?? undefined,
-    publisherLocation: metadata.publisherLocation ?? undefined,
-    seriesName: metadata.series ?? undefined,
-    gradeBand: metadata.gradeLevel ?? undefined,
+    title: metadata.title ?? rawExtracted.title ?? undefined,
+    subtitle: metadata.subtitle ?? rawExtracted.subtitle ?? undefined,
+    edition: metadata.edition ?? rawExtracted.edition ?? undefined,
+    publisher: metadata.publisher ?? rawExtracted.publisher ?? undefined,
+    publisherLocation: metadata.publisherLocation ?? rawExtracted.publisherLocation ?? undefined,
+    seriesName: metadata.series ?? rawExtracted.seriesName ?? undefined,
+    gradeBand: metadata.gradeLevel ?? rawExtracted.gradeBand ?? undefined,
     subject: inferredSubject ?? undefined,
-    copyrightYear: metadata.copyrightYear ?? undefined,
-    isbn: metadata.isbn ?? undefined,
+    copyrightYear: metadata.copyrightYear ?? rawExtracted.copyrightYear ?? undefined,
+    isbn: metadata.isbn ?? rawExtracted.isbn ?? undefined,
     additionalIsbns: metadata.additionalIsbns,
     relatedIsbns: metadata.relatedIsbns,
-    platformUrl: metadata.platformUrl ?? undefined,
-    mhid: metadata.mhid ?? undefined,
+    platformUrl: metadata.platformUrl ?? rawExtracted.platformUrl ?? undefined,
+    mhid: metadata.mhid ?? rawExtracted.mhid ?? undefined,
   };
 }
 

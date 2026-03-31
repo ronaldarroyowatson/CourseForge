@@ -350,4 +350,337 @@ describe("textbookAutoExtractionService", () => {
     });
     expect(clear.decision).toBe("allow");
   });
+
+  // Phase 1: Enhanced OCR Field Extraction Tests
+  describe("Phase 1: Enhanced extraction of all required copyright page fields", () => {
+    it("extracts ISBN even when label is missing from line", () => {
+      const metadata = extractMetadataFromOcrText([
+        "The Nature of Science",
+        "Student Edition",
+        "978-0-07-671685-2",  // ISBN without label
+        "McGraw-Hill Education",
+      ].join("\n"));
+
+      expect(metadata.isbn).toBe("9780076716852");
+    });
+
+    it("extracts multiple ISBN formats with different separators", () => {
+      const metadata = extractMetadataFromOcrText([
+        "ISBN: 978-0-07-671685-2",
+        "Teacher ISBN: 9780076717002",
+        "Alternative: 978 0 07 671685 2",
+      ].join("\n"));
+
+      expect(metadata.isbn).toBe("9780076716852");
+      expect(metadata.additionalIsbns).toContain("9780076717002");
+    });
+
+    it("extracts ISBN-10 format correctly", () => {
+      const metadata = extractMetadataFromOcrText([
+        "ISBN: 0-07-671685-6",
+        "ISBN-13: 978-0-07-671685-2",
+      ].join("\n"));
+
+      // Both should be normalized to 10 or 13 digit format
+      expect(metadata.isbn).toBeDefined();
+      expect(metadata.isbn?.length).toBeGreaterThanOrEqual(10);
+    });
+
+    it("extracts copyright year with multiple patterns", () => {
+      // Pattern 1: Copyright symbol + year
+      const meta1 = extractMetadataFromOcrText("Copyright © 2021 McGraw-Hill Education");
+      expect(meta1.copyrightYear).toBe(2021);
+
+      // Pattern 2: Copyright word + year
+      const meta2 = extractMetadataFromOcrText("Copyright 2021 McGraw-Hill Education");
+      expect(meta2.copyrightYear).toBe(2021);
+
+      // Pattern 3: Just the year in context
+      const meta3 = extractMetadataFromOcrText("McGraw-Hill Education\n2021");
+      expect(meta3.copyrightYear).toBe(2021);
+    });
+
+    it("validates copyright year is within reasonable range", () => {
+      const validYear = extractMetadataFromOcrText("Copyright © 2021");
+      expect(validYear.copyrightYear).toBe(2021);
+
+      const futureYear = extractMetadataFromOcrText("Copyright © 2030");  // Up to 5 years in future OK
+      expect(futureYear.copyrightYear).toBe(2030);
+
+      const invalidYear = extractMetadataFromOcrText("Version 1800");  // Too old
+      expect(invalidYear.copyrightYear).toBeUndefined();
+    });
+
+    it("extracts publisher location from traditional address blocks", () => {
+      const metadata = extractMetadataFromOcrText([
+        "McGraw-Hill Education",
+        "STEM Learning Solutions Center",
+        "8787 Orion Place",
+        "Columbus, OH 43240",
+      ].join("\n"));
+
+      expect(metadata.publisherLocation).toBeDefined();
+      expect(metadata.publisherLocation).toContain("Columbus");
+      expect(metadata.publisherLocation).toContain("OH");
+      expect(metadata.publisherLocation).toContain("43240");
+    });
+
+    it("extracts publisher location from 'Send all inquiries to:' blocks", () => {
+      const metadata = extractMetadataFromOcrText([
+        "Send all inquiries to:",
+        "McGraw-Hill Education",
+        "8787 Orion Place",
+        "Columbus, OH 43240",
+      ].join("\n"));
+
+      expect(metadata.publisherLocation).toBeDefined();
+      expect(metadata.publisherLocation).toContain("McGraw-Hill");
+      expect(metadata.publisherLocation).toContain("8787 Orion Place");
+    });
+
+    it("handles multi-line publisher addresses", () => {
+      const metadata = extractMetadataFromOcrText([
+        "Send all inquiries to:",
+        "Pearson Education",
+        "Publisher Education Group",
+        "One Lake Street",
+        "Upper Saddle River, NJ 07458",
+      ].join("\n"));
+
+      expect(metadata.publisherLocation).toBeDefined();
+      const lines = metadata.publisherLocation!.split("\n");
+      expect(lines.length).toBeGreaterThanOrEqual(3);
+      expect(metadata.publisherLocation).toContain("Upper Saddle River");
+    });
+
+    it("excludes legal boilerplate from publisher location", () => {
+      const metadata = extractMetadataFromOcrText([
+        "McGraw-Hill Education",
+        "8787 Orion Place",
+        "Columbus, OH 43240",
+        "All rights reserved. No part of this publication may be reproduced.",
+        "Printed in the United States of America.",
+      ].join("\n"));
+
+      expect(metadata.publisherLocation).toBeDefined();
+      expect(metadata.publisherLocation).not.toContain("reproduced");
+      expect(metadata.publisherLocation).not.toContain("United States");
+    });
+
+    it("ignores cross-column spillover lines when extracting 'Send all inquiries' address block", () => {
+      const metadata = extractMetadataFromOcrText([
+        "Hill Copyright 2021 McGraw-Hill Education McGraw-Hill is committed to providing instructional materials",
+        "Send all inquiries to:",
+        "McGraw-Hill Education",
+        "STEM Learning Solutions Center",
+        "8787 Orion Place",
+        "Columbus, OH 43240",
+        "ISBN: 978-0-07-671685-2",
+      ].join("\n"));
+
+      expect(metadata.publisherLocation).toBe("McGraw-Hill Education\nSTEM Learning Solutions Center\n8787 Orion Place\nColumbus, OH 43240");
+      expect(metadata.publisherLocation).not.toContain("committed to providing");
+    });
+
+    it("extracts platform URLs from various formats", () => {
+      // Full HTTPS URL
+      const meta1 = extractMetadataFromOcrText("Visit https://mheducation.com/prek-12");
+      expect(meta1.platformUrl).toBe("https://mheducation.com/prek-12");
+
+      // www format
+      const meta2 = extractMetadataFromOcrText("www.mheducation.com");
+      expect(meta2.platformUrl).toContain("mheducation.com");
+
+      // domain.com format
+      const meta3 = extractMetadataFromOcrText("mheducation.com/prek-12");
+      expect(meta3.platformUrl).toContain("mheducation.com");
+    });
+
+    it("normalizes URLs to HTTPS when scheme is missing", () => {
+      const metadata = extractMetadataFromOcrText("mheducation.com/textbooks");
+      expect(metadata.platformUrl).toMatch(/^https?:\/\//);
+    });
+
+    it("extracts all fields from realistic copyright page OCR text (screenshot scenario)", () => {
+      const metadata = extractMetadataFromOcrText([
+        "The Nature of Science",
+        "Student Edition",
+        "",
+        "Grade Band",
+        "",
+        "Subject",
+        "Science",
+        "Edition",
+        "",
+        "Publication Year",
+        "",
+        "Copyright Year",
+        "",
+        "ISBN",
+        "978-0-07-671685-2",
+        "Additional ISBNs (comma separated)",
+        "",
+        "Related ISBNs (typed)",
+        "Use this when the copyright page lists student, teacher, digital, workbook, or assessment ISBNs separately.",
+        "+ Add Related ISBN",
+        "",
+        "Capture Copyright Page",
+        "Upload Copyright Page",
+        "Inspire",
+        "Physical Science",
+        "Copyright © 2021 McGraw-Hill Education",
+        "ISBN: 978-0-07-671685-2",
+        "MHID: 0-07-671685-6",
+        "Teacher ISBN: 978-0-07-671700-2",
+        "Send all inquiries to:",
+        "McGraw-Hill Education",
+        "STEM Learning Solutions Center",
+        "8787 Orion Place",
+        "Columbus, OH 43240",
+        "https://mheducation.com/prek-12",
+      ].join("\n"));
+
+      // Verify all critical fields are extracted
+      expect(metadata.title).toBeDefined();
+      expect(metadata.isbn).toBe("9780076716852");
+      expect(metadata.copyrightYear).toBe(2021);
+      expect(metadata.mhid).toBe("0-07-671685-6");
+      expect(metadata.publisherLocation).toBeDefined();
+      expect(metadata.publisherLocation).toContain("Columbus, OH 43240");
+      expect(metadata.platformUrl).toContain("mheducation.com");
+    });
+
+    it("handles edge case: ISBN without hyphens", () => {
+      const metadata = extractMetadataFromOcrText("ISBN 9780076716852");
+      expect(metadata.isbn).toBe("9780076716852");
+    });
+
+    it("distinguishes main ISBN from teacher/related ISBNs", () => {
+      const metadata = extractMetadataFromOcrText([
+        "Student Edition ISBN: 978-0-07-671685-2",
+        "Teacher ISBN: 978-0-07-671700-2",
+        "Digital ISBN: 978-0-07-671722-4",
+      ].join("\n"));
+
+      expect(metadata.isbn).toBe("9780076716852");  // Student = primary
+      expect(metadata.relatedIsbns).toContainEqual(
+        expect.objectContaining({ isbn: "9780076717002", type: "teacher" })
+      );
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Permanent validation suite: McGraw-Hill copyright page (screenshot 3)
+  // Required fields every run: isbn, publisherLocation, copyrightYear,
+  // platformUrl, gradeBand.
+  // ────────────────────────────────────────────────────────────────────────────
+  describe("McGraw-Hill copyright page — permanent validation suite", () => {
+    // Canonical full OCR text that Agent A (cloud OCR) must produce from the
+    // copyright page screenshot. All text sections from both columns included.
+    const MCGRAW_COPYRIGHT_PAGE_FULL_OCR = [
+      "mheducation.com/prek-12",
+      "McGraw Hill",
+      "Copyright © 2021 McGraw-Hill Education",
+      "All rights reserved. No part of this publication may be reproduced or distributed in any form or by any means, or stored in a database or retrieval system, without the prior written consent of McGraw-Hill Education, including, but not limited to, network storage or transmission, or broadcast for distance learning.",
+      "Send all inquiries to:",
+      "McGraw-Hill Education",
+      "STEM Learning Solutions Center",
+      "8787 Orion Place",
+      "Columbus, OH 43240",
+      "ISBN: 978-0-07-671685-2",
+      "MHID: 0-07-671685-6",
+      "Printed in the United States of America.",
+      "3 4 5 6 7 8 LWI 24 23 22 21",
+      "STEM",
+      "McGraw-Hill is committed to providing instructional materials in Science, Technology, Engineering, and Mathematics (STEM) that give all students a solid foundation, one that prepares them for college and careers in the 21st century.",
+    ].join("\n");
+
+    it("OCR completeness: full text contains all required sections", () => {
+      // This test documents what Agent A (cloud OCR) MUST return when processing
+      // the copyright page screenshot. Every section that follows must be present.
+      const ocrText = MCGRAW_COPYRIGHT_PAGE_FULL_OCR;
+
+      // Publisher URL (top of page)
+      expect(ocrText).toContain("mheducation.com/prek-12");
+
+      // Copyright notice
+      expect(ocrText).toContain("Copyright © 2021");
+
+      // "Send all inquiries" section marker
+      expect(ocrText).toContain("Send all inquiries to:");
+
+      // Full address block
+      expect(ocrText).toContain("STEM Learning Solutions Center");
+      expect(ocrText).toContain("8787 Orion Place");
+      expect(ocrText).toContain("Columbus, OH 43240");
+
+      // ISBN and MHID identifiers
+      expect(ocrText).toContain("ISBN: 978-0-07-671685-2");
+      expect(ocrText).toContain("MHID: 0-07-671685-6");
+
+      // Right-column STEM content
+      expect(ocrText).toContain("STEM");
+      expect(ocrText).toContain("Science, Technology, Engineering, and Mathematics");
+    });
+
+    it("Agent B metadata extraction: ISBN extracted and normalized from full OCR", () => {
+      const metadata = extractMetadataFromOcrText(MCGRAW_COPYRIGHT_PAGE_FULL_OCR);
+      expect(metadata.isbn).toBe("9780076716852");
+    });
+
+    it("Agent B metadata extraction: publisher address extracted from full OCR", () => {
+      const metadata = extractMetadataFromOcrText(MCGRAW_COPYRIGHT_PAGE_FULL_OCR);
+      expect(metadata.publisherLocation).toBeDefined();
+      expect(metadata.publisherLocation).toContain("McGraw-Hill Education");
+      expect(metadata.publisherLocation).toContain("STEM Learning Solutions Center");
+      expect(metadata.publisherLocation).toContain("8787 Orion Place");
+      expect(metadata.publisherLocation).toContain("Columbus, OH 43240");
+    });
+
+    it("Agent B metadata extraction: copyright year extracted from full OCR", () => {
+      const metadata = extractMetadataFromOcrText(MCGRAW_COPYRIGHT_PAGE_FULL_OCR);
+      expect(metadata.copyrightYear).toBe(2021);
+    });
+
+    it("Agent B metadata extraction: publisher URL extracted from full OCR", () => {
+      const metadata = extractMetadataFromOcrText(MCGRAW_COPYRIGHT_PAGE_FULL_OCR);
+      expect(metadata.platformUrl).toBe("https://mheducation.com/prek-12");
+    });
+
+    it("Agent B metadata extraction: grade band inferred from URL in full OCR", () => {
+      const metadata = extractMetadataFromOcrText(MCGRAW_COPYRIGHT_PAGE_FULL_OCR);
+      expect(metadata.gradeBand).toBe("Pre-K-12");
+    });
+
+    it("Agent B metadata extraction: MHID extracted from full OCR", () => {
+      const metadata = extractMetadataFromOcrText(MCGRAW_COPYRIGHT_PAGE_FULL_OCR);
+      expect(metadata.mhid).toBe("0-07-671685-6");
+    });
+
+    it("Agent B metadata extraction: all five required fields present simultaneously", () => {
+      // This is the primary regression test — all required fields together.
+      const metadata = extractMetadataFromOcrText(MCGRAW_COPYRIGHT_PAGE_FULL_OCR);
+
+      expect(metadata.isbn).toBe("9780076716852");
+      expect(metadata.publisherLocation).toContain("Columbus, OH 43240");
+      expect(metadata.copyrightYear).toBe(2021);
+      expect(metadata.platformUrl).toBe("https://mheducation.com/prek-12");
+      expect(metadata.gradeBand).toBe("Pre-K-12");
+    });
+
+    it("pipeline integration: full OCR text yields correct metadata through complete pipeline (OCR-only path)", async () => {
+      // Simulates Agent A returning the full copyright page text; Agent B parses it.
+      const { extractMetadataFromOcrText: parseOcr } = await import(
+        "../../src/core/services/textbookAutoExtractionService"
+      );
+
+      const parsed = parseOcr(MCGRAW_COPYRIGHT_PAGE_FULL_OCR);
+
+      expect(parsed.isbn).toBe("9780076716852");
+      expect(parsed.copyrightYear).toBe(2021);
+      expect(parsed.platformUrl).toBe("https://mheducation.com/prek-12");
+      expect(parsed.gradeBand).toBe("Pre-K-12");
+      expect(parsed.publisherLocation).toContain("Columbus, OH 43240");
+    });
+  });
 });

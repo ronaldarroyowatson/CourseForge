@@ -389,9 +389,16 @@ export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadat
     metadata.edition = editionMatch[1];
   }
 
-  const copyrightMatch = text.match(/(?:copyright|©)[^\d]{0,12}((?:19|20)\d{2})/i) || text.match(/\b((?:19|20)\d{2})\b/);
+  // Enhanced copyright year extraction with multiple patterns
+  const copyrightMatch = text.match(/(?:copyright|©)[^\d]{0,12}((?:19|20)\d{2})/i)
+    || text.match(/\bcopyright\s+(\d{4})\b/i)
+    || text.match(/\b((?:19|20)\d{2})\b/);
   if (copyrightMatch) {
-    metadata.copyrightYear = Number(copyrightMatch[1]);
+    const year = Number(copyrightMatch[1]);
+    // Validate year is reasonable (between 1900 and current year + 5 for future)
+    if (year >= 1900 && year <= new Date().getFullYear() + 5) {
+      metadata.copyrightYear = year;
+    }
   }
 
   const gradeMatch = text.match(/grades?\s*([kK0-9][kK0-9\-\s]*)/i) || text.match(/grade\s*([kK0-9\-\s]+)/i);
@@ -459,7 +466,10 @@ export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadat
     }
   }
 
-  const mhidMatch = text.match(/\bmhid\b[^A-Z0-9]{0,6}([A-Z0-9\-]{5,})/i);
+  // Search both preprocessed text and raw lines to avoid drop from preprocessing slice.
+  const rawFullText = rawLines.join("\n");
+  const mhidMatch = text.match(/\bmhid\b[^A-Z0-9]{0,6}([A-Z0-9\-]{5,})/i)
+    ?? rawFullText.match(/\bmhid\b[^A-Z0-9]{0,6}([A-Z0-9\-]{5,})/i);
   if (mhidMatch) {
     metadata.mhid = mhidMatch[1].trim();
   }
@@ -926,11 +936,9 @@ function extractIsbnMetadata(lines: string[], text: string): {
 } {
   const labeledEntries: Array<{ isbn: string; type: RelatedIsbnType; line: string }> = [];
 
+  // First pass: lines explicitly labeled with isbn/mhid
   for (const line of lines) {
-    if (!/isbn/i.test(line)) {
-      continue;
-    }
-
+    const hasIsbnLabel = /isbn|mhid/i.test(line);
     const matches = line.match(/(?:97[89][\d\-\s]{10,20}|\b\d{9}[\dXx]\b)/g) ?? [];
     for (const match of matches) {
       const normalized = normalizeIsbnLike(match);
@@ -944,7 +952,21 @@ function extractIsbnMetadata(lines: string[], text: string): {
     }
   }
 
-  const allIsbns = Array.from(new Set((text.match(/(?:97[89][\d\-\s]{10,20}|\b\d{9}[\dXx]\b)/g) ?? [])
+  // Comprehensive pattern matching: look for ISBNs anywhere in text with better patterns
+  const isbnPatterns = [
+    /(?:97[89][\d\-\s]{10,20})/g,  // ISBN-13 with separators
+    /\b\d{9}[\dXx]\b/g,            // ISBN-10
+    /(?:isbn[^0-9]*)?[\s]?97[89][\d\-]{10,}/gi,  // ISBN-13 with optional label
+    /(?:isbn[^0-9]*)?[\s]?\d{9}[\dXx]/gi,        // ISBN-10 with optional label
+  ];
+  
+  const allIsbnMatches: string[] = [];
+  for (const pattern of isbnPatterns) {
+    const matches = text.match(pattern) ?? [];
+    allIsbnMatches.push(...matches);
+  }
+  
+  const allIsbns = Array.from(new Set(allIsbnMatches
     .map((value) => normalizeIsbnLike(value))
     .filter((value) => value.length >= 10)));
 
@@ -965,45 +987,127 @@ function extractIsbnMetadata(lines: string[], text: string): {
 }
 
 function extractPlatformUrl(text: string): string | undefined {
-  const match = text.match(/\b((?:https?:\/\/)?(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}(?:\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]*)?)/i);
-  if (!match) {
-    return undefined;
+  // Enhanced URL extraction with better patterns for publisher URLs
+  const patterns = [
+    /\b(https?:\/\/[a-z0-9.-]+(?:\/[A-Za-z0-9._~:\/?#[\]@!$&'()*+,;=%-]*)?)/i,  // Full http(s) URL
+    /\b(www\.[a-z0-9.-]+(?:\/[A-Za-z0-9._~:\/?#[\]@!$&'()*+,;=%-]*)?)/i,  // www. URL
+    /\b([a-z0-9.-]+\.[a-z]{2,}(?:\/[A-Za-z0-9._~:\/?#[\]@!$&'()*+,;=%-]*)?)/i,  // Domain with potential path (hyphen added)
+  ];
+  
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      let normalized = match[1]!.trim().replace(/[),.;:"'`]+$/, "").trim();
+      // Validate it looks like a real URL (not just a word with a dot)
+      if (normalized.includes("/") || normalized.includes(".")) {
+        return /^https?:\/\//i.test(normalized) ? normalized : `https://${normalized}`;
+      }
+    }
   }
-
-  const normalized = match[1].trim().replace(/[),.;]+$/, "");
-  return /^https?:\/\//i.test(normalized) ? normalized : `https://${normalized}`;
+  
+  return undefined;
 }
 
 function extractPublisherLocation(lines: string[]): string | undefined {
+  const inquiriesIndex = lines.findIndex((line) => /^send all inquiries\s*to\s*[:\-]?/i.test(line));
+  if (inquiriesIndex >= 0) {
+    const guidedAddressLines: string[] = [];
+    for (let index = inquiriesIndex + 1; index < lines.length && index <= inquiriesIndex + 8; index += 1) {
+      const line = lines[index]?.trim();
+      if (!line) {
+        if (guidedAddressLines.length > 0) {
+          break;
+        }
+        continue;
+      }
+
+      if (
+        /^isbn\b/i.test(line)
+        || /^mhid\b/i.test(line)
+        || /^printed in/i.test(line)
+        || /^copyright/i.test(line)
+        || /^all rights reserved/i.test(line)
+        || /^no part of this publication/i.test(line)
+      ) {
+        break;
+      }
+
+      if (isLikelyAddressLine(line)) {
+        guidedAddressLines.push(line);
+        continue;
+      }
+
+      if (guidedAddressLines.length > 0) {
+        break;
+      }
+    }
+
+    if (guidedAddressLines.length > 0) {
+      return Array.from(new Set(guidedAddressLines)).join("\n");
+    }
+  }
+
+  // Enhanced strategy: look for multiple address patterns
   const cityStateIndex = lines.findIndex((line) => /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?/.test(line));
-  if (cityStateIndex === -1) {
+  const addressBlockStart = lines.findIndex((line) => /^(?:mailing|business|address|send all inquiries|contact)\s*[:\-]?/i.test(line) || 
+    /^\d+\s+[a-z\s]+(?:street|st|avenue|ave|road|rd|place|drive|dr|lane|ln|boulevard|blvd|way|circle|ct|court)/i.test(line));
+  
+  let startIndex = cityStateIndex;
+  if (cityStateIndex === -1 && addressBlockStart !== -1) {
+    // No ZIP found but we have an address block marker
+    startIndex = addressBlockStart;
+  } else if (cityStateIndex === -1) {
+    // Try to find any line that looks like a publisher address line
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (isLikelyAddressLine(lines[i]!) && !/^send all inquiries|^isbn|^mhid|^printed in|^copyright/i.test(lines[i]!)) {
+        startIndex = i;
+        break;
+      }
+    }
+  }
+  
+  if (cityStateIndex === -1 && startIndex === -1) {
     return undefined;
   }
 
-  const locationLines: string[] = [lines[cityStateIndex]];
-  for (let index = cityStateIndex - 1; index >= Math.max(0, cityStateIndex - 5); index -= 1) {
-    const line = lines[index];
-    if (!line) {
-      continue;
-    }
+  const locationLines: string[] = [];
+  
+  // Collect address lines around the identified location
+  if (startIndex >= 0) {
+    for (let index = Math.min(startIndex, lines.length - 1); index >= Math.max(0, startIndex - 6); index -= 1) {
+      const line = lines[index];
+      if (!line) {
+        continue;
+      }
 
-    if (
-      /^send all inquiries/i.test(line)
-      || /^isbn\b/i.test(line)
-      || /^mhid\b/i.test(line)
-      || /^printed in/i.test(line)
-      || /^copyright/i.test(line)
-      || isLikelyLegaleseLine(line)
-    ) {
-      continue;
-    }
+      if (
+        /^send all inquiries/i.test(line)
+        || /^isbn\b/i.test(line)
+        || /^mhid\b/i.test(line)
+        || /^printed in/i.test(line)
+        || /^copyright/i.test(line)
+        || isLikelyLegaleseLine(line)
+      ) {
+        continue;
+      }
 
-    if (!isLikelyAddressLine(line)) {
-      // Stop once we leave the likely address block.
-      break;
-    }
+      if (!isLikelyAddressLine(line) && cityStateIndex >= 0 && line.length > 35) {
+        // Stop once we leave the likely address block (only for confirmed city-state lines)
+        break;
+      }
 
-    locationLines.unshift(line);
+      if (isLikelyAddressLine(line)) {
+        locationLines.unshift(line);
+      }
+    }
+  }
+
+  if (locationLines.length === 0 && cityStateIndex >= 0) {
+    locationLines.push(lines[cityStateIndex]!);
+  }
+
+  if (locationLines.length === 0) {
+    return undefined;
   }
 
   let result = Array.from(new Set(locationLines)).join("\n");
@@ -1426,7 +1530,17 @@ function shouldKeepMetadataLine(value: string, index: number): boolean {
   }
 
   // Preserve structured identifier lines even when alphabetic density is low.
-  if (/\b(?:isbn|mhid)\b/i.test(value) || /\b(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,}\/)/i.test(value)) {
+  if (/\b(?:isbn|mhid)\b/i.test(value) || /\b(?:https?:\/\/|www\.|[a-z0-9.-]+\.[a-z]{2,}\/)/.test(value)) {
+    return true;
+  }
+
+  // Preserve bare ISBN-13 sequences (978/979 prefix, with or without separators).
+  if (/\b97[89][\d\-\s]{10,}/.test(value) || /^\d{9}[\dXx]\s*$/.test(value)) {
+    return true;
+  }
+
+  // Preserve standalone 4-digit publication/copyright years.
+  if (/^(19|20)\d{2}$/.test(value.trim())) {
     return true;
   }
 
@@ -1617,7 +1731,7 @@ export function preprocessMetadataOcrText(rawText: string): string {
       }
       return b.score - a.score;
     })
-    .slice(0, 20)
+    .slice(0, 30)
     .sort((a, b) => a.index - b.index)
     .map((entry) => {
       const mostlyUppercase = entry.line === entry.line.toUpperCase() && /[A-Z]/.test(entry.line);

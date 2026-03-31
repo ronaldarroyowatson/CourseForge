@@ -52,9 +52,175 @@ $PkgPath    = Join-Path $RepoRoot "package.json"
 $ChangelogPath = Join-Path $RepoRoot "CHANGELOG.md"
 $ReleaseDir = Join-Path $RepoRoot "release"
 $ReleaseNotesDir = Join-Path $RepoRoot "docs\releases"
+$Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+$MainChangelogReleaseCount = 12  # recent releases kept in CHANGELOG.md
+$ArchivePageReleaseCount   = 50  # releases per CHANGELOG-page-N.md archive file
+$MaxChangelogSizeKB        = 300 # hard ceiling for CHANGELOG.md; older entries overflow to archive pages
+
+function Read-Utf8File {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  return [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
+}
+
+function Write-Utf8File {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Content
+  )
+
+  [System.IO.File]::WriteAllText($Path, $Content, $Utf8NoBom)
+}
+
+function Split-ChangelogContent {
+  param([Parameter(Mandatory = $true)][string]$Content)
+
+  $normalized = $Content -replace "`r`n", "`n"
+  $headerMarker = "## [Unreleased]"
+  $headerIndex = $normalized.IndexOf($headerMarker)
+  if ($headerIndex -lt 0) {
+    throw "Could not find '## [Unreleased]' section in CHANGELOG.md."
+  }
+
+  $header = $normalized.Substring(0, $headerIndex).TrimEnd("`n")
+  $sectionsText = $normalized.Substring($headerIndex)
+  $matches = [regex]::Matches($sectionsText, '(?ms)^## \[(?<title>[^\]]+)\]\n.*?(?=^## \[|\z)')
+  if ($matches.Count -eq 0) {
+    throw "Could not parse CHANGELOG.md sections."
+  }
+
+  $unreleased = $null
+  $releases = New-Object System.Collections.Generic.List[string]
+  foreach ($match in $matches) {
+    $section = $match.Value.TrimEnd()
+    if ($match.Groups['title'].Value -eq 'Unreleased') {
+      $unreleased = $section
+      continue
+    }
+
+    $releases.Add($section)
+  }
+
+  if (-not $unreleased) {
+    throw "Could not parse the Unreleased section from CHANGELOG.md."
+  }
+
+  return [pscustomobject]@{
+    Header = $header
+    Unreleased = $unreleased
+    Releases = @($releases)
+  }
+}
+
+# Build the CHANGELOG.md body string from parsed parts, given a specific entry count and
+# a list of archive page filenames that have already been determined.
+function Build-MainChangelogContent {
+  param(
+    [Parameter(Mandatory = $true)][object]$Parts,
+    [Parameter(Mandatory = $true)][int]$KeepCount,
+    [string[]]$ArchiveFileNames = @()
+  )
+
+  $recentReleases = @($Parts.Releases | Select-Object -First $KeepCount)
+  $mainSections   = New-Object System.Collections.Generic.List[string]
+  $mainSections.Add($Parts.Header.TrimEnd())     | Out-Null
+  $mainSections.Add($Parts.Unreleased.TrimEnd()) | Out-Null
+
+  if ($ArchiveFileNames.Count -gt 0) {
+    $archiveLines  = @(
+      "### Archive Pages",
+      "",
+      "Older release entries are continued in the following paged changelog files:",
+      ""
+    )
+    $archiveLines += $ArchiveFileNames | ForEach-Object { "- $_" }
+    $mainSections.Add(($archiveLines -join "`n")) | Out-Null
+  }
+
+  foreach ($section in $recentReleases) {
+    $mainSections.Add($section.TrimEnd()) | Out-Null
+  }
+
+  return (($mainSections -join "`n`n").TrimEnd() + "`n") -replace "`n", "`r`n"
+}
+
+# Writes CHANGELOG.md (capped to $MaxChangelogSizeKB) and CHANGELOG-page-N.md archive files.
+# Starts with $MainChangelogReleaseCount recent entries; if the result would exceed the size
+# budget, entries are moved to archive pages two-at-a-time until the budget is met.
+function Publish-ChangelogPages {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Content
+  )
+
+  $parts       = Split-ChangelogContent -Content $Content
+  $repoDir     = Split-Path -Parent $Path
+  $maxBytes    = $MaxChangelogSizeKB * 1024
+  $keepCount   = [Math]::Min($MainChangelogReleaseCount, $parts.Releases.Count)
+
+  while ($true) {
+    $archivedReleases      = @($parts.Releases | Select-Object -Skip $keepCount)
+    $generatedArchiveNames = New-Object System.Collections.Generic.List[string]
+
+    # Determine archive page names for the current keepCount
+    if ($archivedReleases.Count -gt 0) {
+      $pageNumber = 1
+      for ($i = 0; $i -lt $archivedReleases.Count; $i += $ArchivePageReleaseCount) {
+        $generatedArchiveNames.Add("CHANGELOG-page-$pageNumber.md") | Out-Null
+        $pageNumber++
+      }
+    }
+
+    $candidate        = Build-MainChangelogContent -Parts $parts -KeepCount $keepCount -ArchiveFileNames $generatedArchiveNames
+    $candidateBytes   = [System.Text.Encoding]::UTF8.GetByteCount($candidate)
+    $candidateSizeKB  = [math]::Round($candidateBytes / 1024, 1)
+
+    $withinBudget = ($candidateBytes -le $maxBytes)
+    $atMinimum    = ($keepCount -le 1)
+
+    if ($withinBudget -or $atMinimum) {
+      if (-not $withinBudget) {
+        Write-Host "  [changelog] WARNING: minimum content (1 entry) is still ${candidateSizeKB}KB - exceeds ${MaxChangelogSizeKB}KB limit. Check for oversized release entries." -ForegroundColor Yellow
+      }
+
+      # Write archive pages
+      $pageNumber = 1
+      for ($i = 0; $i -lt $archivedReleases.Count; $i += $ArchivePageReleaseCount) {
+        $count      = [Math]::Min($ArchivePageReleaseCount, $archivedReleases.Count - $i)
+        $pageEntries = $archivedReleases[$i..($i + $count - 1)]
+        $pageName   = "CHANGELOG-page-$pageNumber.md"
+        $pagePath   = Join-Path $repoDir $pageName
+        $pageContent = @(
+          "# Changelog Archive Page $pageNumber",
+          "",
+          "Older CourseForge release notes continued from CHANGELOG.md.",
+          "",
+          ($pageEntries -join "`n`n")
+        ) -join "`n"
+        Write-Utf8File -Path $pagePath -Content $pageContent
+        $pageNumber++
+      }
+
+      # Remove stale archive pages from previous runs
+      Get-ChildItem $repoDir -File -Filter "CHANGELOG-page-*.md" |
+        Where-Object { $generatedArchiveNames -notcontains $_.Name } |
+        Remove-Item -Force
+
+      Write-Utf8File -Path $Path -Content $candidate
+
+      $archivedCount = $archivedReleases.Count
+      $pageCount     = $generatedArchiveNames.Count
+      Write-Host "  [changelog] ${candidateSizeKB}KB written - $keepCount recent entries in CHANGELOG.md, $archivedCount older entries in $pageCount archive page(s)." -ForegroundColor Gray
+      break
+    }
+
+    Write-Host "  [changelog] ${candidateSizeKB}KB with $keepCount entries exceeds ${MaxChangelogSizeKB}KB limit - archiving 2 more entries..." -ForegroundColor Yellow
+    $keepCount = [Math]::Max(1, $keepCount - 2)
+  }
+}
 
 # ---- Read current version ----
-$pkgRaw  = Get-Content $PkgPath -Raw
+$pkgRaw  = Read-Utf8File $PkgPath
 $pkg     = $pkgRaw | ConvertFrom-Json
 $current = $pkg.version
 
@@ -133,7 +299,7 @@ Write-Host ""
 Write-Host "--- Bumping version $current -> $newVersion ---" -ForegroundColor Cyan
 # Replace only the exact "version": "<current>" line to avoid matching version strings in dependencies
 $pkgUpdated = $pkgRaw -replace ('"version": "' + [regex]::Escape($current) + '"'), ('"version": "' + $newVersion + '"')
-[System.IO.File]::WriteAllText($PkgPath, $pkgUpdated, (New-Object System.Text.UTF8Encoding $false))
+Write-Utf8File -Path $PkgPath -Content $pkgUpdated
 
 # ---- Create release notes doc ----
 Write-Host "--- Creating docs/releases/$newVersion.md ---" -ForegroundColor Cyan
@@ -158,11 +324,24 @@ $Description
 
 - Released $today
 "@
-[System.IO.File]::WriteAllText($releaseNotesPath, $notesContent, (New-Object System.Text.UTF8Encoding $false))
+Write-Utf8File -Path $releaseNotesPath -Content $notesContent
 
 # ---- Update CHANGELOG ----
 Write-Host "--- Updating CHANGELOG.md ---" -ForegroundColor Cyan
-$changelog = Get-Content $ChangelogPath -Raw
+
+# Pre-check: report current on-disk size and warn if already bloated
+if (Test-Path $ChangelogPath) {
+  $preSizeKB = [math]::Round((Get-Item $ChangelogPath).Length / 1024, 1)
+  if ($preSizeKB -gt $MaxChangelogSizeKB) {
+    Write-Host "  [changelog] WARNING: CHANGELOG.md is currently ${preSizeKB}KB - exceeds ${MaxChangelogSizeKB}KB limit. Re-paginating now..." -ForegroundColor Yellow
+  } elseif ($preSizeKB -gt ($MaxChangelogSizeKB * 0.8)) {
+    Write-Host "  [changelog] NOTICE: CHANGELOG.md is ${preSizeKB}KB (>80% of ${MaxChangelogSizeKB}KB limit - pagination may activate after this entry)." -ForegroundColor Yellow
+  } else {
+    Write-Host "  [changelog] Current size: ${preSizeKB}KB (limit: ${MaxChangelogSizeKB}KB)." -ForegroundColor Gray
+  }
+}
+
+$changelog = Read-Utf8File $ChangelogPath
 
 $newEntry = @"
 
@@ -177,7 +356,7 @@ $newEntry = @"
 # Insert the new entry right after "## [Unreleased]"
 if ($changelog -match '## \[Unreleased\]') {
   $changelog = $changelog -replace '(## \[Unreleased\])', "`$1$newEntry"
-  [System.IO.File]::WriteAllText($ChangelogPath, $changelog, (New-Object System.Text.UTF8Encoding $false))
+  Publish-ChangelogPages -Path $ChangelogPath -Content $changelog
 } else {
   Write-Host "[WARNING] Could not find '## [Unreleased]' section in CHANGELOG.md. Skipping CHANGELOG update." -ForegroundColor Yellow
 }

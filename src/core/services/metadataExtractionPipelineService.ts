@@ -14,7 +14,20 @@ import {
 import { extractMetadataFromOcrText } from "./textbookAutoExtractionService";
 
 const DEFAULT_VISION_CONFIDENCE_THRESHOLD = 0.72;
+const MAX_METADATA_OCR_ATTEMPTS = 3;
+const DEBUG_IMAGE_PREVIEW_BASE64_CHARS = 4096;
 const METADATA_PIPELINE_RUNTIME_STATUS_KEY = "courseforge.metadataPipeline.runtime.v1";
+const TITLE_CRITICAL_FIELDS = ["isbn", "copyrightYear"] as const;
+const TITLE_TARGET_DEBUG_FIELDS = [
+  "title",
+  "subtitle",
+  "publisher",
+  "publisherLocation",
+  "isbn",
+  "copyrightYear",
+  "platformUrl",
+  "mhid",
+] as const;
 
 export interface MetadataPipelineRuntimeStatus {
   updatedAt: string;
@@ -31,9 +44,13 @@ export interface MetadataPipelineRuntimeStatus {
   ocr: {
     providerId: AutoOcrProviderId | null;
     rawTextLength: number;
+    attemptCount: number;
+    maxAttempts: number;
   };
   parsedFieldsCount: number;
   parsedFields: string[];
+  missingCriticalFields: string[];
+  missingTargetFields: string[];
 }
 
 const DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS: MetadataPipelineRuntimeStatus = {
@@ -51,9 +68,13 @@ const DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS: MetadataPipelineRuntimeStatus = 
   ocr: {
     providerId: null,
     rawTextLength: 0,
+    attemptCount: 0,
+    maxAttempts: MAX_METADATA_OCR_ATTEMPTS,
   },
   parsedFieldsCount: 0,
   parsedFields: [],
+  missingCriticalFields: [],
+  missingTargetFields: [],
 };
 
 function getStorage(): Storage | null {
@@ -131,6 +152,12 @@ export function readMetadataPipelineRuntimeStatus(): MetadataPipelineRuntimeStat
         ...DEFAULT_METADATA_PIPELINE_RUNTIME_STATUS.ocr,
         ...(parsed.ocr ?? {}),
       },
+      missingCriticalFields: Array.isArray(parsed.missingCriticalFields)
+        ? parsed.missingCriticalFields.filter((value): value is string => typeof value === "string")
+        : [],
+      missingTargetFields: Array.isArray(parsed.missingTargetFields)
+        ? parsed.missingTargetFields.filter((value): value is string => typeof value === "string")
+        : [],
       parsedFields: Array.isArray(parsed.parsedFields)
         ? parsed.parsedFields.filter((value): value is string => typeof value === "string")
         : [],
@@ -235,7 +262,61 @@ function normalizeTextValue(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
+function normalizeIsbnDigits(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const digits = value.replace(/[^0-9Xx]/g, "").toUpperCase();
+  return (digits.length === 10 || digits.length === 13) ? digits : null;
+}
+
+function parseCopyrightYear(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isInteger(parsed) && parsed >= 1900 && parsed <= new Date().getFullYear() + 5) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function inferGradeLevelFromPlatformUrl(url: string | null): string | null {
+  if (!url) {
+    return null;
+  }
+
+  const lowered = url.toLowerCase();
+  if (/\bpre\s*-?k\s*[-_/]\s*12\b|\/prek-?12\b/.test(lowered)) {
+    return "Pre-K-12";
+  }
+
+  return null;
+}
+
+function isCopyrightLikePage(metadata: MetadataResult, context: MetadataExtractionContext): boolean {
+  if (context.pageType !== "title") {
+    return false;
+  }
+
+  const raw = metadata.rawText.toLowerCase();
+  return /send all inquiries|all rights reserved|no part of this publication|printed in the united states/.test(raw);
+}
+
+function hasCriticalCopyrightFields(metadata: MetadataResult): boolean {
+  return Boolean(metadata.isbn && metadata.copyrightYear && metadata.platformUrl && metadata.publisherLocation);
+}
+
 function normalizeMetadataResult(input: Partial<MetadataResult> & Pick<MetadataResult, "source">): MetadataResult {
+  const normalizedPlatformUrl = normalizeTextValue(input.platformUrl);
+  const normalizedGradeLevel = normalizeTextValue(input.gradeLevel);
+  const inferredGradeLevel = inferGradeLevelFromPlatformUrl(normalizedPlatformUrl);
+
   return {
     title: normalizeTextValue(input.title),
     subtitle: normalizeTextValue(input.subtitle),
@@ -243,19 +324,32 @@ function normalizeMetadataResult(input: Partial<MetadataResult> & Pick<MetadataR
     publisher: normalizeTextValue(input.publisher),
     publisherLocation: normalizeTextValue(input.publisherLocation),
     series: normalizeTextValue(input.series),
-    gradeLevel: normalizeTextValue(input.gradeLevel),
+    gradeLevel: normalizedGradeLevel ?? inferredGradeLevel,
     subject: normalizeTextValue(input.subject),
-    copyrightYear: typeof input.copyrightYear === "number" && Number.isInteger(input.copyrightYear) ? input.copyrightYear : null,
-    isbn: normalizeTextValue(input.isbn),
+    copyrightYear: parseCopyrightYear(input.copyrightYear),
+    isbn: normalizeIsbnDigits(normalizeTextValue(input.isbn)),
     additionalIsbns: Array.isArray(input.additionalIsbns)
-      ? input.additionalIsbns.map((value) => normalizeTextValue(value)).filter((value): value is string => Boolean(value))
+      ? input.additionalIsbns
+          .map((value) => normalizeIsbnDigits(normalizeTextValue(value)))
+          .filter((value): value is string => Boolean(value))
       : undefined,
     relatedIsbns: Array.isArray(input.relatedIsbns)
-      ? input.relatedIsbns
-          .filter((entry): entry is RelatedIsbn => Boolean(entry) && typeof entry.isbn === "string" && typeof entry.type === "string")
-          .map((entry) => ({ isbn: entry.isbn.trim(), type: entry.type, note: normalizeTextValue(entry.note) ?? undefined }))
+      ? input.relatedIsbns.reduce<RelatedIsbn[]>((accumulator, entry) => {
+          if (!entry || typeof entry.isbn !== "string" || typeof entry.type !== "string") {
+            return accumulator;
+          }
+
+          const normalizedIsbn = normalizeIsbnDigits(entry.isbn.trim());
+          if (!normalizedIsbn) {
+            return accumulator;
+          }
+
+          const note = normalizeTextValue(entry.note) ?? undefined;
+          accumulator.push(note ? { isbn: normalizedIsbn, type: entry.type, note } : { isbn: normalizedIsbn, type: entry.type });
+          return accumulator;
+        }, [])
       : undefined,
-    platformUrl: normalizeTextValue(input.platformUrl),
+    platformUrl: normalizedPlatformUrl,
     mhid: normalizeTextValue(input.mhid),
     confidence: clampConfidence(input.confidence),
     rawText: typeof input.rawText === "string" ? input.rawText : "",
@@ -287,6 +381,172 @@ function postProcessOcrText(rawText: string, context: MetadataExtractionContext)
   return applyCorrectionRulesToText(normalized, getEffectiveCorrectionRules(), {
     publisher: context.publisherHint,
   });
+}
+
+function extractFocusedIdentifierBackfill(rawText: string): Partial<MetadataResult> {
+  const normalized = rawText.replace(/\r/g, "\n");
+  const fallback: Partial<MetadataResult> = {};
+
+  const copyrightMatch = normalized.match(/(?:copyright|©)[^\d]{0,12}((?:19|20)\d{2})/i)
+    ?? normalized.match(/\b((?:19|20)\d{2})\b/);
+  if (copyrightMatch) {
+    const parsedYear = Number.parseInt(copyrightMatch[1] ?? "", 10);
+    if (Number.isInteger(parsedYear) && parsedYear >= 1900 && parsedYear <= new Date().getFullYear() + 5) {
+      fallback.copyrightYear = parsedYear;
+    }
+  }
+
+  const mhidMatch = normalized.match(/\bmhid\b[^A-Z0-9]{0,8}([A-Z0-9-]{5,})/i);
+  if (mhidMatch?.[1]) {
+    fallback.mhid = mhidMatch[1].trim();
+  }
+
+  const isbnMatch = normalized.match(/(?:isbn[^0-9]*)?(97[89][\d\-\s]{10,20}|\b\d{9}[\dXx]\b)/i);
+  if (isbnMatch?.[1]) {
+    const normalizedIsbn = normalizeIsbnDigits(isbnMatch[1]);
+    if (normalizedIsbn) {
+      fallback.isbn = normalizedIsbn;
+    }
+  }
+
+  const urlMatch = normalized.match(/\b(https?:\/\/[a-z0-9.-]+(?:\/[A-Za-z0-9._~:\/?#[\]@!$&'()*+,;=%-]*)?|www\.[a-z0-9.-]+(?:\/[A-Za-z0-9._~:\/?#[\]@!$&'()*+,;=%-]*)?|[a-z0-9.-]+\.[a-z]{2,}(?:\/[A-Za-z0-9._~:\/?#[\]@!$&'()*+,;=%-]*)?)\b/i);
+  if (urlMatch?.[1]) {
+    const trimmed = urlMatch[1].trim().replace(/[),.;:"'`]+$/, "").trim();
+    fallback.platformUrl = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  }
+
+  const lines = normalized.split("\n").map((line) => line.trim()).filter(Boolean);
+  const inquiriesIndex = lines.findIndex((line) => /^send all inquiries\s*to\s*[:\-]?/i.test(line));
+  if (inquiriesIndex >= 0) {
+    const locationLines: string[] = [];
+    for (let index = inquiriesIndex + 1; index < lines.length && index <= inquiriesIndex + 8; index += 1) {
+      const line = lines[index];
+      if (!line) {
+        if (locationLines.length > 0) {
+          break;
+        }
+        continue;
+      }
+
+      if (/^isbn\b|^mhid\b|^printed in|^copyright|^all rights reserved|^no part of this publication/i.test(line)) {
+        break;
+      }
+
+      locationLines.push(line);
+    }
+
+    if (locationLines.length > 0) {
+      fallback.publisherLocation = locationLines.join("\n");
+    }
+  }
+
+  return fallback;
+}
+
+function backfillMissingHighValueFields(metadata: MetadataResult, rawText: string): MetadataResult {
+  const focused = extractFocusedIdentifierBackfill(rawText);
+  return {
+    ...metadata,
+    copyrightYear: metadata.copyrightYear ?? focused.copyrightYear ?? null,
+    mhid: metadata.mhid ?? (typeof focused.mhid === "string" ? focused.mhid : null),
+    isbn: metadata.isbn ?? (typeof focused.isbn === "string" ? focused.isbn : null),
+    platformUrl: metadata.platformUrl ?? (typeof focused.platformUrl === "string" ? focused.platformUrl : null),
+    publisherLocation: metadata.publisherLocation ?? (typeof focused.publisherLocation === "string" ? focused.publisherLocation : null),
+  };
+}
+
+function hasMetadataField(metadata: MetadataResult, field: string): boolean {
+  const value = metadata[field as keyof MetadataResult];
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+
+  return true;
+}
+
+function collectMissingFields(metadata: MetadataResult, fields: readonly string[]): string[] {
+  return fields.filter((field) => !hasMetadataField(metadata, field));
+}
+
+function createDebugImageArtifact(imageDataUrl: string): Record<string, unknown> | null {
+  const dataUrlMatch = imageDataUrl.match(/^data:([^;]+);base64,(.+)$/i);
+  if (!dataUrlMatch) {
+    return null;
+  }
+
+  const mimeType = dataUrlMatch[1] ?? "application/octet-stream";
+  const base64Payload = dataUrlMatch[2] ?? "";
+  if (!base64Payload) {
+    return null;
+  }
+
+  const previewPayload = base64Payload.slice(0, DEBUG_IMAGE_PREVIEW_BASE64_CHARS);
+  return {
+    mimeType,
+    estimatedByteLength: Math.floor((base64Payload.length * 3) / 4),
+    previewDataUrl: `data:${mimeType};base64,${previewPayload}`,
+    isTruncated: base64Payload.length > DEBUG_IMAGE_PREVIEW_BASE64_CHARS,
+  };
+}
+
+function buildMetadataFailureSnapshot(metadata: MetadataResult, ocrText: string, imageDataUrl: string): Record<string, unknown> {
+  return {
+    source: metadata.source,
+    confidence: metadata.confidence,
+    parsedFields: summarizeMetadataFields(metadata),
+    missingCriticalFields: collectMissingFields(metadata, TITLE_CRITICAL_FIELDS),
+    missingTargetFields: collectMissingFields(metadata, TITLE_TARGET_DEBUG_FIELDS),
+    title: metadata.title,
+    publisher: metadata.publisher,
+    isbn: metadata.isbn,
+    copyrightYear: metadata.copyrightYear,
+    platformUrl: metadata.platformUrl,
+    mhid: metadata.mhid,
+    publisherLocation: metadata.publisherLocation,
+    rawTextPreview: metadata.rawText.slice(0, 800),
+    ocrTextPreview: ocrText.slice(0, 800),
+    imageArtifact: createDebugImageArtifact(imageDataUrl),
+  };
+}
+
+function metadataCoverageScore(metadata: MetadataResult): number {
+  return summarizeMetadataFields(metadata).length;
+}
+
+function mergeVisionAndOcrMetadata(
+  visionMetadata: MetadataResult,
+  ocrMetadata: MetadataResult,
+  ocrRawText: string
+): MetadataResult {
+  const mergedBase: MetadataResult = {
+    title: visionMetadata.title ?? ocrMetadata.title,
+    subtitle: visionMetadata.subtitle ?? ocrMetadata.subtitle,
+    edition: visionMetadata.edition ?? ocrMetadata.edition,
+    publisher: visionMetadata.publisher ?? ocrMetadata.publisher,
+    publisherLocation: visionMetadata.publisherLocation ?? ocrMetadata.publisherLocation,
+    series: visionMetadata.series ?? ocrMetadata.series,
+    gradeLevel: visionMetadata.gradeLevel ?? ocrMetadata.gradeLevel,
+    subject: crossValidateSubject(visionMetadata.subject, ocrRawText, ocrMetadata.subject),
+    copyrightYear: visionMetadata.copyrightYear ?? ocrMetadata.copyrightYear,
+    isbn: visionMetadata.isbn ?? ocrMetadata.isbn,
+    additionalIsbns: Array.from(new Set([...(visionMetadata.additionalIsbns ?? []), ...(ocrMetadata.additionalIsbns ?? [])])),
+    relatedIsbns: Array.from(new Map([...(visionMetadata.relatedIsbns ?? []), ...(ocrMetadata.relatedIsbns ?? [])].map((entry) => [`${entry.type}:${entry.isbn}`, entry])).values()),
+    platformUrl: visionMetadata.platformUrl ?? ocrMetadata.platformUrl,
+    mhid: visionMetadata.mhid ?? ocrMetadata.mhid,
+    confidence: Math.max(ocrMetadata.confidence, visionMetadata.confidence),
+    rawText: [visionMetadata.rawText, ocrMetadata.rawText].filter(Boolean).join("\n\n").trim(),
+    source: "vision+ocr",
+  };
+
+  return backfillMissingHighValueFields(mergedBase, mergedBase.rawText);
 }
 
 /**
@@ -445,9 +705,13 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     ocr: {
       providerId: null,
       rawTextLength: 0,
+      attemptCount: 0,
+      maxAttempts: MAX_METADATA_OCR_ATTEMPTS,
     },
     parsedFieldsCount: 0,
     parsedFields: [],
+    missingCriticalFields: [],
+    missingTargetFields: [],
   });
 
   let originalVisionOutput: MetadataResult | null = null;
@@ -492,25 +756,41 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     });
   }
 
-  if (originalVisionOutput && originalVisionOutput.confidence >= confidenceThreshold && metadataHasRequiredFields(originalVisionOutput)) {
+  const visionLooksUsable = Boolean(
+    originalVisionOutput
+    && originalVisionOutput.confidence >= confidenceThreshold
+    && metadataHasRequiredFields(originalVisionOutput)
+  );
+  const copyrightFieldsSufficient = originalVisionOutput
+    ? !isCopyrightLikePage(originalVisionOutput, context) || hasCriticalCopyrightFields(originalVisionOutput)
+    : false;
+
+  const shouldForceOcrEnrichment = Boolean(originalVisionOutput) && context.pageType === "title";
+  const requiresOcrForCompleteness = !visionLooksUsable || !copyrightFieldsSufficient;
+  const shouldAttemptOcr = shouldForceOcrEnrichment || requiresOcrForCompleteness;
+
+  if (!shouldAttemptOcr && visionLooksUsable && copyrightFieldsSufficient && originalVisionOutput) {
     const crossValidatedVisionOutput = crossValidateVisionSubjectFromRawText(originalVisionOutput);
-    const parsedFields = summarizeMetadataFields(crossValidatedVisionOutput);
+    const enrichedVisionOutput = backfillMissingHighValueFields(crossValidatedVisionOutput, crossValidatedVisionOutput.rawText);
+    const parsedFields = summarizeMetadataFields(enrichedVisionOutput);
     updateMetadataPipelineRuntimeStatus({
       stage: "completed",
       path: "vision_only",
       parsedFieldsCount: parsedFields.length,
       parsedFields,
+      missingCriticalFields: collectMissingFields(enrichedVisionOutput, TITLE_CRITICAL_FIELDS),
+      missingTargetFields: collectMissingFields(enrichedVisionOutput, TITLE_TARGET_DEBUG_FIELDS),
     });
     void emitMetadataPipelineDiagnostic("completed", {
       traceId,
       context: {
         path: "vision_only",
-        confidence: crossValidatedVisionOutput.confidence,
-        subject: crossValidatedVisionOutput.subject,
+        confidence: enrichedVisionOutput.confidence,
+        subject: enrichedVisionOutput.subject,
       },
     });
     return {
-      result: crossValidatedVisionOutput,
+      result: enrichedVisionOutput,
       originalVisionOutput,
       originalOcrOutput: null,
     };
@@ -521,99 +801,196 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     context: {
       reason: originalVisionOutput ? "low_confidence_or_missing_fields" : "vision_failed",
       visionConfidence: originalVisionOutput?.confidence ?? null,
+      copyrightFieldsSufficient: originalVisionOutput ? hasCriticalCopyrightFields(originalVisionOutput) : null,
     },
   });
   updateMetadataPipelineRuntimeStatus({
     stage: "fallback_to_ocr",
   });
 
-  const ocrResult = await extractTextFromImageWithFallback(imageDataUrl);
-  updateMetadataPipelineRuntimeStatus({
-    stage: "ocr_succeeded",
-    ocr: {
-      providerId: ocrResult.providerId,
-      rawTextLength: ocrResult.text.length,
-    },
-  });
-  void emitMetadataPipelineDiagnostic("ocr_fallback_succeeded", {
-    traceId,
-    context: {
-      ocrProviderId: ocrResult.providerId,
-      rawTextLength: ocrResult.text.length,
-    },
-  });
-  const correctedRawText = postProcessOcrText(ocrResult.text, context);
-  const ocrMetadata = autoMetadataToMetadataResult(correctedRawText, "ocr");
+  const maxOcrAttempts = requiresOcrForCompleteness ? MAX_METADATA_OCR_ATTEMPTS : 1;
+  let ocrAttemptCount = 0;
+  let lastOcrError: Error | null = null;
+  let bestResult: MetadataResult | null = null;
+  let bestOriginalOcrOutput: OcrMetadataOutput | null = null;
 
-  if (!originalVisionOutput) {
-    const parsedFields = summarizeMetadataFields(ocrMetadata);
+  while (ocrAttemptCount < maxOcrAttempts) {
+    ocrAttemptCount += 1;
+    let ocrResult: Awaited<ReturnType<typeof extractTextFromImageWithFallback>>;
+    try {
+      ocrResult = await extractTextFromImageWithFallback(imageDataUrl);
+      if (!ocrResult || typeof ocrResult.text !== "string" || typeof ocrResult.providerId !== "string") {
+        throw new Error("OCR enrichment returned an invalid response payload.");
+      }
+    } catch (error) {
+      lastOcrError = error instanceof Error ? error : new Error(String(error));
+      void emitMetadataPipelineDiagnostic("ocr_pass_failed", {
+        level: "warning",
+        traceId,
+        context: {
+          attempt: ocrAttemptCount,
+          maxAttempts: maxOcrAttempts,
+          pageType: context.pageType,
+          message: lastOcrError.message,
+        },
+      });
+      continue;
+    }
+
     updateMetadataPipelineRuntimeStatus({
-      stage: "completed",
-      path: "ocr_only",
-      parsedFieldsCount: parsedFields.length,
-      parsedFields,
+      stage: "ocr_succeeded",
+      ocr: {
+        providerId: ocrResult.providerId,
+        rawTextLength: ocrResult.text.length,
+        attemptCount: ocrAttemptCount,
+        maxAttempts: maxOcrAttempts,
+      },
     });
-    void emitMetadataPipelineDiagnostic("completed", {
+    void emitMetadataPipelineDiagnostic("ocr_fallback_succeeded", {
       traceId,
       context: {
-        path: "ocr_only",
+        attempt: ocrAttemptCount,
+        maxAttempts: maxOcrAttempts,
         ocrProviderId: ocrResult.providerId,
+        rawTextLength: ocrResult.text.length,
       },
     });
-    return {
-      result: ocrMetadata,
-      originalVisionOutput: null,
-      originalOcrOutput: {
+
+    const correctedRawText = postProcessOcrText(ocrResult.text, context);
+    const ocrMetadata = backfillMissingHighValueFields(autoMetadataToMetadataResult(correctedRawText, "ocr"), correctedRawText);
+    const candidateResult = originalVisionOutput
+      ? mergeVisionAndOcrMetadata(originalVisionOutput, ocrMetadata, ocrResult.text)
+      : ocrMetadata;
+
+    if (!bestResult || metadataCoverageScore(candidateResult) >= metadataCoverageScore(bestResult)) {
+      bestResult = candidateResult;
+      bestOriginalOcrOutput = {
         rawText: ocrResult.text,
         providerId: ocrResult.providerId,
+      };
+    }
+
+    const missingCriticalFields = collectMissingFields(candidateResult, TITLE_CRITICAL_FIELDS);
+    const missingTargetFields = collectMissingFields(candidateResult, TITLE_TARGET_DEBUG_FIELDS);
+
+    updateMetadataPipelineRuntimeStatus({
+      missingCriticalFields,
+      missingTargetFields,
+      ocr: {
+        providerId: ocrResult.providerId,
+        rawTextLength: ocrResult.text.length,
+        attemptCount: ocrAttemptCount,
+        maxAttempts: maxOcrAttempts,
       },
-    };
+    });
+
+    void emitMetadataPipelineDiagnostic("ocr_pass_completed", {
+      traceId,
+      context: {
+        attempt: ocrAttemptCount,
+        maxAttempts: maxOcrAttempts,
+        missingCriticalFields,
+        missingTargetFields,
+      },
+    });
+
+    if (!requiresOcrForCompleteness || missingCriticalFields.length === 0) {
+      break;
+    }
   }
 
-  const merged: MetadataResult = {
-    title: originalVisionOutput.title ?? ocrMetadata.title,
-    subtitle: originalVisionOutput.subtitle ?? ocrMetadata.subtitle,
-    edition: originalVisionOutput.edition ?? ocrMetadata.edition,
-    publisher: originalVisionOutput.publisher ?? ocrMetadata.publisher,
-    publisherLocation: originalVisionOutput.publisherLocation ?? ocrMetadata.publisherLocation,
-    series: originalVisionOutput.series ?? ocrMetadata.series,
-    gradeLevel: originalVisionOutput.gradeLevel ?? ocrMetadata.gradeLevel,
-    subject: crossValidateSubject(originalVisionOutput.subject, ocrResult.text, ocrMetadata.subject),
-    copyrightYear: originalVisionOutput.copyrightYear ?? ocrMetadata.copyrightYear,
-    isbn: originalVisionOutput.isbn ?? ocrMetadata.isbn,
-    additionalIsbns: Array.from(new Set([...(originalVisionOutput.additionalIsbns ?? []), ...(ocrMetadata.additionalIsbns ?? [])])),
-    relatedIsbns: Array.from(new Map([...(originalVisionOutput.relatedIsbns ?? []), ...(ocrMetadata.relatedIsbns ?? [])].map((entry) => [`${entry.type}:${entry.isbn}`, entry])).values()),
-    platformUrl: originalVisionOutput.platformUrl ?? ocrMetadata.platformUrl,
-    mhid: originalVisionOutput.mhid ?? ocrMetadata.mhid,
-    confidence: Math.max(ocrMetadata.confidence, originalVisionOutput.confidence),
-    rawText: [originalVisionOutput.rawText, correctedRawText].filter(Boolean).join("\n\n").trim(),
-    source: "vision+ocr",
-  };
-  const parsedFields = summarizeMetadataFields(merged);
+  if (!bestResult) {
+    if (shouldForceOcrEnrichment && originalVisionOutput && visionLooksUsable) {
+      const crossValidatedVisionOutput = crossValidateVisionSubjectFromRawText(originalVisionOutput);
+      const enrichedVisionOutput = backfillMissingHighValueFields(crossValidatedVisionOutput, crossValidatedVisionOutput.rawText);
+      const parsedFields = summarizeMetadataFields(enrichedVisionOutput);
+      updateMetadataPipelineRuntimeStatus({
+        stage: "completed",
+        path: "vision_only",
+        parsedFieldsCount: parsedFields.length,
+        parsedFields,
+        ocr: {
+          providerId: null,
+          rawTextLength: 0,
+          attemptCount: ocrAttemptCount,
+          maxAttempts: maxOcrAttempts,
+        },
+        missingCriticalFields: collectMissingFields(enrichedVisionOutput, TITLE_CRITICAL_FIELDS),
+        missingTargetFields: collectMissingFields(enrichedVisionOutput, TITLE_TARGET_DEBUG_FIELDS),
+      });
+      void emitMetadataPipelineDiagnostic("ocr_enrichment_failed_using_vision", {
+        level: "warning",
+        traceId,
+        context: {
+          pageType: context.pageType,
+          attempts: ocrAttemptCount,
+          message: lastOcrError?.message ?? "All OCR attempts failed.",
+        },
+      });
+
+      return {
+        result: enrichedVisionOutput,
+        originalVisionOutput,
+        originalOcrOutput: null,
+      };
+    }
+
+    throw lastOcrError ?? new Error("OCR extraction failed after all attempts.");
+  }
+
+  const finalMissingCriticalFields = collectMissingFields(bestResult, TITLE_CRITICAL_FIELDS);
+  const finalMissingTargetFields = collectMissingFields(bestResult, TITLE_TARGET_DEBUG_FIELDS);
+  const bestPath: MetadataPipelineRuntimeStatus["path"] = originalVisionOutput ? "vision_ocr_merged" : "ocr_only";
+  const parsedFields = summarizeMetadataFields(bestResult);
+
+  if (finalMissingCriticalFields.length > 0) {
+    const failureSnapshot = buildMetadataFailureSnapshot(bestResult, bestOriginalOcrOutput?.rawText ?? "", imageDataUrl);
+    void emitMetadataPipelineDiagnostic("ocr_max_attempts_reached", {
+      level: "warning",
+      traceId,
+      context: {
+        pageType: context.pageType,
+        attempts: ocrAttemptCount,
+        maxAttempts: maxOcrAttempts,
+        missingCriticalFields: finalMissingCriticalFields,
+        missingTargetFields: finalMissingTargetFields,
+        failureSnapshot,
+      },
+    });
+  }
+
   updateMetadataPipelineRuntimeStatus({
     stage: "completed",
-    path: "vision_ocr_merged",
+    path: bestPath,
     parsedFieldsCount: parsedFields.length,
     parsedFields,
+    missingCriticalFields: finalMissingCriticalFields,
+    missingTargetFields: finalMissingTargetFields,
+    ocr: {
+      providerId: bestOriginalOcrOutput?.providerId ?? null,
+      rawTextLength: bestOriginalOcrOutput?.rawText.length ?? 0,
+      attemptCount: ocrAttemptCount,
+      maxAttempts: maxOcrAttempts,
+    },
   });
 
   void emitMetadataPipelineDiagnostic("completed", {
     traceId,
     context: {
-      path: "vision_ocr_merged",
-      ocrProviderId: ocrResult.providerId,
-      mergedConfidence: merged.confidence,
-      visionConfidence: originalVisionOutput.confidence,
+      path: bestPath,
+      ocrProviderId: bestOriginalOcrOutput?.providerId ?? null,
+      mergedConfidence: bestResult.confidence,
+      visionConfidence: originalVisionOutput?.confidence ?? null,
+      ocrAttempts: ocrAttemptCount,
+      maxOcrAttempts: maxOcrAttempts,
+      missingCriticalFields: finalMissingCriticalFields,
     },
   });
 
   return {
-    result: merged,
+    result: bestResult,
     originalVisionOutput,
-    originalOcrOutput: {
-      rawText: ocrResult.text,
-      providerId: ocrResult.providerId,
-    },
+    originalOcrOutput: bestOriginalOcrOutput,
   };
 }
 

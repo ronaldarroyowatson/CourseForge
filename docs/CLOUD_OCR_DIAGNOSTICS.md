@@ -48,6 +48,13 @@ Webapp-side OCR diagnostics continue to mirror events to:
 
 Cloud extraction failures are now emitted with the provider id, trace id, and failure metadata so the fallback path is visible in the local log.
 
+Metadata extraction failures now also emit bounded post-mortem diagnostics when title/copyright-page recovery cannot collect the required fields after retrying:
+
+- OCR metadata completion retries are capped at `3` attempts for completeness recovery
+- the best available merged metadata is returned instead of failing indefinitely
+- `ocr_max_attempts_reached` includes missing critical fields, missing target fields, and a failure snapshot
+- the failure snapshot now carries a bounded image preview artifact so the failed page can be inspected later without uploading the full source image payload
+
 ## Smoke Test Command
 
 Run the live smoke test with:
@@ -58,9 +65,11 @@ npm run test:smoke:ocr:cloud
 
 What it does:
 
-- generates a representative textbook-style PNG locally
-- sends the same image to OpenAI Vision and GitHub Models Vision
-- validates that returned OCR text contains expected textbook keywords
+- generates a copyright-page sample PNG with strict left/right column boundaries
+- checks live OCR-agent reachability by calling OpenAI Vision and GitHub Models Vision
+- checks live metadata-agent reachability against the same sample image
+- validates OCR completeness for required copyright-page text sections
+- validates expected metadata extraction fields (ISBN, publisher location, copyright year, publisher URL, grade band from field or URL, MHID)
 - writes a machine-readable JSON report to `tmp-smoke/`
 
 ## Required Credentials
@@ -79,6 +88,12 @@ Examples:
 - `reasonCode=request_failed`: request was prepared and sent, but no provider response was received
 - `reasonCode=empty_text`: provider responded successfully but returned no usable OCR output
 - `reasonCode=unusable_text`: smoke test received text that did not contain the expected textbook keywords
+
+For metadata fallback diagnostics, inspect these additional fields when present:
+
+- `missingCriticalFields`: fields still blocking a complete copyright-page extraction, currently `isbn` and `copyrightYear`
+- `missingTargetFields`: broader debug target list used for triage, including `title`, `publisher`, `publisherLocation`, `platformUrl`, and `mhid`
+- `failureSnapshot.imageArtifact.previewDataUrl`: truncated inline preview of the page image captured with the failed metadata snapshot
 
 When a cloud provider is marked unavailable, CourseForge keeps that state in the provider-health cache for the TTL window to avoid repeating dead-end calls before trying the next provider.
 

@@ -1,0 +1,166 @@
+﻿{
+    "generatedAt":  "2026-03-31T21:29:16.7665064-05:00",
+    "sampleImagePath":  "C:\\Users\\ronal\\Documents\\CourseForge\\tmp-smoke\\ocr-smoke-copyright-20260331-212853.png",
+    "checks":  {
+                   "ocrAgentReachable":  true,
+                   "metadataAgentReachable":  true,
+                   "ocrCompletenessPassed":  true,
+                   "metadataValidationPassed":  true
+               },
+    "providers":  [
+                      {
+                          "providerId":  "cloud_openai_vision",
+                          "providerLabel":  "Cloud OCR + Metadata (OpenAI)",
+                          "ocr":  {
+                                      "providerId":  "cloud_openai_vision",
+                                      "success":  false,
+                                      "reasonCode":  "rate_limited",
+                                      "message":  "You exceeded your current quota, please check your plan and billing details. For more information on this error, read the docs: https://platform.openai.com/docs/guides/error-codes/api-errors.",
+                                      "httpStatus":  429,
+                                      "extractedText":  null
+                                  },
+                          "ocrCompleteness":  null,
+                          "metadataAgent":  {
+                                                "providerId":  "cloud_openai_vision",
+                                                "success":  false,
+                                                "reasonCode":  "rate_limited",
+                                                "message":  "You exceeded your current quota, please check your plan and billing details. For more information on this error, read the docs: https://platform.openai.com/docs/guides/error-codes/api-errors.",
+                                                "httpStatus":  429,
+                                                "metadata":  null
+                                            },
+                          "metadataValidation":  null
+                      },
+                      {
+                          "providerId":  "cloud_github_models_vision",
+                          "providerLabel":  "Cloud OCR + Metadata (GitHub Models)",
+                          "ocr":  {
+                                      "providerId":  "cloud_github_models_vision",
+                                      "success":  true,
+                                      "reasonCode":  "ok",
+                                      "message":  "Provider returned OCR text.",
+                                      "httpStatus":  200,
+                                      "extractedText":  "mheducation.com/prek-12\nMc\nGraw\nHill Copyright © 2021 McGraw-Hill Education\nAll rights reserved. No part of this publication may be reproduced or distributed in any form or by any means, or stored in a database or retrieval system, without the prior written consent of McGraw-Hill Education, including, but not limited to, network storage or transmission, or broadcast for distance learning.\n\nSend all inquiries to:\nMcGraw-Hill Education\nSTEM Learning Solutions Center\n8787 Orion Place\nColumbus, OH 43240\n\nISBN: 978-0-07-671685-2\nMHID: 0-07-671685-6\n\nPrinted in the United States of America.\n3 4 5 6 7 8 LWI 24 23 22 21\n\nSTEM\nMcGraw-Hill is committed to providing instructional materials in\nScience, Technology, Engineering, and Mathematics (STEM) that\ngive all students a solid foundation, one that prepares them for\ncollege and careers in the 21st century."
+                                  },
+                          "ocrCompleteness":  {
+                                                  "requiredPhraseCount":  12,
+                                                  "matchedPhraseCount":  12,
+                                                  "completenessPercent":  100,
+                                                  "checks":  [
+                                                                 {
+                                                                     "phrase":  "mheducation.com/prek-12",
+                                                                     "found":  true
+                                                                 },
+                                                                 {
+                                                                     "phrase":  "Copyright",
+                                                                     "found":  true
+                                                                 },
+                                                                 {
+                                                                     "phrase":  "2021",
+                                                                     "found":  true
+                                                                 },
+                                                                 {
+                                                                     "phrase":  "Send all inquiries to:",
+                                                                     "found":  true
+                                                                 },
+                                                                 {
+                                                                     "phrase":  "STEM Learning Solutions Center",
+                                                                     "found":  true
+                                                                 },
+                                                                 {
+                                                                     "phrase":  "8787 Orion Place",
+                                                                     "found":  true
+                                                                 },
+                                                                 {
+                                                                     "phrase":  "Columbus, OH 43240",
+                                                                     "found":  true
+                                                                 },
+                                                                 {
+                                                                     "phrase":  "ISBN: 978-0-07-671685-2",
+                                                                     "found":  true
+                                                                 },
+                                                                 {
+                                                                     "phrase":  "MHID: 0-07-671685-6",
+                                                                     "found":  true
+                                                                 },
+                                                                 {
+                                                                     "phrase":  "Printed in the United States of America",
+                                                                     "found":  true
+                                                                 },
+                                                                 {
+                                                                     "phrase":  "3 4 5 6 7 8 LWI 24 23 22 21",
+                                                                     "found":  true
+                                                                 },
+                                                                 {
+                                                                     "phrase":  "Science, Technology, Engineering, and Mathematics",
+                                                                     "found":  true
+                                                                 }
+                                                             ],
+                                                  "passed":  true
+                                              },
+                          "metadataAgent":  {
+                                                "providerId":  "cloud_github_models_vision",
+                                                "success":  true,
+                                                "reasonCode":  "ok",
+                                                "message":  "Provider returned metadata JSON.",
+                                                "httpStatus":  200,
+                                                "metadata":  {
+                                                                 "title":  null,
+                                                                 "subtitle":  null,
+                                                                 "edition":  null,
+                                                                 "publisher":  "McGraw-Hill Education",
+                                                                 "publisherLocation":  "Columbus, OH 43240",
+                                                                 "series":  null,
+                                                                 "gradeLevel":  null,
+                                                                 "subject":  "STEM",
+                                                                 "copyrightYear":  2021,
+                                                                 "isbn":  "978-0-07-671685-2",
+                                                                 "platformUrl":  "mheducation.com/prek-12",
+                                                                 "mhid":  "0-07-671685-6",
+                                                                 "rawText":  "mheducation.com/prek-12\nMc\nGraw\nHill Copyright © 2021 McGraw-Hill Education\nAll rights reserved. No part of this publication may be reproduced or distributed in any form or by any means, or stored in a database or retrieval system, without the prior written consent of McGraw-Hill Education, including, but not limited to, network storage or transmission, or broadcast for distance learning.\nSend all inquiries to:\nMcGraw-Hill Education\nSTEM Learning Solutions Center\n8787 Orion Place\nColumbus, OH 43240\nISBN: 978-0-07-671685-2\nMHID: 0-07-671685-6\nPrinted in the United States of America.\n3 4 5 6 7 8 LWI 24 23 22 21\nSTEM\nMcGraw-Hill is committed to providing instructional materials in\nScience, Technology, Engineering, and Mathematics (STEM) that\ngive all students a solid foundation, one that prepares them for\ncollege and careers in the 21st century.",
+                                                                 "confidence":  0.95
+                                                             }
+                                            },
+                          "metadataValidation":  {
+                                                     "passed":  true,
+                                                     "checks":  [
+                                                                    {
+                                                                        "field":  "isbn",
+                                                                        "passed":  true,
+                                                                        "actual":  "9780076716852",
+                                                                        "expected":  "9780076716852"
+                                                                    },
+                                                                    {
+                                                                        "field":  "publisherLocation",
+                                                                        "passed":  true,
+                                                                        "actual":  "Columbus, OH 43240",
+                                                                        "expected":  "contains Columbus, OH 43240"
+                                                                    },
+                                                                    {
+                                                                        "field":  "copyrightYear",
+                                                                        "passed":  true,
+                                                                        "actual":  "2021",
+                                                                        "expected":  "2021"
+                                                                    },
+                                                                    {
+                                                                        "field":  "platformUrl",
+                                                                        "passed":  true,
+                                                                        "actual":  "mheducation.com/prek-12",
+                                                                        "expected":  "contains mheducation.com/prek-12"
+                                                                    },
+                                                                    {
+                                                                        "field":  "gradeLevel",
+                                                                        "passed":  true,
+                                                                        "actual":  "",
+                                                                        "expected":  "Pre-K-12 (or derivable from /prek-12 URL)"
+                                                                    },
+                                                                    {
+                                                                        "field":  "mhid",
+                                                                        "passed":  true,
+                                                                        "actual":  "0-07-671685-6",
+                                                                        "expected":  "0-07-671685-6"
+                                                                    }
+                                                                ]
+                                                 }
+                      }
+                  ]
+}

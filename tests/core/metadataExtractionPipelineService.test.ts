@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+﻿import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const callableMock = vi.fn();
 const ocrMock = vi.fn();
@@ -69,7 +69,7 @@ describe("metadataExtractionPipelineService", () => {
               "mheducation.com/prek-12",
               "McGraw Hill",
               "Science, Technology, Engineering, and Mathematics (STEM)",
-              "Copyright © 2021 McGraw-Hill Education",
+              "Copyright Â© 2021 McGraw-Hill Education",
               "ISBN: 978-0-07-671685-2",
               "MHID: 0-07-671685-6",
             ].join("\n"),
@@ -83,7 +83,7 @@ describe("metadataExtractionPipelineService", () => {
         "Inspire Physical Science",
         "with Earth Science",
         "mheducation.com/prek-12",
-        "Copyright © 2021 McGraw-Hill Education",
+        "Copyright Â© 2021 McGraw-Hill Education",
       ].join("\n"),
       providerId: "cloud_openai_vision",
     });
@@ -116,7 +116,7 @@ describe("metadataExtractionPipelineService", () => {
 
     ocrMock.mockResolvedValue({
       text: [
-        "Copyright © 2021 McGraw-Hill Education",
+        "Copyright Â© 2021 McGraw-Hill Education",
         "ISBN: 978-0-07-671685-2",
         "MHID: 0-07-671685-6",
       ].join("\n"),
@@ -192,7 +192,7 @@ describe("metadataExtractionPipelineService", () => {
         "8787 Orion Place",
         "Columbus, OH 43240",
         "ISBN: 978-0-07-671685-2",
-        "Copyright © 2021 McGraw-Hill Education",
+        "Copyright Â© 2021 McGraw-Hill Education",
       ].join("\n"),
       providerId: "cloud_github_models_vision",
     });
@@ -489,7 +489,7 @@ describe("metadataExtractionPipelineService", () => {
               title: "Science Textbook",
               copyrightYear: 2021,  // As number
               confidence: 0.85,
-              rawText: "Copyright © 2021",
+              rawText: "Copyright Â© 2021",
             },
           },
         },
@@ -512,7 +512,7 @@ describe("metadataExtractionPipelineService", () => {
               title: "Science Textbook",
               copyrightYear: "2021",  // As string - sanitization should convert to number
               confidence: 0.85,
-              rawText: "Copyright © 2021",
+              rawText: "Copyright Â© 2021",
             },
           },
         },
@@ -667,16 +667,16 @@ describe("metadataExtractionPipelineService", () => {
     });
   });
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Permanent validation suite: McGraw-Hill copyright page — pipeline path
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Permanent validation suite: McGraw-Hill copyright page â€” pipeline path
   // Verifies Agent A (OCR) output flows correctly through Agent B (vision/parser)
   // and populates all required metadata fields every time.
-  // ────────────────────────────────────────────────────────────────────────────
-  describe("McGraw-Hill copyright page — pipeline permanent validation", () => {
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  describe("McGraw-Hill copyright page â€” pipeline permanent validation", () => {
     const MCGRAW_FULL_OCR_TEXT = [
       "mheducation.com/prek-12",
       "McGraw Hill",
-      "Copyright © 2021 McGraw-Hill Education",
+      "Copyright Â© 2021 McGraw-Hill Education",
       "All rights reserved. No part of this publication may be reproduced or distributed in any form or by any means, or stored in a database or retrieval system, without the prior written consent of McGraw-Hill Education, including, but not limited to, network storage or transmission, or broadcast for distance learning.",
       "Send all inquiries to:",
       "McGraw-Hill Education",
@@ -691,7 +691,7 @@ describe("metadataExtractionPipelineService", () => {
       "McGraw-Hill is committed to providing instructional materials in Science, Technology, Engineering, and Mathematics (STEM) that give all students a solid foundation, one that prepares them for college and careers in the 21st century.",
     ].join("\n");
 
-    it("pipeline (vision low-confidence → OCR fallback): extracts isbn from copyright page", async () => {
+    it("pipeline (vision low-confidence â†’ OCR fallback): extracts isbn from copyright page", async () => {
       callableMock.mockResolvedValue({
         data: {
           success: true,
@@ -710,7 +710,7 @@ describe("metadataExtractionPipelineService", () => {
       expect(result.result.isbn).toBe("9780076716852");
     });
 
-    it("pipeline (vision low-confidence → OCR fallback): extracts copyrightYear from copyright page", async () => {
+    it("pipeline (vision low-confidence â†’ OCR fallback): extracts copyrightYear from copyright page", async () => {
       callableMock.mockResolvedValue({
         data: {
           success: true,
@@ -729,7 +729,7 @@ describe("metadataExtractionPipelineService", () => {
       expect(result.result.copyrightYear).toBe(2021);
     });
 
-    it("pipeline (vision low-confidence → OCR fallback): extracts platformUrl from copyright page", async () => {
+    it("pipeline (vision low-confidence â†’ OCR fallback): extracts platformUrl from copyright page", async () => {
       callableMock.mockResolvedValue({
         data: {
           success: true,
@@ -748,7 +748,7 @@ describe("metadataExtractionPipelineService", () => {
       expect(result.result.platformUrl).toBe("https://mheducation.com/prek-12");
     });
 
-    it("pipeline (vision low-confidence → OCR fallback): extracts gradeBand from copyright page URL", async () => {
+    it("pipeline (vision low-confidence â†’ OCR fallback): extracts gradeBand from copyright page URL", async () => {
       callableMock.mockResolvedValue({
         data: {
           success: true,
@@ -767,7 +767,7 @@ describe("metadataExtractionPipelineService", () => {
       expect(result.result.gradeLevel).toBe("Pre-K-12");
     });
 
-    it("pipeline (vision low-confidence → OCR fallback): extracts publisherLocation from copyright page", async () => {
+    it("pipeline (vision low-confidence â†’ OCR fallback): extracts publisherLocation from copyright page", async () => {
       callableMock.mockResolvedValue({
         data: {
           success: true,

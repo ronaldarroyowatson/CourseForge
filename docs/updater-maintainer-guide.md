@@ -78,6 +78,7 @@ Critical scenarios to keep covered:
 6. Staged apply success path
 7. Staged apply retry/failure diagnostics path
 8. Status and diagnostics API contract
+9. Preferred-port collision fallback path (`auto-update-launcher.integration.test.ts`) using a generous marker wait budget on slower Windows runners
 
 ## 7. Safe extension points
 

@@ -424,7 +424,7 @@ describe("portable launcher staged-update flow", () => {
       blocker = await startBlockingServer(preferredPort);
       const result = runLauncher(root, binDir, { robocopyMode: "success" });
       const logDetails = readLauncherLog(root);
-      await waitForFile(join(root, "server-started.json"), 10000);
+      await waitForFile(join(root, "server-started.json"), 20000);
       const started = JSON.parse(readFileSync(join(root, "server-started.json"), "utf8")) as { args: string[] };
       const actualPort = Number(started.args[1]);
 

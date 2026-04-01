@@ -1,4 +1,4 @@
-# Cloud OCR Diagnostics
+﻿# Cloud OCR Diagnostics
 
 This guide covers the cloud OCR diagnostics path, smoke test workflow, and the exact failure signals CourseForge now emits before falling back to a secondary provider or local OCR.
 

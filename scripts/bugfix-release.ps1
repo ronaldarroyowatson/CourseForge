@@ -1,4 +1,4 @@
-# bugfix-release.ps1
+﻿# bugfix-release.ps1
 # Automates the full CourseForge bugfix release flow.
 #
 # Usage:
@@ -31,7 +31,7 @@ param(
   # Build artifacts but do not commit/tag/push or create GitHub release
   [switch]$DryRun,
 
-  # Alias for DryRun — just run tests and show what would happen
+  # Alias for DryRun â€” just run tests and show what would happen
   [switch]$TestOnly,
 
   # Skip building portable and windows zip packages

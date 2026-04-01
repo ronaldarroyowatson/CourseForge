@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { RelatedIsbn, RelatedIsbnType } from "../../../core/models";
 
 import {
@@ -250,7 +250,7 @@ function clearPersistedCaptureUsage(draftKey: string): void {
   }
 }
 
-// ── Auto Session Draft — resumable workflow across page reloads ───────────────
+// â”€â”€ Auto Session Draft â€” resumable workflow across page reloads â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const AUTO_SESSION_DRAFTS_KEY = "courseforge.autoSessionDrafts.v2";
 const AUTO_SESSION_DRAFT_KEY = "courseforge.autoSessionDraft.v1"; // legacy key
@@ -875,18 +875,18 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingUploadLimitResultRef = useRef<ReturnType<typeof enforceAutoCaptureLimit> | null>(null);
-  // Scroll target — metadata fields section revealed after successful OCR.
+  // Scroll target â€” metadata fields section revealed after successful OCR.
   const metadataFormRef = useRef<HTMLDivElement>(null);
   const activeSessionDraftIdRef = useRef<string>(createAutoFlowTraceId("auto-draft"));
   const lastCorrectionSignatureRef = useRef<string | null>(null);
 
-  // ── Raw OCR / parsed metadata two-section state ──────────────────────────
+  // â”€â”€ Raw OCR / parsed metadata two-section state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // rawOcrText: original, unedited OCR output shown read-only for transparency.
   // ocrDraft: editable copy the user can correct before re-parsing.
   const [rawOcrText, setRawOcrText] = useState(testingSeedState?.ocrDraft ?? "");
   const [isRawOcrExpanded, setIsRawOcrExpanded] = useState(false);
 
-  // ── Resumable sessions (max 3) ────────────────────────────────────────────
+  // â”€â”€ Resumable sessions (max 3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [resumableDrafts, setResumableDrafts] = useState<AutoSessionDraft[]>(() => readAutoSessionDrafts());
   const currentSessionHasWork = Boolean(coverImageDataUrl || rawOcrText || metadataForm.title.trim());
   const isSessionCapacityReached = resumableDrafts.length >= MAX_AUTO_SESSION_DRAFTS && !currentSessionHasWork;
@@ -2478,7 +2478,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     <section className={`panel auto-textbook-flow${compactChromeLayout ? " auto-textbook-flow--chromeos-compact" : ""}`}>
       <h3>{stepTitle}</h3>
 
-      {/* ── Session queue (max 3 unfinished auto captures) ─────────────── */}
+      {/* â”€â”€ Session queue (max 3 unfinished auto captures) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="auto-session-resume" role="complementary" aria-label="Resume previous Auto sessions">
         <p className="auto-session-resume__title">Auto Mode Queue ({resumableDrafts.length}/{MAX_AUTO_SESSION_DRAFTS})</p>
         <div className="auto-session-slots" aria-label="Auto capture queue slots">
@@ -2487,7 +2487,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             if (!draft) {
               return (
                 <div key={`auto-slot-empty-${index}`} className="auto-session-slot auto-session-slot--empty" aria-label={`Queue slot ${index + 1} empty`}>
-                  <span className="auto-session-slot__placeholder" aria-hidden="true">📘</span>
+                  <span className="auto-session-slot__placeholder" aria-hidden="true">ðŸ“˜</span>
                   <p className="auto-session-slot__hint">Empty slot</p>
                 </div>
               );
@@ -2498,7 +2498,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                 {draft.coverImageDataUrl ? (
                   <img src={draft.coverImageDataUrl} alt="Queued cover thumbnail" className="auto-session-resume__thumb" />
                 ) : (
-                  <span className="auto-session-slot__placeholder" aria-hidden="true">📘</span>
+                  <span className="auto-session-slot__placeholder" aria-hidden="true">ðŸ“˜</span>
                 )}
                 <p className="auto-session-resume__meta">
                   {draft.metadataTitle ? <strong>{draft.metadataTitle}</strong> : <em>Untitled</em>}
@@ -2589,9 +2589,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             Copyright page capture is always treated as full-page to support future ownership verification against stored textbook metadata.
           </p>
           <div className="capture-tip-callout">
-            <span className="capture-tip-callout__icon" aria-hidden="true">💡</span>
+            <span className="capture-tip-callout__icon" aria-hidden="true">ðŸ’¡</span>
             <p className="capture-tip-callout__text">
-              <strong>Best results tip:</strong> Before capturing, zoom in so the copyright page fills most of your screen — small text is harder for OCR to read accurately. If you zoomed out to see the full page and some fields were missed, try re-capturing at a higher zoom level, or drag &amp; drop a close-up screenshot of just the copyright text.
+              <strong>Best results tip:</strong> Before capturing, zoom in so the copyright page fills most of your screen â€” small text is harder for OCR to read accurately. If you zoomed out to see the full page and some fields were missed, try re-capturing at a higher zoom level, or drag &amp; drop a close-up screenshot of just the copyright text.
             </p>
           </div>
         </>
@@ -2606,7 +2606,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       {isRunningOcr ? (
         <div className="ocr-loading-banner" role="status" aria-live="polite">
           <span className="ocr-loading-spinner" aria-hidden="true" />
-          <span className="ocr-loading-text">Analyzing image — OCR is reading your page. This usually takes a few seconds&hellip;</span>
+          <span className="ocr-loading-text">Analyzing image â€” OCR is reading your page. This usually takes a few seconds&hellip;</span>
         </div>
       ) : null}
 
@@ -2618,7 +2618,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           <ul className="extraction-summary__list">
             {lastExtractionFields.map((field) => (
               <li key={field} className="extraction-summary__item">
-                <span className="extraction-summary__check" aria-hidden="true">✓</span> {field}
+                <span className="extraction-summary__check" aria-hidden="true">âœ“</span> {field}
               </li>
             ))}
           </ul>
@@ -2749,7 +2749,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         />
       </label>
 
-      {/* ── Raw OCR collapsible section (item #5 / #9) ───────────── */}
+      {/* â”€â”€ Raw OCR collapsible section (item #5 / #9) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {rawOcrText ? (
         <div className="ocr-raw-section">
           <button
@@ -2757,7 +2757,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             className="btn-text ocr-raw-section__label"
             onClick={() => setIsRawOcrExpanded((v) => !v)}
           >
-            {isRawOcrExpanded ? "▾" : "▸"} Raw OCR Output
+            {isRawOcrExpanded ? "â–¾" : "â–¸"} Raw OCR Output
           </button>
           {isRawOcrExpanded ? (
             <pre className="ocr-raw-section__pre">{rawOcrText}</pre>
@@ -2765,7 +2765,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         </div>
       ) : null}
 
-      {/* Standalone re-parse button — only shown when no cover thumbnail is present yet */}
+      {/* Standalone re-parse button â€” only shown when no cover thumbnail is present yet */}
       {(step === "cover" || step === "title") && !coverImageDataUrl ? (
         <button type="button" className="btn-secondary" onClick={runMetadataExtraction} disabled={isBusy}>
           Re-parse OCR Text
@@ -2917,7 +2917,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                   placeholder="Note (optional)"
                   className="related-isbn-note"
                 />
-                <button type="button" className="btn-icon btn-danger" onClick={() => removeRelatedIsbn(index)} aria-label="Remove related ISBN" title="Remove">✕</button>
+                <button type="button" className="btn-icon btn-danger" onClick={() => removeRelatedIsbn(index)} aria-label="Remove related ISBN" title="Remove">âœ•</button>
               </div>
             ))}
             <button type="button" className="btn-secondary" onClick={addRelatedIsbn}>+ Add Related ISBN</button>

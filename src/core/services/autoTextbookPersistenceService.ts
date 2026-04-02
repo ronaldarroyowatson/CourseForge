@@ -76,6 +76,59 @@ export interface PersistAutoTextbookDependencies {
   createSection: (input: { sourceType?: "auto" | "manual"; chapterId: string; index: number; title: string; notes?: string }) => Promise<string>;
 }
 
+function deriveChapterPageEnd(chapters: TocChapter[], chapterIndex: number): number | undefined {
+  const chapter = chapters[chapterIndex];
+  if (!chapter) {
+    return undefined;
+  }
+
+  if (typeof chapter.pageEnd === "number" && Number.isFinite(chapter.pageEnd)) {
+    return chapter.pageEnd;
+  }
+
+  if (typeof chapter.pageStart !== "number" || !Number.isFinite(chapter.pageStart)) {
+    return undefined;
+  }
+
+  for (let index = chapterIndex + 1; index < chapters.length; index += 1) {
+    const nextStart = chapters[index]?.pageStart;
+    if (typeof nextStart === "number" && Number.isFinite(nextStart) && nextStart > chapter.pageStart) {
+      return nextStart - 1;
+    }
+  }
+
+  return undefined;
+}
+
+function buildChapterDescription(unitName: string | undefined, pageStart: number | undefined, pageEnd: number | undefined): string | undefined {
+  const parts: string[] = [];
+  if (unitName && unitName.trim()) {
+    parts.push(unitName.trim());
+  }
+
+  if (typeof pageStart === "number" && Number.isFinite(pageStart)) {
+    if (typeof pageEnd === "number" && Number.isFinite(pageEnd) && pageEnd >= pageStart) {
+      parts.push(`Pages ${pageStart}-${pageEnd}`);
+    } else {
+      parts.push(`Starts on page ${pageStart}`);
+    }
+  }
+
+  return parts.length > 0 ? parts.join(" | ") : undefined;
+}
+
+function buildSectionNotes(pageStart: number | undefined, pageEnd: number | undefined): string | undefined {
+  if (typeof pageStart !== "number" || !Number.isFinite(pageStart)) {
+    return undefined;
+  }
+
+  if (typeof pageEnd === "number" && Number.isFinite(pageEnd) && pageEnd >= pageStart) {
+    return `Pages ${pageStart}-${pageEnd}`;
+  }
+
+  return `Starts on page ${pageStart}`;
+}
+
 export async function persistAutoTextbook(
   input: PersistAutoTextbookInput,
   deps: PersistAutoTextbookDependencies
@@ -115,12 +168,13 @@ export async function persistAutoTextbook(
   for (let chapterIndex = 0; chapterIndex < input.tocChapters.length; chapterIndex += 1) {
     const chapter = input.tocChapters[chapterIndex];
     const chapterOrder = Number.parseInt(chapter.chapterNumber, 10);
+    const chapterPageEnd = deriveChapterPageEnd(input.tocChapters, chapterIndex);
     const createdChapterId = await deps.createChapter({
       sourceType: "auto",
       textbookId,
       index: Number.isInteger(chapterOrder) ? chapterOrder : chapterIndex + 1,
       name: chapter.title,
-      description: chapter.unitName,
+      description: buildChapterDescription(chapter.unitName, chapter.pageStart, chapterPageEnd),
     });
 
     for (let sectionIndex = 0; sectionIndex < chapter.sections.length; sectionIndex += 1) {
@@ -131,6 +185,7 @@ export async function persistAutoTextbook(
         chapterId: createdChapterId,
         index: Number.isInteger(sectionOrder) ? sectionOrder : sectionIndex + 1,
         title: section.title,
+        notes: buildSectionNotes(section.pageStart, section.pageEnd),
       });
     }
   }

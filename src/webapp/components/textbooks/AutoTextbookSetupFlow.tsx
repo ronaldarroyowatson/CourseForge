@@ -485,6 +485,73 @@ function fromMetadataFormState(form: MetadataFormState): AutoTextbookMetadata {
   };
 }
 
+function toPageInputValue(page: number | undefined): string {
+  return typeof page === "number" && Number.isFinite(page) ? String(page) : "";
+}
+
+function parsePageInputValue(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function getChapterDerivedPageEnd(chapters: TocChapter[], chapterIndex: number): number | undefined {
+  const chapter = chapters[chapterIndex];
+  if (!chapter) {
+    return undefined;
+  }
+
+  if (typeof chapter.pageEnd === "number" && Number.isFinite(chapter.pageEnd)) {
+    return chapter.pageEnd;
+  }
+
+  if (typeof chapter.pageStart !== "number" || !Number.isFinite(chapter.pageStart)) {
+    return undefined;
+  }
+
+  for (let index = chapterIndex + 1; index < chapters.length; index += 1) {
+    const nextStart = chapters[index]?.pageStart;
+    if (typeof nextStart === "number" && Number.isFinite(nextStart) && nextStart > chapter.pageStart) {
+      return nextStart - 1;
+    }
+  }
+
+  return undefined;
+}
+
+function buildChapterDescription(unitName: string | undefined, pageStart: number | undefined, pageEnd: number | undefined): string | undefined {
+  const parts: string[] = [];
+  if (unitName && unitName.trim()) {
+    parts.push(unitName.trim());
+  }
+
+  if (typeof pageStart === "number" && Number.isFinite(pageStart)) {
+    if (typeof pageEnd === "number" && Number.isFinite(pageEnd) && pageEnd >= pageStart) {
+      parts.push(`Pages ${pageStart}-${pageEnd}`);
+    } else {
+      parts.push(`Starts on page ${pageStart}`);
+    }
+  }
+
+  return parts.length > 0 ? parts.join(" | ") : undefined;
+}
+
+function buildSectionNotes(pageStart: number | undefined, pageEnd: number | undefined): string | undefined {
+  if (typeof pageStart !== "number" || !Number.isFinite(pageStart)) {
+    return undefined;
+  }
+
+  if (typeof pageEnd === "number" && Number.isFinite(pageEnd) && pageEnd >= pageStart) {
+    return `Pages ${pageStart}-${pageEnd}`;
+  }
+
+  return `Starts on page ${pageStart}`;
+}
+
 function metadataResultToAutoMetadata(metadata: MetadataResult): AutoTextbookMetadata {
   const rawExtracted = extractMetadataFromOcrText(metadata.rawText);
   const inferredSubject = metadata.subject ?? rawExtracted.subject ?? null;
@@ -2053,7 +2120,11 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     });
   }
 
-  function updateSection(chapterIndex: number, sectionIndex: number, update: { sectionNumber?: string; title?: string }): void {
+  function updateSection(
+    chapterIndex: number,
+    sectionIndex: number,
+    update: { sectionNumber?: string; title?: string; pageStart?: number; pageEnd?: number }
+  ): void {
     setTocResult((current) => {
       const chapters = current.chapters.map((chapter, currentChapterIndex) => {
         if (currentChapterIndex !== chapterIndex) {
@@ -2352,11 +2423,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
         for (const chapterInstruction of plan.chapterUpserts) {
           const chapterIndexValue = Number.parseInt(chapterInstruction.autoChapter.chapterNumber, 10);
+          const chapterPageEnd = chapterInstruction.autoChapter.pageEnd ?? getChapterDerivedPageEnd(tocResult.chapters, chapterInstruction.chapterIndex);
           const chapterPayload = {
             sourceType: "auto" as const,
             index: Number.isInteger(chapterIndexValue) ? chapterIndexValue : chapterInstruction.chapterIndex + 1,
             name: chapterInstruction.autoChapter.title,
-            description: chapterInstruction.autoChapter.unitName,
+            description: buildChapterDescription(
+              chapterInstruction.autoChapter.unitName,
+              chapterInstruction.autoChapter.pageStart,
+              chapterPageEnd
+            ),
           };
 
           if (chapterInstruction.existingChapterId) {
@@ -2378,10 +2454,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             continue;
           }
 
+          const sourceSection = tocResult.chapters[sectionInstruction.chapterRef.chapterIndex]?.sections[sectionInstruction.sectionIndex];
+
           const sectionPayload = {
             sourceType: "auto" as const,
             index: sectionInstruction.sectionIndex + 1,
             title: sectionInstruction.sectionTitle,
+            notes: buildSectionNotes(
+              sourceSection?.pageStart,
+              sourceSection?.pageEnd
+            ),
           };
 
           if (sectionInstruction.existingSectionId) {
@@ -2487,7 +2569,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             if (!draft) {
               return (
                 <div key={`auto-slot-empty-${index}`} className="auto-session-slot auto-session-slot--empty" aria-label={`Queue slot ${index + 1} empty`}>
-                  <span className="auto-session-slot__placeholder" aria-hidden="true">ðŸ“˜</span>
+                    <span className="auto-session-slot__placeholder" aria-hidden="true">{"\u{1F4D8}"}</span>
                   <p className="auto-session-slot__hint">Empty slot</p>
                 </div>
               );
@@ -2498,7 +2580,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                 {draft.coverImageDataUrl ? (
                   <img src={draft.coverImageDataUrl} alt="Queued cover thumbnail" className="auto-session-resume__thumb" />
                 ) : (
-                  <span className="auto-session-slot__placeholder" aria-hidden="true">ðŸ“˜</span>
+                  <span className="auto-session-slot__placeholder" aria-hidden="true">{"\u{1F4D8}"}</span>
                 )}
                 <p className="auto-session-resume__meta">
                   {draft.metadataTitle ? <strong>{draft.metadataTitle}</strong> : <em>Untitled</em>}
@@ -2589,9 +2671,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             Copyright page capture is always treated as full-page to support future ownership verification against stored textbook metadata.
           </p>
           <div className="capture-tip-callout">
-            <span className="capture-tip-callout__icon" aria-hidden="true">ðŸ’¡</span>
+            <span className="capture-tip-callout__icon" aria-hidden="true">{"\u{1F4A1}"}</span>
             <p className="capture-tip-callout__text">
-              <strong>Best results tip:</strong> Before capturing, zoom in so the copyright page fills most of your screen â€” small text is harder for OCR to read accurately. If you zoomed out to see the full page and some fields were missed, try re-capturing at a higher zoom level, or drag &amp; drop a close-up screenshot of just the copyright text.
+              <strong>Best results tip:</strong> Before capturing, zoom in so the copyright page fills most of your screen - small text is harder for OCR to read accurately. If you zoomed out to see the full page and some fields were missed, try re-capturing at a higher zoom level, or drag &amp; drop a close-up screenshot of just the copyright text.
             </p>
           </div>
         </>
@@ -2606,7 +2688,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       {isRunningOcr ? (
         <div className="ocr-loading-banner" role="status" aria-live="polite">
           <span className="ocr-loading-spinner" aria-hidden="true" />
-          <span className="ocr-loading-text">Analyzing image â€” OCR is reading your page. This usually takes a few seconds&hellip;</span>
+          <span className="ocr-loading-text">Analyzing image {"\u2014"} OCR is reading your page. This usually takes a few seconds&hellip;</span>
         </div>
       ) : null}
 
@@ -2790,6 +2872,15 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
               <li key={`toc-preview-${chapter.chapterNumber}-${index}`} className="toc-capture-summary__chapter">
                 <span className="toc-capture-summary__chapter-num">{chapter.chapterNumber}.</span>
                 {" "}{chapter.title}
+                {(typeof chapter.pageStart === "number" || typeof chapter.pageEnd === "number" || typeof getChapterDerivedPageEnd(tocResult.chapters, index) === "number") ? (
+                  <span className="toc-capture-summary__chapter-pages">
+                    {" "}({
+                      typeof chapter.pageStart === "number"
+                        ? `pp. ${chapter.pageStart}-${chapter.pageEnd ?? getChapterDerivedPageEnd(tocResult.chapters, index) ?? "?"}`
+                        : `ends p. ${chapter.pageEnd ?? getChapterDerivedPageEnd(tocResult.chapters, index) ?? "?"}`
+                    })
+                  </span>
+                ) : null}
                 {chapter.sections.length > 0 ? (
                   <span className="toc-capture-summary__section-count"> ({chapter.sections.length} section{chapter.sections.length !== 1 ? "s" : ""})</span>
                 ) : null}
@@ -2797,6 +2888,61 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             ))}
           </ol>
           <p className="form-hint">Review the list above. Use the TOC editor to correct any errors after clicking <strong>Finish TOC</strong>.</p>
+        </div>
+      ) : null}
+
+      {step === "toc" ? (
+        <div className="toc-target-fields" aria-label="TOC target fields preview">
+          <h4>TOC fields that will be filled</h4>
+          <p className="form-hint">
+            TOC capture now fills chapter, section, and subsection-style entries (for numbers like 2.1.3), including page ranges when detected.
+          </p>
+
+          {tocResult.chapters.length === 0 ? (
+            <div className="toc-target-fields__empty">
+              <p><strong>Awaiting TOC parse.</strong> These fields are prepared:</p>
+              <ul>
+                <li>Chapter: Number, Title, Start Page, End Page</li>
+                <li>Section: Number, Title, Start Page, End Page</li>
+                <li>Subsection: Number, Title, Start Page, End Page</li>
+              </ul>
+            </div>
+          ) : (
+            <div className="toc-target-fields__chapters">
+              {tocResult.chapters.map((chapter, chapterIndex) => {
+                const inferredChapterEnd = chapter.pageEnd ?? getChapterDerivedPageEnd(tocResult.chapters, chapterIndex);
+                return (
+                  <div key={`toc-target-${chapter.chapterNumber}-${chapterIndex}`} className="toc-target-fields__chapter">
+                    <p className="toc-target-fields__chapter-title">
+                      Chapter {chapter.chapterNumber}: {chapter.title || "(untitled)"}
+                    </p>
+                    <p className="toc-target-fields__chapter-meta">
+                      Start Page: {chapter.pageStart ?? "-"} | End Page: {inferredChapterEnd ?? "-"}
+                    </p>
+
+                    {chapter.sections.length > 0 ? (
+                      <div className="toc-target-fields__section-list">
+                        {chapter.sections.map((section, sectionIndex) => {
+                          const dotCount = (section.sectionNumber.match(/\./g) ?? []).length;
+                          const levelLabel = dotCount >= 2 ? "Subsection" : "Section";
+                          return (
+                            <div key={`toc-target-sec-${chapterIndex}-${sectionIndex}`} className="toc-target-fields__section-row">
+                              <span className="toc-target-fields__level">{levelLabel}</span>
+                              <span className="toc-target-fields__number">{section.sectionNumber || "-"}</span>
+                              <span className="toc-target-fields__name">{section.title || "(untitled)"}</span>
+                              <span className="toc-target-fields__pages">pp. {section.pageStart ?? "-"}-{section.pageEnd ?? "-"}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="form-hint">No sections detected for this chapter yet.</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -2819,13 +2965,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         </div>
       ) : null}
 
-      {step !== "toc-editor" ? (
+      {(step === "cover" || step === "title") ? (
         <p className="form-hint">
           You can edit any of these fields. Your corrections help improve future extractions.
         </p>
       ) : null}
 
-      {step !== "toc-editor" ? (
+      {(step === "cover" || step === "title") ? (
         <div ref={metadataFormRef} className="metadata-fields-section">
         <div className="form-grid">
           <label>
@@ -2997,6 +3143,25 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                     onChange={(event) => updateChapter(chapterIndex, { title: event.target.value })}
                   />
                 </label>
+                <label>
+                  Chapter Start Page
+                  <input
+                    type="number"
+                    min={1}
+                    value={toPageInputValue(chapter.pageStart)}
+                    onChange={(event) => updateChapter(chapterIndex, { pageStart: parsePageInputValue(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  Chapter End Page
+                  <input
+                    type="number"
+                    min={1}
+                    value={toPageInputValue(chapter.pageEnd)}
+                    onChange={(event) => updateChapter(chapterIndex, { pageEnd: parsePageInputValue(event.target.value) })}
+                    placeholder={toPageInputValue(getChapterDerivedPageEnd(tocResult.chapters, chapterIndex)) || "Auto"}
+                  />
+                </label>
               </div>
 
               <div className="form-actions">
@@ -3019,6 +3184,20 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                     value={section.title}
                     onChange={(event) => updateSection(chapterIndex, sectionIndex, { title: event.target.value })}
                     placeholder="Section title"
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    value={toPageInputValue(section.pageStart)}
+                    onChange={(event) => updateSection(chapterIndex, sectionIndex, { pageStart: parsePageInputValue(event.target.value) })}
+                    placeholder="Start page"
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    value={toPageInputValue(section.pageEnd)}
+                    onChange={(event) => updateSection(chapterIndex, sectionIndex, { pageEnd: parsePageInputValue(event.target.value) })}
+                    placeholder="End page"
                   />
                 </div>
               ))}

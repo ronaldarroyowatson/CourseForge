@@ -211,6 +211,12 @@ flowchart TD
 - User controls loop: "Capture another TOC page?" prompt after each page.
 - OCR failure on a page → that page is skipped; stitching continues with remaining pages.
 
+**UI behavior and data mapping:**
+
+- During TOC capture, the editor now shows TOC target fields (chapter/section/subsection-style rows) instead of metadata fields.
+- Parsed page numbers are editable in TOC editor fields and retained for downstream chapter/section guidance.
+- Chapter end page can be inferred from the next chapter start page when OCR does not provide an explicit end page.
+
 ---
 
 ### Stage 5 – Anti-Abuse Checks

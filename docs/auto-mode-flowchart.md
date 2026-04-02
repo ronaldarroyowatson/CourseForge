@@ -154,6 +154,18 @@ flowchart TD
 
 ## Stage-by-Stage Summary
 
+## Bugfix UX Notes (2026-04-02)
+
+- During OCR processing, capture actions are now interaction-locked to prevent overlapping requests.
+- Drag-and-drop zones are visually disabled while OCR is running, then automatically re-enabled when OCR completes.
+- OCR processing status now overlays the action button area so waiting state is obvious.
+- Auto-scroll now performs one-shot positioning only and does not continue fighting manual user scrolling.
+- After accepting Cover or Copyright metadata, the view returns to the next step instructions/drop zone region.
+- Optional metadata fields are collapsed behind a show/hide control to keep primary fields and Accept flow visible.
+- Upload review overlay is raised above workflow cards to avoid clipping inside container boundaries.
+- TOC entries without numeric section IDs are treated as Additional Section rather than flagged as missing number.
+- Single-page ancillary TOC rows now infer pageEnd equal to pageStart when only one page is provided.
+
 ### Stage 1 – Environment Preparation
 
 | Task | Service | Debug Event |

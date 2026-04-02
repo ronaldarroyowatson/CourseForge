@@ -2010,9 +2010,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 40;
+  z-index: 2000;
   padding: 1rem;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .capture-overlay__panel {
@@ -2025,6 +2025,11 @@ body {
   padding: 0.85rem;
   display: grid;
   gap: 0.65rem;
+}
+
+.upload-preview-panel {
+  position: relative;
+  z-index: 2001;
 }
 
 .capture-overlay__image-wrap {
@@ -2593,6 +2598,29 @@ button:not(:disabled):active {
   margin: 0.35rem 0;
 }
 
+.auto-textbook-flow .form-actions--ocr-aware {
+  position: relative;
+}
+
+.auto-textbook-flow .form-actions--locked {
+  min-height: 3.25rem;
+}
+
+.ocr-actions-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--cf-border);
+  background: color-mix(in srgb, var(--cf-surface) 86%, black);
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  font-style: italic;
+  z-index: 3;
+  pointer-events: all;
+}
+
 .auto-textbook-flow .form-actions > button {
   min-width: 148px;
   padding: 0.65rem 1.1rem;
@@ -2779,4 +2807,14 @@ button:not(:disabled):active {
   display: grid;
   gap: 0.75rem;
   scroll-margin-top: 1.5rem;
+}
+
+.metadata-optional-toggle-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.metadata-optional-grid {
+  border-top: 1px dashed var(--cf-border);
+  padding-top: 0.75rem;
 }

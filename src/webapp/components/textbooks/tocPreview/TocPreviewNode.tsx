@@ -18,10 +18,10 @@ function toNodeLabel(level: TocPreviewNodeModel["level"], value: string, heading
   }
 
   if (level === "section") {
-    return value;
+    return value.trim() ? value : "Additional Section";
   }
 
-  return value;
+  return value.trim() ? value : "Additional Section";
 }
 
 export function TocPreviewNode({ node, initiallyExpanded = true, onUpdateNode, onRegenerateNode, isBusy = false }: TocPreviewNodeProps): React.JSX.Element {

@@ -656,11 +656,12 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
 
     const titledPageMatch = line.match(/^([A-Za-z][A-Za-z0-9'&/,().\- ]+?)\s+(\d+)(?:\s*[-–]\s*(\d+))?$/);
     if (titledPageMatch && currentChapter) {
+      const startPage = Number(titledPageMatch[2]);
       currentChapter.sections.push({
         sectionNumber: "",
         title: titledPageMatch[1].trim(),
-        pageStart: Number(titledPageMatch[2]),
-        pageEnd: titledPageMatch[3] ? Number(titledPageMatch[3]) : undefined,
+        pageStart: startPage,
+        pageEnd: titledPageMatch[3] ? Number(titledPageMatch[3]) : startPage,
       });
       lineHits += 1;
     }

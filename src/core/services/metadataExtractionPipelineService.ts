@@ -371,7 +371,7 @@ function normalizeWhitespace(value: string): string {
 }
 
 function removeRepeatedAdjacentWords(value: string): string {
-  return value.replace(/\b([A-Za-z][A-Za-z0-9'â€™.-]*)\s+\1\b/gi, "$1");
+  return value.replace(/\b([A-Za-z][A-Za-z0-9'’.-]*)\s+\1\b/gi, "$1");
 }
 
 function postProcessOcrText(rawText: string, context: MetadataExtractionContext): string {
@@ -387,7 +387,7 @@ function extractFocusedIdentifierBackfill(rawText: string): Partial<MetadataResu
   const normalized = rawText.replace(/\r/g, "\n");
   const fallback: Partial<MetadataResult> = {};
 
-  const copyrightMatch = normalized.match(/(?:copyright|Â©)[^\d]{0,12}((?:19|20)\d{2})/i)
+  const copyrightMatch = normalized.match(/(?:copyright|©)[^\d]{0,12}((?:19|20)\d{2})/i)
     ?? normalized.match(/\b((?:19|20)\d{2})\b/);
   if (copyrightMatch) {
     const parsedYear = Number.parseInt(copyrightMatch[1] ?? "", 10);
@@ -564,7 +564,7 @@ function crossValidateSubject(
   const hasStrongScienceKeywords = /physical science|earth science|life science|biology|chemistry|physics|anatomy|geology/.test(lower);
   const visionIsScienceCategory = /science/i.test(visionSubject);
   if (hasStrongScienceKeywords && !visionIsScienceCategory) {
-    // OCR text clearly indicates a science subject â€” trust OCR subject over vision's guess
+    // OCR text clearly indicates a science subject - trust OCR subject over vision's guess
     return ocrSubject ?? visionSubject;
   }
   return visionSubject;

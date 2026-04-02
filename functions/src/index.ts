@@ -694,7 +694,7 @@ function extractPlatformUrlFromText(text: string): string | null {
 
 /** Extract copyright year from free-form text. */
 function extractCopyrightYearFromText(text: string): number | null {
-  const match = text.match(/(?:copyright|Â©)[^\d]{0,12}((?:19|20)\d{2})/i) ?? text.match(/\b((?:19|20)\d{2})\b/);
+  const match = text.match(/(?:copyright|©)[^\d]{0,12}((?:19|20)\d{2})/i) ?? text.match(/\b((?:19|20)\d{2})\b/);
   if (match?.[1]) {
     const year = Number.parseInt(match[1], 10);
     if (year >= 1900 && year <= new Date().getFullYear() + 5) {
@@ -2472,14 +2472,14 @@ export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret
                 "12. RELATED ISBNS: Array of {isbn, type, note} where type is: student|teacher|digital|workbook|assessment|other",
                 "13. PLATFORM URL: Publisher website URL (e.g., 'https://mheducation.com', starts with http/www or .com/.edu etc)",
                 "14. MHID: McGraw-Hill ID if present",
-                "15. rawText: CRITICAL â€” Copy ALL visible text from the image verbatim, preserving every line break. Include every line: URL, full address block, every ISBN line, MHID line, legal notices, footer codes. Do NOT summarize or truncate.",
+                "15. rawText: CRITICAL - Copy ALL visible text from the image verbatim, preserving every line break. Include every line: URL, full address block, every ISBN line, MHID line, legal notices, footer codes. Do NOT summarize or truncate.",
                 "",
                 "FIELD EXTRACTION DETAILS:",
                 "- For PUBLISHER LOCATION: Look for 'Send all inquiries to:' section or address blocks with street + city, state ZIP",
                 "- For COPYRIGHT PAGE images, always extract address if visible",
                 "- For ISBN: Never skip - search entire image for 10-13 digit sequences, ISBN labels",
                 "- For platformUrl: Look for domain names, website text, typically 'mheducation.com' or similar",
-                "- For copyrightYear: Extract from 'Copyright Â© YYYY' or 'Â© YYYY'",
+                "- For copyrightYear: Extract from 'Copyright © YYYY' or '© YYYY'",
                 "- confidence: 0.0-1.0 based on overall extraction quality",
                 "",
                 `- pageType context: ${pageType} (use this to focus extraction on relevant fields)`,
@@ -3017,8 +3017,8 @@ function isTieredQuestionItem(value: unknown): value is TieredQuestionItem {
  * Extract structured educational content from a document using AI.
  *
  * Expects either:
- *   - { fileName, mimeType, text }   â€” plain-text content already extracted by the client
- *   - { fileName, mimeType, base64 } â€” Base64-encoded PDF or DOCX for server-side extraction
+ *   - { fileName, mimeType, text }   - plain-text content already extracted by the client
+ *   - { fileName, mimeType, base64 } - Base64-encoded PDF or DOCX for server-side extraction
  *
  * Reads OPENAI_API_KEY from Firebase Functions secrets (set via `firebase functions:secrets:set OPENAI_API_KEY`).
  * Falls back to an empty extraction result rather than throwing when the key is not configured,

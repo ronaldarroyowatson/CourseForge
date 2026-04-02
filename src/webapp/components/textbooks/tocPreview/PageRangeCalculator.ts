@@ -88,9 +88,14 @@ function scoreNodeConfidence(baseConfidence: number, hasNumber: boolean, hasTitl
   return Math.max(0.08, Math.min(1, score));
 }
 
-function collectMissingFields(numberValue: string, title: string, pageStart: number | undefined): string[] {
+function collectMissingFields(
+  numberValue: string,
+  title: string,
+  pageStart: number | undefined,
+  options: { requireNumber: boolean }
+): string[] {
   const missing: string[] = [];
-  if (!numberValue.trim()) {
+  if (options.requireNumber && !numberValue.trim()) {
     missing.push("number");
   }
 
@@ -134,7 +139,7 @@ function buildSectionNodes(chapterIndex: number, sections: TocSection[], baseCon
     const pageStart = normalizePageStart(section.pageStart);
     const nextStart = normalizePageStart(sections[sectionIndex + 1]?.pageStart);
     const pageEnd = inferSiblingEnd(pageStart, nextStart, section.pageEnd);
-    const missingFields = collectMissingFields(numberValue, title, pageStart);
+    const missingFields = collectMissingFields(numberValue, title, pageStart, { requireNumber: false });
     const nodeConfidence = scoreNodeConfidence(baseConfidence, Boolean(numberValue.trim()), Boolean(title.trim()), typeof pageStart === "number");
 
     const node: TocPreviewNodeModel = {
@@ -207,7 +212,7 @@ export function buildTocPreviewTree(chapters: TocChapter[], globalConfidence: nu
     const pageStart = normalizePageStart(chapter.pageStart);
     const nextStart = normalizePageStart(chapters[chapterIndex + 1]?.pageStart);
     const pageEnd = inferSiblingEnd(pageStart, nextStart, chapter.pageEnd);
-    const missingFields = collectMissingFields(numberValue, title, pageStart);
+    const missingFields = collectMissingFields(numberValue, title, pageStart, { requireNumber: true });
     const confidence = scoreNodeConfidence(globalConfidence, Boolean(numberValue.trim()), Boolean(title.trim()), typeof pageStart === "number");
 
     return {

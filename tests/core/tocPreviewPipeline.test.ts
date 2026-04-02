@@ -43,6 +43,8 @@ describe("TOC preview pipeline", () => {
     const ancillarySection = parsed.chapters[0].sections.find((section) => section.title.includes("Module Wrap-Up"));
     expect(ancillarySection).toBeDefined();
     expect(ancillarySection?.sectionNumber).toBe("");
+    expect(ancillarySection?.pageStart).toBe(33);
+    expect(ancillarySection?.pageEnd).toBe(33);
 
     const preview = buildTocPreviewTree(parsed.chapters, parsed.confidence);
     expect(preview.chapterCount).toBeGreaterThanOrEqual(3);
@@ -63,5 +65,10 @@ describe("TOC preview pipeline", () => {
     expect(lessonThree).toBeDefined();
     expect(lessonThree?.pageStart).toBe(19);
     expect(lessonThree?.pageEnd).toBe(23);
+
+    const wrapUp = chapterOne.children.find((child) => child.title.includes("Module Wrap-Up"));
+    expect(wrapUp).toBeDefined();
+    expect(wrapUp?.missingFields.includes("number")).toBe(false);
+    expect(wrapUp?.pageRangeLabel).toBe("pp. 33-33");
   });
 });

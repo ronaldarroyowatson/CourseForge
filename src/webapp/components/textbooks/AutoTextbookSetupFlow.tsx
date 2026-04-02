@@ -252,7 +252,7 @@ function clearPersistedCaptureUsage(draftKey: string): void {
   }
 }
 
-// â”€â”€ Auto Session Draft â€” resumable workflow across page reloads â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Auto Session Draft - resumable workflow across page reloads.
 
 const AUTO_SESSION_DRAFTS_KEY = "courseforge.autoSessionDrafts.v2";
 const AUTO_SESSION_DRAFT_KEY = "courseforge.autoSessionDraft.v1"; // legacy key
@@ -524,6 +524,25 @@ function getChapterDerivedPageEnd(chapters: TocChapter[], chapterIndex: number):
     if (typeof nextStart === "number" && Number.isFinite(nextStart) && nextStart > chapter.pageStart) {
       return nextStart - 1;
     }
+  }
+
+  const lastSectionPage = [...chapter.sections]
+    .map((section) => {
+      if (typeof section.pageEnd === "number" && Number.isFinite(section.pageEnd)) {
+        return section.pageEnd;
+      }
+
+      if (typeof section.pageStart === "number" && Number.isFinite(section.pageStart)) {
+        return section.pageStart;
+      }
+
+      return undefined;
+    })
+    .filter((value): value is number => typeof value === "number")
+    .sort((left, right) => right - left)[0];
+
+  if (typeof lastSectionPage === "number" && lastSectionPage >= chapter.pageStart) {
+    return lastSectionPage;
   }
 
   return undefined;
@@ -948,21 +967,64 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingUploadLimitResultRef = useRef<ReturnType<typeof enforceAutoCaptureLimit> | null>(null);
-  // Scroll target â€” metadata fields section revealed after successful OCR.
+  // Scroll target for metadata fields revealed after successful OCR.
   const metadataFormRef = useRef<HTMLDivElement>(null);
+  const stepTopRef = useRef<HTMLElement>(null);
+  const autoScrollTokenRef = useRef(0);
   const activeSessionDraftIdRef = useRef<string>(createAutoFlowTraceId("auto-draft"));
   const lastCorrectionSignatureRef = useRef<string | null>(null);
 
-  // â”€â”€ Raw OCR / parsed metadata two-section state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Raw OCR / parsed metadata two-section state.
   // rawOcrText: original, unedited OCR output shown read-only for transparency.
   // ocrDraft: editable copy the user can correct before re-parsing.
   const [rawOcrText, setRawOcrText] = useState(testingSeedState?.ocrDraft ?? "");
   const [isRawOcrExpanded, setIsRawOcrExpanded] = useState(false);
+  const [showOptionalMetadataFields, setShowOptionalMetadataFields] = useState(false);
 
-  // â”€â”€ Resumable sessions (max 3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Resumable sessions (max 3).
   const [resumableDrafts, setResumableDrafts] = useState<AutoSessionDraft[]>(() => readAutoSessionDrafts());
   const currentSessionHasWork = Boolean(coverImageDataUrl || rawOcrText || metadataForm.title.trim());
   const isSessionCapacityReached = resumableDrafts.length >= MAX_AUTO_SESSION_DRAFTS && !currentSessionHasWork;
+  const isInteractionLocked = isBusy || isRunningOcr;
+  const optionalMetadataValueCount = useMemo(() => {
+    const values = [
+      metadataForm.subtitle,
+      metadataForm.grade,
+      metadataForm.gradeBand,
+      metadataForm.additionalIsbnsCsv,
+      metadataForm.seriesName,
+      metadataForm.publisherLocation,
+      metadataForm.platformUrl,
+      metadataForm.mhid,
+      metadataForm.authorsCsv,
+      metadataForm.publicationYear,
+      relatedIsbns.length > 0 ? "has-related-isbns" : "",
+    ];
+
+    return values.filter((value) => value.trim().length > 0).length;
+  }, [metadataForm, relatedIsbns.length]);
+
+  useEffect(() => {
+    if (optionalMetadataValueCount > 0) {
+      setShowOptionalMetadataFields(true);
+    }
+  }, [optionalMetadataValueCount]);
+
+  useEffect(() => {
+    const cancelAutoScroll = (): void => {
+      autoScrollTokenRef.current += 1;
+    };
+
+    window.addEventListener("wheel", cancelAutoScroll, { passive: true });
+    window.addEventListener("touchmove", cancelAutoScroll, { passive: true });
+    window.addEventListener("keydown", cancelAutoScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("wheel", cancelAutoScroll);
+      window.removeEventListener("touchmove", cancelAutoScroll);
+      window.removeEventListener("keydown", cancelAutoScroll);
+    };
+  }, []);
 
   useEffect(() => {
     emitAutoFlowDiagnostic("session_started", {
@@ -1216,11 +1278,25 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     );
   }
 
-  /** Smooth-scroll the viewport so the metadata fields are centred. */
-  function scrollToMetadata(): void {
+  function scrollToTarget(target: HTMLElement | null, block: ScrollLogicalPosition): void {
+    const token = autoScrollTokenRef.current + 1;
+    autoScrollTokenRef.current = token;
+
     window.requestAnimationFrame(() => {
-      metadataFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (autoScrollTokenRef.current !== token || !target) {
+        return;
+      }
+
+      target.scrollIntoView({ behavior: "auto", block });
     });
+  }
+
+  function scrollToMetadata(): void {
+    scrollToTarget(metadataFormRef.current, "center");
+  }
+
+  function scrollToStepTop(): void {
+    scrollToTarget(stepTopRef.current, "start");
   }
 
   async function requestSelection(imageDataUrl: string): Promise<SelectionRect | null> {
@@ -1515,11 +1591,15 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   function handleAcceptCoverStep(): void {
     queueCorrectionLearningSample("accept_cover");
     setStep("title");
+    setUploadPreview((current) => ({ ...current, open: false }));
+    scrollToStepTop();
   }
 
   function handleAcceptTitleStep(): void {
     queueCorrectionLearningSample("accept_title");
     setStep("toc");
+    setUploadPreview((current) => ({ ...current, open: false }));
+    scrollToStepTop();
   }
 
   function applyTocFromText(rawText: string): void {
@@ -2008,7 +2088,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   function handleCoverDropZoneDragOver(event: React.DragEvent<HTMLDivElement>): void {
     event.preventDefault();
-    if (isSessionCapacityReached) {
+    if (isSessionCapacityReached || isInteractionLocked) {
       return;
     }
     setIsDragOver(true);
@@ -2020,7 +2100,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   function handleCoverDropZoneDrop(event: React.DragEvent<HTMLDivElement>): void {
     event.preventDefault();
-    if (isSessionCapacityReached) {
+    if (isSessionCapacityReached || isInteractionLocked) {
       setErrorMessage("Queue full: finish or delete one of the 3 in-progress auto captures before starting another.");
       return;
     }
@@ -2033,7 +2113,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   function handleTitleDropZoneDragOver(event: React.DragEvent<HTMLDivElement>): void {
     event.preventDefault();
-    if (isSessionCapacityReached) {
+    if (isSessionCapacityReached || isInteractionLocked) {
       return;
     }
     setIsTitleDragOver(true);
@@ -2045,7 +2125,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   function handleTitleDropZoneDrop(event: React.DragEvent<HTMLDivElement>): void {
     event.preventDefault();
-    if (isSessionCapacityReached) {
+    if (isSessionCapacityReached || isInteractionLocked) {
       setErrorMessage("Queue full: finish or delete one of the 3 in-progress auto captures before starting another.");
       return;
     }
@@ -2633,10 +2713,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   return (
-    <section className={`panel auto-textbook-flow${compactChromeLayout ? " auto-textbook-flow--chromeos-compact" : ""}`}>
+    <section ref={stepTopRef} className={`panel auto-textbook-flow${compactChromeLayout ? " auto-textbook-flow--chromeos-compact" : ""}`}>
       <h3>{stepTitle}</h3>
 
-      {/* â”€â”€ Session queue (max 3 unfinished auto captures) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* Session queue (max 3 unfinished auto captures). */}
       <div className="auto-session-resume" role="complementary" aria-label="Resume previous Auto sessions">
         <p className="auto-session-resume__title">Auto Mode Queue ({resumableDrafts.length}/{MAX_AUTO_SESSION_DRAFTS})</p>
         <div className="auto-session-slots" aria-label="Auto capture queue slots">
@@ -2786,7 +2866,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           <ul className="extraction-summary__list">
             {lastExtractionFields.map((field) => (
               <li key={field} className="extraction-summary__item">
-                <span className="extraction-summary__check" aria-hidden="true">âœ“</span> {field}
+                <span className="extraction-summary__check" aria-hidden="true">OK</span> {field}
               </li>
             ))}
           </ul>
@@ -2796,7 +2876,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       {step === "cover" ? (
         <div
-          className={`cover-drop-zone${isDragOver ? " cover-drop-zone--active" : ""}${isSessionCapacityReached ? " cover-drop-zone--disabled" : ""}`}
+          className={`cover-drop-zone${isDragOver ? " cover-drop-zone--active" : ""}${(isSessionCapacityReached || isInteractionLocked) ? " cover-drop-zone--disabled" : ""}`}
           onDragOver={handleCoverDropZoneDragOver}
           onDragLeave={handleCoverDropZoneDragLeave}
           onDrop={handleCoverDropZoneDrop}
@@ -2809,7 +2889,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       {step === "title" ? (
         <div
-          className={`cover-drop-zone${isTitleDragOver ? " cover-drop-zone--active" : ""}${isSessionCapacityReached ? " cover-drop-zone--disabled" : ""}`}
+          className={`cover-drop-zone${isTitleDragOver ? " cover-drop-zone--active" : ""}${(isSessionCapacityReached || isInteractionLocked) ? " cover-drop-zone--disabled" : ""}`}
           onDragOver={handleTitleDropZoneDragOver}
           onDragLeave={handleTitleDropZoneDragLeave}
           onDrop={handleTitleDropZoneDrop}
@@ -2848,10 +2928,11 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         className="cover-file-input"
         onChange={(event) => {
           const file = event.target.files?.[0];
-          if (file && !isSessionCapacityReached) void processImageFileForStep(file, "cover");
+          if (file && !isSessionCapacityReached && !isInteractionLocked) void processImageFileForStep(file, "cover");
           event.target.value = "";
         }}
         aria-label="Upload cover image file"
+        disabled={isSessionCapacityReached || isInteractionLocked}
       />
 
       <input
@@ -2861,19 +2942,25 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         className="cover-file-input"
         onChange={(event) => {
           const file = event.target.files?.[0];
-          if (file && !isSessionCapacityReached) void processImageFileForStep(file, "title");
+          if (file && !isSessionCapacityReached && !isInteractionLocked) void processImageFileForStep(file, "title");
           event.target.value = "";
         }}
         aria-label="Upload copyright page image file"
+        disabled={isSessionCapacityReached || isInteractionLocked}
       />
 
-      <div className="form-actions">
+      <div className={`form-actions form-actions--ocr-aware${isRunningOcr ? " form-actions--locked" : ""}`}>
+        {isRunningOcr ? (
+          <div className="ocr-actions-overlay" role="status" aria-live="polite">
+            OCR in progress. Please wait before capturing again.
+          </div>
+        ) : null}
         {step === "cover" ? (
           <>
-            <button type="button" onClick={() => void handleCaptureCover()} disabled={isBusy || isSessionCapacityReached}>
+            <button type="button" onClick={() => void handleCaptureCover()} disabled={isInteractionLocked || isSessionCapacityReached}>
               Capture Cover
             </button>
-            <button type="button" className="btn-secondary" onClick={() => coverFileInputRef.current?.click()} disabled={isBusy || isSessionCapacityReached}>
+            <button type="button" className="btn-secondary" onClick={() => coverFileInputRef.current?.click()} disabled={isInteractionLocked || isSessionCapacityReached}>
               Upload Image
             </button>
           </>
@@ -2881,10 +2968,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
         {step === "title" ? (
           <>
-            <button type="button" onClick={() => void handleCaptureTitle()} disabled={isBusy || isSessionCapacityReached}>
+            <button type="button" onClick={() => void handleCaptureTitle()} disabled={isInteractionLocked || isSessionCapacityReached}>
               Capture Copyright Page
             </button>
-            <button type="button" className="btn-secondary" onClick={() => titleFileInputRef.current?.click()} disabled={isBusy || isSessionCapacityReached}>
+            <button type="button" className="btn-secondary" onClick={() => titleFileInputRef.current?.click()} disabled={isInteractionLocked || isSessionCapacityReached}>
               Upload Copyright Page
             </button>
           </>
@@ -2892,16 +2979,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
         {step === "toc" ? (
           <>
-            <button type="button" onClick={() => void handleCaptureToc()} disabled={isBusy}>
+            <button type="button" onClick={() => void handleCaptureToc()} disabled={isInteractionLocked}>
               Capture TOC Page
             </button>
-            <button type="button" className="btn-secondary" onClick={() => setStep("toc-editor")} disabled={!canFinishToc || isBusy}>
+            <button type="button" className="btn-secondary" onClick={() => setStep("toc-editor")} disabled={!canFinishToc || isInteractionLocked}>
               Finish TOC
             </button>
           </>
         ) : null}
 
-        <button type="button" className="btn-secondary" onClick={onSwitchToManual}>
+        <button type="button" className="btn-secondary" onClick={onSwitchToManual} disabled={isInteractionLocked}>
           Switch to Manual
         </button>
       </div>
@@ -2917,7 +3004,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         />
       </label>
 
-      {/* â”€â”€ Raw OCR collapsible section (item #5 / #9) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* Raw OCR collapsible section. */}
       {rawOcrText ? (
         <div className="ocr-raw-section">
           <button
@@ -2925,7 +3012,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             className="btn-text ocr-raw-section__label"
             onClick={() => setIsRawOcrExpanded((v) => !v)}
           >
-            {isRawOcrExpanded ? "â–¾" : "â–¸"} Raw OCR Output
+            {isRawOcrExpanded ? "[-]" : "[+]"} Raw OCR Output
           </button>
           {isRawOcrExpanded ? (
             <pre className="ocr-raw-section__pre">{rawOcrText}</pre>
@@ -2933,9 +3020,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         </div>
       ) : null}
 
-      {/* Standalone re-parse button â€” only shown when no cover thumbnail is present yet */}
+      {/* Standalone re-parse button shown only when no cover thumbnail is present yet. */}
       {(step === "cover" || step === "title") && !coverImageDataUrl ? (
-        <button type="button" className="btn-secondary" onClick={runMetadataExtraction} disabled={isBusy}>
+        <button type="button" className="btn-secondary" onClick={runMetadataExtraction} disabled={isInteractionLocked}>
           Re-parse OCR Text
         </button>
       ) : null}
@@ -3024,23 +3111,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           </label>
 
           <label>
-            Subtitle
-            {renderConfidenceDot("subtitle")}
-            <input value={metadataForm.subtitle} onChange={(event) => updateMetadataForm("subtitle", event.target.value)} />
-          </label>
-
-          <label>
-            Grade
-            <input value={metadataForm.grade} onChange={(event) => updateMetadataForm("grade", event.target.value)} />
-          </label>
-
-          <label>
-            Grade Band
-            {renderConfidenceDot("gradeBand")}
-            <input value={metadataForm.gradeBand} onChange={(event) => updateMetadataForm("gradeBand", event.target.value)} />
-          </label>
-
-          <label>
             Subject
             {renderConfidenceDot("subject")}
             <select value={metadataForm.subject} onChange={(event) => updateMetadataForm("subject", event.target.value)}>
@@ -3057,14 +3127,14 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           </label>
 
           <label>
-            Publication Year
-            <input type="number" value={metadataForm.publicationYear} onChange={(event) => updateMetadataForm("publicationYear", event.target.value)} />
-          </label>
-
-          <label>
             Copyright Year
             {renderConfidenceDot("copyrightYear")}
             <input type="number" value={metadataForm.copyrightYear} onChange={(event) => updateMetadataForm("copyrightYear", event.target.value)} />
+          </label>
+
+          <label>
+            Publication Year
+            <input type="number" value={metadataForm.publicationYear} onChange={(event) => updateMetadataForm("publicationYear", event.target.value)} />
           </label>
 
           <label>
@@ -3074,81 +3144,113 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           </label>
 
           <label>
-            Additional ISBNs (comma separated)
-            {renderConfidenceDot("additionalIsbns")}
-            <input value={metadataForm.additionalIsbnsCsv} onChange={(event) => updateMetadataForm("additionalIsbnsCsv", event.target.value)} />
-            <span className="form-hint">Use the typed Related ISBN list below when you need an edition label (Teacher, Digital, etc.).</span>
-          </label>
-
-          <fieldset className="form-fieldset">
-            <legend>Related ISBNs (typed)</legend>
-            <p className="form-hint">Use this when the copyright page lists student, teacher, digital, workbook, or assessment ISBNs separately.</p>
-            {relatedIsbns.map((row, index) => (
-              <div key={`auto-related-isbn-${index}`} className="related-isbn-row">
-                <input
-                  value={row.isbn}
-                  onChange={(event) => updateRelatedIsbn(index, "isbn", event.target.value)}
-                  placeholder="ISBN-10 or ISBN-13"
-                  className="related-isbn-input"
-                />
-                <select
-                  value={row.type}
-                  onChange={(event) => updateRelatedIsbn(index, "type", event.target.value as RelatedIsbnType)}
-                  aria-label={`Auto related ISBN type ${index + 1}`}
-                  className="related-isbn-type"
-                >
-                  {RELATED_ISBN_TYPES.map((type) => (
-                    <option key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</option>
-                  ))}
-                </select>
-                <input
-                  value={row.note ?? ""}
-                  onChange={(event) => updateRelatedIsbn(index, "note", event.target.value)}
-                  placeholder="Label/Note (optional, e.g., Teacher Edition)"
-                  className="related-isbn-note"
-                />
-                <button type="button" className="btn-icon btn-danger" onClick={() => removeRelatedIsbn(index)} aria-label="Remove related ISBN" title="Remove">âœ•</button>
-              </div>
-            ))}
-            <button type="button" className="btn-secondary" onClick={addRelatedIsbn}>+ Add Related ISBN</button>
-          </fieldset>
-
-          <label>
-            Authors (comma separated)
-            {renderConfidenceDot("authors")}
-            <input value={metadataForm.authorsCsv} onChange={(event) => updateMetadataForm("authorsCsv", event.target.value)} />
-          </label>
-
-          <label>
             Publisher
             {renderConfidenceDot("publisher")}
             <input value={metadataForm.publisher} onChange={(event) => updateMetadataForm("publisher", event.target.value)} />
           </label>
-
-          <label>
-            Publisher Location
-            {renderConfidenceDot("publisherLocation")}
-            <input value={metadataForm.publisherLocation} onChange={(event) => updateMetadataForm("publisherLocation", event.target.value)} />
-          </label>
-
-          <label>
-            Publisher URL
-            {renderConfidenceDot("platformUrl")}
-            <input type="url" value={metadataForm.platformUrl} onChange={(event) => updateMetadataForm("platformUrl", event.target.value)} />
-          </label>
-
-          <label>
-            MHID
-            {renderConfidenceDot("mhid")}
-            <input value={metadataForm.mhid} onChange={(event) => updateMetadataForm("mhid", event.target.value)} />
-          </label>
-
-          <label>
-            Series Name
-            {renderConfidenceDot("seriesName")}
-            <input value={metadataForm.seriesName} onChange={(event) => updateMetadataForm("seriesName", event.target.value)} />
-          </label>
         </div>
+
+        <div className="metadata-optional-toggle-row">
+          <button
+            type="button"
+            className="btn-text"
+            onClick={() => setShowOptionalMetadataFields((current) => !current)}
+          >
+            {showOptionalMetadataFields ? "Hide optional fields" : "Show optional fields"}
+            {optionalMetadataValueCount > 0 ? ` (${optionalMetadataValueCount} populated)` : ""}
+          </button>
+        </div>
+
+        {showOptionalMetadataFields ? (
+          <div className="form-grid metadata-optional-grid">
+            <label>
+              Subtitle
+              {renderConfidenceDot("subtitle")}
+              <input value={metadataForm.subtitle} onChange={(event) => updateMetadataForm("subtitle", event.target.value)} />
+            </label>
+
+            <label>
+              Grade
+              <input value={metadataForm.grade} onChange={(event) => updateMetadataForm("grade", event.target.value)} />
+            </label>
+
+            <label>
+              Grade Band
+              {renderConfidenceDot("gradeBand")}
+              <input value={metadataForm.gradeBand} onChange={(event) => updateMetadataForm("gradeBand", event.target.value)} />
+            </label>
+
+            <label>
+              Additional ISBNs (comma separated)
+              {renderConfidenceDot("additionalIsbns")}
+              <input value={metadataForm.additionalIsbnsCsv} onChange={(event) => updateMetadataForm("additionalIsbnsCsv", event.target.value)} />
+              <span className="form-hint">Use the typed Related ISBN list below when you need an edition label (Teacher, Digital, etc.).</span>
+            </label>
+
+            <fieldset className="form-fieldset">
+              <legend>Related ISBNs (typed)</legend>
+              <p className="form-hint">Use this when the copyright page lists student, teacher, digital, workbook, or assessment ISBNs separately.</p>
+              {relatedIsbns.map((row, index) => (
+                <div key={`auto-related-isbn-${index}`} className="related-isbn-row">
+                  <input
+                    value={row.isbn}
+                    onChange={(event) => updateRelatedIsbn(index, "isbn", event.target.value)}
+                    placeholder="ISBN-10 or ISBN-13"
+                    className="related-isbn-input"
+                  />
+                  <select
+                    value={row.type}
+                    onChange={(event) => updateRelatedIsbn(index, "type", event.target.value as RelatedIsbnType)}
+                    aria-label={`Auto related ISBN type ${index + 1}`}
+                    className="related-isbn-type"
+                  >
+                    {RELATED_ISBN_TYPES.map((type) => (
+                      <option key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</option>
+                    ))}
+                  </select>
+                  <input
+                    value={row.note ?? ""}
+                    onChange={(event) => updateRelatedIsbn(index, "note", event.target.value)}
+                    placeholder="Label/Note (optional, e.g., Teacher Edition)"
+                    className="related-isbn-note"
+                  />
+                  <button type="button" className="btn-icon btn-danger" onClick={() => removeRelatedIsbn(index)} aria-label="Remove related ISBN" title="Remove">X</button>
+                </div>
+              ))}
+              <button type="button" className="btn-secondary" onClick={addRelatedIsbn}>+ Add Related ISBN</button>
+            </fieldset>
+
+            <label>
+              Authors (comma separated)
+              {renderConfidenceDot("authors")}
+              <input value={metadataForm.authorsCsv} onChange={(event) => updateMetadataForm("authorsCsv", event.target.value)} />
+            </label>
+
+            <label>
+              Publisher Location
+              {renderConfidenceDot("publisherLocation")}
+              <input value={metadataForm.publisherLocation} onChange={(event) => updateMetadataForm("publisherLocation", event.target.value)} />
+            </label>
+
+            <label>
+              Publisher URL
+              {renderConfidenceDot("platformUrl")}
+              <input type="url" value={metadataForm.platformUrl} onChange={(event) => updateMetadataForm("platformUrl", event.target.value)} />
+            </label>
+
+            <label>
+              MHID
+              {renderConfidenceDot("mhid")}
+              <input value={metadataForm.mhid} onChange={(event) => updateMetadataForm("mhid", event.target.value)} />
+            </label>
+
+            <label>
+              Series Name
+              {renderConfidenceDot("seriesName")}
+              <input value={metadataForm.seriesName} onChange={(event) => updateMetadataForm("seriesName", event.target.value)} />
+            </label>
+          </div>
+        ) : null}
         </div>
       ) : null}
 

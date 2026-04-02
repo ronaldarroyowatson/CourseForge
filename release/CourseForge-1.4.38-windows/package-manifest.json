@@ -2,7 +2,7 @@
     "name":  "CourseForge",
     "version":  "1.4.38",
     "packageType":  "windows",
-    "createdAtUtc":  "2026-04-02T00:57:01.8725669Z",
+    "createdAtUtc":  "2026-04-02T01:00:01.3963793Z",
     "includes":  [
                      "webapp/",
                      "extension/",

@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-  "version": "1.4.38",
+  "version": "1.4.39",
   "private": true,
   "type": "module",
   "engines": {
@@ -13,8 +13,8 @@
     "functions:build:compat": "node scripts/run-functions-compat.mjs build",
     "functions:serve:compat": "node scripts/run-functions-compat.mjs serve",
     "functions:deploy:compat": "node scripts/run-functions-compat.mjs deploy",
-    "verify:stable": "npm run check:node && npm run check:node:functions && npm run typecheck && npm run build && npm run build:extension && npm test && npm run check:installer && npm --prefix functions run build",
-    "verify:canary": "npm run check:node:next24 && npm run typecheck && npm run build && npm run build:extension && npm test && npm run check:installer && npm run functions:build:compat",
+    "verify:stable": "npm run check:node && npm run check:node:functions && npm run typecheck:all && npm run build && npm run build:extension && npm test && npm run check:installer && npm --prefix functions run build",
+    "verify:canary": "npm run check:node:next24 && npm run typecheck:all && npm run build && npm run build:extension && npm test && npm run check:installer && npm run functions:build:compat",
     "dev": "vite",
     "webapp": "vite",
     "build": "vite build",
@@ -22,6 +22,8 @@
     "build:extension": "vite build --config vite.extension.config.ts",
     "build:extension:chrome": "vite build --config vite.chrome-extension.config.ts",
     "typecheck": "tsc --noEmit",
+    "typecheck:scripts": "tsc -p scripts/tsconfig.json --noEmit",
+    "typecheck:all": "npm run typecheck && npm run typecheck:scripts",
     "test:core": "tsx tests/core/runCoreTests.ts",
     "test:unit": "vitest run tests/core",
     "test:integration": "vitest run tests/integration",
@@ -33,6 +35,7 @@
     "test:e2e:comprehensive": "npm run test:e2e && npm run test:core && npm run test:unit && npm run test:integration && npm run test:rules",
     "test:e2e:no-rules": "npm run test:e2e && npm run test:core && npm run test:unit && npm run test:integration",
     "test:smoke:ocr:cloud": "powershell -ExecutionPolicy Bypass -File scripts/smoke-cloud-ocr.ps1",
+    "test:smoke:ocr:cloud:gate": "node scripts/run-cloud-ocr-smoke-gate.mjs",
     "test:e2e:packaged": "npm run test:e2e:autoupdate && npm run test:installer && npm run check:installer",
     "test:real-sync": "tsx tests/realSyncTest.ts",
     "test:installer:guardrails": "vitest run tests/integration/windows.installer.template.integration.test.ts",
@@ -54,7 +57,7 @@
     "deploy:functions": "firebase deploy --only functions",
     "deploy:backend": "firebase deploy --only firestore,functions",
     "test": "npm run test:core && npm run test:unit && npm run test:integration && npm run test:rules",
-    "bugfix:test": "npm run typecheck && npm run build && npm run test:e2e:comprehensive",
+    "bugfix:test": "npm run typecheck:all && npm run build && npm run test:e2e:comprehensive && npm run test:smoke:ocr:cloud:gate",
     "bugfix:release": "powershell -ExecutionPolicy Bypass -File scripts/bugfix-release.ps1"
   },
   "dependencies": {
@@ -83,6 +86,7 @@
     "jsdom": "^28.1.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.2",
+    "@types/node": "^24.0.0",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"
   }

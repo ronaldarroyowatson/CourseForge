@@ -1,0 +1,32 @@
+﻿INTRODUCTION TO PHYSICAL SCIENCE
+This module introduces the nature of science, what physical science is, and provides tools for the study of science.
+
+MODULE 1: THE NATURE OF SCIENCE
+ENCOUNTER THE PHENOMENON
+CER Claim, Evidence, Reasoning ..................................................... 3
+Lesson 1 The Methods of Science ..................................................... 4
+Lesson 2 Standards of Measurement ............................................. 12
+Lesson 3 Communicating with Graphs ........................................... 19
+Lesson 4 Science and Technology .................................................. 24
+NATURE OF SCIENCE
+Scientific Methods ................................................................. 31
+Module Wrap-Up .................................................................. 33
+SEP GO FURTHER Data Analysis Lab ............................................. 33
+
+MODULE 2: MOTION
+ENCOUNTER THE PHENOMENON
+CER Claim, Evidence, Reasoning ..................................................... 37
+Lesson 1 Describing Motion .......................................................... 38
+Lesson 2 Velocity and Momentum ................................................ 45
+Lesson 3 Acceleration .................................................................. 50
+ENGINEERING & TECHNOLOGY
+Autonomous Vehicles Go Subterranean ........................................ 55
+Module Wrap-Up .................................................................. 57
+SEP GO FURTHER Data Analysis Lab ............................................. 57
+
+MODULE 3: FORCES AND NEWTON’S LAWS
+ENCOUNTER THE PHENOMENON
+CER Claim, Evidence, Reasoning ..................................................... 59
+Lesson 1 Forces ........................................................................... 60
+Lesson 2 Newton’s Laws of Motion ................................................ 68
+Lesson 3 Using Newton’s Laws ..................................................... 74

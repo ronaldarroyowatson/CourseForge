@@ -45,6 +45,8 @@ import {
   type MetadataPipelineResult,
 } from "../../../core/services/metadataExtractionPipelineService";
 import { syncMetadataCorrectionLearning } from "../../../core/services/metadataCorrectionSyncService";
+import { TocPreviewTree } from "./tocPreview/TocPreviewTree";
+import type { TocPreviewNodeModel } from "./tocPreview/PageRangeCalculator";
 import { useRepositories } from "../../hooks/useRepositories";
 import { useUIStore } from "../../store/uiStore";
 import { t as translate } from "../../../core/services/i18nService";
@@ -2197,6 +2199,35 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     });
   }
 
+  function handlePreviewNodeUpdate(
+    node: TocPreviewNodeModel,
+    update: { numberValue: string; title: string; pageStart?: number }
+  ): void {
+    if (node.level === "chapter") {
+      updateChapter(node.chapterIndex, {
+        chapterNumber: update.numberValue,
+        title: update.title,
+        pageStart: update.pageStart,
+      });
+      return;
+    }
+
+    if (typeof node.sectionIndex !== "number") {
+      return;
+    }
+
+    updateSection(node.chapterIndex, node.sectionIndex, {
+      sectionNumber: update.numberValue,
+      title: update.title,
+      pageStart: update.pageStart,
+    });
+  }
+
+  function handleRegenerateNodeFromImage(node: TocPreviewNodeModel): void {
+    setInfoMessage(`Regenerating ${node.level} from a new TOC image capture. Capture the page containing this node next.`);
+    void handleCaptureToc();
+  }
+
   async function handleSaveAutoSetup(): Promise<void> {
     const traceId = createAutoFlowTraceId("auto-flow-save");
     emitAutoFlowDiagnostic("save_started", {
@@ -2892,58 +2923,15 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       ) : null}
 
       {step === "toc" ? (
-        <div className="toc-target-fields" aria-label="TOC target fields preview">
-          <h4>TOC fields that will be filled</h4>
-          <p className="form-hint">
-            TOC capture now fills chapter, section, and subsection-style entries (for numbers like 2.1.3), including page ranges when detected.
-          </p>
-
-          {tocResult.chapters.length === 0 ? (
-            <div className="toc-target-fields__empty">
-              <p><strong>Awaiting TOC parse.</strong> These fields are prepared:</p>
-              <ul>
-                <li>Chapter: Number, Title, Start Page, End Page</li>
-                <li>Section: Number, Title, Start Page, End Page</li>
-                <li>Subsection: Number, Title, Start Page, End Page</li>
-              </ul>
-            </div>
-          ) : (
-            <div className="toc-target-fields__chapters">
-              {tocResult.chapters.map((chapter, chapterIndex) => {
-                const inferredChapterEnd = chapter.pageEnd ?? getChapterDerivedPageEnd(tocResult.chapters, chapterIndex);
-                return (
-                  <div key={`toc-target-${chapter.chapterNumber}-${chapterIndex}`} className="toc-target-fields__chapter">
-                    <p className="toc-target-fields__chapter-title">
-                      Chapter {chapter.chapterNumber}: {chapter.title || "(untitled)"}
-                    </p>
-                    <p className="toc-target-fields__chapter-meta">
-                      Start Page: {chapter.pageStart ?? "-"} | End Page: {inferredChapterEnd ?? "-"}
-                    </p>
-
-                    {chapter.sections.length > 0 ? (
-                      <div className="toc-target-fields__section-list">
-                        {chapter.sections.map((section, sectionIndex) => {
-                          const dotCount = (section.sectionNumber.match(/\./g) ?? []).length;
-                          const levelLabel = dotCount >= 2 ? "Subsection" : "Section";
-                          return (
-                            <div key={`toc-target-sec-${chapterIndex}-${sectionIndex}`} className="toc-target-fields__section-row">
-                              <span className="toc-target-fields__level">{levelLabel}</span>
-                              <span className="toc-target-fields__number">{section.sectionNumber || "-"}</span>
-                              <span className="toc-target-fields__name">{section.title || "(untitled)"}</span>
-                              <span className="toc-target-fields__pages">pp. {section.pageStart ?? "-"}-{section.pageEnd ?? "-"}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="form-hint">No sections detected for this chapter yet.</p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <TocPreviewTree
+          toc={{
+            chapters: tocResult.chapters,
+            confidence: tocResult.confidence,
+          }}
+          isBusy={isBusy}
+          onUpdateNode={handlePreviewNodeUpdate}
+          onRegenerateNode={handleRegenerateNodeFromImage}
+        />
       ) : null}
 
       {coverImageDataUrl ? (

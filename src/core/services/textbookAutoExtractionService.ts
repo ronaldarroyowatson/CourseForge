@@ -557,7 +557,22 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       continue;
     }
 
-    const chapterMatch = line.match(/^(?:chapter|ch\.?|lesson)\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/i);
+    const moduleMatch = line.match(/^module\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/i);
+    if (moduleMatch) {
+      currentChapter = {
+        chapterNumber: moduleMatch[1],
+        title: moduleMatch[2].trim(),
+        pageStart: moduleMatch[3] ? Number(moduleMatch[3]) : undefined,
+        pageEnd: moduleMatch[4] ? Number(moduleMatch[4]) : undefined,
+        unitName: activeUnitName,
+        sections: [],
+      };
+      chapters.push(currentChapter);
+      lineHits += 1;
+      continue;
+    }
+
+    const chapterMatch = line.match(/^(?:chapter|ch\.?)\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/i);
     if (chapterMatch) {
       currentChapter = {
         chapterNumber: chapterMatch[1],
@@ -568,6 +583,30 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
         sections: [],
       };
       chapters.push(currentChapter);
+      lineHits += 1;
+      continue;
+    }
+
+    const lessonMatch = line.match(/^lesson\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/i);
+    if (lessonMatch) {
+      if (!currentChapter) {
+        currentChapter = {
+          chapterNumber: normalizeChapterNumber(lessonMatch[1]),
+          title: `Chapter ${normalizeChapterNumber(lessonMatch[1])}`,
+          unitName: activeUnitName,
+          sections: [],
+        };
+        chapters.push(currentChapter);
+      }
+
+      const chapterNumber = normalizeChapterNumber(currentChapter.chapterNumber);
+      const lessonNumber = normalizeSectionNumber(lessonMatch[1]);
+      currentChapter.sections.push({
+        sectionNumber: `${chapterNumber}.${lessonNumber}`,
+        title: lessonMatch[2].trim(),
+        pageStart: lessonMatch[3] ? Number(lessonMatch[3]) : undefined,
+        pageEnd: lessonMatch[4] ? Number(lessonMatch[4]) : undefined,
+      });
       lineHits += 1;
       continue;
     }
@@ -606,6 +645,33 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
         pageEnd: sectionMatch[4] ? Number(sectionMatch[4]) : undefined,
       });
       lineHits += 1;
+      continue;
+    }
+
+    const titledPageMatch = line.match(/^([A-Za-z][A-Za-z0-9'&/,().\- ]+?)\s+(\d+)(?:\s*[-–]\s*(\d+))?$/);
+    if (titledPageMatch && currentChapter) {
+      const nextSectionIndex = currentChapter.sections.length + 1;
+      currentChapter.sections.push({
+        sectionNumber: `${normalizeChapterNumber(currentChapter.chapterNumber)}.${nextSectionIndex}`,
+        title: titledPageMatch[1].trim(),
+        pageStart: Number(titledPageMatch[2]),
+        pageEnd: titledPageMatch[3] ? Number(titledPageMatch[3]) : undefined,
+      });
+      lineHits += 1;
+    }
+  }
+
+  for (const chapter of chapters) {
+    if (typeof chapter.pageStart === "number") {
+      continue;
+    }
+
+    const firstSectionStart = chapter.sections
+      .map((section) => section.pageStart)
+      .find((value): value is number => typeof value === "number" && Number.isFinite(value));
+
+    if (typeof firstSectionStart === "number") {
+      chapter.pageStart = firstSectionStart;
     }
   }
 
@@ -1149,7 +1215,10 @@ export function isLikelyTocText(rawText: string): boolean {
   return (
     text.includes("table of contents") ||
     /chapter\s+\d+/i.test(rawText) ||
-    /\d+\.\d+\s+[A-Za-z]/.test(rawText)
+    /module\s+[0-9ivx]+/i.test(rawText) ||
+    /lesson\s+[0-9ivx]+/i.test(rawText) ||
+    /\d+\.\d+\s+[A-Za-z]/.test(rawText) ||
+    /[A-Za-z].+\.{2,}\s*\d+/.test(rawText)
   );
 }
 

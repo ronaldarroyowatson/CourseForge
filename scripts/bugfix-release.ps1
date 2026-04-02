@@ -10,7 +10,7 @@
 #   .\scripts\bugfix-release.ps1 -Description "Fix xyz" -SkipGitHub    # skip GitHub release creation
 #
 # Steps performed:
-#   1. npm run typecheck          (clears VS Code Problems pane errors)
+#   1. npm run typecheck:all      (clears VS Code Problems pane errors including scripts)
 #   2. npm run build              (verify build compiles)
 #   3. npm run test:e2e:comprehensive  (full test battery)
 #   4. Bump PATCH version in package.json (e.g. 1.4.10 -> 1.4.11)
@@ -250,8 +250,8 @@ Write-Host ""
 if (-not $SkipTests) {
   Push-Location $RepoRoot
 
-  Write-Host "--- [1/3] Typecheck (VS Code Problems pane) ---" -ForegroundColor Cyan
-  npm run typecheck
+  Write-Host "--- [1/3] Typecheck ALL (VS Code Problems pane) ---" -ForegroundColor Cyan
+  npm run typecheck:all
   if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Error "TYPECHECK FAILED. Fix all TypeScript errors before releasing."
@@ -316,7 +316,7 @@ $Description
 
 ## Validation
 
-- ``npm run typecheck``
+- ``npm run typecheck:all``
 - ``npm run build``
 - ``npm run test:e2e:comprehensive``
 

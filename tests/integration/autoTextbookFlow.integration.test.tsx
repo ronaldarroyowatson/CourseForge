@@ -659,4 +659,41 @@ describe("auto textbook flow integration", () => {
     expect(repositoryMocks.editSection).not.toHaveBeenCalled();
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
+
+  it("builds live TOC hierarchy preview with computed ranges from OCR text", async () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc",
+          coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+        }}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText(/OCR text/i), {
+      target: {
+        value: [
+          "MODULE 1: THE NATURE OF SCIENCE",
+          "CER Claim, Evidence, Reasoning 3",
+          "Lesson 1 The Methods of Science 4",
+          "Lesson 2 Standards of Measurement 12",
+          "Lesson 3 Communicating with Graphs 19",
+          "MODULE 2: MOTION",
+          "CER Claim, Evidence, Reasoning 37",
+          "Lesson 1 Describing Motion 38",
+        ].join("\n"),
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Re-parse TOC Text" }));
+
+    expect(await screen.findByText(/Live TOC Structure Preview/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Chapter 1/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/NATURE OF SCIENCE/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/pp\. 3-36/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Methods of Science/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/pp\. 4-11/i).length).toBeGreaterThan(0);
+  });
 });

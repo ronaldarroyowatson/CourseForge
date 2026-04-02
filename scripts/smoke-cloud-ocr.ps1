@@ -1,5 +1,8 @@
 ﻿param(
   [string]$OutputDir = "",
+  [string]$CopyrightImagePath = "",
+  [string]$TocImagePath = "",
+  [string]$TocImagePath2 = "",
   [switch]$OpenAIOnly,
   [switch]$GitHubOnly
 )
@@ -14,7 +17,22 @@ if ([string]::IsNullOrWhiteSpace($OutputDir)) {
   $OutputDir = Join-Path $PSScriptRoot "..\tmp-smoke"
 }
 
-$resolvedOutputDir = [System.IO.Path]::GetFullPath($OutputDir)
+function Resolve-AbsolutePathSafe {
+  param([string]$PathValue)
+
+  if ([string]::IsNullOrWhiteSpace($PathValue)) {
+    throw "Path value cannot be empty."
+  }
+
+  $normalized = $PathValue.Trim()
+  if ($normalized.StartsWith('"') -and $normalized.EndsWith('"') -and $normalized.Length -gt 1) {
+    $normalized = $normalized.Substring(1, $normalized.Length - 2)
+  }
+
+  return [System.IO.Path]::GetFullPath($normalized)
+}
+
+$resolvedOutputDir = Resolve-AbsolutePathSafe -PathValue $OutputDir
 New-Item -ItemType Directory -Path $resolvedOutputDir -Force | Out-Null
 
 function Get-GitHubModelsToken {
@@ -126,6 +144,55 @@ function New-CopyrightSampleImage {
       )
       $graphics.DrawString($line, $body, [System.Drawing.Brushes]::Black, $lineRect)
       $rightY += [Math]::Ceiling($lineSize.Height) + 8
+    }
+
+    $bitmap.Save($TargetPath, [System.Drawing.Imaging.ImageFormat]::Png)
+  } finally {
+    $graphics.Dispose()
+    $bitmap.Dispose()
+  }
+}
+
+function New-TocSampleImage {
+  param([string]$TargetPath)
+
+  $bitmap = New-Object System.Drawing.Bitmap 2400, 2200
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  try {
+    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+    $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+    $graphics.Clear([System.Drawing.Color]::FromArgb(245, 245, 245))
+
+    $titleFont = New-Object System.Drawing.Font("Consolas", 48, [System.Drawing.FontStyle]::Bold)
+    $bodyFont = New-Object System.Drawing.Font("Consolas", 32, [System.Drawing.FontStyle]::Regular)
+
+    $lines = @(
+      "INTRODUCTION TO PHYSICAL SCIENCE",
+      "MODULE 1: THE NATURE OF SCIENCE",
+      "CER Claim, Evidence, Reasoning ........................................ 3",
+      "Lesson 1 The Methods of Science ...................................... 4",
+      "Lesson 2 Standards of Measurement ................................... 12",
+      "Lesson 3 Communicating with Graphs ................................. 19",
+      "Lesson 4 Science and Technology .................................... 24",
+      "NATURE OF SCIENCE .................................................. 31",
+      "Module Wrap-Up ..................................................... 33",
+      "MODULE 2: MOTION",
+      "CER Claim, Evidence, Reasoning ....................................... 37",
+      "Lesson 1 Describing Motion .......................................... 38",
+      "Lesson 2 Velocity and Momentum ...................................... 45",
+      "Lesson 3 Acceleration ............................................... 50",
+      "Module Wrap-Up ...................................................... 57",
+      "MODULE 3: FORCES AND NEWTON'S LAWS",
+      "CER Claim, Evidence, Reasoning ....................................... 59",
+      "Lesson 1 Forces ..................................................... 60",
+      "Lesson 2 Newton's Laws of Motion .................................... 68"
+    )
+
+    $graphics.DrawString("TABLE OF CONTENTS", $titleFont, [System.Drawing.Brushes]::Black, 70, 70)
+    $y = 170
+    foreach ($line in $lines) {
+      $graphics.DrawString($line, $bodyFont, [System.Drawing.Brushes]::Black, 70, $y)
+      $y += 70
     }
 
     $bitmap.Save($TargetPath, [System.Drawing.Imaging.ImageFormat]::Png)
@@ -363,6 +430,37 @@ function Test-CopyrightOcrCompleteness {
   }
 }
 
+function Test-TocOcrCompleteness {
+  param([string]$Text)
+
+  $mustContain = @(
+    "MODULE 1",
+    "THE NATURE OF SCIENCE",
+    "Lesson 1 The Methods of Science",
+    "Lesson 2 Standards of Measurement",
+    "MODULE 2",
+    "Lesson 1 Describing Motion",
+    "MODULE 3",
+    "Lesson 2 Newton's Laws of Motion"
+  )
+
+  $checks = @()
+  foreach ($phrase in $mustContain) {
+    $pattern = [Regex]::Escape($phrase).Replace("\\ ", "\\s+")
+    $checks += [ordered]@{ phrase = $phrase; found = ($Text -match $pattern) }
+  }
+
+  $foundCount = (@($checks | Where-Object { $_.found })).Count
+  $pct = [math]::Round(($foundCount / $mustContain.Count) * 100, 2)
+  return [ordered]@{
+    requiredPhraseCount = $mustContain.Count
+    matchedPhraseCount = $foundCount
+    completenessPercent = $pct
+    checks = $checks
+    passed = ($pct -ge 87.5)
+  }
+}
+
 function Test-ExpectedMetadata {
   param([object]$Metadata)
 
@@ -393,9 +491,39 @@ function Test-ExpectedMetadata {
 }
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$sampleImagePath = Join-Path $resolvedOutputDir "ocr-smoke-copyright-$timestamp.png"
-New-CopyrightSampleImage -TargetPath $sampleImagePath
+$sampleImagePath = if (-not [string]::IsNullOrWhiteSpace($CopyrightImagePath)) {
+  Resolve-AbsolutePathSafe -PathValue $CopyrightImagePath
+} else {
+  $generatedCopyrightPath = Join-Path $resolvedOutputDir "ocr-smoke-copyright-$timestamp.png"
+  New-CopyrightSampleImage -TargetPath $generatedCopyrightPath
+  $generatedCopyrightPath
+}
+
+if (-not (Test-Path $sampleImagePath)) {
+  throw "Copyright image not found: $sampleImagePath"
+}
+
 $imageDataUrl = Convert-ImageToDataUrl -ImagePath $sampleImagePath
+
+$tocImagePaths = @()
+if (-not [string]::IsNullOrWhiteSpace($TocImagePath)) {
+  $tocImagePaths += Resolve-AbsolutePathSafe -PathValue $TocImagePath
+}
+if (-not [string]::IsNullOrWhiteSpace($TocImagePath2)) {
+  $tocImagePaths += Resolve-AbsolutePathSafe -PathValue $TocImagePath2
+}
+
+if ($tocImagePaths.Count -eq 0) {
+  $generatedTocPath = Join-Path $resolvedOutputDir "ocr-smoke-toc-$timestamp.png"
+  New-TocSampleImage -TargetPath $generatedTocPath
+  $tocImagePaths += $generatedTocPath
+}
+
+foreach ($tocPath in $tocImagePaths) {
+  if (-not (Test-Path $tocPath)) {
+    throw "TOC image not found: $tocPath"
+  }
+}
 
 $openAiToken = if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) { "" } else { $env:OPENAI_API_KEY.Trim() }
 $gitHubToken = Get-GitHubModelsToken
@@ -440,6 +568,55 @@ foreach ($provider in $providers) {
     $metadataChecks = Test-ExpectedMetadata -Metadata $metadataAgent.metadata
   }
 
+  $tocSamples = @()
+  foreach ($tocPath in $tocImagePaths) {
+    $tocImageDataUrl = Convert-ImageToDataUrl -ImagePath $tocPath
+    $tocOcr = Invoke-VisionOcr -Provider $provider -ImageDataUrl $tocImageDataUrl
+    $tocOcrCompleteness = $null
+    $tocParserValidation = $null
+
+    if ($tocOcr.success -and -not [string]::IsNullOrWhiteSpace($tocOcr.extractedText)) {
+      $tocOcrCompleteness = Test-TocOcrCompleteness -Text $tocOcr.extractedText
+
+      $tocBaseName = [System.IO.Path]::GetFileNameWithoutExtension($tocPath)
+      $tocOcrPath = Join-Path $resolvedOutputDir ("toc-ocr-" + $provider.ProviderId + "-" + $tocBaseName + "-" + $timestamp + ".txt")
+      Set-Content -Path $tocOcrPath -Value $tocOcr.extractedText -Encoding UTF8
+
+      try {
+        $parserRaw = & npx tsx scripts/validate-toc-parser.ts --ocr-file "$tocOcrPath" 2>&1
+        if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 1) {
+          try {
+            $tocParserValidation = $parserRaw -join "`n" | ConvertFrom-Json -ErrorAction Stop
+          } catch {
+            $tocParserValidation = [ordered]@{
+              passed = $false
+              error = "Failed to parse parser validator JSON output"
+              raw = ($parserRaw -join "`n")
+            }
+          }
+        } else {
+          $tocParserValidation = [ordered]@{
+            passed = $false
+            error = "validate-toc-parser.ts failed"
+            raw = ($parserRaw -join "`n")
+          }
+        }
+      } catch {
+        $tocParserValidation = [ordered]@{
+          passed = $false
+          error = $_.Exception.Message
+        }
+      }
+    }
+
+    $tocSamples += [ordered]@{
+      imagePath = $tocPath
+      tocOcr = $tocOcr
+      tocOcrCompleteness = $tocOcrCompleteness
+      tocParserValidation = $tocParserValidation
+    }
+  }
+
   $providerResults += [ordered]@{
     providerId = $provider.ProviderId
     providerLabel = $provider.ProviderLabel
@@ -447,6 +624,7 @@ foreach ($provider in $providers) {
     ocrCompleteness = $ocrCompleteness
     metadataAgent = $metadataAgent
     metadataValidation = $metadataChecks
+    tocSamples = $tocSamples
   }
 }
 
@@ -454,16 +632,75 @@ $ocrReachable = (@($providerResults | Where-Object { $_.ocr.success })).Count -g
 $metadataReachable = (@($providerResults | Where-Object { $_.metadataAgent.success })).Count -gt 0
 $ocrCompletenessPassed = (@($providerResults | Where-Object { $_.ocrCompleteness -and $_.ocrCompleteness.passed })).Count -gt 0
 $metadataValidationPassed = (@($providerResults | Where-Object { $_.metadataValidation -and $_.metadataValidation.passed })).Count -gt 0
+$allTocSamples = @($providerResults | ForEach-Object { $_.tocSamples } | Where-Object { $_ })
+$tocOcrReachable = (@($allTocSamples | Where-Object { $_.tocOcr.success })).Count -eq $allTocSamples.Count
+$tocOcrCompletenessPassed = (@($allTocSamples | Where-Object { $_.tocOcrCompleteness -and $_.tocOcrCompleteness.passed })).Count -eq $allTocSamples.Count
+$tocParserValidationPassed = (@($allTocSamples | Where-Object { $_.tocParserValidation -and $_.tocParserValidation.passed })).Count -eq $allTocSamples.Count
+
+$missingData = @()
+foreach ($provider in $providerResults) {
+  if ($provider.metadataValidation) {
+    foreach ($check in $provider.metadataValidation.checks) {
+      if (-not $check.passed) {
+        $missingData += [ordered]@{
+          providerId = $provider.providerId
+          category = "metadata"
+          field = $check.field
+          actual = $check.actual
+          expected = $check.expected
+        }
+      }
+    }
+  }
+
+  foreach ($tocSample in @($provider.tocSamples)) {
+    if ($tocSample.tocParserValidation -and $tocSample.tocParserValidation.checks) {
+      foreach ($check in $tocSample.tocParserValidation.checks) {
+        if (-not $check.passed) {
+          $missingData += [ordered]@{
+            providerId = $provider.providerId
+            category = "toc_parser"
+            sample = $tocSample.imagePath
+            field = $check.name
+            actual = $check.actual
+            expected = $check.expected
+          }
+        }
+      }
+    }
+
+    if ($tocSample.tocOcrCompleteness -and -not $tocSample.tocOcrCompleteness.passed) {
+      foreach ($phraseCheck in $tocSample.tocOcrCompleteness.checks) {
+        if (-not $phraseCheck.found) {
+          $missingData += [ordered]@{
+            providerId = $provider.providerId
+            category = "toc_ocr"
+            sample = $tocSample.imagePath
+            field = "phrase"
+            actual = "missing"
+            expected = $phraseCheck.phrase
+          }
+        }
+      }
+    }
+  }
+}
 
 $report = [ordered]@{
   generatedAt = (Get-Date).ToString("o")
   sampleImagePath = $sampleImagePath
+  tocImagePaths = $tocImagePaths
   checks = [ordered]@{
     ocrAgentReachable = $ocrReachable
     metadataAgentReachable = $metadataReachable
     ocrCompletenessPassed = $ocrCompletenessPassed
     metadataValidationPassed = $metadataValidationPassed
+    tocOcrAgentReachable = $tocOcrReachable
+    tocOcrCompletenessPassed = $tocOcrCompletenessPassed
+    tocParserValidationPassed = $tocParserValidationPassed
+    missingDataCount = $missingData.Count
   }
+  missingData = $missingData
   providers = $providerResults
 }
 
@@ -481,11 +718,28 @@ foreach ($provider in $providerResults) {
     $failedChecks = @($provider.metadataValidation.checks | Where-Object { -not $_.passed })
     Write-Host ("  Metadata checks passed: {0}" -f ($failedChecks.Count -eq 0))
   }
+  foreach ($tocSample in @($provider.tocSamples)) {
+    $tocStatus = if ($tocSample.tocOcr.success) { "ok" } else { $tocSample.tocOcr.reasonCode }
+    Write-Host ("  TOC sample: {0}" -f $tocSample.imagePath)
+    Write-Host ("    TOC OCR={0}" -f $tocStatus)
+    if ($tocSample.tocOcrCompleteness) {
+      Write-Host ("    TOC OCR completeness: {0}% ({1}/{2})" -f $tocSample.tocOcrCompleteness.completenessPercent, $tocSample.tocOcrCompleteness.matchedPhraseCount, $tocSample.tocOcrCompleteness.requiredPhraseCount)
+    }
+    if ($tocSample.tocParserValidation) {
+      Write-Host ("    TOC parser checks passed: {0}" -f $tocSample.tocParserValidation.passed)
+    }
+  }
+}
+
+if ($missingData.Count -gt 0) {
+  $missingPath = Join-Path $resolvedOutputDir "ocr-smoke-missing-fields-$timestamp.json"
+  ($missingData | ConvertTo-Json -Depth 14) | Set-Content -Path $missingPath -Encoding UTF8
+  Write-Host ("Missing field report: {0}" -f $missingPath)
 }
 
 Write-Host ("Smoke report: {0}" -f $reportPath)
 
-$overallPass = $ocrReachable -and $metadataReachable -and $ocrCompletenessPassed -and $metadataValidationPassed
+$overallPass = $ocrReachable -and $metadataReachable -and $ocrCompletenessPassed -and $metadataValidationPassed -and $tocOcrReachable -and $tocOcrCompletenessPassed -and $tocParserValidationPassed -and ($missingData.Count -eq 0)
 if (-not $overallPass) {
   exit 1
 }

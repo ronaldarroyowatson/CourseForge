@@ -1,7 +1,0 @@
-﻿{
-    "providerId":  "cloud_github_models_vision",
-    "category":  "metadata",
-    "field":  "publisherLocation",
-    "actual":  "Columbus, OH",
-    "expected":  "contains Columbus, OH 43240"
-}

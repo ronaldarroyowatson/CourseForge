@@ -32,6 +32,7 @@ describe("TOC preview pipeline", () => {
 
     expect(parsed.chapters.length).toBeGreaterThanOrEqual(3);
     expect(parsed.chapters[0].chapterNumber).toBe("1");
+    expect(parsed.chapters[0].chapterLabel).toBe("Module");
     expect(parsed.chapters[0].title).toContain("NATURE OF SCIENCE");
     expect(parsed.chapters[0].pageStart).toBe(3);
     expect(parsed.chapters[1].pageStart).toBe(37);
@@ -39,6 +40,9 @@ describe("TOC preview pipeline", () => {
     expect(parsed.chapters[0].sections.some((section) => section.title.includes("Methods of Science"))).toBe(true);
     expect(parsed.chapters[0].sections.some((section) => section.title.includes("Standards of Measurement"))).toBe(true);
     expect(parsed.chapters[0].sections.some((section) => section.title.includes("Communicating with Graphs"))).toBe(true);
+    const ancillarySection = parsed.chapters[0].sections.find((section) => section.title.includes("Module Wrap-Up"));
+    expect(ancillarySection).toBeDefined();
+    expect(ancillarySection?.sectionNumber).toBe("");
 
     const preview = buildTocPreviewTree(parsed.chapters, parsed.confidence);
     expect(preview.chapterCount).toBeGreaterThanOrEqual(3);

@@ -271,6 +271,8 @@ interface AutoSessionDraft {
   metadataTitle: string;
   metadataSubject: string;
   metadataPublisher: string;
+  metadataFormSnapshot?: MetadataFormState;
+  relatedIsbnsSnapshot?: RelatedIsbn[];
   step: AutoFlowStep;
   stepsCompleted: { cover: boolean; copyright: boolean };
 }
@@ -290,6 +292,8 @@ function isAutoSessionDraft(value: unknown): value is AutoSessionDraft {
     && typeof draft.metadataTitle === "string"
     && typeof draft.metadataSubject === "string"
     && typeof draft.metadataPublisher === "string"
+    && (draft.metadataFormSnapshot === undefined || typeof draft.metadataFormSnapshot === "object")
+    && (draft.relatedIsbnsSnapshot === undefined || Array.isArray(draft.relatedIsbnsSnapshot))
     && (draft.step === "cover" || draft.step === "title" || draft.step === "toc" || draft.step === "toc-editor")
     && typeof draft.stepsCompleted?.cover === "boolean"
     && typeof draft.stepsCompleted?.copyright === "boolean"
@@ -1039,6 +1043,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       metadataTitle: metadataForm.title,
       metadataSubject: metadataForm.subject,
       metadataPublisher: metadataForm.publisher,
+      metadataFormSnapshot: metadataForm,
+      relatedIsbnsSnapshot: relatedIsbns,
       step,
       stepsCompleted: {
         cover: Boolean(coverImageDataUrl),
@@ -1048,7 +1054,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
     const nextDrafts = saveAutoSessionDraft(draft);
     setResumableDrafts(nextDrafts.filter((entry) => entry.id !== activeSessionDraftIdRef.current));
-  }, [coverImageDataUrl, rawOcrText, metadataForm.title, metadataForm.subject, metadataForm.publisher, step]);
+  }, [coverImageDataUrl, rawOcrText, metadataForm, relatedIsbns, step]);
 
   const canFinishToc = tocResult.chapters.length > 0;
 
@@ -1076,7 +1082,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }, [environmentPreparationMessage, step]);
 
   function updateMetadataForm<K extends keyof MetadataFormState>(field: K, value: MetadataFormState[K]): void {
-    setMetadataForm((current) => ({ ...current, [field]: value }));
+    setMetadataForm((current) => {
+      const next = { ...current, [field]: value };
+      const nextMetadata = fromMetadataFormState(next);
+      const normalizedRelated = relatedIsbns.filter((entry) => entry.isbn.trim().length > 0);
+
+      setMetadataDraft((currentDraft) => ({
+        ...currentDraft,
+        ...nextMetadata,
+        relatedIsbns: normalizedRelated.length > 0 ? normalizedRelated : undefined,
+      }));
+
+      return next;
+    });
 
     const metadataField = FORM_TO_METADATA_FIELD[field];
     if (!metadataField) {
@@ -1100,15 +1118,42 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   function addRelatedIsbn(): void {
-    setRelatedIsbns((current) => [...current, { isbn: "", type: "student" }]);
+    setRelatedIsbns((current) => {
+      const next: RelatedIsbn[] = [...current, { isbn: "", type: "student" }];
+      const normalizedRelated = next.filter((entry) => entry.isbn.trim().length > 0);
+      setMetadataDraft((currentDraft) => ({
+        ...currentDraft,
+        ...fromMetadataFormState(metadataForm),
+        relatedIsbns: normalizedRelated.length > 0 ? normalizedRelated : undefined,
+      }));
+      return next;
+    });
   }
 
   function removeRelatedIsbn(index: number): void {
-    setRelatedIsbns((current) => current.filter((_, currentIndex) => currentIndex !== index));
+    setRelatedIsbns((current) => {
+      const next = current.filter((_, currentIndex) => currentIndex !== index);
+      const normalizedRelated = next.filter((entry) => entry.isbn.trim().length > 0);
+      setMetadataDraft((currentDraft) => ({
+        ...currentDraft,
+        ...fromMetadataFormState(metadataForm),
+        relatedIsbns: normalizedRelated.length > 0 ? normalizedRelated : undefined,
+      }));
+      return next;
+    });
   }
 
   function updateRelatedIsbn<K extends keyof RelatedIsbn>(index: number, field: K, value: RelatedIsbn[K]): void {
-    setRelatedIsbns((current) => current.map((entry, currentIndex) => currentIndex === index ? { ...entry, [field]: value } : entry));
+    setRelatedIsbns((current) => {
+      const next = current.map((entry, currentIndex) => currentIndex === index ? { ...entry, [field]: value } : entry);
+      const normalizedRelated = next.filter((entry) => entry.isbn.trim().length > 0);
+      setMetadataDraft((currentDraft) => ({
+        ...currentDraft,
+        ...fromMetadataFormState(metadataForm),
+        relatedIsbns: normalizedRelated.length > 0 ? normalizedRelated : undefined,
+      }));
+      return next;
+    });
   }
 
   function upsertAutoMetadataConfidence(incoming: AutoMetadataConfidenceMap): void {
@@ -2633,12 +2678,22 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                       setLastMetadataImageDataUrl(draft.coverImageDataUrl);
                       setRawOcrText(draft.rawOcrText);
                       setOcrDraft(draft.rawOcrText);
-                      setMetadataForm((current) => ({
-                        ...current,
-                        title: draft.metadataTitle || current.title,
-                        subject: draft.metadataSubject || current.subject,
-                        publisher: draft.metadataPublisher || current.publisher,
-                      }));
+                      const nextMetadataForm: MetadataFormState = draft.metadataFormSnapshot
+                        ? { ...draft.metadataFormSnapshot }
+                        : {
+                            ...metadataForm,
+                            title: draft.metadataTitle || metadataForm.title,
+                            subject: draft.metadataSubject || metadataForm.subject,
+                            publisher: draft.metadataPublisher || metadataForm.publisher,
+                          };
+                      const nextRelatedIsbns = draft.relatedIsbnsSnapshot ?? [];
+
+                      setMetadataForm(nextMetadataForm);
+                      setRelatedIsbns(nextRelatedIsbns);
+                      setMetadataDraft({
+                        ...fromMetadataFormState(nextMetadataForm),
+                        relatedIsbns: nextRelatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
+                      });
                       setStep(draft.step);
                       setResumableDrafts(deleteAutoSessionDraft(draft.id));
                     }}
@@ -3022,6 +3077,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             Additional ISBNs (comma separated)
             {renderConfidenceDot("additionalIsbns")}
             <input value={metadataForm.additionalIsbnsCsv} onChange={(event) => updateMetadataForm("additionalIsbnsCsv", event.target.value)} />
+            <span className="form-hint">Use the typed Related ISBN list below when you need an edition label (Teacher, Digital, etc.).</span>
           </label>
 
           <fieldset className="form-fieldset">
@@ -3048,7 +3104,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                 <input
                   value={row.note ?? ""}
                   onChange={(event) => updateRelatedIsbn(index, "note", event.target.value)}
-                  placeholder="Note (optional)"
+                  placeholder="Label/Note (optional, e.g., Teacher Edition)"
                   className="related-isbn-note"
                 />
                 <button type="button" className="btn-icon btn-danger" onClick={() => removeRelatedIsbn(index)} aria-label="Remove related ISBN" title="Remove">âœ•</button>

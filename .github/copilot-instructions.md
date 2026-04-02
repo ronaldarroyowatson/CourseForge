@@ -43,7 +43,9 @@ npm run bugfix:release -- -Description "..." -DryRun
 
 | Command | Purpose |
 |---------|---------|
-| `npm run typecheck` | Clears VS Code Problems pane TypeScript errors |
+| `npm run typecheck:all` | Clears VS Code Problems pane TypeScript errors across app and scripts |
+| `npm run test:index` | Regenerates the checked-in test index |
+| `npm run test:samples:validate` | Verifies canonical sample naming and usage |
 | `npm run bugfix:test` | Full quality gate: typecheck + build + all tests |
 | `npm run test:e2e:comprehensive` | Complete end-to-end + unit + integration battery |
 | `npm run test:rules` | Firestore rules tests (Java or static fallback) |
@@ -55,7 +57,9 @@ npm run bugfix:release -- -Description "..." -DryRun
 
 Before marking any bug fix complete, confirm:
 
-- [ ] `npm run typecheck` passes (zero errors)
+- [ ] `npm run typecheck:all` passes (zero errors)
+- [ ] `npm run test:index` was run after test-suite changes
+- [ ] `npm run test:samples:validate` passes after fixture changes
 - [ ] `npm run test:e2e:comprehensive` passes
 - [ ] VS Code Problems pane shows no new errors
 - [ ] Relevant docs updated (if behavior changed)
@@ -65,6 +69,20 @@ Before marking any bug fix complete, confirm:
 ---
 
 ## Project Conventions
+
+### Testing And Fixture Standards
+
+- Read and follow `docs/TESTING_AND_DEBUG_STANDARDS.md` when changing tests, smoke flows, fixtures, or debug tooling.
+- Canonical smoke samples belong in `tmp-smoke/samples` only and must use `<category>__<scenario>__<expected-outcome>.<ext>` naming.
+- Keep one blank-input fixture and one corrupted-input fixture per distinct corruption mode. Delete redundant duplicates.
+- Timestamped smoke outputs under `tmp-smoke/` are generated artifacts, not canonical fixtures.
+- When changing parser or extraction tests, prefer structured expected-versus-actual assertions over weak truthy checks.
+
+### Debug And CLI Mirror Standards
+
+- Any new debug behavior in the app should keep a CLI-equivalent path via `npm run program -- debug ...`.
+- Debug metadata should include timestamp, subsystem, severity, source type, and error context whenever available.
+- Use normalized source type vocabulary (`automatic`, `manual`) for new debug and CLI flows; preserve compatibility with older app entity values only where needed.
 
 
 ---

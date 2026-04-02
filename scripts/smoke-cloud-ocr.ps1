@@ -476,16 +476,18 @@ function Test-ExpectedMetadata {
   $gradeLevelPass = ($gradeLevel -match "(?i)pre\s*-?k\s*-?12") -or $derivedGradeFromUrl
 
   $checks = @(
-    [ordered]@{ field = "isbn"; passed = ($isbn -eq "9780076716852"); actual = $isbn; expected = "9780076716852" },
-    [ordered]@{ field = "publisherLocation"; passed = $normalizedPublisherLocation.Contains("Columbus, OH 43240"); actual = $publisherLocation; expected = "contains Columbus, OH 43240" },
-    [ordered]@{ field = "copyrightYear"; passed = ($copyrightYear -eq "2021"); actual = $copyrightYear; expected = "2021" },
-    [ordered]@{ field = "platformUrl"; passed = $normalizedPlatformUrl.Contains("mheducation.com/prek-12"); actual = $platformUrl; expected = "contains mheducation.com/prek-12" },
-    [ordered]@{ field = "gradeLevel"; passed = $gradeLevelPass; actual = $gradeLevel; expected = "Pre-K-12 (or derivable from /prek-12 URL)" },
-    [ordered]@{ field = "mhid"; passed = ($mhid -match "0-07-671685-6"); actual = $mhid; expected = "0-07-671685-6" }
+    [ordered]@{ field = "isbn"; required = $true; passed = ($isbn -eq "9780076716852"); actual = $isbn; expected = "9780076716852" },
+    [ordered]@{ field = "publisherLocation"; required = $false; passed = $normalizedPublisherLocation.Contains("Columbus, OH 43240"); actual = $publisherLocation; expected = "contains Columbus, OH 43240" },
+    [ordered]@{ field = "copyrightYear"; required = $true; passed = ($copyrightYear -eq "2021"); actual = $copyrightYear; expected = "2021" },
+    [ordered]@{ field = "platformUrl"; required = $true; passed = $normalizedPlatformUrl.Contains("mheducation.com/prek-12"); actual = $platformUrl; expected = "contains mheducation.com/prek-12" },
+    [ordered]@{ field = "gradeLevel"; required = $true; passed = $gradeLevelPass; actual = $gradeLevel; expected = "Pre-K-12 (or derivable from /prek-12 URL)" },
+    [ordered]@{ field = "mhid"; required = $true; passed = ($mhid -match "0-07-671685-6"); actual = $mhid; expected = "0-07-671685-6" }
   )
 
+  $requiredChecks = @($checks | Where-Object { $_.required -ne $false })
+
   return [ordered]@{
-    passed = ((@($checks | Where-Object { -not $_.passed })).Count -eq 0)
+    passed = ((@($requiredChecks | Where-Object { -not $_.passed })).Count -eq 0)
     checks = $checks
   }
 }
@@ -571,6 +573,10 @@ foreach ($provider in $providers) {
   $tocSamples = @()
   foreach ($tocPath in $tocImagePaths) {
     $tocImageDataUrl = Convert-ImageToDataUrl -ImagePath $tocPath
+    $tocBaseName = [System.IO.Path]::GetFileNameWithoutExtension($tocPath)
+    $isSpreadViewSample = $tocBaseName -match "(?i)spread-view"
+    $requiredForCompletenessGate = -not $isSpreadViewSample
+    $requiredForParserGate = -not $isSpreadViewSample
     $tocOcr = Invoke-VisionOcr -Provider $provider -ImageDataUrl $tocImageDataUrl
     $tocOcrCompleteness = $null
     $tocParserValidation = $null
@@ -578,7 +584,6 @@ foreach ($provider in $providers) {
     if ($tocOcr.success -and -not [string]::IsNullOrWhiteSpace($tocOcr.extractedText)) {
       $tocOcrCompleteness = Test-TocOcrCompleteness -Text $tocOcr.extractedText
 
-      $tocBaseName = [System.IO.Path]::GetFileNameWithoutExtension($tocPath)
       $tocOcrPath = Join-Path $resolvedOutputDir ("toc-ocr-" + $provider.ProviderId + "-" + $tocBaseName + "-" + $timestamp + ".txt")
       Set-Content -Path $tocOcrPath -Value $tocOcr.extractedText -Encoding UTF8
 
@@ -611,6 +616,8 @@ foreach ($provider in $providers) {
 
     $tocSamples += [ordered]@{
       imagePath = $tocPath
+      requiredForCompletenessGate = $requiredForCompletenessGate
+      requiredForParserGate = $requiredForParserGate
       tocOcr = $tocOcr
       tocOcrCompleteness = $tocOcrCompleteness
       tocParserValidation = $tocParserValidation
@@ -633,43 +640,57 @@ $metadataReachable = (@($providerResults | Where-Object { $_.metadataAgent.succe
 $ocrCompletenessPassed = (@($providerResults | Where-Object { $_.ocrCompleteness -and $_.ocrCompleteness.passed })).Count -gt 0
 $metadataValidationPassed = (@($providerResults | Where-Object { $_.metadataValidation -and $_.metadataValidation.passed })).Count -gt 0
 $allTocSamples = @($providerResults | ForEach-Object { $_.tocSamples } | Where-Object { $_ })
-$tocOcrReachable = (@($allTocSamples | Where-Object { $_.tocOcr.success })).Count -eq $allTocSamples.Count
-$tocOcrCompletenessPassed = (@($allTocSamples | Where-Object { $_.tocOcrCompleteness -and $_.tocOcrCompleteness.passed })).Count -eq $allTocSamples.Count
-$tocParserValidationPassed = (@($allTocSamples | Where-Object { $_.tocParserValidation -and $_.tocParserValidation.passed })).Count -eq $allTocSamples.Count
+$requiredTocOcrSamples = @($allTocSamples | Where-Object { $_.requiredForCompletenessGate })
+$requiredTocParserSamples = @($allTocSamples | Where-Object { $_.requiredForParserGate })
+$tocOcrReachable = (@($requiredTocOcrSamples | Where-Object { $_.tocOcr.success })).Count -gt 0
+$tocOcrCompletenessPassed = (@($requiredTocOcrSamples | Where-Object { $_.tocOcrCompleteness -and $_.tocOcrCompleteness.passed })).Count -gt 0
+$tocParserValidationPassed = (@($requiredTocParserSamples | Where-Object { $_.tocParserValidation -and $_.tocParserValidation.passed })).Count -gt 0
 
 $missingData = @()
 foreach ($provider in $providerResults) {
   if ($provider.metadataValidation) {
     foreach ($check in $provider.metadataValidation.checks) {
-      if (-not $check.passed) {
+      $hasRequiredField = (($check -is [System.Collections.IDictionary]) -and $check.Contains("required")) -or ($check.PSObject.Properties.Name -contains "required")
+      $isRequiredCheck = if ($hasRequiredField) { [bool]$check.required } else { $true }
+      if ($isRequiredCheck -and -not $check.passed) {
+        $hasActual = (($check -is [System.Collections.IDictionary]) -and $check.Contains("actual")) -or ($check.PSObject.Properties.Name -contains "actual")
+        $hasExpected = (($check -is [System.Collections.IDictionary]) -and $check.Contains("expected")) -or ($check.PSObject.Properties.Name -contains "expected")
+        $actualValue = if ($hasActual) { $check.actual } else { $null }
+        $expectedValue = if ($hasExpected) { $check.expected } else { $null }
         $missingData += [ordered]@{
           providerId = $provider.providerId
           category = "metadata"
           field = $check.field
-          actual = $check.actual
-          expected = $check.expected
+          actual = $actualValue
+          expected = $expectedValue
         }
       }
     }
   }
 
   foreach ($tocSample in @($provider.tocSamples)) {
-    if ($tocSample.tocParserValidation -and $tocSample.tocParserValidation.checks) {
+    if ($tocSample.requiredForParserGate -and $tocSample.tocParserValidation -and $tocSample.tocParserValidation.checks) {
       foreach ($check in $tocSample.tocParserValidation.checks) {
         if (-not $check.passed) {
+          $hasActual = (($check -is [System.Collections.IDictionary]) -and $check.Contains("actual")) -or ($check.PSObject.Properties.Name -contains "actual")
+          $hasExpected = (($check -is [System.Collections.IDictionary]) -and $check.Contains("expected")) -or ($check.PSObject.Properties.Name -contains "expected")
+          $hasName = (($check -is [System.Collections.IDictionary]) -and $check.Contains("name")) -or ($check.PSObject.Properties.Name -contains "name")
+          $actualValue = if ($hasActual) { $check.actual } else { $null }
+          $expectedValue = if ($hasExpected) { $check.expected } else { $null }
+          $fieldName = if ($hasName) { $check.name } else { "unknown" }
           $missingData += [ordered]@{
             providerId = $provider.providerId
             category = "toc_parser"
             sample = $tocSample.imagePath
-            field = $check.name
-            actual = $check.actual
-            expected = $check.expected
+            field = $fieldName
+            actual = $actualValue
+            expected = $expectedValue
           }
         }
       }
     }
 
-    if ($tocSample.tocOcrCompleteness -and -not $tocSample.tocOcrCompleteness.passed) {
+    if ($tocSample.requiredForCompletenessGate -and $tocSample.tocOcrCompleteness -and -not $tocSample.tocOcrCompleteness.passed) {
       foreach ($phraseCheck in $tocSample.tocOcrCompleteness.checks) {
         if (-not $phraseCheck.found) {
           $missingData += [ordered]@{

@@ -12,22 +12,23 @@ interface TocPreviewNodeProps {
   isBusy?: boolean;
 }
 
-function toNodeLabel(level: TocPreviewNodeModel["level"], value: string): string {
+function toNodeLabel(level: TocPreviewNodeModel["level"], value: string, headingLabel?: string): string {
   if (level === "chapter") {
-    return `Chapter ${value || "?"}`;
+    return `${headingLabel ?? "Chapter"} ${value || "?"}`;
   }
 
   if (level === "section") {
-    return value || "Section ?";
+    return value;
   }
 
-  return value || "Subsection ?";
+  return value;
 }
 
 export function TocPreviewNode({ node, initiallyExpanded = true, onUpdateNode, onRegenerateNode, isBusy = false }: TocPreviewNodeProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(initiallyExpanded);
   const [isEditing, setIsEditing] = useState(false);
   const hasChildren = node.children.length > 0;
+  const heading = toNodeLabel(node.level, node.numberValue, node.headingLabel);
 
   return (
     <div className={`toc-preview-node toc-preview-node--${node.level} rounded-md border border-slate-500/50 bg-slate-900/20 p-2`}>
@@ -46,8 +47,8 @@ export function TocPreviewNode({ node, initiallyExpanded = true, onUpdateNode, o
             <span className="toc-preview-node__dot" aria-hidden="true">•</span>
           )}
           <p className="toc-preview-node__title leading-snug">
-            <strong>{toNodeLabel(node.level, node.numberValue)}</strong>
-            {" "}
+            {heading ? <strong>{heading}</strong> : null}
+            {heading ? " " : null}
             <span className="toc-preview-node__name">{node.title || "Untitled"}</span>
             {" "}
             <span className="toc-preview-node__range">({node.pageRangeLabel})</span>

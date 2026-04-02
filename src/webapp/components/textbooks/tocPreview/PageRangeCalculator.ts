@@ -5,6 +5,7 @@ export type TocPreviewLevel = "chapter" | "section" | "subsection";
 export interface TocPreviewNodeModel {
   id: string;
   level: TocPreviewLevel;
+  headingLabel?: string;
   numberValue: string;
   title: string;
   pageStart?: number;
@@ -212,6 +213,7 @@ export function buildTocPreviewTree(chapters: TocChapter[], globalConfidence: nu
     return {
       id: `chapter-${chapterIndex}`,
       level: "chapter",
+      headingLabel: chapter.chapterLabel ?? "Chapter",
       numberValue,
       title,
       pageStart,

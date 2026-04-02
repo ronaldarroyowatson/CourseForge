@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-  "version": "1.4.39",
+  "version": "1.4.41",
   "private": true,
   "type": "module",
   "engines": {
@@ -24,6 +24,9 @@
     "typecheck": "tsc --noEmit",
     "typecheck:scripts": "tsc -p scripts/tsconfig.json --noEmit",
     "typecheck:all": "npm run typecheck && npm run typecheck:scripts",
+    "test:index": "node scripts/generate-test-index.mjs",
+    "test:samples:validate": "node scripts/validate-test-samples.mjs",
+    "program": "node scripts/program-cli.mjs",
     "test:core": "tsx tests/core/runCoreTests.ts",
     "test:unit": "vitest run tests/core",
     "test:integration": "vitest run tests/integration",
@@ -57,7 +60,7 @@
     "deploy:functions": "firebase deploy --only functions",
     "deploy:backend": "firebase deploy --only firestore,functions",
     "test": "npm run test:core && npm run test:unit && npm run test:integration && npm run test:rules",
-    "bugfix:test": "npm run typecheck:all && npm run build && npm run test:e2e:comprehensive && npm run test:smoke:ocr:cloud:gate",
+    "bugfix:test": "npm run typecheck:all && npm run test:index && npm run test:samples:validate && npm run build && npm run test:e2e:comprehensive && npm run test:smoke:ocr:cloud:gate",
     "bugfix:release": "powershell -ExecutionPolicy Bypass -File scripts/bugfix-release.ps1"
   },
   "dependencies": {

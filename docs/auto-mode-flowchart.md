@@ -216,6 +216,8 @@ flowchart TD
 - During TOC capture, the editor now shows TOC target fields (chapter/section/subsection-style rows) instead of metadata fields.
 - Parsed page numbers are editable in TOC editor fields and retained for downstream chapter/section guidance.
 - Chapter end page can be inferred from the next chapter start page when OCR does not provide an explicit end page.
+- Module-based books preserve `Module` naming in the TOC preview instead of forcing `Chapter` labels.
+- Ancillary titled entries without numeric prefixes (for example `Module Wrap-Up`) are retained as unnumbered sections and are not auto-numbered into the lesson sequence.
 
 ---
 
@@ -248,6 +250,11 @@ Each metadata field shows a confidence dot (green / yellow / red / grey):
 | Year | Yes | Yes |
 
 User edits set `sourceType: "manual"` and `confidence: 1.0` for that field.
+
+Additional metadata persistence rules:
+
+- Manual edits to Additional ISBNs persist across later cover/copyright captures and OCR merges.
+- Use `Related ISBNs (typed)` for labeled variants (teacher, digital, workbook, assessment, or custom note text).
 
 ---
 

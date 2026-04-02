@@ -224,6 +224,62 @@ describe("auto textbook flow integration", () => {
     }
   });
 
+  it("restores additional and typed ISBN metadata when resuming a queued draft", async () => {
+    const now = Date.now();
+    window.localStorage.setItem(
+      AUTO_SESSION_DRAFTS_KEY,
+      JSON.stringify([
+        {
+          id: "resume-isbn-draft",
+          version: 1,
+          savedAt: now,
+          coverImageDataUrl: "data:image/png;base64,a",
+          rawOcrText: "Inspire Physical Science",
+          metadataTitle: "Inspire Physical Science",
+          metadataSubject: "Science",
+          metadataPublisher: "McGraw Hill",
+          metadataFormSnapshot: {
+            title: "Inspire Physical Science",
+            subtitle: "",
+            grade: "",
+            gradeBand: "",
+            subject: "Science",
+            edition: "Student Edition",
+            publicationYear: "2021",
+            copyrightYear: "2021",
+            isbnRaw: "9780076716852",
+            additionalIsbnsCsv: "9780076770007",
+            seriesName: "",
+            publisher: "McGraw Hill",
+            publisherLocation: "",
+            platformUrl: "",
+            mhid: "",
+            authorsCsv: "",
+            tocExtractionConfidence: "",
+          },
+          relatedIsbnsSnapshot: [{ isbn: "9780076770007", type: "teacher", note: "Teacher Edition" }],
+          step: "title",
+          stepsCompleted: { cover: true, copyright: false },
+        },
+      ])
+    );
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(/Additional ISBNs \(comma separated\)/i) as HTMLInputElement).value).toContain("9780076770007");
+    });
+
+    expect((screen.getByDisplayValue("Teacher Edition") as HTMLInputElement).value).toBe("Teacher Edition");
+  });
+
   it("limits unfinished auto captures to three queue slots and allows deleting a draft to reopen capacity", async () => {
     const now = Date.now();
     window.localStorage.setItem(
@@ -690,7 +746,7 @@ describe("auto textbook flow integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Re-parse TOC Text" }));
 
     expect(await screen.findByText(/Live TOC Structure Preview/i)).toBeInTheDocument();
-    expect(await screen.findByText(/Chapter 1/i)).toBeInTheDocument();
+    expect(await screen.findByText(/^Module 1$/i, { selector: "strong" })).toBeInTheDocument();
     expect(screen.getAllByText(/NATURE OF SCIENCE/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/pp\. 3-36/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Methods of Science/i).length).toBeGreaterThan(0);

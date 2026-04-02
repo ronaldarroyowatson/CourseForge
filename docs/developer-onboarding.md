@@ -1,6 +1,6 @@
 # CourseForge – Developer Onboarding Guide
 
-> **Related docs:** [Auto Mode Pipeline](./auto-mode-flowchart.md) · [Firestore Debug Rules](./firestore-debug-rules.md) · [Architecture](./ARCHITECTURE.md) · [Updater Maintainer Guide](./updater-maintainer-guide.md) · [DB Schema](./DB_SCHEMA.md) · [Code Style](./CODE_STYLE.md)
+> **Related docs:** [Auto Mode Pipeline](./auto-mode-flowchart.md) · [Firestore Debug Rules](./firestore-debug-rules.md) · [Architecture](./ARCHITECTURE.md) · [Updater Maintainer Guide](./updater-maintainer-guide.md) · [DB Schema](./DB_SCHEMA.md) · [Code Style](./CODE_STYLE.md) · [Testing And Debug Standards](./TESTING_AND_DEBUG_STANDARDS.md)
 
 ---
 

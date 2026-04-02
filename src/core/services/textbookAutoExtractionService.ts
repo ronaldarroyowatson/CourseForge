@@ -59,6 +59,7 @@ export interface TocSection {
 export interface TocChapter {
   chapterNumber: string;
   title: string;
+  chapterLabel?: "Chapter" | "Module";
   pageStart?: number;
   pageEnd?: number;
   unitName?: string;
@@ -562,6 +563,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       currentChapter = {
         chapterNumber: moduleMatch[1],
         title: moduleMatch[2].trim(),
+        chapterLabel: "Module",
         pageStart: moduleMatch[3] ? Number(moduleMatch[3]) : undefined,
         pageEnd: moduleMatch[4] ? Number(moduleMatch[4]) : undefined,
         unitName: activeUnitName,
@@ -577,6 +579,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       currentChapter = {
         chapterNumber: chapterMatch[1],
         title: chapterMatch[2].trim(),
+        chapterLabel: "Chapter",
         pageStart: chapterMatch[3] ? Number(chapterMatch[3]) : undefined,
         pageEnd: chapterMatch[4] ? Number(chapterMatch[4]) : undefined,
         unitName: activeUnitName,
@@ -592,6 +595,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       if (!currentChapter) {
         currentChapter = {
           chapterNumber: normalizeChapterNumber(lessonMatch[1]),
+          chapterLabel: "Chapter",
           title: `Chapter ${normalizeChapterNumber(lessonMatch[1])}`,
           unitName: activeUnitName,
           sections: [],
@@ -616,6 +620,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       currentChapter = {
         chapterNumber: numericChapterMatch[1],
         title: numericChapterMatch[2].trim(),
+        chapterLabel: "Chapter",
         pageStart: Number(numericChapterMatch[3]),
         pageEnd: numericChapterMatch[4] ? Number(numericChapterMatch[4]) : undefined,
         unitName: activeUnitName,
@@ -631,6 +636,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       if (!currentChapter) {
         currentChapter = {
           chapterNumber: sectionMatch[1].split(".")[0],
+          chapterLabel: "Chapter",
           title: `Chapter ${sectionMatch[1].split(".")[0]}`,
           unitName: activeUnitName,
           sections: [],
@@ -650,9 +656,8 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
 
     const titledPageMatch = line.match(/^([A-Za-z][A-Za-z0-9'&/,().\- ]+?)\s+(\d+)(?:\s*[-–]\s*(\d+))?$/);
     if (titledPageMatch && currentChapter) {
-      const nextSectionIndex = currentChapter.sections.length + 1;
       currentChapter.sections.push({
-        sectionNumber: `${normalizeChapterNumber(currentChapter.chapterNumber)}.${nextSectionIndex}`,
+        sectionNumber: "",
         title: titledPageMatch[1].trim(),
         pageStart: Number(titledPageMatch[2]),
         pageEnd: titledPageMatch[3] ? Number(titledPageMatch[3]) : undefined,
@@ -716,6 +721,7 @@ export function mergeParsedToc(base: ParsedTocResult, incoming: ParsedTocResult)
 
     chapterMap.set(key, {
       ...existing,
+      chapterLabel: existing.chapterLabel ?? chapter.chapterLabel,
       unitName: existing.unitName ?? chapter.unitName,
       pageStart: existing.pageStart ?? chapter.pageStart,
       pageEnd: existing.pageEnd ?? chapter.pageEnd,
@@ -803,6 +809,7 @@ export function stitchTocPages(pages: TocPage[]): TocStructure {
 
       chapterMap.set(key, {
         ...existing,
+        chapterLabel: existing.chapterLabel ?? chapter.chapterLabel,
         unitName: existing.unitName ?? chapter.unitName,
         pageStart: existing.pageStart ?? chapter.pageStart,
         pageEnd: existing.pageEnd ?? chapter.pageEnd,
@@ -825,11 +832,22 @@ export function stitchTocPages(pages: TocPage[]): TocStructure {
     .map((chapter) => ({
       ...chapter,
       sections: [...chapter.sections].sort((left, right) => {
+        const leftIsNumbered = isNumberedSection(left.sectionNumber);
+        const rightIsNumbered = isNumberedSection(right.sectionNumber);
+        if (leftIsNumbered !== rightIsNumbered) {
+          return leftIsNumbered ? -1 : 1;
+        }
+
         const leftNum = parseSectionOrder(left.sectionNumber);
         const rightNum = parseSectionOrder(right.sectionNumber);
         if (Number.isFinite(leftNum) && Number.isFinite(rightNum)) {
           return leftNum - rightNum;
         }
+
+        if (typeof left.pageStart === "number" && typeof right.pageStart === "number" && left.pageStart !== right.pageStart) {
+          return left.pageStart - right.pageStart;
+        }
+
         return left.sectionNumber.localeCompare(right.sectionNumber, undefined, { numeric: true, sensitivity: "base" });
       }),
     }));
@@ -1444,6 +1462,11 @@ function parseSectionOrder(sectionNumber: string): number {
   }
 
   return parts.reduce((acc, value, index) => acc + value / Math.pow(100, index), 0);
+}
+
+function isNumberedSection(sectionNumber: string): boolean {
+  const normalized = normalizeSectionNumber(sectionNumber);
+  return /^\d+(?:\.\d+)*$/.test(normalized);
 }
 
 function normalizeToken(value: string): string {

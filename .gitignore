@@ -14,3 +14,10 @@ serviceAccountKey*.json
 *.pfx
 *.log
 .DS_Store
+
+# Smoke test generated artifacts (keep tmp-smoke/samples as canonical fixtures)
+tmp-smoke/*.json
+tmp-smoke/*.txt
+tmp-smoke/*.png
+tmp-smoke/debug/*.jsonl
+tmp-smoke/debug/*.json

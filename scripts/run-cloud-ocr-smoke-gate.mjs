@@ -28,9 +28,9 @@ if (!hasToken()) {
 
 console.log("[smoke-gate] Cloud token detected. Running live cloud OCR smoke checks...");
 const sampleDir = path.join(process.cwd(), "tmp-smoke", "samples");
-const copyrightPath = path.join(sampleDir, "copyright_mcgraw-hill_student-edition_page3_2021.png");
-const tocPathPrimary = path.join(sampleDir, "toc_physical-science_module-lessons_text-capture.png");
-const tocPathSpread = path.join(sampleDir, "toc_physical-science_module-lessons_spread-view.png");
+const copyrightPath = path.join(sampleDir, "ocr__copyright-page__expect-metadata-success.png");
+const tocPathPrimary = path.join(sampleDir, "ocr__toc-text-capture__expect-parse-success.png");
+const tocPathSpread = path.join(sampleDir, "ocr__toc-spread-view__expect-parse-success.png");
 
 const args = [];
 if (fs.existsSync(copyrightPath)) {

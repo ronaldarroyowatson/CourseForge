@@ -70,6 +70,7 @@ Quick release note: v1.4.3 adds end-to-end trace IDs and OCR debug sink logging 
 | [Auto Mode Pipeline Flowchart](docs/auto-mode-flowchart.md) | Mermaid flowchart of the full Auto Mode capture → extract → stitch → save pipeline |
 | [Firestore Debug Rules](docs/firestore-debug-rules.md) | Firestore security rules for debug log protection: access model, helper functions, testing and deploy guide |
 | [Architecture Overview](docs/ARCHITECTURE.md) | High-level layers, data flow, and Firestore structure |
+| [Codebase Index](docs/codebase-index.md) | Canonical append-only architecture and domain index maintained for Copilot and contributors |
 | [DB Schema](docs/DB_SCHEMA.md) | Entity definitions for all local and cloud-synced data |
 | [Code Style](docs/CODE_STYLE.md) | File organization, naming, spacing, and comment conventions |
 | [XML Schema](docs/XML_SCHEMA.md) | Canonical export format for game engines and AI tutors |
@@ -79,6 +80,17 @@ Quick release note: v1.4.3 adds end-to-end trace IDs and OCR debug sink logging 
 | [ChromeOS Deployment](docs/chromeos-deployment.md) | Chrome extension/webapp deployment guidance for managed Chromebooks |
 | [i18n Architecture](docs/i18n-architecture.md) | Language detection, fallback strategy, and localization data model |
 | [Accessibility Plan](docs/accessibility-plan.md) | Foundational accessibility features, settings, and roadmap |
+
+## Index bootstrap check
+
+Use this quick check after opening the repository in VS Code to confirm Copilot is using the canonical index workflow.
+
+1. Confirm the canonical index file exists: `docs/codebase-index.md`.
+2. Confirm repository instructions include codebase index guidance: `.github/copilot-instructions.md`.
+3. In chat, ask: `What is the canonical codebase index file for this project?`
+4. Expected response should reference `docs/codebase-index.md` and append-only index maintenance behavior.
+
+Note: The chat UI "Workspace Index" availability indicator is separate from repo instructions and may show "not available" even when index instructions are active.
 
 ## Local development
 

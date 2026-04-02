@@ -110,3 +110,14 @@ Before marking any bug fix complete, confirm:
 - `CHANGELOG.md` always retains the `## [Unreleased]` section and an archive page index block.
 - Archive pages are tracked by git — they are the permanent historical record.
 - Never manually edit `CHANGELOG-page-N.md` files; they are fully regenerated each release.
+
+---
+
+## Codebase Index Usage (Persistent)
+
+- Canonical codebase index file: `docs/codebase-index.md`.
+- For architecture mapping, domain discovery, flow tracing, and shared-utility lookup, consult `docs/codebase-index.md` first before broad repo exploration.
+- Treat the existing Step 1–Step 7 sections in `docs/codebase-index.md` as historical/canonical unless a user explicitly requests rewriting them.
+- Index updates are append-only by default: add new sections/subsections (for example: `Updates`, `Revisions`, `New Domain`, `Updated Flow`, `New Shared Utility`, `Refactor Notes`, `Deprecations`) instead of rewriting prior sections.
+- If newer behavior supersedes older behavior, append an explicit update note rather than silently modifying historical sections.
+- When boundaries are ambiguous, state assumptions explicitly in the appended update.

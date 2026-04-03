@@ -82,6 +82,159 @@ export interface TocStructure {
   stitchingConfidence: number;
 }
 
+function isPositivePage(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function findNextSectionStart(sections: TocSection[], startIndex: number): number | undefined {
+  for (let index = startIndex + 1; index < sections.length; index += 1) {
+    const page = sections[index]?.pageStart;
+    if (isPositivePage(page)) {
+      return page;
+    }
+  }
+
+  return undefined;
+}
+
+function findNextChapterStart(chapters: TocChapter[], chapterIndex: number): number | undefined {
+  for (let index = chapterIndex + 1; index < chapters.length; index += 1) {
+    const chapter = chapters[index];
+    const chapterStart = chapter?.pageStart;
+    if (isPositivePage(chapterStart)) {
+      return chapterStart;
+    }
+
+    const firstSectionStart = chapter?.sections
+      ?.map((section) => section.pageStart)
+      .find((value): value is number => isPositivePage(value));
+
+    if (isPositivePage(firstSectionStart)) {
+      return firstSectionStart;
+    }
+  }
+
+  return undefined;
+}
+
+function cloneTocChapters(chapters: TocChapter[]): TocChapter[] {
+  return chapters.map((chapter) => ({
+    ...chapter,
+    sections: chapter.sections.map((section) => ({ ...section })),
+  }));
+}
+
+export function inferTocPageRanges(chaptersInput: TocChapter[]): TocChapter[] {
+  const chapters = cloneTocChapters(chaptersInput);
+
+  // Pass 1: normalize starts from explicit values and local context.
+  for (let chapterIndex = 0; chapterIndex < chapters.length; chapterIndex += 1) {
+    const chapter = chapters[chapterIndex];
+    const sections = chapter.sections;
+
+    if (!isPositivePage(chapter.pageStart)) {
+      const firstSectionStart = sections
+        .map((section) => section.pageStart)
+        .find((value): value is number => isPositivePage(value));
+      if (isPositivePage(firstSectionStart)) {
+        chapter.pageStart = firstSectionStart;
+      }
+    }
+
+    for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
+      const section = sections[sectionIndex];
+      if (isPositivePage(section.pageStart)) {
+        continue;
+      }
+
+      const previous = sectionIndex > 0 ? sections[sectionIndex - 1] : undefined;
+      const nextStart = findNextSectionStart(sections, sectionIndex);
+
+      if (previous && isPositivePage(previous.pageEnd)) {
+        section.pageStart = previous.pageEnd + 1;
+        continue;
+      }
+
+      if (sectionIndex === 0 && isPositivePage(chapter.pageStart)) {
+        section.pageStart = chapter.pageStart;
+        continue;
+      }
+
+      if (previous && isPositivePage(previous.pageStart) && isPositivePage(nextStart) && nextStart > previous.pageStart) {
+        section.pageStart = previous.pageStart + 1;
+        continue;
+      }
+
+      if (isPositivePage(nextStart) && nextStart > 1) {
+        section.pageStart = nextStart - 1;
+      }
+    }
+  }
+
+  // Pass 2: infer section/chapter ends from nearest following start.
+  for (let chapterIndex = 0; chapterIndex < chapters.length; chapterIndex += 1) {
+    const chapter = chapters[chapterIndex];
+    const sections = chapter.sections;
+
+    for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
+      const section = sections[sectionIndex];
+      if (!isPositivePage(section.pageStart)) {
+        section.pageEnd = undefined;
+        continue;
+      }
+
+      const nextSectionStart = findNextSectionStart(sections, sectionIndex);
+      if (isPositivePage(nextSectionStart) && nextSectionStart > section.pageStart) {
+        section.pageEnd = nextSectionStart - 1;
+        continue;
+      }
+
+      const nextChapterStart = findNextChapterStart(chapters, chapterIndex);
+      if (isPositivePage(nextChapterStart) && nextChapterStart > section.pageStart) {
+        section.pageEnd = nextChapterStart - 1;
+        continue;
+      }
+
+      if (isPositivePage(section.pageEnd) && section.pageEnd >= section.pageStart) {
+        continue;
+      }
+
+      // No reliable future boundary; keep unknown and allow manual override in editor.
+      section.pageEnd = undefined;
+    }
+
+    if (!isPositivePage(chapter.pageStart)) {
+      const firstSectionStart = sections
+        .map((section) => section.pageStart)
+        .find((value): value is number => isPositivePage(value));
+      if (isPositivePage(firstSectionStart)) {
+        chapter.pageStart = firstSectionStart;
+      }
+    }
+
+    if (isPositivePage(chapter.pageStart)) {
+      const nextChapterStart = findNextChapterStart(chapters, chapterIndex);
+      if (isPositivePage(nextChapterStart) && nextChapterStart > chapter.pageStart) {
+        chapter.pageEnd = nextChapterStart - 1;
+        continue;
+      }
+
+      const lastSectionEnd = [...sections]
+        .map((section) => section.pageEnd ?? section.pageStart)
+        .filter((value): value is number => isPositivePage(value))
+        .sort((left, right) => right - left)[0];
+
+      if (isPositivePage(lastSectionEnd) && lastSectionEnd >= chapter.pageStart) {
+        chapter.pageEnd = lastSectionEnd;
+      } else {
+        chapter.pageEnd = undefined;
+      }
+    }
+  }
+
+  return chapters;
+}
+
 export interface ExtractionLimitsResult {
   allowed: boolean;
   message?: string;
@@ -661,29 +814,17 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
         sectionNumber: "",
         title: titledPageMatch[1].trim(),
         pageStart: startPage,
-        pageEnd: titledPageMatch[3] ? Number(titledPageMatch[3]) : startPage,
+        pageEnd: titledPageMatch[3] ? Number(titledPageMatch[3]) : undefined,
       });
       lineHits += 1;
     }
   }
 
-  for (const chapter of chapters) {
-    if (typeof chapter.pageStart === "number") {
-      continue;
-    }
-
-    const firstSectionStart = chapter.sections
-      .map((section) => section.pageStart)
-      .find((value): value is number => typeof value === "number" && Number.isFinite(value));
-
-    if (typeof firstSectionStart === "number") {
-      chapter.pageStart = firstSectionStart;
-    }
-  }
+  const normalizedChapters = inferTocPageRanges(chapters);
 
   const confidence = lines.length > 0 ? Math.min(1, lineHits / lines.length + (chapters.length > 0 ? 0.2 : 0)) : 0;
 
-  return { chapters, confidence };
+  return { chapters: normalizedChapters, confidence };
 }
 
 export function mergeParsedToc(base: ParsedTocResult, incoming: ParsedTocResult): ParsedTocResult {
@@ -853,14 +994,16 @@ export function stitchTocPages(pages: TocPage[]): TocStructure {
       }),
     }));
 
+  const inferredChapters = inferTocPageRanges(chapters);
+
   const averagePageConfidence = sortedPages.reduce((sum, page) => sum + clamp01(page.confidence ?? 0.55), 0) / sortedPages.length;
   const duplicatePenalty = totalSections > 0 ? (duplicateHits / totalSections) * 0.2 : 0;
   const conflictPenalty = totalSections > 0 ? (conflictHits / totalSections) * 0.3 : 0;
-  const chapterBonus = chapters.length > 0 ? 0.08 : 0;
+  const chapterBonus = inferredChapters.length > 0 ? 0.08 : 0;
   const stitchingConfidence = clamp01(averagePageConfidence + chapterBonus - duplicatePenalty - conflictPenalty);
 
   return {
-    chapters,
+    chapters: inferredChapters,
     stitchingConfidence,
   };
 }

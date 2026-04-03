@@ -1,0 +1,114 @@
+{
+  "chapters": [
+    {
+      "chapterNumber": "29",
+      "title": "THE EARTH-MOON-SUN SYSTEM MODULE 31: STARS AND GALAXIES",
+      "chapterLabel": "Module",
+      "sections": []
+    },
+    {
+      "chapterNumber": "3",
+      "title": "Claim, Evidence, Reasoning 761 @3 Claim, Evidence, Reasoning",
+      "chapterLabel": "Chapter",
+      "pageStart": 819,
+      "pageEnd": 840,
+      "sections": [
+        {
+          "sectionNumber": "3.1",
+          "title": "Earth in Space. 762 Lesson 1 Observing the Universe",
+          "pageStart": 820,
+          "pageEnd": 824
+        },
+        {
+          "sectionNumber": "3.2",
+          "title": "Time and Seasons. 767 Lesson 2 Evolution of Stars.",
+          "pageStart": 825,
+          "pageEnd": 831
+        },
+        {
+          "sectionNumber": "3.3",
+          "title": "Earth's Moon 773 Lesson 3 Galaxies and the Milky Way.",
+          "pageStart": 832,
+          "pageEnd": 836
+        },
+        {
+          "sectionNumber": "",
+          "title": "STEM AT WORK Lesson 4 Cosmology.",
+          "pageStart": 837,
+          "pageEnd": 840
+        }
+      ]
+    },
+    {
+      "chapterNumber": "4",
+      "title": "Module Wrap-Up. 786 An Astronomical Debate.",
+      "chapterLabel": "Chapter",
+      "pageStart": 841,
+      "pageEnd": 842,
+      "sections": []
+    },
+    {
+      "chapterNumber": "3",
+      "title": "GO FURTHER Data Analysis Lab 786 4 Module Wrap-Up.",
+      "chapterLabel": "Chapter",
+      "pageStart": 843,
+      "sections": []
+    },
+    {
+      "chapterNumber": "3",
+      "title": "GO FURTHER Data Analysis Lab",
+      "chapterLabel": "Chapter",
+      "pageStart": 843,
+      "sections": []
+    },
+    {
+      "chapterNumber": "30",
+      "title": "THE SOLAR SYSTEM © STEM UNIT 8 PROJECT",
+      "chapterLabel": "Module",
+      "pageStart": 843,
+      "sections": [
+        {
+          "sectionNumber": "30.1",
+          "title": "Planetary Motion",
+          "pageStart": 789,
+          "pageEnd": 794
+        },
+        {
+          "sectionNumber": "30.2",
+          "title": "The Inner Planets",
+          "pageStart": 795,
+          "pageEnd": 801
+        },
+        {
+          "sectionNumber": "30.3",
+          "title": "The Outer Planets",
+          "pageStart": 802,
+          "pageEnd": 808
+        },
+        {
+          "sectionNumber": "30.4",
+          "title": "Lie in the Solar System",
+          "pageStart": 809,
+          "pageEnd": 814
+        },
+        {
+          "sectionNumber": "",
+          "title": "Killer Asteroids",
+          "pageStart": 815,
+          "pageEnd": 816
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up.",
+          "pageStart": 817
+        },
+        {
+          "sectionNumber": "",
+          "title": "E39 GO FURTHER Data Analysis Lab",
+          "pageStart": 817
+        }
+      ]
+    }
+  ],
+  "confidence": 0.9727272727272727
+}

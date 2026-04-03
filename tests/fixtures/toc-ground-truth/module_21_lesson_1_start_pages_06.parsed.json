@@ -1,0 +1,86 @@
+{
+  "chapters": [
+    {
+      "chapterNumber": "21",
+      "title": "SOLUTIONS MODULE 23: ORGANIC COMPOUNDS",
+      "chapterLabel": "Module",
+      "pageStart": 574,
+      "pageEnd": 598,
+      "sections": [
+        {
+          "sectionNumber": "21.1",
+          "title": "How Solutions Form 526 Lesson 1 Simple Organic Compounds",
+          "pageStart": 574,
+          "pageEnd": 579
+        },
+        {
+          "sectionNumber": "21.2",
+          "title": "Concentration and Solubilty. 533 Lesson 2 Substituted Hydrocarbons.",
+          "pageStart": 580,
+          "pageEnd": 580
+        },
+        {
+          "sectionNumber": "21.3",
+          "title": "Particles in Solution 538 Lesson 3 Petroleum—A Source of",
+          "pageStart": 581,
+          "pageEnd": 584
+        },
+        {
+          "sectionNumber": "21.4",
+          "title": "Dissolving Without Water. 542 Organic Compounds.",
+          "pageStart": 585,
+          "pageEnd": 598
+        }
+      ]
+    },
+    {
+      "chapterNumber": "33",
+      "title": "GO FURTHER Data Analysis Lab",
+      "chapterLabel": "Chapter",
+      "pageStart": 599,
+      "pageEnd": 600,
+      "sections": []
+    },
+    {
+      "chapterNumber": "22",
+      "title": "ACIDS, BASES, AND SALTS",
+      "chapterLabel": "Module",
+      "pageStart": 601,
+      "pageEnd": 620,
+      "sections": [
+        {
+          "sectionNumber": "22.1",
+          "title": "Acids and Bases. 552 (ED Claim, Evidence, Reasoning",
+          "pageStart": 601,
+          "pageEnd": 601
+        },
+        {
+          "sectionNumber": "22.2",
+          "title": "Strength of Acids and Bases. 558 Lesson 1 Alloys",
+          "pageStart": 602,
+          "pageEnd": 607
+        },
+        {
+          "sectionNumber": "22.3",
+          "title": "Salts 562 Lesson 2 Versatile Materials.",
+          "pageStart": 608,
+          "pageEnd": 614
+        },
+        {
+          "sectionNumber": "",
+          "title": "NATURE OF SCIENCE Lesson 3 Polymers and Composites",
+          "pageStart": 615,
+          "pageEnd": 620
+        }
+      ]
+    },
+    {
+      "chapterNumber": "4",
+      "title": "Module Wrap-Up. 571 Wonder Fiber",
+      "chapterLabel": "Chapter",
+      "pageStart": 621,
+      "sections": []
+    }
+  ],
+  "confidence": 0.7
+}

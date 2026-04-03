@@ -2628,6 +2628,12 @@ button:not(:disabled):active {
   font-weight: 600;
 }
 
+.auto-ocr-editor {
+  width: 100%;
+  min-height: 14rem;
+  resize: vertical;
+}
+
 /* ============================================================
    Cover Action Row — thumbnail + inline action buttons
    ============================================================ */

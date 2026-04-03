@@ -1,0 +1,84 @@
+{
+  "chapters": [
+    {
+      "chapterNumber": "1",
+      "title": "THE NATURE OF SCIENCE Lesson 2 Newton's Laws of Motion",
+      "chapterLabel": "Module",
+      "pageStart": 68,
+      "pageEnd": 81,
+      "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Lo bah Lesson 3 Using Newton's Laws.",
+          "pageStart": 74,
+          "pageEnd": 80
+        },
+        {
+          "sectionNumber": "",
+          "title": "Lesson The Methods of Science 4 Bureme Atitudes",
+          "pageStart": 81
+        },
+        {
+          "sectionNumber": "1.2",
+          "title": "Standards of Measurement. 2% Module Wrap Up a",
+          "pageStart": 30,
+          "pageEnd": 30
+        },
+        {
+          "sectionNumber": "1.3",
+          "title": "Communicating with Graphs 19 E2260 FURTHER Data Analysis Lab =",
+          "pageStart": 31
+        },
+        {
+          "sectionNumber": "1.4",
+          "title": "Science and Technology. 20 @ STEM UNIT1PROJECT =",
+          "pageStart": 30,
+          "pageEnd": 30
+        },
+        {
+          "sectionNumber": "",
+          "title": "Scientific Methods.",
+          "pageStart": 31
+        }
+      ]
+    },
+    {
+      "chapterNumber": "2",
+      "title": "MOTION",
+      "chapterLabel": "Module",
+      "pageStart": 5,
+      "pageEnd": 57,
+      "sections": [
+        {
+          "sectionNumber": "2.1",
+          "title": "Describing Motion El",
+          "pageStart": 5
+        },
+        {
+          "sectionNumber": "2.2",
+          "title": "Velocity and Momentum",
+          "pageStart": 5,
+          "pageEnd": 49
+        },
+        {
+          "sectionNumber": "2.3",
+          "title": "Acceleration",
+          "pageStart": 50,
+          "pageEnd": 54
+        },
+        {
+          "sectionNumber": "",
+          "title": "Autonomous Vehicles Go Subterranean.",
+          "pageStart": 55,
+          "pageEnd": 56
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 57
+        }
+      ]
+    }
+  ],
+  "confidence": 0.72
+}

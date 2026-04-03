@@ -1,0 +1,100 @@
+{
+  "chapters": [
+    {
+      "chapterNumber": "9",
+      "title": "INTRODUCTION TO WAVES MODULE 12: LIGHT",
+      "chapterLabel": "Module",
+      "pageStart": 302,
+      "pageEnd": 326,
+      "sections": [
+        {
+          "sectionNumber": "9.1",
+          "title": "The Nature of Waves 226 Lesson 1 The Behavior of Light",
+          "pageStart": 302,
+          "pageEnd": 306
+        },
+        {
+          "sectionNumber": "9.2",
+          "title": "Wave Properties. 231 Lesson 2 Light and Color.",
+          "pageStart": 307,
+          "pageEnd": 311
+        },
+        {
+          "sectionNumber": "9.3",
+          "title": "The Behavior of Waves 237 Lesson 3 Producing Light",
+          "pageStart": 312,
+          "pageEnd": 317
+        },
+        {
+          "sectionNumber": "",
+          "title": "SCIENTIFIC BREAKTHROUGHS Lesson 4 Using Light",
+          "pageStart": 318,
+          "pageEnd": 326
+        }
+      ]
+    },
+    {
+      "chapterNumber": "10",
+      "title": "SOUND",
+      "chapterLabel": "Module",
+      "pageStart": 327,
+      "pageEnd": 342,
+      "sections": [
+        {
+          "sectionNumber": "10.1",
+          "title": "The Nature of Sound 252 GED Claim, Evidence, Reasoning",
+          "pageStart": 327,
+          "pageEnd": 327
+        },
+        {
+          "sectionNumber": "10.2",
+          "title": "Properties of Sound. 257 Lesson 1 Mirrors",
+          "pageStart": 328,
+          "pageEnd": 334
+        },
+        {
+          "sectionNumber": "10.3",
+          "title": "Music. 263 Lesson 2 Lenses",
+          "pageStart": 335,
+          "pageEnd": 341
+        },
+        {
+          "sectionNumber": "10.4",
+          "title": "Using Sound 269 Lesson 3 Optical Instruments.",
+          "pageStart": 342
+        }
+      ]
+    },
+    {
+      "chapterNumber": "11",
+      "title": "ELECTROMAGNETIC WAVES",
+      "chapterLabel": "Module",
+      "pageStart": 284,
+      "pageEnd": 291,
+      "sections": [
+        {
+          "sectionNumber": "11.1",
+          "title": "What are electromagnetic",
+          "pageStart": 284
+        },
+        {
+          "sectionNumber": "11.2",
+          "title": "The Electromagnetic Spectrum",
+          "pageStart": 284,
+          "pageEnd": 290
+        },
+        {
+          "sectionNumber": "11.3",
+          "title": "Radio Communication",
+          "pageStart": 291
+        },
+        {
+          "sectionNumber": "",
+          "title": "A New Kind of Ray.",
+          "pageStart": 207
+        }
+      ]
+    }
+  ],
+  "confidence": 0.6411764705882352
+}

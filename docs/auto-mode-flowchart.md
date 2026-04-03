@@ -164,7 +164,9 @@ flowchart TD
 - Optional metadata fields are collapsed behind a show/hide control to keep primary fields and Accept flow visible.
 - Upload review overlay is raised above workflow cards to avoid clipping inside container boundaries.
 - TOC entries without numeric section IDs are treated as Additional Section rather than flagged as missing number.
-- Single-page ancillary TOC rows now infer pageEnd equal to pageStart when only one page is provided.
+- TOC page-range inference now computes section/chapter end pages from the next known section or chapter boundary.
+- Resume now restores the full saved TOC tree (captured pages + stitched outline) instead of metadata-only state.
+- TOC Editor now includes an explicit Save TOC to Server action alongside Confirm and Save Textbook.
 
 ### Stage 1 – Environment Preparation
 

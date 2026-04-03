@@ -1,0 +1,141 @@
+{
+  "chapters": [
+    {
+      "chapterNumber": "4",
+      "title": "WORK AND ENERGY MODULE 7: MAGNETISM AND ITS USES",
+      "chapterLabel": "Module",
+      "sections": []
+    },
+    {
+      "chapterNumber": "3",
+      "title": "Claim, Evidence, Reasoning 87 3 Claim, Evidence, Reasoning",
+      "chapterLabel": "Chapter",
+      "pageStart": 165,
+      "pageEnd": 188,
+      "sections": [
+        {
+          "sectionNumber": "3.1",
+          "title": "Work and Machines 88 Lesson 1 Magnetism",
+          "pageStart": 166,
+          "pageEnd": 172
+        },
+        {
+          "sectionNumber": "3.2",
+          "title": "Describing Energy. 05 Lesson 2 Electricity and Magnetism",
+          "pageStart": 173,
+          "pageEnd": 179
+        },
+        {
+          "sectionNumber": "3.3",
+          "title": "Conservation of Energy. 101 Lesson 3 Producing Electric Curent.",
+          "pageStart": 180,
+          "pageEnd": 186
+        },
+        {
+          "sectionNumber": "",
+          "title": "World's Fastest Bicycle 109 Locating Land Mines",
+          "pageStart": 187,
+          "pageEnd": 188
+        }
+      ]
+    },
+    {
+      "chapterNumber": "4",
+      "title": "Module Wrap-Up. 111 Module Wrap-Up.",
+      "chapterLabel": "Chapter",
+      "pageStart": 189,
+      "pageEnd": 190,
+      "sections": []
+    },
+    {
+      "chapterNumber": "5",
+      "title": "THERMAL ENERGY MODULE 8: ENERGY SOURCES AND",
+      "chapterLabel": "Module",
+      "pageStart": 191,
+      "pageEnd": 212,
+      "sections": [
+        {
+          "sectionNumber": "5.1",
+          "title": "Temperature, Thermal Energy, G3 Claim, Evidence, Reasoning",
+          "pageStart": 191,
+          "pageEnd": 191
+        },
+        {
+          "sectionNumber": "",
+          "title": "and Heat. 1a Lesson 1 Fossil Fuels.",
+          "pageStart": 192,
+          "pageEnd": 198
+        },
+        {
+          "sectionNumber": "5.2",
+          "title": "Conduction, Convection, Lesson 2 Nuclear Energy.",
+          "pageStart": 199,
+          "pageEnd": 205
+        },
+        {
+          "sectionNumber": "",
+          "title": "and Radiation. 20 Lesson 3 Renewable Energy Sources.",
+          "pageStart": 206,
+          "pageEnd": 211
+        },
+        {
+          "sectionNumber": "5.3",
+          "title": "Using Thermal Energy 27 Lesson 4 Environmental Impacts.",
+          "pageStart": 212
+        },
+        {
+          "sectionNumber": "",
+          "title": "E5) GO FURTHER Data Analysis Lab 137 E23 GO FURTHER Data Analysis Lab",
+          "pageStart": 22,
+          "pageEnd": 139
+        }
+      ]
+    },
+    {
+      "chapterNumber": "6",
+      "title": "ELECTRICITY",
+      "chapterLabel": "Module",
+      "pageStart": 140,
+      "pageEnd": 162,
+      "sections": [
+        {
+          "sectionNumber": "6.1",
+          "title": "Electric Charge.",
+          "pageStart": 140,
+          "pageEnd": 162
+        },
+        {
+          "sectionNumber": "6.2",
+          "title": "Electric Current.",
+          "pageStart": 18,
+          "pageEnd": 153
+        },
+        {
+          "sectionNumber": "6.3",
+          "title": "More Complex Circuits",
+          "pageStart": 154,
+          "pageEnd": 160
+        },
+        {
+          "sectionNumber": "",
+          "title": "War of the Currents",
+          "pageStart": 161,
+          "pageEnd": 162
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up.",
+          "pageStart": 163
+        }
+      ]
+    },
+    {
+      "chapterNumber": "3",
+      "title": "GO FURTHER Data Analysis Lab",
+      "chapterLabel": "Chapter",
+      "pageStart": 163,
+      "sections": []
+    }
+  ],
+  "confidence": 0.8363636363636364
+}

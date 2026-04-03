@@ -1,0 +1,74 @@
+{
+  "chapters": [
+    {
+      "chapterNumber": "18",
+      "title": "CHEMICAL BONDS MODULE 20: RADIOACTIVITY AND",
+      "chapterLabel": "Module",
+      "pageStart": 501,
+      "pageEnd": 520,
+      "sections": [
+        {
+          "sectionNumber": "18.1",
+          "title": "Stability in Bonding 450 =) Claim, Evidence, Reasoning",
+          "pageStart": 501,
+          "pageEnd": 501
+        },
+        {
+          "sectionNumber": "18.2",
+          "title": "Types of Bonds. 455 Lesson 1 The Nucleus",
+          "pageStart": 502,
+          "pageEnd": 506
+        },
+        {
+          "sectionNumber": "18.3",
+          "title": "Writing Formulas and Lesson 2 Nuclear Decays and Reactions",
+          "pageStart": 507,
+          "pageEnd": 513
+        },
+        {
+          "sectionNumber": "",
+          "title": "ENGRMEERING A TECHNOLOGY and Applications",
+          "pageStart": 514,
+          "pageEnd": 520
+        }
+      ]
+    },
+    {
+      "chapterNumber": "19",
+      "title": "CHEMICAL REACTIONS © STEM UNIT 5 PROJECT",
+      "chapterLabel": "Module",
+      "pageStart": 521,
+      "pageEnd": 521,
+      "sections": [
+        {
+          "sectionNumber": "19.1",
+          "title": "Chemical Changes a7",
+          "pageStart": 521
+        },
+        {
+          "sectionNumber": "19.2",
+          "title": "Classifying Chemicals Reactions. a82",
+          "pageStart": 485,
+          "pageEnd": 485
+        },
+        {
+          "sectionNumber": "19.3",
+          "title": "Chemical Reactions and Energy.",
+          "pageStart": 486
+        },
+        {
+          "sectionNumber": "19.4",
+          "title": "Reaction Rates and Equilibrium.",
+          "pageStart": 40,
+          "pageEnd": 496
+        },
+        {
+          "sectionNumber": "",
+          "title": "Lavoisier.",
+          "pageStart": 497
+        }
+      ]
+    }
+  ],
+  "confidence": 0.6782608695652175
+}

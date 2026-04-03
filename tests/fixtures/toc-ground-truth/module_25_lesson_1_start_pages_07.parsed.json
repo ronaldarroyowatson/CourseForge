@@ -1,0 +1,106 @@
+{
+  "chapters": [
+    {
+      "chapterNumber": "25",
+      "title": "EARTH'S INTERNAL PROCESSES MODULE 27: EARTH'S CHANGING SURFACE",
+      "chapterLabel": "Module",
+      "pageStart": 694,
+      "pageEnd": 733,
+      "sections": [
+        {
+          "sectionNumber": "",
+          "title": "G2 Claim, Evidence, Reasoning 627 (ED Claim, Evidence, Reasoning",
+          "pageStart": 694,
+          "pageEnd": 694
+        },
+        {
+          "sectionNumber": "25.1",
+          "title": "The Plate Tectonics Theory. 628 Lesson 1 Weathering and Soil",
+          "pageStart": 695,
+          "pageEnd": 703
+        },
+        {
+          "sectionNumber": "25.2",
+          "title": "Earthquakes 636 Lesson 2 Shaping the Landscape",
+          "pageStart": 704,
+          "pageEnd": 714
+        },
+        {
+          "sectionNumber": "25.3",
+          "title": "Earth's Interior 646 Lesson 3 Groundwater",
+          "pageStart": 715,
+          "pageEnd": 720
+        },
+        {
+          "sectionNumber": "25.4",
+          "title": "Volcanoes. 650 Lesson 4 Geologic Time.",
+          "pageStart": 721,
+          "pageEnd": 728
+        },
+        {
+          "sectionNumber": "",
+          "title": "Yellowstone Supervolcano 657 Safe Water, A Global Concern",
+          "pageStart": 729,
+          "pageEnd": 730
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up. 659 Module Wrap-Up",
+          "pageStart": 731,
+          "pageEnd": 733
+        },
+        {
+          "sectionNumber": "",
+          "title": "ED GO FURTHER Data Analysis Lab. 659 (EZ GO FURTHER Data Analysis Lab",
+          "pageStart": 731,
+          "pageEnd": 733
+        }
+      ]
+    },
+    {
+      "chapterNumber": "26",
+      "title": "EARTH MATERIALS MODULE 28: WEATHER AND CLIMATE",
+      "chapterLabel": "Module",
+      "pageStart": 734,
+      "pageEnd": 757,
+      "sections": [
+        {
+          "sectionNumber": "26.1",
+          "title": "Minerals 662 Lesson Earth's Atmosphere.",
+          "pageStart": 734,
+          "pageEnd": 738
+        },
+        {
+          "sectionNumber": "26.2",
+          "title": "Igneous Rocks 671 Lesson 2 Weather.",
+          "pageStart": 739,
+          "pageEnd": 743
+        },
+        {
+          "sectionNumber": "26.3",
+          "title": "Sedimentary Rocks. 678 Lesson 3 Climate",
+          "pageStart": 744,
+          "pageEnd": 749
+        },
+        {
+          "sectionNumber": "26.4",
+          "title": "Metamorphic Rocks and Lesson 4 Earths Changing Climate.",
+          "pageStart": 750,
+          "pageEnd": 755
+        },
+        {
+          "sectionNumber": "",
+          "title": "ENGINEERING & TECHNOLOGY Cities Combat Climate Change",
+          "pageStart": 756,
+          "pageEnd": 756
+        },
+        {
+          "sectionNumber": "",
+          "title": "Car Parts 690 Module Wrap-Up",
+          "pageStart": 757
+        }
+      ]
+    }
+  ],
+  "confidence": 0.8956521739130434
+}

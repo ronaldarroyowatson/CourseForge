@@ -19,6 +19,7 @@ import {
   evaluateAutoCaptureSafety,
   extractMetadataFromOcrText,
   isLikelyTocText,
+  inferTocPageRanges,
   mergeAutoMetadata,
   parseTocFromOcrText,
   preprocessMetadataOcrText,
@@ -273,8 +274,10 @@ interface AutoSessionDraft {
   metadataPublisher: string;
   metadataFormSnapshot?: MetadataFormState;
   relatedIsbnsSnapshot?: RelatedIsbn[];
+  tocResultSnapshot?: ParsedTocResult;
+  tocPagesSnapshot?: TocPage[];
   step: AutoFlowStep;
-  stepsCompleted: { cover: boolean; copyright: boolean };
+  stepsCompleted: { cover: boolean; copyright: boolean; toc: boolean };
 }
 
 function isAutoSessionDraft(value: unknown): value is AutoSessionDraft {
@@ -294,9 +297,12 @@ function isAutoSessionDraft(value: unknown): value is AutoSessionDraft {
     && typeof draft.metadataPublisher === "string"
     && (draft.metadataFormSnapshot === undefined || typeof draft.metadataFormSnapshot === "object")
     && (draft.relatedIsbnsSnapshot === undefined || Array.isArray(draft.relatedIsbnsSnapshot))
+    && (draft.tocResultSnapshot === undefined || typeof draft.tocResultSnapshot === "object")
+    && (draft.tocPagesSnapshot === undefined || Array.isArray(draft.tocPagesSnapshot))
     && (draft.step === "cover" || draft.step === "title" || draft.step === "toc" || draft.step === "toc-editor")
     && typeof draft.stepsCompleted?.cover === "boolean"
     && typeof draft.stepsCompleted?.copyright === "boolean"
+    && (draft.stepsCompleted?.toc === undefined || typeof draft.stepsCompleted.toc === "boolean")
   );
 }
 
@@ -312,9 +318,18 @@ function normalizeAutoSessionDrafts(drafts: AutoSessionDraft[]): AutoSessionDraf
       continue;
     }
 
+    const normalizedDraft: AutoSessionDraft = {
+      ...draft,
+      stepsCompleted: {
+        cover: draft.stepsCompleted.cover,
+        copyright: draft.stepsCompleted.copyright,
+        toc: draft.stepsCompleted.toc ?? false,
+      },
+    };
+
     const existing = deduped.get(draft.id);
     if (!existing || existing.savedAt < draft.savedAt) {
-      deduped.set(draft.id, draft);
+      deduped.set(normalizedDraft.id, normalizedDraft);
     }
   }
 
@@ -350,8 +365,8 @@ function readAutoSessionDrafts(): AutoSessionDraft[] {
   }
 
   try {
-    const parsedLegacy = JSON.parse(rawLegacy) as Omit<AutoSessionDraft, "id">;
-    if (!parsedLegacy || parsedLegacy.version !== 1) {
+    const parsedLegacy = JSON.parse(rawLegacy) as Partial<AutoSessionDraft>;
+    if (!parsedLegacy || parsedLegacy.version !== 1 || typeof parsedLegacy.savedAt !== "number") {
       window.localStorage.removeItem(AUTO_SESSION_DRAFT_KEY);
       return [];
     }
@@ -363,7 +378,23 @@ function readAutoSessionDrafts(): AutoSessionDraft[] {
 
     const migrated: AutoSessionDraft = {
       id: createAutoFlowTraceId("auto-draft"),
-      ...parsedLegacy,
+      version: 1,
+      savedAt: parsedLegacy.savedAt,
+      coverImageDataUrl: typeof parsedLegacy.coverImageDataUrl === "string" ? parsedLegacy.coverImageDataUrl : null,
+      rawOcrText: typeof parsedLegacy.rawOcrText === "string" ? parsedLegacy.rawOcrText : "",
+      metadataTitle: typeof parsedLegacy.metadataTitle === "string" ? parsedLegacy.metadataTitle : "",
+      metadataSubject: typeof parsedLegacy.metadataSubject === "string" ? parsedLegacy.metadataSubject : "",
+      metadataPublisher: typeof parsedLegacy.metadataPublisher === "string" ? parsedLegacy.metadataPublisher : "",
+      metadataFormSnapshot: parsedLegacy.metadataFormSnapshot,
+      relatedIsbnsSnapshot: Array.isArray(parsedLegacy.relatedIsbnsSnapshot) ? parsedLegacy.relatedIsbnsSnapshot : undefined,
+      tocResultSnapshot: parsedLegacy.tocResultSnapshot,
+      tocPagesSnapshot: Array.isArray(parsedLegacy.tocPagesSnapshot) ? parsedLegacy.tocPagesSnapshot : undefined,
+      step: parsedLegacy.step === "title" || parsedLegacy.step === "toc" || parsedLegacy.step === "toc-editor" ? parsedLegacy.step : "cover",
+      stepsCompleted: {
+        cover: Boolean(parsedLegacy.stepsCompleted?.cover),
+        copyright: Boolean(parsedLegacy.stepsCompleted?.copyright),
+        toc: Boolean(parsedLegacy.stepsCompleted?.toc),
+      },
     };
 
     const normalized = normalizeAutoSessionDrafts([migrated]);
@@ -922,7 +953,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   const [lastMetadataImageDataUrl, setLastMetadataImageDataUrl] = useState<string | null>(testingSeedState?.coverImageDataUrl ?? null);
   const [relatedIsbns, setRelatedIsbns] = useState<RelatedIsbn[]>(testingSeedState?.metadataDraft?.relatedIsbns ?? []);
   const [ocrDraft, setOcrDraft] = useState(testingSeedState?.ocrDraft ?? "");
-  const [tocResult, setTocResult] = useState<ParsedTocResult>(testingSeedState?.tocResult ?? INITIAL_TOC_RESULT);
+  const [tocResult, setTocResult] = useState<ParsedTocResult>(() => {
+    if (!testingSeedState?.tocResult) {
+      return INITIAL_TOC_RESULT;
+    }
+
+    return {
+      ...testingSeedState.tocResult,
+      chapters: inferTocPageRanges(testingSeedState.tocResult.chapters),
+    };
+  });
   const [tocPages, setTocPages] = useState<TocPage[]>(testingSeedState?.tocPages ?? (testingSeedState?.tocResult ? [{
     pageIndex: 0,
     chapters: testingSeedState.tocResult.chapters,
@@ -974,16 +1014,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   const activeSessionDraftIdRef = useRef<string>(createAutoFlowTraceId("auto-draft"));
   const lastCorrectionSignatureRef = useRef<string | null>(null);
 
-  // Raw OCR / parsed metadata two-section state.
-  // rawOcrText: original, unedited OCR output shown read-only for transparency.
-  // ocrDraft: editable copy the user can correct before re-parsing.
+  // rawOcrText keeps the latest OCR capture for resume state; ocrDraft is editable.
   const [rawOcrText, setRawOcrText] = useState(testingSeedState?.ocrDraft ?? "");
-  const [isRawOcrExpanded, setIsRawOcrExpanded] = useState(false);
   const [showOptionalMetadataFields, setShowOptionalMetadataFields] = useState(false);
 
   // Resumable sessions (max 3).
   const [resumableDrafts, setResumableDrafts] = useState<AutoSessionDraft[]>(() => readAutoSessionDrafts());
-  const currentSessionHasWork = Boolean(coverImageDataUrl || rawOcrText || metadataForm.title.trim());
+  const currentSessionHasWork = Boolean(
+    coverImageDataUrl
+    || rawOcrText
+    || metadataForm.title.trim()
+    || tocResult.chapters.length > 0
+    || tocPages.length > 0
+  );
   const isSessionCapacityReached = resumableDrafts.length >= MAX_AUTO_SESSION_DRAFTS && !currentSessionHasWork;
   const isInteractionLocked = isBusy || isRunningOcr;
   const optionalMetadataValueCount = useMemo(() => {
@@ -1090,7 +1133,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   // Persist a lightweight session snapshot so the user can resume after a
   // page reload.  Only save when there is something meaningful to recover.
   useEffect(() => {
-    if (!coverImageDataUrl && !rawOcrText && !metadataForm.title) {
+    if (!coverImageDataUrl && !rawOcrText && !metadataForm.title && tocResult.chapters.length === 0) {
       const remaining = deleteAutoSessionDraft(activeSessionDraftIdRef.current);
       setResumableDrafts(remaining);
       return;
@@ -1107,16 +1150,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       metadataPublisher: metadataForm.publisher,
       metadataFormSnapshot: metadataForm,
       relatedIsbnsSnapshot: relatedIsbns,
+      tocResultSnapshot: tocResult,
+      tocPagesSnapshot: tocPages,
       step,
       stepsCompleted: {
         cover: Boolean(coverImageDataUrl),
         copyright: Boolean(lastCapturedOcrByStepRef.current.title),
+        toc: tocResult.chapters.length > 0,
       },
     };
 
     const nextDrafts = saveAutoSessionDraft(draft);
     setResumableDrafts(nextDrafts.filter((entry) => entry.id !== activeSessionDraftIdRef.current));
-  }, [coverImageDataUrl, rawOcrText, metadataForm, relatedIsbns, step]);
+  }, [coverImageDataUrl, rawOcrText, metadataForm, relatedIsbns, step, tocResult, tocPages]);
 
   const canFinishToc = tocResult.chapters.length > 0;
 
@@ -2243,7 +2289,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         };
       });
 
-      return { ...current, chapters };
+      return { ...current, chapters: inferTocPageRanges(chapters) };
     });
   }
 
@@ -2275,7 +2321,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         };
       });
 
-      return { ...current, chapters };
+      return { ...current, chapters: inferTocPageRanges(chapters) };
     });
   }
 
@@ -2295,7 +2341,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       const next = [...current.chapters];
       next.splice(chapterIndex - 1, 2, merged);
-      return { ...current, chapters: next };
+      return { ...current, chapters: inferTocPageRanges(next) };
     });
   }
 
@@ -2320,7 +2366,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       const next = [...current.chapters];
       next.splice(chapterIndex, 1, left, right);
-      return { ...current, chapters: next };
+      return { ...current, chapters: inferTocPageRanges(next) };
     });
   }
 
@@ -2746,6 +2792,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                   Completed: {[
                     draft.stepsCompleted.cover && "Cover",
                     draft.stepsCompleted.copyright && "Copyright",
+                    draft.stepsCompleted.toc && "TOC",
                   ].filter(Boolean).join(", ") || "None yet"}
                 </p>
                 <div className="auto-session-resume__actions">
@@ -2774,7 +2821,21 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                         ...fromMetadataFormState(nextMetadataForm),
                         relatedIsbns: nextRelatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
                       });
-                      setStep(draft.step);
+                      const resumedTocResult = draft.tocResultSnapshot
+                        ? {
+                            ...draft.tocResultSnapshot,
+                            chapters: inferTocPageRanges(draft.tocResultSnapshot.chapters),
+                          }
+                        : INITIAL_TOC_RESULT;
+                      setTocResult(resumedTocResult);
+                      setTocPages(draft.tocPagesSnapshot ?? (resumedTocResult.chapters.length > 0
+                        ? [{ pageIndex: 0, chapters: resumedTocResult.chapters, confidence: resumedTocResult.confidence }]
+                        : []));
+
+                      const nextStep = draft.step === "toc-editor" && resumedTocResult.chapters.length === 0
+                        ? "toc"
+                        : draft.step;
+                      setStep(nextStep);
                       setResumableDrafts(deleteAutoSessionDraft(draft.id));
                     }}
                   >
@@ -2994,8 +3055,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       </div>
 
       <label>
-        OCR text (editable)
+        OCR text (updates every capture, editable)
         <textarea
+          className="auto-ocr-editor"
           rows={6}
           aria-label="OCR text"
           value={ocrDraft}
@@ -3003,22 +3065,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           placeholder="If the OCR misread something, paste or edit it here before parsing."
         />
       </label>
-
-      {/* Raw OCR collapsible section. */}
-      {rawOcrText ? (
-        <div className="ocr-raw-section">
-          <button
-            type="button"
-            className="btn-text ocr-raw-section__label"
-            onClick={() => setIsRawOcrExpanded((v) => !v)}
-          >
-            {isRawOcrExpanded ? "[-]" : "[+]"} Raw OCR Output
-          </button>
-          {isRawOcrExpanded ? (
-            <pre className="ocr-raw-section__pre">{rawOcrText}</pre>
-          ) : null}
-        </div>
-      ) : null}
 
       {/* Standalone re-parse button shown only when no cover thumbnail is present yet. */}
       {(step === "cover" || step === "title") && !coverImageDataUrl ? (
@@ -3351,6 +3397,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           ))}
 
           <div className="form-actions">
+            <button type="button" onClick={() => void handleSaveAutoSetup()} disabled={isBusy}>
+              Save TOC to Server
+            </button>
             <button type="button" onClick={() => void handleSaveAutoSetup()} disabled={isBusy}>
               Confirm and Save Textbook
             </button>

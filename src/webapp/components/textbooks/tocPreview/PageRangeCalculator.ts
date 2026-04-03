@@ -54,6 +54,25 @@ function inferSiblingEnd(
   return undefined;
 }
 
+function findNextChapterStart(chapters: TocChapter[], chapterIndex: number): number | undefined {
+  for (let index = chapterIndex + 1; index < chapters.length; index += 1) {
+    const chapter = chapters[index];
+    if (typeof chapter?.pageStart === "number" && Number.isFinite(chapter.pageStart) && chapter.pageStart > 0) {
+      return chapter.pageStart;
+    }
+
+    const firstSectionStart = chapter?.sections
+      ?.map((section) => section.pageStart)
+      .find((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
+
+    if (typeof firstSectionStart === "number") {
+      return firstSectionStart;
+    }
+  }
+
+  return undefined;
+}
+
 function toRangeLabel(pageStart?: number, pageEnd?: number): string {
   if (typeof pageStart !== "number") {
     return "p. ?";
@@ -128,7 +147,7 @@ function parentSectionPrefix(sectionNumber: string): string {
   return parts.slice(0, 2).join(".");
 }
 
-function buildSectionNodes(chapterIndex: number, sections: TocSection[], baseConfidence: number): TocPreviewNodeModel[] {
+function buildSectionNodes(chapters: TocChapter[], chapterIndex: number, sections: TocSection[], baseConfidence: number): TocPreviewNodeModel[] {
   const topLevelSections: TocPreviewNodeModel[] = [];
   const sectionIdByPrefix = new Map<string, string>();
   const sectionById = new Map<string, TocPreviewNodeModel>();
@@ -138,7 +157,8 @@ function buildSectionNodes(chapterIndex: number, sections: TocSection[], baseCon
     const title = section.title ?? "";
     const pageStart = normalizePageStart(section.pageStart);
     const nextStart = normalizePageStart(sections[sectionIndex + 1]?.pageStart);
-    const pageEnd = inferSiblingEnd(pageStart, nextStart, section.pageEnd);
+    const nextChapterStart = !nextStart ? findNextChapterStart(chapters, chapterIndex) : undefined;
+    const pageEnd = inferSiblingEnd(pageStart, nextStart ?? nextChapterStart, section.pageEnd);
     const missingFields = collectMissingFields(numberValue, title, pageStart, { requireNumber: false });
     const nodeConfidence = scoreNodeConfidence(baseConfidence, Boolean(numberValue.trim()), Boolean(title.trim()), typeof pageStart === "number");
 
@@ -227,7 +247,7 @@ export function buildTocPreviewTree(chapters: TocChapter[], globalConfidence: nu
       confidence,
       missingFields,
       chapterIndex,
-      children: buildSectionNodes(chapterIndex, chapter.sections, globalConfidence),
+      children: buildSectionNodes(chapters, chapterIndex, chapter.sections, globalConfidence),
     } satisfies TocPreviewNodeModel;
   });
 

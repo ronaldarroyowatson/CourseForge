@@ -1,0 +1,84 @@
+{
+  "chapters": [
+    {
+      "chapterNumber": "14",
+      "title": "SOLIDS, LIQUIDS, AND GASES MODULE 16: PROPERTIES OF ATOMS AND",
+      "chapterLabel": "Module",
+      "pageStart": 397,
+      "pageEnd": 418,
+      "sections": [
+        {
+          "sectionNumber": "14.1",
+          "title": "Matter and Thermal Energy 350 E23 Claim, Evidence, Reasoning",
+          "pageStart": 397,
+          "pageEnd": 418
+        },
+        {
+          "sectionNumber": "14.2",
+          "title": "Properties of Fluids 362 Lesson 1 Structure of the Atom",
+          "pageStart": 308,
+          "pageEnd": 403
+        },
+        {
+          "sectionNumber": "14.3",
+          "title": "Behavior of Gases. 368 Lesson 2 Masses of Atoms",
+          "pageStart": 404,
+          "pageEnd": 407
+        },
+        {
+          "sectionNumber": "",
+          "title": "NATURE OF SCIENCE Lesson 3 The Periodic Table",
+          "pageStart": 408,
+          "pageEnd": 418
+        }
+      ]
+    },
+    {
+      "chapterNumber": "3",
+      "title": "GO FURTHER Data Analysis Lab 375 Module Wrap Up",
+      "chapterLabel": "Chapter",
+      "pageStart": 419,
+      "pageEnd": 420,
+      "sections": []
+    },
+    {
+      "chapterNumber": "15",
+      "title": "CLASSIFICATION OF MATTER",
+      "chapterLabel": "Module",
+      "pageStart": 421,
+      "pageEnd": 445,
+      "sections": [
+        {
+          "sectionNumber": "15.1",
+          "title": "Composition of Matter 378 @ Claim, Evidence, Reasoning",
+          "pageStart": 421,
+          "pageEnd": 421
+        },
+        {
+          "sectionNumber": "15.2",
+          "title": "Properties of Matter. 385 Lesson1 Metals",
+          "pageStart": 422,
+          "pageEnd": 429
+        },
+        {
+          "sectionNumber": "",
+          "title": "ENGINEERING & TECHNOLOGY Lesson 2 Nonmetals.",
+          "pageStart": 430,
+          "pageEnd": 434
+        },
+        {
+          "sectionNumber": "",
+          "title": "Room Temperature Superconductors 303 Lesson 3 Mixed Groups",
+          "pageStart": 435,
+          "pageEnd": 444
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up.",
+          "pageStart": 445
+        }
+      ]
+    }
+  ],
+  "confidence": 0.7217391304347827
+}

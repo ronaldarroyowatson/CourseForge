@@ -280,6 +280,95 @@ describe("auto textbook flow integration", () => {
     expect((screen.getByDisplayValue("Teacher Edition") as HTMLInputElement).value).toBe("Teacher Edition");
   });
 
+  it("restores full TOC tree when resuming a queued TOC draft", async () => {
+    const now = Date.now();
+    window.localStorage.setItem(
+      AUTO_SESSION_DRAFTS_KEY,
+      JSON.stringify([
+        {
+          id: "resume-toc-draft",
+          version: 1,
+          savedAt: now,
+          coverImageDataUrl: "data:image/png;base64,a",
+          rawOcrText: "MODULE 1: MATTER\nLesson 1 Atoms 10\nLesson 2 Elements 18",
+          metadataTitle: "Physical Science",
+          metadataSubject: "Science",
+          metadataPublisher: "McGraw Hill",
+          metadataFormSnapshot: {
+            title: "Physical Science",
+            subtitle: "",
+            grade: "",
+            gradeBand: "",
+            subject: "Science",
+            edition: "",
+            publicationYear: "2026",
+            copyrightYear: "2026",
+            isbnRaw: "",
+            additionalIsbnsCsv: "",
+            seriesName: "",
+            publisher: "McGraw Hill",
+            publisherLocation: "",
+            platformUrl: "",
+            mhid: "",
+            authorsCsv: "",
+            tocExtractionConfidence: "0.91",
+          },
+          relatedIsbnsSnapshot: [],
+          tocResultSnapshot: {
+            confidence: 0.91,
+            chapters: [
+              {
+                chapterNumber: "1",
+                title: "MATTER",
+                chapterLabel: "Module",
+                pageStart: 10,
+                pageEnd: 19,
+                sections: [
+                  { sectionNumber: "1.1", title: "Atoms", pageStart: 10, pageEnd: 17 },
+                  { sectionNumber: "1.2", title: "Elements", pageStart: 18, pageEnd: 19 },
+                ],
+              },
+            ],
+          },
+          tocPagesSnapshot: [
+            {
+              pageIndex: 0,
+              confidence: 0.91,
+              chapters: [
+                {
+                  chapterNumber: "1",
+                  title: "MATTER",
+                  chapterLabel: "Module",
+                  pageStart: 10,
+                  pageEnd: 19,
+                  sections: [
+                    { sectionNumber: "1.1", title: "Atoms", pageStart: 10, pageEnd: 17 },
+                    { sectionNumber: "1.2", title: "Elements", pageStart: 18, pageEnd: 19 },
+                  ],
+                },
+              ],
+            },
+          ],
+          step: "toc",
+          stepsCompleted: { cover: true, copyright: true, toc: true },
+        },
+      ])
+    );
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    expect(await screen.findByText(/Live TOC Structure Preview/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/MATTER/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Capture TOC Page" })).toBeInTheDocument();
+  });
+
   it("limits unfinished auto captures to three queue slots and allows deleting a draft to reopen capacity", async () => {
     const now = Date.now();
     window.localStorage.setItem(
@@ -751,5 +840,38 @@ describe("auto textbook flow integration", () => {
     expect(screen.getAllByText(/pp\. 3-36/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Methods of Science/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/pp\. 4-11/i).length).toBeGreaterThan(0);
+  });
+
+  it("shows an explicit Save TOC to Server action after finishing TOC", async () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+          tocResult: {
+            confidence: 0.93,
+            chapters: [
+              {
+                chapterNumber: "1",
+                title: "Waves",
+                sections: [{ sectionNumber: "1.1", title: "Electromagnetic Waves", pageStart: 10 }],
+              },
+            ],
+          },
+          metadataForm: {
+            title: "Physics",
+            subject: "Science",
+            edition: "1",
+            publicationYear: "2026",
+            isbnRaw: "",
+          },
+          bypassImageModeration: true,
+        }}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Save TOC to Server" })).toBeInTheDocument();
   });
 });

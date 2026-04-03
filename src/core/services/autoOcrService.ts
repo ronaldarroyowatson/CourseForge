@@ -277,6 +277,21 @@ async function preprocessImageForOcr(imageDataUrl: string): Promise<string> {
   }
 }
 
+function postprocessOcrText(rawText: string): string {
+  return rawText
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/[•·]/g, ".")
+    .replace(/\b(Module|Lesson|Chapter)\s+l\b/gi, "$1 1")
+    .replace(/\b(\d+)\s*[,;:]\s*(\d+)\b/g, "$1$2")
+    .replace(/[—–]{2,}/g, "-")
+    .replace(/\n{3,}/g, "\n\n")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .trim();
+}
+
 function getStorage(): Storage | null {
   if (typeof window === "undefined") {
     return null;
@@ -1006,8 +1021,14 @@ export async function extractTextFromImageWithFallback(
       const providerImage = providerId === "local_tesseract"
         ? await getLocalPreparedImage()
         : imageDataUrl;
-      const text = await provider.extractText(providerImage);
-      if (!text.trim()) {
+
+      let text = await provider.extractText(providerImage);
+      if (providerId === "local_tesseract" && !text.trim() && providerImage !== imageDataUrl) {
+        text = await provider.extractText(imageDataUrl);
+      }
+
+      const normalizedText = postprocessOcrText(text);
+      if (!normalizedText.trim()) {
         attempts.push({ providerId, success: false, errorMessage: "OCR returned empty text." });
         recordProviderFailure(providerId, "OCR returned empty text.");
         void emitOcrDiagnostic("provider_extract_empty_text", {
@@ -1025,12 +1046,12 @@ export async function extractTextFromImageWithFallback(
         context: {
           providerId,
           imageBytesUsed: providerImage.length,
-          textLength: text.length,
+          textLength: normalizedText.length,
           attemptsCount: attempts.length,
         },
       });
       return {
-        text,
+        text: normalizedText,
         providerId,
         attempts,
       };

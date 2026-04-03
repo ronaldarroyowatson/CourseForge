@@ -2,7 +2,6 @@ UNIT 3 WAVES
 ENCOUNTER THE PHENOMENON
 How do waves interact with our senses?
 STEM UNIT 3 PROJECT 223
-
 MODULE 9 INTRODUCTION TO WAVES
 ENCOUNTER THE PHENOMENON
 CER Claim, Evidence, Reasoning 225
@@ -13,7 +12,6 @@ SCIENTIFIC BREAKTHROUGHS
 Vanished! 247
 Module Wrap-up 249
 SEP GO FURTHER Data Analysis Lab 249
-
 MODULE 10: SOUND
 ENCOUNTER THE PHENOMENON
 CER Claim, Evidence, Reasoning 251
@@ -25,8 +23,7 @@ SCIENCE AND SOCIETY
 "The Menace of Mechanical Music" 273
 Module Wrap-Up 275
 SEP GO FURTHER Data Analysis Lab 275
-
-MODULE 11: ELECTROMAGNETIC  WAVES
+MODULE 11: ELECTROMAGNETIC WAVES
 ENCOUNTER THE PHENOMENON
 CER Claim, Evidence, Reasoning 277
 Lesson 1 What are electromagnetic waves? 278
@@ -36,11 +33,10 @@ SCIENTIFIC BREAKTHROUGHS
 A New Kind of Ray 297
 Module Wrap-Up 299
 SEP GO FURTHER Data Analysis Lab 299
-
 MODULE 12: LIGHT
 ENCOUNTER THE PHENOMENON
 CER Claim, Evidence, Reasoning 301
-Lesson 1 The Behavior of Light 302
+Lesson 1 The Behavior of Light
 Lesson 2 Light and Color 307
 Lesson 3 Producing Light 312
 Lesson 4 Using Light 318
@@ -48,7 +44,6 @@ STEM AT WORK
 Shining New Light on an Old Text 323
 Module Wrap-Up 325
 SEP GO FURTHER Data Analysis Lab 325
-
 Module 13: Mirrors and Lenses
 ENCOUNTER THE PHENOMENON
 CER Claim, Evidence, Reasoning 327

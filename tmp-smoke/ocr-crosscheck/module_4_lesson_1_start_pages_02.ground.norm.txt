@@ -8,10 +8,9 @@ SCIENTIFIC BREAKTHROUGHS
 World's Fastest Bicycle 109
 Module Wrap-Up 111
 SEP GO FURTHER Data Analysis Lab 111
-
 MODULE 5: THERMAL ENERGY
 ENCOUNTER THE PHENOMENON
-CER Claim, Evidence, Reasoning 113
+CER Claim, Evidence, Reasoning
 Lesson 1 Temperature, Thermal Energy, and Heat 113
 Lesson 2 Conduction, Convection, and Radiation 120
 Lesson 3 Using Thermal Energy 127
@@ -19,7 +18,6 @@ SCIENCE & SOCIETY
 "20 Degrees Cooler Inside!" 135
 Module Wrap-Up 137
 SEP GO FUTHER Data Analysis Lab 137
-
 MODULE 6: ELECTRICITY
 ENCOUNTER THE PHENOMENON
 CER Claim, Evidence, Reasoning 139
@@ -30,7 +28,6 @@ SCIENTIFIC BREAKTHROUGHS
 War of the Currents 161
 Module Wrap-Up 163
 SEP GO FURTHER Data Analysis Lab 163
-
 MODULE 7: MAGNETISM AND ITS USES
 ENCOUNTER THE PHENOMENON
 CER Claim, Evidence, Reasoning 187
@@ -41,7 +38,6 @@ STEM AT WORK
 Locating Land Mines 187
 Module Wrap-Up 189
 SEP GO FURTHER Data Analysis Lab 189
-
 MODULE 8: ENERGY SOURCES AND THE ENVIRONMENT
 ENCOUNTER THE PHENOMENON
 CER Claim, Evidence, Reasoning 191

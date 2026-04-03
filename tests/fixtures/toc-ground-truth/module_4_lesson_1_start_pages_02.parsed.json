@@ -59,6 +59,12 @@
       "pageEnd": 138,
       "sections": [
         {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 113,
+          "pageEnd": 119
+        },
+        {
           "sectionNumber": "5.1",
           "title": "Temperature, Thermal Energy, and Heat",
           "pageStart": 113,
@@ -253,5 +259,5 @@
       ]
     }
   ],
-  "confidence": 0.9692307692307693
+  "confidence": 0.9884615384615385
 }

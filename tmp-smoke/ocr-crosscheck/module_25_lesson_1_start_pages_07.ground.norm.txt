@@ -2,9 +2,7 @@ UNIT 7
 EARTH
 ENCOUNTER THE PHENOMENON
 How have so many climates developed on Earth?
-
 STEM UNIT 7 PROJECT 625
-
 MODULE 25: EARTH'S INTERNAL PROCESSES
 ENCOUNTER THE PHENOMENON
 CER Claim, Evidence, Reasoning 627
@@ -16,19 +14,17 @@ IN THE FIELD
 Yellowstone Supervolcano 657
 Module Wrap-Up 659
 SEP GO FURTHER Data Analysis Lab 659
-
 MODULE 26: EARTH'S MATERIALS
 ENCOUNTER THE PHENOMENON
 CER Claim, Evidence, Reasoning 661
 Lesson 1 Minerals 662
 Lesson 2 Igneous Rocks 671
-Lesson 3 Sedimentary Rocks 678
+Lesson 3 Sedimentary Rocks 671
 Lesson 4 Metamorphic Rocks and the Rock Cycle 684
 ENGINEERING & TECHNOLOGY
 Car Parts 690
 Module Wrap-Up 692
 SEP GO FURTHER Data Analysis Lab 692
-
 MODULE 27: EARTH'S CHANGING SURFACE
 ENCOUNTER THE PHENOMENON
 CER Claim, Evidence, Reasoning 694
@@ -40,7 +36,6 @@ ENGINEERING & TECHNOLOGY
 Safe Water, A Global Concern 729
 Module Wrap-Up 731
 SEP GO FURTHER Data Analysis Lab 731
-
 MODULE 28: WEATHER AND CLIMATE
 ENCOUNTER THE PHENOMENON
 CER Claim, Evidence, Reasoning 733

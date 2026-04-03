@@ -27,7 +27,8 @@
         {
           "sectionNumber": "1.3",
           "title": "Communicating with Graphs 19 E2260 FURTHER Data Analysis Lab =",
-          "pageStart": 31
+          "pageStart": 31,
+          "pageEnd": 36
         },
         {
           "sectionNumber": "1.4",
@@ -38,7 +39,8 @@
         {
           "sectionNumber": "",
           "title": "Scientific Methods.",
-          "pageStart": 31
+          "pageStart": 31,
+          "pageEnd": 36
         }
       ]
     },
@@ -46,18 +48,25 @@
       "chapterNumber": "2",
       "title": "MOTION",
       "chapterLabel": "Module",
-      "pageStart": 5,
+      "pageStart": 37,
       "pageEnd": 57,
       "sections": [
         {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 37,
+          "pageEnd": 37
+        },
+        {
           "sectionNumber": "2.1",
-          "title": "Describing Motion El",
-          "pageStart": 5
+          "title": "Describing Motion",
+          "pageStart": 38,
+          "pageEnd": 44
         },
         {
           "sectionNumber": "2.2",
           "title": "Velocity and Momentum",
-          "pageStart": 5,
+          "pageStart": 45,
           "pageEnd": 49
         },
         {
@@ -80,5 +89,5 @@
       ]
     }
   ],
-  "confidence": 0.72
+  "confidence": 0.76
 }

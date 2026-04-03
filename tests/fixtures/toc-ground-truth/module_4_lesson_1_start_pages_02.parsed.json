@@ -4,29 +4,29 @@
       "chapterNumber": "4",
       "title": "WORK AND ENERGY MODULE 7: MAGNETISM AND ITS USES",
       "chapterLabel": "Module",
-      "sections": []
-    },
-    {
-      "chapterNumber": "3",
-      "title": "Claim, Evidence, Reasoning 87 3 Claim, Evidence, Reasoning",
-      "chapterLabel": "Chapter",
       "pageStart": 165,
       "pageEnd": 188,
       "sections": [
         {
-          "sectionNumber": "3.1",
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 165,
+          "pageEnd": 165
+        },
+        {
+          "sectionNumber": "4.1",
           "title": "Work and Machines 88 Lesson 1 Magnetism",
           "pageStart": 166,
           "pageEnd": 172
         },
         {
-          "sectionNumber": "3.2",
+          "sectionNumber": "4.2",
           "title": "Describing Energy. 05 Lesson 2 Electricity and Magnetism",
           "pageStart": 173,
           "pageEnd": 179
         },
         {
-          "sectionNumber": "3.3",
+          "sectionNumber": "4.3",
           "title": "Conservation of Energy. 101 Lesson 3 Producing Electric Curent.",
           "pageStart": 180,
           "pageEnd": 186
@@ -87,7 +87,7 @@
           "sectionNumber": "",
           "title": "E5) GO FURTHER Data Analysis Lab 137 E23 GO FURTHER Data Analysis Lab",
           "pageStart": 22,
-          "pageEnd": 139
+          "pageEnd": 22
         }
       ]
     },
@@ -95,14 +95,20 @@
       "chapterNumber": "6",
       "title": "ELECTRICITY",
       "chapterLabel": "Module",
-      "pageStart": 140,
+      "pageStart": 139,
       "pageEnd": 162,
       "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 139,
+          "pageEnd": 139
+        },
         {
           "sectionNumber": "6.1",
           "title": "Electric Charge.",
           "pageStart": 140,
-          "pageEnd": 162
+          "pageEnd": 153
         },
         {
           "sectionNumber": "6.2",
@@ -137,5 +143,5 @@
       "sections": []
     }
   ],
-  "confidence": 0.8363636363636364
+  "confidence": 0.8666666666666667
 }

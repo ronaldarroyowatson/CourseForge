@@ -46,6 +46,11 @@ describe("TOC preview pipeline", () => {
     expect(ancillarySection?.pageStart).toBe(33);
     expect(ancillarySection?.pageEnd).toBe(36);
 
+    const cerSection = parsed.chapters[0].sections.find((section) => section.title.includes("Claim, Evidence, Reasoning"));
+    expect(cerSection).toBeDefined();
+    expect(cerSection?.pageStart).toBe(3);
+    expect(cerSection?.pageEnd).toBe(3);
+
     const preview = buildTocPreviewTree(parsed.chapters, parsed.confidence);
     expect(preview.chapterCount).toBeGreaterThanOrEqual(3);
     expect(preview.sectionCount).toBeGreaterThanOrEqual(8);

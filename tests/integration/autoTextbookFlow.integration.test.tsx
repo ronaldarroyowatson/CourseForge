@@ -190,6 +190,28 @@ describe("auto textbook flow integration", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps optional metadata fields collapsed by default even when some optional values are populated", () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "cover",
+          coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+          metadataDraft: {
+            title: "Inspire Physical Science",
+            subtitle: "with Earth Science",
+            publisher: "McGraw Hill",
+            copyrightYear: 2021,
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: /Show optional fields/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Subtitle")).not.toBeInTheDocument();
+  });
+
   it("processes a dropped cover image through OCR pipeline and surfaces provider/source status", async () => {
     const fileReaderReadAsDataUrl = vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function mockReadAsDataUrl(this: FileReader) {
       Object.defineProperty(this, "result", {
@@ -272,6 +294,7 @@ describe("auto textbook flow integration", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    fireEvent.click(screen.getByRole("button", { name: /Show optional fields/i }));
 
     await waitFor(() => {
       expect((screen.getByLabelText(/Additional ISBNs \(comma separated\)/i) as HTMLInputElement).value).toContain("9780076770007");

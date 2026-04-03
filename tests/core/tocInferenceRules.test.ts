@@ -78,4 +78,101 @@ describe("TOC inference rules", () => {
     expect(inferred[0].sections[1].pageStart).toBe(61);
     expect(inferred[0].sections[1].pageEnd).toBe(65);
   });
+
+  it("treats a CER section before the first lesson as a single-page pre-chapter section (OCR order)", () => {
+    const input: TocChapter[] = [
+      {
+        chapterNumber: "1",
+        title: "THE NATURE OF SCIENCE",
+        sections: [
+          { sectionNumber: "", title: "CER Claim, Evidence, Reasoning", pageStart: 3 },
+          { sectionNumber: "1.1", title: "The Methods of Science", pageStart: 4 },
+          { sectionNumber: "1.2", title: "Standards of Measurement", pageStart: 12 },
+          { sectionNumber: "1.3", title: "Communicating with Graphs", pageStart: 19 },
+          { sectionNumber: "1.4", title: "Science and Technology", pageStart: 24 },
+          { sectionNumber: "", title: "Scientific Methods", pageStart: 31 },
+          { sectionNumber: "", title: "Module Wrap-Up", pageStart: 33 },
+        ],
+      },
+      {
+        chapterNumber: "2",
+        title: "MOTION",
+        pageStart: 37,
+        sections: [{ sectionNumber: "2.1", title: "Describing Motion", pageStart: 38 }],
+      },
+    ];
+
+    const inferred = inferTocPageRanges(input);
+    const cer = inferred[0].sections[0];
+    expect(cer.pageEnd).toBe(3);
+    const lesson4 = inferred[0].sections.find((s) => s.sectionNumber === "1.4");
+    expect(lesson4?.pageEnd).toBe(30);
+    const sciMethods = inferred[0].sections.find((s) => s.title.includes("Scientific Methods"));
+    expect(sciMethods?.pageEnd).toBe(32);
+    const wrapUp = inferred[0].sections.find((s) => s.title.includes("Module Wrap-Up"));
+    expect(wrapUp?.pageEnd).toBe(36);
+  });
+
+  it("treats a CER section before the first lesson as a single-page pre-chapter section (stitched sort order)", () => {
+    // Simulates the post-stitchTocPages order where numbered sections come first
+    // and unnumbered sections are sorted after, causing CER (p.3) to appear in the
+    // array after Lesson 1.4 (p.24).
+    const input: TocChapter[] = [
+      {
+        chapterNumber: "1",
+        title: "THE NATURE OF SCIENCE",
+        sections: [
+          { sectionNumber: "1.1", title: "The Methods of Science", pageStart: 4 },
+          { sectionNumber: "1.2", title: "Standards of Measurement", pageStart: 12 },
+          { sectionNumber: "1.3", title: "Communicating with Graphs", pageStart: 19 },
+          { sectionNumber: "1.4", title: "Science and Technology", pageStart: 24 },
+          { sectionNumber: "", title: "CER Claim, Evidence, Reasoning", pageStart: 3 },
+          { sectionNumber: "", title: "Scientific Methods", pageStart: 31 },
+          { sectionNumber: "", title: "Module Wrap-Up", pageStart: 33 },
+        ],
+      },
+      {
+        chapterNumber: "2",
+        title: "MOTION",
+        pageStart: 37,
+        sections: [{ sectionNumber: "2.1", title: "Describing Motion", pageStart: 38 }],
+      },
+    ];
+
+    const inferred = inferTocPageRanges(input);
+    // CER pre-chapter: must be single-page regardless of array position
+    const cer = inferred[0].sections.find((s) => s.title.includes("CER"));
+    expect(cer?.pageEnd).toBe(3);
+    // Lesson 1.4 must end at 30 (Scientific Methods starts at 31)
+    const lesson4 = inferred[0].sections.find((s) => s.sectionNumber === "1.4");
+    expect(lesson4?.pageEnd).toBe(30);
+    // Post-chapter unnumbered sections infer normally
+    const sciMethods = inferred[0].sections.find((s) => s.title.includes("Scientific Methods"));
+    expect(sciMethods?.pageEnd).toBe(32);
+    const wrapUp = inferred[0].sections.find((s) => s.title.includes("Module Wrap-Up"));
+    expect(wrapUp?.pageEnd).toBe(36);
+  });
+
+  it("ignores lower stale ancillary pages and uses the next greater additional-section boundary", () => {
+    const input: TocChapter[] = [
+      {
+        chapterNumber: "3",
+        title: "FORCES AND NEWTON'S LAWS",
+        pageStart: 59,
+        pageEnd: 86,
+        sections: [
+          { sectionNumber: "3.1", title: "Forces", pageStart: 60 },
+          { sectionNumber: "3.2", title: "Newton's Laws of Motion", pageStart: 68 },
+          { sectionNumber: "3.3", title: "Using Newton's Laws", pageStart: 74 },
+          { sectionNumber: "", title: "STEM UNIT 1 PROJECT", pageStart: 35 },
+          { sectionNumber: "", title: "CER Claim, Evidence, Reasoning", pageStart: 59 },
+          { sectionNumber: "", title: "Extreme Altitudes", pageStart: 81 },
+          { sectionNumber: "", title: "Module Wrap-Up", pageStart: 83 },
+        ],
+      },
+    ];
+
+    const inferred = inferTocPageRanges(input);
+    expect(inferred[0].sections[2].pageEnd).toBe(80);
+  });
 });

@@ -208,6 +208,43 @@ describe("textbookAutoExtractionService", () => {
     expect(parsed.confidence).toBeGreaterThan(0.5);
   });
 
+  it("recovers noisy CER and lesson page tokens in module TOC OCR", () => {
+    const parsed = parseTocFromOcrText([
+      "MODULE 1: THE NATURE OF SCIENCE",
+      "Lesson 1 The Methods of Science 4",
+      "Lesson 2 Standards of Measurement 12",
+      "Lesson 3 Communicating with Graphs 19",
+      "Lesson 4 Science and Technology 24",
+      "Scientific Methods 31",
+      "Module Wrap-Up 33",
+      "MODULE 2: MOTION",
+      "ENCOUNTER THE PHENOMENON",
+      "(= Claim, Evidence, Reasoning Ea",
+      "Lesson 1 Describing Motion El",
+      "Lesson 2 Velocity and Momentum 5",
+      "Lesson 3 Acceleration 50",
+      "Autonomous Vehicles Go Subterranean 55",
+      "Module Wrap-Up 57",
+      "MODULE 3: FORCES AND NEWTON'S LAWS 59",
+      "Lesson 1 Forces 60",
+    ].join("\n"));
+
+    const moduleTwo = parsed.chapters.find((chapter) => chapter.chapterNumber === "2");
+    expect(moduleTwo).toBeDefined();
+
+    const cer = moduleTwo?.sections.find((section) => section.title.includes("Claim, Evidence, Reasoning"));
+    expect(cer?.pageStart).toBe(37);
+    expect(cer?.pageEnd).toBe(37);
+
+    const lessonOne = moduleTwo?.sections.find((section) => section.sectionNumber === "2.1");
+    expect(lessonOne?.title).toBe("Describing Motion");
+    expect(lessonOne?.pageStart).toBe(38);
+
+    const lessonTwo = moduleTwo?.sections.find((section) => section.sectionNumber === "2.2");
+    expect(lessonTwo?.pageStart).toBe(45);
+    expect(lessonTwo?.pageEnd).toBe(49);
+  });
+
   it("merges TOC captures from multiple pages", () => {
     const first = parseTocFromOcrText("Chapter 1 Integers 10\n1.1 Absolute Value 12");
     const second = parseTocFromOcrText("Chapter 1 Integers 10\n1.2 Number Lines 18");

@@ -4,9 +4,15 @@
       "chapterNumber": "21",
       "title": "SOLUTIONS MODULE 23: ORGANIC COMPOUNDS",
       "chapterLabel": "Module",
-      "pageStart": 574,
+      "pageStart": 573,
       "pageEnd": 598,
       "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 573,
+          "pageEnd": 573
+        },
         {
           "sectionNumber": "21.1",
           "title": "How Solutions Form 526 Lesson 1 Simple Organic Compounds",
@@ -82,5 +88,5 @@
       "sections": []
     }
   ],
-  "confidence": 0.7
+  "confidence": 0.7416666666666667
 }

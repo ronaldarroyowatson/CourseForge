@@ -4,29 +4,29 @@
       "chapterNumber": "29",
       "title": "THE EARTH-MOON-SUN SYSTEM MODULE 31: STARS AND GALAXIES",
       "chapterLabel": "Module",
-      "sections": []
-    },
-    {
-      "chapterNumber": "3",
-      "title": "Claim, Evidence, Reasoning 761 @3 Claim, Evidence, Reasoning",
-      "chapterLabel": "Chapter",
       "pageStart": 819,
       "pageEnd": 840,
       "sections": [
         {
-          "sectionNumber": "3.1",
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 819,
+          "pageEnd": 819
+        },
+        {
+          "sectionNumber": "29.1",
           "title": "Earth in Space. 762 Lesson 1 Observing the Universe",
           "pageStart": 820,
           "pageEnd": 824
         },
         {
-          "sectionNumber": "3.2",
+          "sectionNumber": "29.2",
           "title": "Time and Seasons. 767 Lesson 2 Evolution of Stars.",
           "pageStart": 825,
           "pageEnd": 831
         },
         {
-          "sectionNumber": "3.3",
+          "sectionNumber": "29.3",
           "title": "Earth's Moon 773 Lesson 3 Galaxies and the Milky Way.",
           "pageStart": 832,
           "pageEnd": 836
@@ -67,6 +67,12 @@
       "chapterLabel": "Module",
       "pageStart": 843,
       "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 788,
+          "pageEnd": 788
+        },
         {
           "sectionNumber": "30.1",
           "title": "Planetary Motion",
@@ -110,5 +116,5 @@
       ]
     }
   ],
-  "confidence": 0.9727272727272727
+  "confidence": 1
 }

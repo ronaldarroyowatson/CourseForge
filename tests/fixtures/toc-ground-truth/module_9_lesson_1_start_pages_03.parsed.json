@@ -4,9 +4,15 @@
       "chapterNumber": "9",
       "title": "INTRODUCTION TO WAVES MODULE 12: LIGHT",
       "chapterLabel": "Module",
-      "pageStart": 302,
+      "pageStart": 301,
       "pageEnd": 326,
       "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 301,
+          "pageEnd": 301
+        },
         {
           "sectionNumber": "9.1",
           "title": "The Nature of Waves 226 Lesson 1 The Behavior of Light",
@@ -69,13 +75,20 @@
       "chapterNumber": "11",
       "title": "ELECTROMAGNETIC WAVES",
       "chapterLabel": "Module",
-      "pageStart": 284,
+      "pageStart": 277,
       "pageEnd": 291,
       "sections": [
         {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 277,
+          "pageEnd": 277
+        },
+        {
           "sectionNumber": "11.1",
           "title": "What are electromagnetic",
-          "pageStart": 284
+          "pageStart": 278,
+          "pageEnd": 283
         },
         {
           "sectionNumber": "11.2",
@@ -91,10 +104,11 @@
         {
           "sectionNumber": "",
           "title": "A New Kind of Ray.",
-          "pageStart": 207
+          "pageStart": 207,
+          "pageEnd": 207
         }
       ]
     }
   ],
-  "confidence": 0.6411764705882352
+  "confidence": 0.7
 }

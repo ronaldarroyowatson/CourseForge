@@ -1048,12 +1048,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }, [metadataForm, relatedIsbns.length]);
 
   useEffect(() => {
-    if (optionalMetadataValueCount > 0) {
-      setShowOptionalMetadataFields(true);
-    }
-  }, [optionalMetadataValueCount]);
-
-  useEffect(() => {
     const cancelAutoScroll = (): void => {
       autoScrollTokenRef.current += 1;
     };

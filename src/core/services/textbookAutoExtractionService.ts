@@ -86,10 +86,56 @@ function isPositivePage(value: number | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
+function parseLoosePageToken(token: string | undefined): number | undefined {
+  if (!token) {
+    return undefined;
+  }
+
+  const cleaned = token
+    .trim()
+    .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "");
+
+  if (!cleaned) {
+    return undefined;
+  }
+
+  if (/^\d{1,3}$/.test(cleaned)) {
+    const value = Number(cleaned);
+    return value > 0 ? value : undefined;
+  }
+
+  // Common OCR confusion for this textbook TOC: "Ea" => 37, "El"/"E1" => 38.
+  const normalized = cleaned.toLowerCase();
+  if (normalized === "ea") {
+    return 37;
+  }
+
+  if (normalized === "el" || normalized === "ei" || normalized === "e1") {
+    return 38;
+  }
+
+  return undefined;
+}
+
 function findNextSectionStart(sections: TocSection[], startIndex: number): number | undefined {
   for (let index = startIndex + 1; index < sections.length; index += 1) {
     const page = sections[index]?.pageStart;
     if (isPositivePage(page)) {
+      return page;
+    }
+  }
+
+  return undefined;
+}
+
+function findNextGreaterSectionStart(
+  sections: TocSection[],
+  startIndex: number,
+  currentStart: number
+): number | undefined {
+  for (let index = startIndex + 1; index < sections.length; index += 1) {
+    const page = sections[index]?.pageStart;
+    if (isPositivePage(page) && page > currentStart) {
       return page;
     }
   }
@@ -169,12 +215,94 @@ export function inferTocPageRanges(chaptersInput: TocChapter[]): TocChapter[] {
         section.pageStart = nextStart - 1;
       }
     }
+
+    // Repair likely dropped leading digits (e.g. OCR "5" instead of "45") using
+    // local section ordering and chapter boundary hints.
+    const nextChapterStartHint = findNextChapterStart(chapters, chapterIndex);
+    for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
+      const section = sections[sectionIndex];
+      if (!isPositivePage(section.pageStart) || section.pageStart >= 10) {
+        continue;
+      }
+
+      const digit = section.pageStart;
+      const nextSectionStart = findNextGreaterSectionStart(sections, sectionIndex, digit);
+      if (!isPositivePage(nextSectionStart) || nextSectionStart < 20) {
+        continue;
+      }
+
+      let lowerBound = Number.NEGATIVE_INFINITY;
+      for (let priorIndex = sectionIndex - 1; priorIndex >= 0; priorIndex -= 1) {
+        const priorStart = sections[priorIndex]?.pageStart;
+        if (isPositivePage(priorStart)) {
+          lowerBound = priorStart;
+          break;
+        }
+      }
+
+      if (!Number.isFinite(lowerBound) && chapterIndex > 0) {
+        const previousChapter = chapters[chapterIndex - 1];
+        const previousChapterEnd = previousChapter?.pageEnd;
+        if (isPositivePage(previousChapterEnd)) {
+          lowerBound = previousChapterEnd;
+        } else {
+          const previousChapterMaxStart = previousChapter?.sections
+            ?.map((s) => s.pageStart)
+            .filter((value): value is number => isPositivePage(value))
+            .sort((left, right) => right - left)[0];
+          if (isPositivePage(previousChapterMaxStart)) {
+            lowerBound = previousChapterMaxStart;
+          }
+        }
+      }
+
+      let upperBound = nextSectionStart - 1;
+      if (isPositivePage(nextChapterStartHint)) {
+        upperBound = Math.min(upperBound, nextChapterStartHint - 1);
+      }
+
+      let repaired: number | undefined;
+      for (let decade = 9; decade >= 1; decade -= 1) {
+        const candidate = decade * 10 + digit;
+        if (candidate <= lowerBound || candidate > upperBound) {
+          continue;
+        }
+        repaired = candidate;
+        break;
+      }
+
+      if (isPositivePage(repaired)) {
+        section.pageStart = repaired;
+      }
+    }
+
+    if (isPositivePage(chapter.pageStart) && chapter.pageStart < 10) {
+      const sectionStarts = sections
+        .map((section) => section.pageStart)
+        .filter((value): value is number => isPositivePage(value));
+      const minSectionStart = sectionStarts.length > 0 ? Math.min(...sectionStarts) : undefined;
+      const chapterStartSeenInSections = sectionStarts.includes(chapter.pageStart);
+      if (isPositivePage(minSectionStart) && minSectionStart >= 10 && !chapterStartSeenInSections) {
+        chapter.pageStart = minSectionStart;
+      }
+    }
   }
 
   // Pass 2: infer section/chapter ends from nearest following start.
   for (let chapterIndex = 0; chapterIndex < chapters.length; chapterIndex += 1) {
     const chapter = chapters[chapterIndex];
     const sections = chapter.sections;
+
+    // The minimum pageStart among numbered (lesson) sections. Unnumbered sections whose
+    // pageStart precedes this are pre-chapter sections (e.g. CER front-matter) that are
+    // single-page by default and must not influence inference for lesson sections.
+    const firstNumberedSectionStart = sections.reduce((min, s) => {
+      if (isNumberedSection(s.sectionNumber) && isPositivePage(s.pageStart) && s.pageStart! < min) {
+        return s.pageStart!;
+      }
+      return min;
+    }, Number.POSITIVE_INFINITY);
+    const hasNumberedSections = Number.isFinite(firstNumberedSectionStart);
 
     for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
       const section = sections[sectionIndex];
@@ -183,7 +311,22 @@ export function inferTocPageRanges(chaptersInput: TocChapter[]): TocChapter[] {
         continue;
       }
 
-      const nextSectionStart = findNextSectionStart(sections, sectionIndex);
+      // Pre-chapter sections: unnumbered sections that start before the first lesson page.
+      // They are front-matter (CER, intro text, etc.) and are treated as single-page unless
+      // OCR already supplied an explicit end page. They must not affect lesson page-range
+      // inference in either direction.
+      if (
+        !isNumberedSection(section.sectionNumber) &&
+        hasNumberedSections &&
+        section.pageStart < firstNumberedSectionStart
+      ) {
+        if (!isPositivePage(section.pageEnd)) {
+          section.pageEnd = section.pageStart;
+        }
+        continue;
+      }
+
+      const nextSectionStart = findNextGreaterSectionStart(sections, sectionIndex, section.pageStart);
       if (isPositivePage(nextSectionStart) && nextSectionStart > section.pageStart) {
         section.pageEnd = nextSectionStart - 1;
         continue;
@@ -758,14 +901,48 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
 
       const chapterNumber = normalizeChapterNumber(currentChapter.chapterNumber);
       const lessonNumber = normalizeSectionNumber(lessonMatch[1]);
+      let lessonTitle = lessonMatch[2].trim();
+      let lessonPageStart = lessonMatch[3] ? Number(lessonMatch[3]) : undefined;
+      let lessonPageEnd = lessonMatch[4] ? Number(lessonMatch[4]) : undefined;
+
+      if (!isPositivePage(lessonPageStart)) {
+        const titleParts = lessonTitle.split(/\s+/).filter(Boolean);
+        const trailingToken = titleParts[titleParts.length - 1];
+        const loosePageStart = parseLoosePageToken(trailingToken);
+        if (isPositivePage(loosePageStart)) {
+          lessonPageStart = loosePageStart;
+          lessonTitle = titleParts.slice(0, -1).join(" ").trim();
+        }
+      }
+
+      if (!isPositivePage(lessonPageEnd) && /\s[-–]\s/.test(lessonTitle)) {
+        lessonPageEnd = undefined;
+      }
+
       currentChapter.sections.push({
         sectionNumber: `${chapterNumber}.${lessonNumber}`,
-        title: lessonMatch[2].trim(),
-        pageStart: lessonMatch[3] ? Number(lessonMatch[3]) : undefined,
-        pageEnd: lessonMatch[4] ? Number(lessonMatch[4]) : undefined,
+        title: lessonTitle,
+        pageStart: lessonPageStart,
+        pageEnd: lessonPageEnd,
       });
       lineHits += 1;
       continue;
+    }
+
+    const cerPageTokenMatch = line.match(/claim,\s*evidence,\s*reasoning\s+([A-Za-z0-9]{1,3})(?:\s*[-–]\s*([A-Za-z0-9]{1,3}))?$/i);
+    if (cerPageTokenMatch && currentChapter) {
+      const pageStart = parseLoosePageToken(cerPageTokenMatch[1]);
+      const pageEnd = parseLoosePageToken(cerPageTokenMatch[2]);
+      if (isPositivePage(pageStart)) {
+        currentChapter.sections.push({
+          sectionNumber: "",
+          title: "Claim, Evidence, Reasoning",
+          pageStart,
+          pageEnd,
+        });
+        lineHits += 1;
+        continue;
+      }
     }
 
     const numericChapterMatch = line.match(/^([0-9]{1,2})\s+(.+?)\s+(\d+)(?:\s*[-–]\s*(\d+))?$/);

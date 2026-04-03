@@ -5,11 +5,11 @@
       "title": "EARTH'S INTERNAL PROCESSES MODULE 27: EARTH'S CHANGING SURFACE",
       "chapterLabel": "Module",
       "pageStart": 694,
-      "pageEnd": 733,
+      "pageEnd": 732,
       "sections": [
         {
           "sectionNumber": "",
-          "title": "G2 Claim, Evidence, Reasoning 627 (ED Claim, Evidence, Reasoning",
+          "title": "Claim, Evidence, Reasoning",
           "pageStart": 694,
           "pageEnd": 694
         },
@@ -47,13 +47,13 @@
           "sectionNumber": "",
           "title": "Module Wrap-Up. 659 Module Wrap-Up",
           "pageStart": 731,
-          "pageEnd": 733
+          "pageEnd": 732
         },
         {
           "sectionNumber": "",
           "title": "ED GO FURTHER Data Analysis Lab. 659 (EZ GO FURTHER Data Analysis Lab",
           "pageStart": 731,
-          "pageEnd": 733
+          "pageEnd": 732
         }
       ]
     },
@@ -61,9 +61,15 @@
       "chapterNumber": "26",
       "title": "EARTH MATERIALS MODULE 28: WEATHER AND CLIMATE",
       "chapterLabel": "Module",
-      "pageStart": 734,
+      "pageStart": 733,
       "pageEnd": 757,
       "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 733,
+          "pageEnd": 733
+        },
         {
           "sectionNumber": "26.1",
           "title": "Minerals 662 Lesson Earth's Atmosphere.",
@@ -102,5 +108,5 @@
       ]
     }
   ],
-  "confidence": 0.8956521739130434
+  "confidence": 0.9391304347826086
 }

@@ -38,23 +38,30 @@
       "title": "CHEMICAL REACTIONS © STEM UNIT 5 PROJECT",
       "chapterLabel": "Module",
       "pageStart": 521,
-      "pageEnd": 521,
       "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 473,
+          "pageEnd": 473
+        },
         {
           "sectionNumber": "19.1",
           "title": "Chemical Changes a7",
-          "pageStart": 521
+          "pageStart": 474,
+          "pageEnd": 474
         },
         {
           "sectionNumber": "19.2",
           "title": "Classifying Chemicals Reactions. a82",
-          "pageStart": 485,
+          "pageStart": 475,
           "pageEnd": 485
         },
         {
           "sectionNumber": "19.3",
           "title": "Chemical Reactions and Energy.",
-          "pageStart": 486
+          "pageStart": 486,
+          "pageEnd": 496
         },
         {
           "sectionNumber": "19.4",
@@ -70,5 +77,5 @@
       ]
     }
   ],
-  "confidence": 0.6782608695652175
+  "confidence": 0.7217391304347827
 }

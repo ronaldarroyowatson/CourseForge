@@ -2,83 +2,205 @@
   "chapters": [
     {
       "chapterNumber": "14",
-      "title": "SOLIDS, LIQUIDS, AND GASES MODULE 16: PROPERTIES OF ATOMS AND",
+      "title": "SOLIDS, LIQUIDS, AND GASES",
       "chapterLabel": "Module",
-      "pageStart": 397,
-      "pageEnd": 418,
+      "pageStart": 353,
+      "pageEnd": 376,
       "sections": [
         {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 353,
+          "pageEnd": 353
+        },
+        {
           "sectionNumber": "14.1",
-          "title": "Matter and Thermal Energy 350 E23 Claim, Evidence, Reasoning",
-          "pageStart": 397,
-          "pageEnd": 403
+          "title": "Matter and Thermal Energy",
+          "pageStart": 354,
+          "pageEnd": 361
         },
         {
           "sectionNumber": "14.2",
-          "title": "Properties of Fluids 362 Lesson 1 Structure of the Atom",
-          "pageStart": 308,
-          "pageEnd": 403
+          "title": "Properties of Fluids",
+          "pageStart": 362,
+          "pageEnd": 367
         },
         {
           "sectionNumber": "14.3",
-          "title": "Behavior of Gases. 368 Lesson 2 Masses of Atoms",
-          "pageStart": 404,
-          "pageEnd": 407
+          "title": "Behaviors of Gases",
+          "pageStart": 368,
+          "pageEnd": 372
         },
         {
           "sectionNumber": "",
-          "title": "NATURE OF SCIENCE Lesson 3 The Periodic Table",
-          "pageStart": 408,
-          "pageEnd": 418
+          "title": "Detecting Dark Matter",
+          "pageStart": 373,
+          "pageEnd": 374
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 375,
+          "pageEnd": 376
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 375,
+          "pageEnd": 376
         }
       ]
-    },
-    {
-      "chapterNumber": "3",
-      "title": "GO FURTHER Data Analysis Lab 375 Module Wrap Up",
-      "chapterLabel": "Chapter",
-      "pageStart": 419,
-      "pageEnd": 420,
-      "sections": []
     },
     {
       "chapterNumber": "15",
       "title": "CLASSIFICATION OF MATTER",
       "chapterLabel": "Module",
+      "pageStart": 377,
+      "pageEnd": 396,
+      "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 377,
+          "pageEnd": 377
+        },
+        {
+          "sectionNumber": "15.1",
+          "title": "Composition of Matter",
+          "pageStart": 378,
+          "pageEnd": 384
+        },
+        {
+          "sectionNumber": "15.2",
+          "title": "Properties of Matter",
+          "pageStart": 385,
+          "pageEnd": 392
+        },
+        {
+          "sectionNumber": "",
+          "title": "Room Temperature Superconductors",
+          "pageStart": 393,
+          "pageEnd": 394
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 395,
+          "pageEnd": 396
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 395,
+          "pageEnd": 396
+        }
+      ]
+    },
+    {
+      "chapterNumber": "16",
+      "title": "PROPERTIES OF ATOMS AND THE PERIODIC TABLE",
+      "chapterLabel": "Module",
+      "pageStart": 397,
+      "pageEnd": 420,
+      "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 397,
+          "pageEnd": 397
+        },
+        {
+          "sectionNumber": "16.1",
+          "title": "Structure of the Atom",
+          "pageStart": 398,
+          "pageEnd": 403
+        },
+        {
+          "sectionNumber": "16.2",
+          "title": "Masses of Atoms",
+          "pageStart": 404,
+          "pageEnd": 407
+        },
+        {
+          "sectionNumber": "16.3",
+          "title": "The Periodic Table",
+          "pageStart": 408,
+          "pageEnd": 416
+        },
+        {
+          "sectionNumber": "",
+          "title": "Cassini-Huygens Mission",
+          "pageStart": 417,
+          "pageEnd": 418
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 419,
+          "pageEnd": 420
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 419,
+          "pageEnd": 420
+        }
+      ]
+    },
+    {
+      "chapterNumber": "17",
+      "title": "ELEMENTS AND THEIR PROPERTIES",
+      "chapterLabel": "Module",
       "pageStart": 421,
       "pageEnd": 445,
       "sections": [
         {
-          "sectionNumber": "15.1",
-          "title": "Composition of Matter 378 @ Claim, Evidence, Reasoning",
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
           "pageStart": 421,
           "pageEnd": 421
         },
         {
-          "sectionNumber": "15.2",
-          "title": "Properties of Matter. 385 Lesson1 Metals",
+          "sectionNumber": "17.1",
+          "title": "Metals",
           "pageStart": 422,
           "pageEnd": 429
         },
         {
-          "sectionNumber": "",
-          "title": "ENGINEERING & TECHNOLOGY Lesson 2 Nonmetals.",
+          "sectionNumber": "17.2",
+          "title": "Nonmetals",
           "pageStart": 430,
           "pageEnd": 434
         },
         {
-          "sectionNumber": "",
-          "title": "Room Temperature Superconductors 303 Lesson 3 Mixed Groups",
+          "sectionNumber": "17.3",
+          "title": "Mixed Groups",
           "pageStart": 435,
+          "pageEnd": 442
+        },
+        {
+          "sectionNumber": "",
+          "title": "The Power of Peer Review",
+          "pageStart": 443,
           "pageEnd": 444
         },
         {
           "sectionNumber": "",
-          "title": "Module Wrap-Up.",
+          "title": "Module Wrap-Up",
+          "pageStart": 445
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 445
+        },
+        {
+          "sectionNumber": "",
+          "title": "STEM UNIT 4 PROJECT",
           "pageStart": 445
         }
       ]
     }
   ],
-  "confidence": 0.7217391304347827
+  "confidence": 0.9441860465116279
 }

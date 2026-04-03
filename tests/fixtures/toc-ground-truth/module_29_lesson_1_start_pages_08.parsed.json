@@ -2,70 +2,63 @@
   "chapters": [
     {
       "chapterNumber": "29",
-      "title": "THE EARTH-MOON-SUN SYSTEM MODULE 31: STARS AND GALAXIES",
+      "title": "THE EARTH-MOON-SUN SYSTEM",
       "chapterLabel": "Module",
-      "pageStart": 819,
-      "pageEnd": 840,
+      "pageStart": 761,
+      "pageEnd": 787,
+      "unitName": "Unit 8",
       "sections": [
         {
           "sectionNumber": "",
           "title": "Claim, Evidence, Reasoning",
-          "pageStart": 819,
-          "pageEnd": 819
+          "pageStart": 761,
+          "pageEnd": 761
         },
         {
           "sectionNumber": "29.1",
-          "title": "Earth in Space. 762 Lesson 1 Observing the Universe",
-          "pageStart": 820,
-          "pageEnd": 824
+          "title": "Earth in Space",
+          "pageStart": 762,
+          "pageEnd": 766
         },
         {
           "sectionNumber": "29.2",
-          "title": "Time and Seasons. 767 Lesson 2 Evolution of Stars.",
-          "pageStart": 825,
-          "pageEnd": 831
+          "title": "Time and Seasons",
+          "pageStart": 767,
+          "pageEnd": 772
         },
         {
           "sectionNumber": "29.3",
-          "title": "Earth's Moon 773 Lesson 3 Galaxies and the Milky Way.",
-          "pageStart": 832,
-          "pageEnd": 836
+          "title": "Earth's Moon",
+          "pageStart": 773,
+          "pageEnd": 783
         },
         {
           "sectionNumber": "",
-          "title": "STEM AT WORK Lesson 4 Cosmology.",
-          "pageStart": 837,
-          "pageEnd": 840
+          "title": "To the Moon and Back",
+          "pageStart": 784,
+          "pageEnd": 785
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 786,
+          "pageEnd": 787
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 786,
+          "pageEnd": 787
         }
       ]
     },
     {
-      "chapterNumber": "4",
-      "title": "Module Wrap-Up. 786 An Astronomical Debate.",
-      "chapterLabel": "Chapter",
-      "pageStart": 841,
-      "pageEnd": 842,
-      "sections": []
-    },
-    {
-      "chapterNumber": "3",
-      "title": "GO FURTHER Data Analysis Lab 786 4 Module Wrap-Up.",
-      "chapterLabel": "Chapter",
-      "pageStart": 843,
-      "sections": []
-    },
-    {
-      "chapterNumber": "3",
-      "title": "GO FURTHER Data Analysis Lab",
-      "chapterLabel": "Chapter",
-      "pageStart": 843,
-      "sections": []
-    },
-    {
       "chapterNumber": "30",
-      "title": "THE SOLAR SYSTEM © STEM UNIT 8 PROJECT",
+      "title": "THE SOLAR SYSTEM",
       "chapterLabel": "Module",
-      "pageStart": 843,
+      "pageStart": 788,
+      "pageEnd": 818,
+      "unitName": "Unit 8",
       "sections": [
         {
           "sectionNumber": "",
@@ -93,7 +86,7 @@
         },
         {
           "sectionNumber": "30.4",
-          "title": "Lie in the Solar System",
+          "title": "Life in the Solar System",
           "pageStart": 809,
           "pageEnd": 814
         },
@@ -105,16 +98,79 @@
         },
         {
           "sectionNumber": "",
-          "title": "Module Wrap-Up.",
-          "pageStart": 817
+          "title": "Module Wrap-Up",
+          "pageStart": 817,
+          "pageEnd": 818
         },
         {
           "sectionNumber": "",
-          "title": "E39 GO FURTHER Data Analysis Lab",
-          "pageStart": 817
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 817,
+          "pageEnd": 818
+        }
+      ]
+    },
+    {
+      "chapterNumber": "31",
+      "title": "STARS AND THE GALAXIES",
+      "chapterLabel": "Module",
+      "pageStart": 819,
+      "pageEnd": 843,
+      "unitName": "Unit 8",
+      "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 819,
+          "pageEnd": 819
+        },
+        {
+          "sectionNumber": "31.1",
+          "title": "Observing the Universe",
+          "pageStart": 820,
+          "pageEnd": 824
+        },
+        {
+          "sectionNumber": "31.2",
+          "title": "Evolution of Stars",
+          "pageStart": 825,
+          "pageEnd": 831
+        },
+        {
+          "sectionNumber": "31.3",
+          "title": "Galaxies and the Milky Way",
+          "pageStart": 832,
+          "pageEnd": 836
+        },
+        {
+          "sectionNumber": "31.4",
+          "title": "Cosmology",
+          "pageStart": 837,
+          "pageEnd": 840
+        },
+        {
+          "sectionNumber": "",
+          "title": "An Astronomical Debate",
+          "pageStart": 841,
+          "pageEnd": 842
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-up",
+          "pageStart": 843
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 843
+        },
+        {
+          "sectionNumber": "",
+          "title": "STEM UNIT 8 PROJECT",
+          "pageStart": 843
         }
       ]
     }
   ],
-  "confidence": 1
+  "confidence": 0.9368421052631579
 }

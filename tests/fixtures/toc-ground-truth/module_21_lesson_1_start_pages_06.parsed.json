@@ -2,10 +2,118 @@
   "chapters": [
     {
       "chapterNumber": "21",
-      "title": "SOLUTIONS MODULE 23: ORGANIC COMPOUNDS",
+      "title": "SOLUTIONS",
+      "chapterLabel": "Module",
+      "pageStart": 525,
+      "pageEnd": 550,
+      "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 525,
+          "pageEnd": 525
+        },
+        {
+          "sectionNumber": "21.1",
+          "title": "How Solutions Form",
+          "pageStart": 526,
+          "pageEnd": 532
+        },
+        {
+          "sectionNumber": "21.2",
+          "title": "Concentration and Solubility",
+          "pageStart": 533,
+          "pageEnd": 537
+        },
+        {
+          "sectionNumber": "21.3",
+          "title": "Particles in Solution",
+          "pageStart": 538,
+          "pageEnd": 541
+        },
+        {
+          "sectionNumber": "21.4",
+          "title": "Dissolving Without Water",
+          "pageStart": 542,
+          "pageEnd": 546
+        },
+        {
+          "sectionNumber": "",
+          "title": "Hidden Nobel Prize Metals",
+          "pageStart": 547,
+          "pageEnd": 548
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 549,
+          "pageEnd": 550
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 549,
+          "pageEnd": 550
+        }
+      ]
+    },
+    {
+      "chapterNumber": "22",
+      "title": "ACIDS, BASES AND SALTS",
+      "chapterLabel": "Module",
+      "pageStart": 551,
+      "pageEnd": 572,
+      "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 551,
+          "pageEnd": 551
+        },
+        {
+          "sectionNumber": "22.1",
+          "title": "Acids and Bases",
+          "pageStart": 552,
+          "pageEnd": 557
+        },
+        {
+          "sectionNumber": "22.2",
+          "title": "Strength of Acids and Bases",
+          "pageStart": 558,
+          "pageEnd": 561
+        },
+        {
+          "sectionNumber": "22.3",
+          "title": "Salts",
+          "pageStart": 562,
+          "pageEnd": 568
+        },
+        {
+          "sectionNumber": "",
+          "title": "Preventing Acid Precipitation",
+          "pageStart": 569,
+          "pageEnd": 570
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 571,
+          "pageEnd": 572
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 571,
+          "pageEnd": 572
+        }
+      ]
+    },
+    {
+      "chapterNumber": "23",
+      "title": "ORGANIC COMPOUNDS",
       "chapterLabel": "Module",
       "pageStart": 573,
-      "pageEnd": 598,
+      "pageEnd": 600,
       "sections": [
         {
           "sectionNumber": "",
@@ -14,79 +122,103 @@
           "pageEnd": 573
         },
         {
-          "sectionNumber": "21.1",
-          "title": "How Solutions Form 526 Lesson 1 Simple Organic Compounds",
+          "sectionNumber": "23.1",
+          "title": "Simple Organic Compounds",
           "pageStart": 574,
           "pageEnd": 579
         },
         {
-          "sectionNumber": "21.2",
-          "title": "Concentration and Solubilty. 533 Lesson 2 Substituted Hydrocarbons.",
+          "sectionNumber": "23.2",
+          "title": "Substituted Hydrocarbons",
           "pageStart": 580,
-          "pageEnd": 580
-        },
-        {
-          "sectionNumber": "21.3",
-          "title": "Particles in Solution 538 Lesson 3 Petroleum—A Source of",
-          "pageStart": 581,
           "pageEnd": 584
         },
         {
-          "sectionNumber": "21.4",
-          "title": "Dissolving Without Water. 542 Organic Compounds.",
+          "sectionNumber": "23.3",
+          "title": "Petroleum-A Source of Organic Compounds",
           "pageStart": 585,
+          "pageEnd": 590
+        },
+        {
+          "sectionNumber": "23.4",
+          "title": "Biological Compounds",
+          "pageStart": 591,
+          "pageEnd": 596
+        },
+        {
+          "sectionNumber": "",
+          "title": "Molecular Clock Forensics",
+          "pageStart": 597,
           "pageEnd": 598
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 599,
+          "pageEnd": 600
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 599,
+          "pageEnd": 600
         }
       ]
     },
     {
-      "chapterNumber": "33",
-      "title": "GO FURTHER Data Analysis Lab",
-      "chapterLabel": "Chapter",
-      "pageStart": 599,
-      "pageEnd": 600,
-      "sections": []
-    },
-    {
-      "chapterNumber": "22",
-      "title": "ACIDS, BASES, AND SALTS",
+      "chapterNumber": "24",
+      "title": "NEW MATERIALS THROUGH CHEMISTRY",
       "chapterLabel": "Module",
       "pageStart": 601,
-      "pageEnd": 620,
+      "pageEnd": 623,
       "sections": [
         {
-          "sectionNumber": "22.1",
-          "title": "Acids and Bases. 552 (ED Claim, Evidence, Reasoning",
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
           "pageStart": 601,
           "pageEnd": 601
         },
         {
-          "sectionNumber": "22.2",
-          "title": "Strength of Acids and Bases. 558 Lesson 1 Alloys",
+          "sectionNumber": "24.1",
+          "title": "Alloys",
           "pageStart": 602,
           "pageEnd": 607
         },
         {
-          "sectionNumber": "22.3",
-          "title": "Salts 562 Lesson 2 Versatile Materials.",
+          "sectionNumber": "24.2",
+          "title": "Versatile Materials",
           "pageStart": 608,
           "pageEnd": 614
         },
         {
-          "sectionNumber": "",
-          "title": "NATURE OF SCIENCE Lesson 3 Polymers and Composites",
+          "sectionNumber": "24.3",
+          "title": "Polymers and Composites",
           "pageStart": 615,
           "pageEnd": 620
+        },
+        {
+          "sectionNumber": "",
+          "title": "Wonder Fiber",
+          "pageStart": 621,
+          "pageEnd": 622
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 623
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 623
+        },
+        {
+          "sectionNumber": "",
+          "title": "STEM UNIT 6 PROJECT",
+          "pageStart": 623
         }
       ]
-    },
-    {
-      "chapterNumber": "4",
-      "title": "Module Wrap-Up. 571 Wonder Fiber",
-      "chapterLabel": "Chapter",
-      "pageStart": 621,
-      "sections": []
     }
   ],
-  "confidence": 0.7416666666666667
+  "confidence": 0.9446808510638298
 }

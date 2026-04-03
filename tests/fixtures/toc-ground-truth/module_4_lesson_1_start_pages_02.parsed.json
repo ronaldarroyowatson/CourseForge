@@ -2,92 +2,91 @@
   "chapters": [
     {
       "chapterNumber": "4",
-      "title": "WORK AND ENERGY MODULE 7: MAGNETISM AND ITS USES",
+      "title": "WORK AND ENERGY",
       "chapterLabel": "Module",
-      "pageStart": 165,
-      "pageEnd": 188,
+      "pageStart": 87,
+      "pageEnd": 112,
       "sections": [
         {
           "sectionNumber": "",
           "title": "Claim, Evidence, Reasoning",
-          "pageStart": 165,
-          "pageEnd": 165
+          "pageStart": 87,
+          "pageEnd": 87
         },
         {
           "sectionNumber": "4.1",
-          "title": "Work and Machines 88 Lesson 1 Magnetism",
-          "pageStart": 166,
-          "pageEnd": 172
+          "title": "Work and Machines",
+          "pageStart": 88,
+          "pageEnd": 94
         },
         {
           "sectionNumber": "4.2",
-          "title": "Describing Energy. 05 Lesson 2 Electricity and Magnetism",
-          "pageStart": 173,
-          "pageEnd": 179
+          "title": "Describing Energy",
+          "pageStart": 95,
+          "pageEnd": 100
         },
         {
           "sectionNumber": "4.3",
-          "title": "Conservation of Energy. 101 Lesson 3 Producing Electric Curent.",
-          "pageStart": 180,
-          "pageEnd": 186
+          "title": "Conservation of Energy",
+          "pageStart": 101,
+          "pageEnd": 108
         },
         {
           "sectionNumber": "",
-          "title": "World's Fastest Bicycle 109 Locating Land Mines",
-          "pageStart": 187,
-          "pageEnd": 188
+          "title": "World's Fastest Bicycle",
+          "pageStart": 109,
+          "pageEnd": 110
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 111,
+          "pageEnd": 112
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 111,
+          "pageEnd": 112
         }
       ]
     },
     {
-      "chapterNumber": "4",
-      "title": "Module Wrap-Up. 111 Module Wrap-Up.",
-      "chapterLabel": "Chapter",
-      "pageStart": 189,
-      "pageEnd": 190,
-      "sections": []
-    },
-    {
       "chapterNumber": "5",
-      "title": "THERMAL ENERGY MODULE 8: ENERGY SOURCES AND",
+      "title": "THERMAL ENERGY",
       "chapterLabel": "Module",
-      "pageStart": 191,
-      "pageEnd": 212,
+      "pageStart": 113,
+      "pageEnd": 138,
       "sections": [
         {
           "sectionNumber": "5.1",
-          "title": "Temperature, Thermal Energy, G3 Claim, Evidence, Reasoning",
-          "pageStart": 191,
-          "pageEnd": 191
-        },
-        {
-          "sectionNumber": "",
-          "title": "and Heat. 1a Lesson 1 Fossil Fuels.",
-          "pageStart": 192,
-          "pageEnd": 198
+          "title": "Temperature, Thermal Energy, and Heat",
+          "pageStart": 113,
+          "pageEnd": 119
         },
         {
           "sectionNumber": "5.2",
-          "title": "Conduction, Convection, Lesson 2 Nuclear Energy.",
-          "pageStart": 199,
-          "pageEnd": 205
-        },
-        {
-          "sectionNumber": "",
-          "title": "and Radiation. 20 Lesson 3 Renewable Energy Sources.",
-          "pageStart": 206,
-          "pageEnd": 211
+          "title": "Conduction, Convection, and Radiation",
+          "pageStart": 120,
+          "pageEnd": 126
         },
         {
           "sectionNumber": "5.3",
-          "title": "Using Thermal Energy 27 Lesson 4 Environmental Impacts.",
-          "pageStart": 212
+          "title": "Using Thermal Energy",
+          "pageStart": 127,
+          "pageEnd": 136
         },
         {
           "sectionNumber": "",
-          "title": "E5) GO FURTHER Data Analysis Lab 137 E23 GO FURTHER Data Analysis Lab",
-          "pageStart": 22,
-          "pageEnd": 22
+          "title": "Module Wrap-Up",
+          "pageStart": 137,
+          "pageEnd": 138
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FUTHER Data Analysis Lab",
+          "pageStart": 137,
+          "pageEnd": 138
         }
       ]
     },
@@ -96,7 +95,7 @@
       "title": "ELECTRICITY",
       "chapterLabel": "Module",
       "pageStart": 139,
-      "pageEnd": 162,
+      "pageEnd": 186,
       "sections": [
         {
           "sectionNumber": "",
@@ -106,14 +105,14 @@
         },
         {
           "sectionNumber": "6.1",
-          "title": "Electric Charge.",
+          "title": "Electric Charge",
           "pageStart": 140,
-          "pageEnd": 153
+          "pageEnd": 147
         },
         {
           "sectionNumber": "6.2",
-          "title": "Electric Current.",
-          "pageStart": 18,
+          "title": "Electric Current",
+          "pageStart": 148,
           "pageEnd": 153
         },
         {
@@ -130,18 +129,129 @@
         },
         {
           "sectionNumber": "",
-          "title": "Module Wrap-Up.",
-          "pageStart": 163
+          "title": "Module Wrap-Up",
+          "pageStart": 163,
+          "pageEnd": 186
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 163,
+          "pageEnd": 186
         }
       ]
     },
     {
-      "chapterNumber": "3",
-      "title": "GO FURTHER Data Analysis Lab",
-      "chapterLabel": "Chapter",
-      "pageStart": 163,
-      "sections": []
+      "chapterNumber": "7",
+      "title": "MAGNETISM AND ITS USES",
+      "chapterLabel": "Module",
+      "pageStart": 187,
+      "pageEnd": 190,
+      "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 187,
+          "pageEnd": 188
+        },
+        {
+          "sectionNumber": "7.1",
+          "title": "Magnetism",
+          "pageStart": 166,
+          "pageEnd": 172
+        },
+        {
+          "sectionNumber": "7.2",
+          "title": "Electricity and Magnetism",
+          "pageStart": 173,
+          "pageEnd": 179
+        },
+        {
+          "sectionNumber": "7.3",
+          "title": "Producing Electric Current",
+          "pageStart": 180,
+          "pageEnd": 186
+        },
+        {
+          "sectionNumber": "",
+          "title": "Locating Land Mines",
+          "pageStart": 187,
+          "pageEnd": 188
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 189,
+          "pageEnd": 190
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 189,
+          "pageEnd": 190
+        }
+      ]
+    },
+    {
+      "chapterNumber": "8",
+      "title": "ENERGY SOURCES AND THE ENVIRONMENT",
+      "chapterLabel": "Module",
+      "pageStart": 191,
+      "pageEnd": 221,
+      "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 191,
+          "pageEnd": 191
+        },
+        {
+          "sectionNumber": "8.1",
+          "title": "Fossile Fuels",
+          "pageStart": 192,
+          "pageEnd": 198
+        },
+        {
+          "sectionNumber": "8.2",
+          "title": "Nuclear Energy",
+          "pageStart": 199,
+          "pageEnd": 205
+        },
+        {
+          "sectionNumber": "8.3",
+          "title": "Renewable Energy Sources",
+          "pageStart": 206,
+          "pageEnd": 211
+        },
+        {
+          "sectionNumber": "8.4",
+          "title": "Environmental Impacts",
+          "pageStart": 212,
+          "pageEnd": 218
+        },
+        {
+          "sectionNumber": "",
+          "title": "Earth Day, 1970",
+          "pageStart": 219,
+          "pageEnd": 220
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 221
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 221
+        },
+        {
+          "sectionNumber": "",
+          "title": "STEM UNIT 2 PROJECT",
+          "pageStart": 221
+        }
+      ]
     }
   ],
-  "confidence": 0.8666666666666667
+  "confidence": 0.9692307692307693
 }

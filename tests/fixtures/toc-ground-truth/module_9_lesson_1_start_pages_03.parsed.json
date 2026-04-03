@@ -2,40 +2,47 @@
   "chapters": [
     {
       "chapterNumber": "9",
-      "title": "INTRODUCTION TO WAVES MODULE 12: LIGHT",
+      "title": "INTRODUCTION TO WAVES",
       "chapterLabel": "Module",
-      "pageStart": 301,
-      "pageEnd": 326,
+      "pageStart": 225,
+      "pageEnd": 250,
+      "unitName": "Unit 3 WAVES",
       "sections": [
         {
           "sectionNumber": "",
           "title": "Claim, Evidence, Reasoning",
-          "pageStart": 301,
-          "pageEnd": 301
+          "pageStart": 225,
+          "pageEnd": 225
         },
         {
           "sectionNumber": "9.1",
-          "title": "The Nature of Waves 226 Lesson 1 The Behavior of Light",
-          "pageStart": 302,
-          "pageEnd": 306
+          "title": "The Nature of Waves",
+          "pageStart": 226,
+          "pageEnd": 230
         },
         {
           "sectionNumber": "9.2",
-          "title": "Wave Properties. 231 Lesson 2 Light and Color.",
-          "pageStart": 307,
-          "pageEnd": 311
+          "title": "Wave Properties",
+          "pageStart": 231,
+          "pageEnd": 236
         },
         {
           "sectionNumber": "9.3",
-          "title": "The Behavior of Waves 237 Lesson 3 Producing Light",
-          "pageStart": 312,
-          "pageEnd": 317
+          "title": "The Behavior of Waves",
+          "pageStart": 237,
+          "pageEnd": 248
         },
         {
           "sectionNumber": "",
-          "title": "SCIENTIFIC BREAKTHROUGHS Lesson 4 Using Light",
-          "pageStart": 318,
-          "pageEnd": 326
+          "title": "Module Wrap-up",
+          "pageStart": 249,
+          "pageEnd": 250
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 249,
+          "pageEnd": 250
         }
       ]
     },
@@ -43,31 +50,51 @@
       "chapterNumber": "10",
       "title": "SOUND",
       "chapterLabel": "Module",
-      "pageStart": 327,
-      "pageEnd": 342,
+      "pageStart": 251,
+      "pageEnd": 276,
+      "unitName": "Unit 3 WAVES",
       "sections": [
         {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 251,
+          "pageEnd": 251
+        },
+        {
           "sectionNumber": "10.1",
-          "title": "The Nature of Sound 252 GED Claim, Evidence, Reasoning",
-          "pageStart": 327,
-          "pageEnd": 327
+          "title": "The Nature of Sound",
+          "pageStart": 252,
+          "pageEnd": 256
         },
         {
           "sectionNumber": "10.2",
-          "title": "Properties of Sound. 257 Lesson 1 Mirrors",
-          "pageStart": 328,
-          "pageEnd": 334
+          "title": "Properties of Sound",
+          "pageStart": 257,
+          "pageEnd": 262
         },
         {
           "sectionNumber": "10.3",
-          "title": "Music. 263 Lesson 2 Lenses",
-          "pageStart": 335,
-          "pageEnd": 341
+          "title": "Music",
+          "pageStart": 263,
+          "pageEnd": 268
         },
         {
           "sectionNumber": "10.4",
-          "title": "Using Sound 269 Lesson 3 Optical Instruments.",
-          "pageStart": 342
+          "title": "Using Sound",
+          "pageStart": 269,
+          "pageEnd": 274
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 275,
+          "pageEnd": 276
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 275,
+          "pageEnd": 276
         }
       ]
     },
@@ -76,7 +103,8 @@
       "title": "ELECTROMAGNETIC WAVES",
       "chapterLabel": "Module",
       "pageStart": 277,
-      "pageEnd": 291,
+      "pageEnd": 300,
+      "unitName": "Unit 3 WAVES",
       "sections": [
         {
           "sectionNumber": "",
@@ -86,7 +114,7 @@
         },
         {
           "sectionNumber": "11.1",
-          "title": "What are electromagnetic",
+          "title": "What are electromagnetic waves?",
           "pageStart": 278,
           "pageEnd": 283
         },
@@ -99,16 +127,142 @@
         {
           "sectionNumber": "11.3",
           "title": "Radio Communication",
-          "pageStart": 291
+          "pageStart": 291,
+          "pageEnd": 296
         },
         {
           "sectionNumber": "",
-          "title": "A New Kind of Ray.",
-          "pageStart": 207,
-          "pageEnd": 207
+          "title": "A New Kind of Ray",
+          "pageStart": 297,
+          "pageEnd": 298
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 299,
+          "pageEnd": 300
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 299,
+          "pageEnd": 300
+        }
+      ]
+    },
+    {
+      "chapterNumber": "12",
+      "title": "LIGHT",
+      "chapterLabel": "Module",
+      "pageStart": 301,
+      "pageEnd": 326,
+      "unitName": "Unit 3 WAVES",
+      "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 301,
+          "pageEnd": 301
+        },
+        {
+          "sectionNumber": "12.1",
+          "title": "The Behavior of Light",
+          "pageStart": 302,
+          "pageEnd": 306
+        },
+        {
+          "sectionNumber": "12.2",
+          "title": "Light and Color",
+          "pageStart": 307,
+          "pageEnd": 311
+        },
+        {
+          "sectionNumber": "12.3",
+          "title": "Producing Light",
+          "pageStart": 312,
+          "pageEnd": 317
+        },
+        {
+          "sectionNumber": "12.4",
+          "title": "Using Light",
+          "pageStart": 318,
+          "pageEnd": 322
+        },
+        {
+          "sectionNumber": "",
+          "title": "Shining New Light on an Old Text",
+          "pageStart": 323,
+          "pageEnd": 324
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 325,
+          "pageEnd": 326
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 325,
+          "pageEnd": 326
+        }
+      ]
+    },
+    {
+      "chapterNumber": "13",
+      "title": "Mirrors and Lenses",
+      "chapterLabel": "Module",
+      "pageStart": 327,
+      "pageEnd": 349,
+      "unitName": "Unit 3 WAVES",
+      "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 327,
+          "pageEnd": 327
+        },
+        {
+          "sectionNumber": "13.1",
+          "title": "Mirrors",
+          "pageStart": 328,
+          "pageEnd": 334
+        },
+        {
+          "sectionNumber": "13.2",
+          "title": "Lenses",
+          "pageStart": 335,
+          "pageEnd": 341
+        },
+        {
+          "sectionNumber": "13.3",
+          "title": "Optical Instruments",
+          "pageStart": 342,
+          "pageEnd": 346
+        },
+        {
+          "sectionNumber": "",
+          "title": "The Next Telescope",
+          "pageStart": 347,
+          "pageEnd": 348
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 349
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 349
+        },
+        {
+          "sectionNumber": "",
+          "title": "STEM UNIT 3 PROJECT",
+          "pageStart": 349
         }
       ]
     }
   ],
-  "confidence": 0.7
+  "confidence": 0.9368421052631579
 }

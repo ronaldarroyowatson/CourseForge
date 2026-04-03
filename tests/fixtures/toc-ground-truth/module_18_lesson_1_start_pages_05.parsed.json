@@ -2,42 +2,63 @@
   "chapters": [
     {
       "chapterNumber": "18",
-      "title": "CHEMICAL BONDS MODULE 20: RADIOACTIVITY AND",
+      "title": "CHEMICAL BONDS",
       "chapterLabel": "Module",
-      "pageStart": 501,
-      "pageEnd": 520,
+      "pageStart": 449,
+      "pageEnd": 472,
+      "unitName": "Unit 5",
       "sections": [
         {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 449,
+          "pageEnd": 449
+        },
+        {
           "sectionNumber": "18.1",
-          "title": "Stability in Bonding 450 =) Claim, Evidence, Reasoning",
-          "pageStart": 501,
-          "pageEnd": 501
+          "title": "Stability in Bonding",
+          "pageStart": 450,
+          "pageEnd": 454
         },
         {
           "sectionNumber": "18.2",
-          "title": "Types of Bonds. 455 Lesson 1 The Nucleus",
-          "pageStart": 502,
-          "pageEnd": 506
+          "title": "Types of Bonds",
+          "pageStart": 455,
+          "pageEnd": 461
         },
         {
           "sectionNumber": "18.3",
-          "title": "Writing Formulas and Lesson 2 Nuclear Decays and Reactions",
-          "pageStart": 507,
-          "pageEnd": 513
+          "title": "Writing Formulas and Naming Compounds",
+          "pageStart": 462,
+          "pageEnd": 468
         },
         {
           "sectionNumber": "",
-          "title": "ENGRMEERING A TECHNOLOGY and Applications",
-          "pageStart": 514,
-          "pageEnd": 520
+          "title": "Nonstick Surfaces",
+          "pageStart": 469,
+          "pageEnd": 470
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 471,
+          "pageEnd": 472
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 471,
+          "pageEnd": 472
         }
       ]
     },
     {
       "chapterNumber": "19",
-      "title": "CHEMICAL REACTIONS © STEM UNIT 5 PROJECT",
+      "title": "CHEMICAL REACTIONS",
       "chapterLabel": "Module",
-      "pageStart": 521,
+      "pageStart": 473,
+      "pageEnd": 500,
+      "unitName": "Unit 5",
       "sections": [
         {
           "sectionNumber": "",
@@ -47,35 +68,103 @@
         },
         {
           "sectionNumber": "19.1",
-          "title": "Chemical Changes a7",
+          "title": "Chemical Charges",
           "pageStart": 474,
-          "pageEnd": 474
+          "pageEnd": 481
         },
         {
           "sectionNumber": "19.2",
-          "title": "Classifying Chemicals Reactions. a82",
-          "pageStart": 475,
+          "title": "Classifying Chemicals Reactions",
+          "pageStart": 482,
           "pageEnd": 485
         },
         {
           "sectionNumber": "19.3",
-          "title": "Chemical Reactions and Energy.",
+          "title": "Chemical Reactions and Energy",
           "pageStart": 486,
-          "pageEnd": 496
+          "pageEnd": 489
         },
         {
           "sectionNumber": "19.4",
-          "title": "Reaction Rates and Equilibrium.",
-          "pageStart": 40,
+          "title": "Reaction Rates and Equilibrium",
+          "pageStart": 490,
           "pageEnd": 496
         },
         {
           "sectionNumber": "",
-          "title": "Lavoisier.",
-          "pageStart": 497
+          "title": "Lavosier",
+          "pageStart": 497,
+          "pageEnd": 498
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 499,
+          "pageEnd": 500
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 499,
+          "pageEnd": 500
+        }
+      ]
+    },
+    {
+      "chapterNumber": "20",
+      "title": "RADIOACTIVITY AND NUCLEAR REACTIONS",
+      "chapterLabel": "Module",
+      "pageStart": 501,
+      "pageEnd": 521,
+      "unitName": "Unit 5",
+      "sections": [
+        {
+          "sectionNumber": "",
+          "title": "Claim, Evidence, Reasoning",
+          "pageStart": 501,
+          "pageEnd": 501
+        },
+        {
+          "sectionNumber": "20.1",
+          "title": "The Nucleus",
+          "pageStart": 502,
+          "pageEnd": 506
+        },
+        {
+          "sectionNumber": "20.2",
+          "title": "Nuclear Decays and Reactions",
+          "pageStart": 507,
+          "pageEnd": 513
+        },
+        {
+          "sectionNumber": "20.3",
+          "title": "Radiation Technologies and Applications",
+          "pageStart": 514,
+          "pageEnd": 518
+        },
+        {
+          "sectionNumber": "",
+          "title": "The Atomic Bomb",
+          "pageStart": 519,
+          "pageEnd": 520
+        },
+        {
+          "sectionNumber": "",
+          "title": "Module Wrap-Up",
+          "pageStart": 521
+        },
+        {
+          "sectionNumber": "",
+          "title": "SEP GO FURTHER Data Analysis Lab",
+          "pageStart": 521
+        },
+        {
+          "sectionNumber": "",
+          "title": "STEM UNIT 5 PROJECT",
+          "pageStart": 521
         }
       ]
     }
   ],
-  "confidence": 0.7217391304347827
+  "confidence": 0.9297297297297298
 }

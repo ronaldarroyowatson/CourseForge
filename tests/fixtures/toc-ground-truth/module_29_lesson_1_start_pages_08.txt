@@ -1,22 +1,43 @@
-MODULE 29: THE EARTH-MOON-SUN SYSTEM MODULE 31: STARS AND GALAXIES
-ENCOUNTER THE PHENOMENON ENCOUNTER THE PHENOMENON
-3 Claim, Evidence, Reasoning 761 @3 Claim, Evidence, Reasoning 819
-Lesson 1 Earth in Space. 762 Lesson 1 Observing the Universe 820
-Lesson 2 Time and Seasons. 767 Lesson 2 Evolution of Stars. 825
-Lesson 3 Earth's Moon 773 Lesson 3 Galaxies and the Milky Way. 832
-STEM AT WORK Lesson 4 Cosmology. 837
-To the Moon and Back 784 SCIENTIFIC BREAKTHROUGHS
-4 Module Wrap-Up. 786 An Astronomical Debate. 841
-3 GO FURTHER Data Analysis Lab 786 4 Module Wrap-Up. 843
-3 GO FURTHER Data Analysis Lab 843
-MODULE 30: THE SOLAR SYSTEM © STEM UNIT 8 PROJECT 843
+UNIT 8
+SPACE
+
 ENCOUNTER THE PHENOMENON
-(ED Claim, Evidence, Reasoning 788
+What technology do we use to explore the universe?
+
+STEM UNIT 8 PROJECT 759
+
+MODULE 29: THE EARTH-MOON-SUN SYSTEM
+ENCOUNTER THE PHENOMENON
+CER Claim, Evidence, Reasoning 761
+Lesson 1 Earth in Space 762
+Lesson 2 Time and Seasons 767
+Lesson 3 Earth's Moon 773
+STEM AT WORK
+To the Moon and Back 784
+Module Wrap-Up 786
+SEP GO FURTHER Data Analysis Lab 786
+
+MODULE 30: THE SOLAR SYSTEM
+ENCOUNTER THE PHENOMENON
+CER Claim, Evidence, Reasoning 788
 Lesson 1 Planetary Motion 789
 Lesson 2 The Inner Planets 795
 Lesson 3 The Outer Planets 802
-Lesson 4 Lie in the Solar System 809
-SCIENCE & TECHNOLOGY.
+Lesson 4 Life in the Solar System 809
+SCIENCE & TECHNOLOGY
 Killer Asteroids 815
-Module Wrap-Up. 817
-E39 GO FURTHER Data Analysis Lab 817
+Module Wrap-Up 817
+SEP GO FURTHER Data Analysis Lab 817
+
+MODULE 31: STARS AND THE GALAXIES
+ENCOUNTER THE PHENOMENON
+CER Claim, Evidence, Reasoning 819
+Lesson 1 Observing the Universe 820
+Lesson 2 Evolution of Stars 825
+Lesson 3 Galaxies and the Milky Way 832
+Lesson 4 Cosmology 837
+SCIENTIFIC BREAKTHROUGHS
+An Astronomical Debate 841
+Module Wrap-up 843
+SEP GO FURTHER Data Analysis Lab 843
+STEM UNIT 8 PROJECT 843

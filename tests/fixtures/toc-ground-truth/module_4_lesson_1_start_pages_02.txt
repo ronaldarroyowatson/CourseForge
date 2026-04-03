@@ -1,33 +1,56 @@
-MODULE 4: WORK AND ENERGY MODULE 7: MAGNETISM AND ITS USES
-ENCOUNTER THE PHENOMENON ENCOUNTER THE PHENOMENON
-3 Claim, Evidence, Reasoning 87 3 Claim, Evidence, Reasoning 165
-Lesson 1 Work and Machines 88 Lesson 1 Magnetism 166
-Lesson 2 Describing Energy. 05 Lesson 2 Electricity and Magnetism 173
-Lesson 3 Conservation of Energy. 101 Lesson 3 Producing Electric Curent. 180
-‘SCIENTIFIC BREAKTHROUGHS STEM AT WORK
-World's Fastest Bicycle 109 Locating Land Mines 187
-4 Module Wrap-Up. 111 Module Wrap-Up. 189
-€ GO FURTHER Data Analysis Lab 111 EZ) GO FURTHER Data Analysis Lab 189
-MODULE 5: THERMAL ENERGY MODULE 8: ENERGY SOURCES AND
-ENCOUNTER THE PHENOMENON THE ENVIRONMENT
-ED Claim, Evidence, Reasoning 113 ENCOUNTER THE PHENOMENON
-Lesson 1 Temperature, Thermal Energy, G3 Claim, Evidence, Reasoning 191
-and Heat. 1a Lesson 1 Fossil Fuels. 192
-Lesson 2 Conduction, Convection, Lesson 2 Nuclear Energy. 199
-and Radiation. 20 Lesson 3 Renewable Energy Sources. 206
-Lesson 3 Using Thermal Energy 27 Lesson 4 Environmental Impacts. 212
-‘SCIENCE & SOCIETY ‘SCIENCE & SOCIETY
-“20 Degrees Cooler Inside” 5 For Day, 1970. so
-8 Module Wrap-Up. 137 8 ode Wrap Up on
-E5) GO FURTHER Data Analysis Lab 137 E23 GO FURTHER Data Analysis Lab 22
-@ STEM UNIT 2 PROJECT 221
+MODULE 4: WORK AND ENERGY
+ENCOUNTER THE PHENOMENON
+CER Claim, Evidence, Reasoning 87
+Lesson 1 Work and Machines 88
+Lesson 2 Describing Energy 95
+Lesson 3 Conservation of Energy 101
+SCIENTIFIC BREAKTHROUGHS
+World's Fastest Bicycle 109
+Module Wrap-Up 111
+SEP GO FURTHER Data Analysis Lab 111
+
+MODULE 5: THERMAL ENERGY
+ENCOUNTER THE PHENOMENON
+CER Claim, Evidence, Reasoning
+Lesson 1 Temperature, Thermal Energy, and Heat 113
+Lesson 2 Conduction, Convection, and Radiation 120
+Lesson 3 Using Thermal Energy 127
+SCIENCE & SOCIETY
+"20 Degrees Cooler Inside!" 135
+Module Wrap-Up 137
+SEP GO FUTHER Data Analysis Lab 137
+
 MODULE 6: ELECTRICITY
 ENCOUNTER THE PHENOMENON
-(ED Claim, Evidence, Reasoning 139
-Lesson 1 Electric Charge. 140
-Lesson 2 Electric Current. 18
+CER Claim, Evidence, Reasoning 139
+Lesson 1 Electric Charge 140
+Lesson 2 Electric Current 148
 Lesson 3 More Complex Circuits 154
-‘SCIENTIFIC BREAKTHROUGHS
+SCIENTIFIC BREAKTHROUGHS
 War of the Currents 161
-Module Wrap-Up. 163
-3 GO FURTHER Data Analysis Lab 163
+Module Wrap-Up 163
+SEP GO FURTHER Data Analysis Lab 163
+
+MODULE 7: MAGNETISM AND ITS USES
+ENCOUNTER THE PHENOMENON
+CER Claim, Evidence, Reasoning 187
+Lesson 1 Magnetism 166
+Lesson 2 Electricity and Magnetism 173
+Lesson 3 Producing Electric Current 180
+STEM AT WORK
+Locating Land Mines 187
+Module Wrap-Up 189
+SEP GO FURTHER Data Analysis Lab 189
+
+MODULE 8: ENERGY SOURCES AND THE ENVIRONMENT
+ENCOUNTER THE PHENOMENON
+CER Claim, Evidence, Reasoning 191
+Lesson 1 Fossile Fuels 192
+Lesson 2 Nuclear Energy 199
+Lesson 3 Renewable Energy Sources 206
+Lesson 4 Environmental Impacts 212
+SCIENCE & SOCIETY
+Earth Day, 1970 219
+Module Wrap-Up 221
+SEP GO FURTHER Data Analysis Lab 221
+STEM UNIT 2 PROJECT 221

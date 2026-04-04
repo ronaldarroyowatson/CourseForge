@@ -555,8 +555,6 @@ describe("textbookAutoExtractionService", () => {
         "",
         "ISBN",
         "978-0-07-671685-2",
-        "Additional ISBNs (comma separated)",
-        "",
         "Related ISBNs (typed)",
         "Use this when the copyright page lists student, teacher, digital, workbook, or assessment ISBNs separately.",
         "+ Add Related ISBN",
@@ -872,6 +870,59 @@ describe("textbookAutoExtractionService", () => {
 
       // Check that flattened chapters list is also present
       expect(parsed.chapters).toHaveLength(4);
+    });
+
+    it("detects unit numbers and titles from OCR-variant headings without breaking chapter/section parsing", () => {
+      const parsed = parseTocFromOcrText([
+        "UNIT1 Foundations of Math",
+        "Chapter 1 Integers 12",
+        "1.1 Absolute Value 14",
+        "1.2 Number Lines 20",
+        "UNIT 2: Expressions and Equations",
+        "Chapter 2 Expressions 28",
+        "2.1 Variables and Terms 30",
+      ].join("\n"));
+
+      expect(parsed.units).toBeDefined();
+      expect(parsed.units?.map((unit) => unit.unitNumber)).toEqual(["1", "2"]);
+      expect(parsed.units?.[0].title).toContain("Foundations");
+      expect(parsed.units?.[1].title).toContain("Expressions and Equations");
+
+      expect(parsed.units?.[0].chapters.map((chapter) => chapter.chapterNumber)).toEqual(["1"]);
+      expect(parsed.units?.[1].chapters.map((chapter) => chapter.chapterNumber)).toEqual(["2"]);
+
+      expect(parsed.chapters).toHaveLength(2);
+      expect(parsed.chapters[0].sections.map((section) => section.sectionNumber)).toEqual(["1.1", "1.2"]);
+      expect(parsed.chapters[1].sections.map((section) => section.sectionNumber)).toEqual(["2.1"]);
+    });
+
+    it("preserves downstream hierarchy when units are stitched across page boundaries", () => {
+      const firstPage = parseTocFromOcrText([
+        "Unit 1: Foundations",
+        "Chapter 1 Integers 12",
+        "1.1 Absolute Value 14",
+      ].join("\n"));
+
+      const secondPage = parseTocFromOcrText([
+        "Unit 1: Foundations",
+        "Chapter 2 Expressions 28",
+        "2.1 Variables 30",
+        "Unit 2: Functions",
+        "Chapter 3 Linear Functions 40",
+        "3.1 Slope 42",
+      ].join("\n"));
+
+      const stitched = stitchTocPages([
+        { pageIndex: 0, chapters: firstPage.chapters, units: firstPage.units, confidence: firstPage.confidence },
+        { pageIndex: 1, chapters: secondPage.chapters, units: secondPage.units, confidence: secondPage.confidence },
+      ]);
+
+      expect(stitched.units).toBeDefined();
+      expect(stitched.units?.map((unit) => unit.unitNumber)).toEqual(["1", "2"]);
+      expect(stitched.units?.[0].chapters.map((chapter) => chapter.chapterNumber)).toEqual(["1", "2"]);
+      expect(stitched.units?.[1].chapters.map((chapter) => chapter.chapterNumber)).toEqual(["3"]);
+      expect(stitched.chapters.find((chapter) => chapter.chapterNumber === "2")?.sections[0].sectionNumber).toBe("2.1");
+      expect(stitched.chapters.find((chapter) => chapter.chapterNumber === "3")?.sections[0].sectionNumber).toBe("3.1");
     });
 
     it("handles malformed unit lines and falls back gracefully", () => {

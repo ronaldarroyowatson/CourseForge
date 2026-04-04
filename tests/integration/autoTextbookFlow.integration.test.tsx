@@ -59,6 +59,45 @@ const coverServiceMocks = vi.hoisted(() => ({
   uploadTextbookCoverFromDataUrl: vi.fn<(textbookId: string, dataUrl: string) => Promise<string>>(async (textbookId) => `cover://${textbookId}`),
 }));
 
+type MockSyncNowResult = {
+  success: boolean;
+  message: string;
+  retryable: boolean;
+  permissionDenied: boolean;
+  throttled: boolean;
+  writeLoopTriggered: boolean;
+  writeBudgetExceeded: boolean;
+  writeCount: number;
+  writeBudgetLimit: number;
+  readCount: number;
+  readBudgetLimit: number;
+  readBudgetExceeded: boolean;
+  retryLimit: number;
+  errorCode: string | null;
+  pendingCount: number;
+};
+
+const syncServiceMocks = vi.hoisted(() => ({
+  findCloudTextbookByISBN: vi.fn<(userId: string, isbnRaw: string) => Promise<null>>(async () => null),
+  syncNow: vi.fn<(deps?: unknown) => Promise<MockSyncNowResult>>(async () => ({
+    success: true,
+    message: "Cloud sync completed.",
+    retryable: false,
+    permissionDenied: false,
+    throttled: false,
+    writeLoopTriggered: false,
+    writeBudgetExceeded: false,
+    writeCount: 0,
+    writeBudgetLimit: 500,
+    readCount: 0,
+    readBudgetLimit: 5000,
+    readBudgetExceeded: false,
+    retryLimit: 3,
+    errorCode: null,
+    pendingCount: 0,
+  })),
+}));
+
 vi.mock("../../src/core/services/coverImageService", () => ({
   uploadTextbookCoverFromDataUrl: (textbookId: string, dataUrl: string) => coverServiceMocks.uploadTextbookCoverFromDataUrl(textbookId, dataUrl),
   uploadTextbookCoverImage: vi.fn(async () => "cover://mock"),
@@ -96,6 +135,11 @@ vi.mock("../../src/core/services/metadataExtractionPipelineService", async () =>
   };
 });
 
+vi.mock("../../src/core/services/syncService", () => ({
+  findCloudTextbookByISBN: (userId: string, isbnRaw: string) => syncServiceMocks.findCloudTextbookByISBN(userId, isbnRaw),
+  syncNow: (deps?: unknown) => syncServiceMocks.syncNow(deps),
+}));
+
 describe("auto textbook flow integration", () => {
   beforeEach(() => {
     repositoryMocks.createTextbook.mockClear();
@@ -118,6 +162,34 @@ describe("auto textbook flow integration", () => {
     repositoryMocks.removeSection.mockClear();
     repositoryMocks.removeChapter.mockClear();
     coverServiceMocks.uploadTextbookCoverFromDataUrl.mockClear();
+    syncServiceMocks.findCloudTextbookByISBN.mockClear();
+    syncServiceMocks.syncNow.mockClear();
+
+    repositoryMocks.findTextbookByISBN.mockResolvedValue(undefined);
+    repositoryMocks.fetchChaptersByTextbookId.mockResolvedValue([]);
+    repositoryMocks.fetchSectionsByChapterId.mockResolvedValue([]);
+    repositoryMocks.fetchVocabTermsBySectionId.mockResolvedValue([]);
+    repositoryMocks.fetchEquationsBySectionId.mockResolvedValue([]);
+    repositoryMocks.fetchConceptsBySectionId.mockResolvedValue([]);
+    repositoryMocks.fetchKeyIdeasBySectionId.mockResolvedValue([]);
+    syncServiceMocks.findCloudTextbookByISBN.mockResolvedValue(null);
+    syncServiceMocks.syncNow.mockResolvedValue({
+      success: true,
+      message: "Cloud sync completed.",
+      retryable: false,
+      permissionDenied: false,
+      throttled: false,
+      writeLoopTriggered: false,
+      writeBudgetExceeded: false,
+      writeCount: 0,
+      writeBudgetLimit: 500,
+      readCount: 0,
+      readBudgetLimit: 5000,
+      readBudgetExceeded: false,
+      retryLimit: 3,
+      errorCode: null,
+      pendingCount: 0,
+    });
 
     useUIStore.setState({
       selectedTextbook: null,
@@ -246,7 +318,7 @@ describe("auto textbook flow integration", () => {
     }
   });
 
-  it("restores additional and typed ISBN metadata when resuming a queued draft", async () => {
+  it("restores typed related ISBN metadata when resuming a queued draft", async () => {
     const now = Date.now();
     window.localStorage.setItem(
       AUTO_SESSION_DRAFTS_KEY,
@@ -270,7 +342,6 @@ describe("auto textbook flow integration", () => {
             publicationYear: "2021",
             copyrightYear: "2021",
             isbnRaw: "9780076716852",
-            additionalIsbnsCsv: "9780076770007",
             seriesName: "",
             publisher: "McGraw Hill",
             publisherLocation: "",
@@ -295,10 +366,6 @@ describe("auto textbook flow integration", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     fireEvent.click(screen.getByRole("button", { name: /Show optional fields/i }));
-
-    await waitFor(() => {
-      expect((screen.getByLabelText(/Additional ISBNs \(comma separated\)/i) as HTMLInputElement).value).toContain("9780076770007");
-    });
 
     expect((screen.getByDisplayValue("Teacher Edition") as HTMLInputElement).value).toBe("Teacher Edition");
   });
@@ -327,7 +394,6 @@ describe("auto textbook flow integration", () => {
             publicationYear: "2026",
             copyrightYear: "2026",
             isbnRaw: "",
-            additionalIsbnsCsv: "",
             seriesName: "",
             publisher: "McGraw Hill",
             publisherLocation: "",
@@ -390,6 +456,47 @@ describe("auto textbook flow integration", () => {
     expect(await screen.findByText(/Live TOC Structure Preview/i)).toBeInTheDocument();
     expect(screen.getAllByText(/MATTER/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Capture TOC Page" })).toBeInTheDocument();
+  });
+
+  it("removes legacy TOC-end buttons and uses Save Textbook to Cloud", () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+          ocrDraft: "Copyright 2026",
+          metadataForm: {
+            title: "Cloud Algebra",
+            grade: "8",
+            gradeBand: "7-9",
+            subject: "Math",
+            edition: "2",
+            publicationYear: "2026",
+            copyrightYear: "2026",
+            isbnRaw: "9781402894626",
+          },
+          tocResult: {
+            confidence: 0.92,
+            chapters: [
+              {
+                chapterNumber: "1",
+                title: "Integers",
+                pageStart: 10,
+                pageEnd: 20,
+                sections: [{ sectionNumber: "1.1", title: "Absolute Value", pageStart: 10, pageEnd: 14 }],
+              },
+            ],
+          },
+          bypassImageModeration: true,
+        }}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "Confirm and Save Textbook" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save TOC to Server" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Textbook to Cloud" })).toBeInTheDocument();
   });
 
   it("limits unfinished auto captures to three queue slots and allows deleting a draft to reopen capacity", async () => {
@@ -670,15 +777,15 @@ describe("auto textbook flow integration", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
 
     expect(await screen.findByText(/Existing textbook found:/i)).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Confirm and Save Textbook" })).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "Save Textbook to Cloud" })).not.toBeDisabled();
     });
 
     fireEvent.change(screen.getByLabelText("Resolution mode"), { target: { value: "merge_dedupe" } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
 
     await waitFor(() => {
       expect(repositoryMocks.editTextbook).toHaveBeenCalledWith(
@@ -706,6 +813,7 @@ describe("auto textbook flow integration", () => {
     expect(repositoryMocks.removeChapter).not.toHaveBeenCalled();
     expect(repositoryMocks.removeSection).not.toHaveBeenCalled();
     expect(coverServiceMocks.uploadTextbookCoverFromDataUrl).toHaveBeenCalledWith("tb-existing", validCoverDataUrl);
+    expect(syncServiceMocks.syncNow).toHaveBeenCalled();
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
@@ -787,15 +895,15 @@ describe("auto textbook flow integration", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
 
     expect(await screen.findByText(/Existing textbook found:/i)).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Confirm and Save Textbook" })).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "Save Textbook to Cloud" })).not.toBeDisabled();
     });
 
     fireEvent.change(screen.getByLabelText("Resolution mode"), { target: { value: "overwrite_auto" } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
 
     await waitFor(() => {
       expect(repositoryMocks.removeSection).toHaveBeenCalledWith("sec-legacy");
@@ -825,7 +933,211 @@ describe("auto textbook flow integration", () => {
     );
     expect(repositoryMocks.editChapter).not.toHaveBeenCalled();
     expect(repositoryMocks.editSection).not.toHaveBeenCalled();
+    expect(syncServiceMocks.syncNow).toHaveBeenCalled();
     expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Save Locally Only on homepage only and not at TOC-end", () => {
+    render(<TextbookForm onSaved={() => undefined} />);
+    expect(screen.getByRole("button", { name: "Save Locally Only" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Auto \(Recommended\)/i }));
+    expect(screen.queryByRole("button", { name: "Save Locally Only" })).not.toBeInTheDocument();
+  });
+
+  it("saves in local-only mode without cloud upload sync", async () => {
+    const onSaved = vi.fn();
+    render(
+      <AutoTextbookSetupFlow
+        saveMode="local"
+        onSaved={onSaved}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+          ocrDraft: "Copyright 2026",
+          metadataForm: {
+            title: "Offline Biology",
+            grade: "9",
+            gradeBand: "9-10",
+            subject: "Science",
+            edition: "1",
+            publicationYear: "2026",
+            copyrightYear: "2026",
+            isbnRaw: "9781402894001",
+          },
+          tocResult: {
+            confidence: 0.9,
+            chapters: [
+              {
+                chapterNumber: "1",
+                title: "Cells",
+                pageStart: 1,
+                pageEnd: 12,
+                sections: [{ sectionNumber: "1.1", title: "Cell Theory", pageStart: 1, pageEnd: 5 }],
+              },
+            ],
+          },
+          bypassImageModeration: true,
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook Locally" }));
+
+    await waitFor(() => {
+      expect(repositoryMocks.createTextbook).toHaveBeenCalled();
+      const firstCreateCall = repositoryMocks.createTextbook.mock.calls.at(0)?.[0];
+      expect(firstCreateCall).toEqual(
+        expect.objectContaining({
+          title: "Offline Biology",
+          cloudSyncBlockedReason: "user_blocked",
+        })
+      );
+    });
+    expect(syncServiceMocks.syncNow).not.toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows cloud upload progress message and refreshes library callback on successful upload", async () => {
+    let resolveSync!: (value: MockSyncNowResult) => void;
+    const deferredSync = new Promise<MockSyncNowResult>((resolve) => {
+      resolveSync = resolve;
+    });
+    syncServiceMocks.syncNow.mockImplementationOnce(() => deferredSync);
+    const onSaved = vi.fn();
+
+    render(
+      <AutoTextbookSetupFlow
+        saveMode="cloud"
+        onSaved={onSaved}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+          ocrDraft: "Copyright 2026",
+          metadataForm: {
+            title: "Cloud Chemistry",
+            grade: "10",
+            gradeBand: "10-11",
+            subject: "Science",
+            edition: "1",
+            publicationYear: "2026",
+            copyrightYear: "2026",
+            isbnRaw: "9781402894002",
+          },
+          tocResult: {
+            confidence: 0.9,
+            chapters: [
+              {
+                chapterNumber: "1",
+                title: "Atoms",
+                pageStart: 2,
+                pageEnd: 18,
+                sections: [{ sectionNumber: "1.1", title: "Elements", pageStart: 2, pageEnd: 8 }],
+              },
+            ],
+          },
+          bypassImageModeration: true,
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
+    expect(screen.getAllByText("Uploading textbook to cloud...").length).toBeGreaterThan(0);
+
+    await waitFor(() => {
+      expect(syncServiceMocks.syncNow).toHaveBeenCalledTimes(1);
+    });
+
+    resolveSync({
+      success: true,
+      message: "Cloud sync completed.",
+      retryable: false,
+      permissionDenied: false,
+      throttled: false,
+      writeLoopTriggered: false,
+      writeBudgetExceeded: false,
+      writeCount: 0,
+      writeBudgetLimit: 500,
+      readCount: 0,
+      readBudgetLimit: 5000,
+      readBudgetExceeded: false,
+      retryLimit: 3,
+      errorCode: null,
+      pendingCount: 0,
+    });
+
+    await waitFor(() => {
+      expect(onSaved).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("supports adding missing hierarchy levels and preserving downstream structure", async () => {
+    render(
+      <AutoTextbookSetupFlow
+        saveMode="local"
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+          ocrDraft: "Copyright 2026",
+          metadataForm: {
+            title: "Hierarchy Test",
+            grade: "8",
+            gradeBand: "7-9",
+            subject: "Math",
+            edition: "1",
+            publicationYear: "2026",
+            copyrightYear: "2026",
+            isbnRaw: "9781402894003",
+          },
+          tocResult: {
+            confidence: 0.9,
+            chapters: [
+              {
+                chapterNumber: "1",
+                title: "Integers",
+                sections: [{ sectionNumber: "1.1", title: "Absolute Value", pageStart: 10, pageEnd: 14 }],
+              },
+              {
+                chapterNumber: "2",
+                title: "Expressions",
+                sections: [{ sectionNumber: "2.1", title: "Variables", pageStart: 20, pageEnd: 25 }],
+              },
+            ],
+          },
+          bypassImageModeration: true,
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Missing Hierarchy Level" }));
+
+    fireEvent.change(screen.getByLabelText("Hierarchy Level"), { target: { value: "unit" } });
+    fireEvent.change(screen.getByLabelText("Number"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Foundations" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Hierarchy Level" }));
+
+    fireEvent.change(screen.getByLabelText("Hierarchy Level"), { target: { value: "chapter" } });
+    fireEvent.change(screen.getByLabelText("Number"), { target: { value: "3" } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Functions" } });
+    fireEvent.change(screen.getByLabelText("Unit Assignment"), { target: { value: "Unit 1 Foundations" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Hierarchy Level" }));
+
+    expect(screen.getByDisplayValue("Functions")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Hierarchy Level"), { target: { value: "subsection" } });
+    fireEvent.change(screen.getByLabelText("Parent Chapter"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Parent Section"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Number"), { target: { value: "1.1.1" } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Absolute Value Word Problems" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Hierarchy Level" }));
+
+    expect(screen.getByDisplayValue("1.1.1")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Absolute Value Word Problems")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2.1")).toBeInTheDocument();
   });
 
   it("builds live TOC hierarchy preview with computed ranges from OCR text", async () => {
@@ -865,7 +1177,7 @@ describe("auto textbook flow integration", () => {
     expect(screen.getAllByText(/pp\. 4-11/i).length).toBeGreaterThan(0);
   });
 
-  it("shows an explicit Save TOC to Server action after finishing TOC", async () => {
+  it("shows Save Textbook to Cloud action after finishing TOC", async () => {
     render(
       <AutoTextbookSetupFlow
         onSaved={() => undefined}
@@ -895,6 +1207,6 @@ describe("auto textbook flow integration", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Save TOC to Server" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Textbook to Cloud" })).toBeInTheDocument();
   });
 });

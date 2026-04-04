@@ -988,7 +988,7 @@ export function isTextbookCloudSyncBlocked(textbook: CourseForgeEntityMap["textb
     return false;
   }
 
-  if (textbook.cloudSyncBlockedReason === "blocked_content") {
+  if (textbook.cloudSyncBlockedReason === "blocked_content" || textbook.cloudSyncBlockedReason === "user_blocked") {
     return true;
   }
 

@@ -32,6 +32,8 @@ import {
   type ParsedTocResult,
   type TocPage,
   type TocChapter,
+  type TocSection,
+  type TocUnit,
 } from "../../../core/services/textbookAutoExtractionService";
 import {
   autosaveToc,
@@ -49,6 +51,7 @@ import {
   saveCorrectionRecord,
   type MetadataResult,
 } from "../../../core/services/metadataCorrectionLearningService";
+import { syncNow } from "../../../core/services/syncService";
 import {
   extractMetadataWithOcrFallbackFromDataUrl,
   type MetadataPipelineResult,
@@ -68,6 +71,7 @@ const RELATED_ISBN_TYPES: RelatedIsbnType[] = ["student", "teacher", "digital", 
 
 interface AutoTextbookSetupFlowProps {
   runtime?: "webapp" | "extension";
+  saveMode?: "cloud" | "local";
   onSaved: () => void;
   onSwitchToManual: () => void;
   testingSeedState?: {
@@ -100,12 +104,31 @@ interface UploadPreviewState {
   pipelineResult: MetadataPipelineResult | null;
 }
 
+interface TocCaptureFingerprint {
+  image: string;
+  text: string;
+}
+
 interface CaptureResult {
   imageDataUrl: string;
   ocrText: string;
   ocrProviderId: string;
   metadataResult: MetadataResult | null;
   pipelineResult: MetadataPipelineResult | null;
+}
+
+function fingerprintText(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(16);
+}
+
+function normalizeOcrForFingerprint(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function describeMetadataCaptureStep(step: "cover" | "title"): string {
@@ -135,7 +158,6 @@ interface MetadataFormState {
   publicationYear: string;
   copyrightYear: string;
   isbnRaw: string;
-  additionalIsbnsCsv: string;
   seriesName: string;
   publisher: string;
   publisherLocation: string;
@@ -144,6 +166,8 @@ interface MetadataFormState {
   authorsCsv: string;
   tocExtractionConfidence: string;
 }
+
+type MissingHierarchyLevel = "unit" | "chapter" | "section" | "subsection";
 
 const SUBJECTS = [
   "ELA",
@@ -172,7 +196,6 @@ const FORM_TO_METADATA_FIELD: Partial<Record<keyof MetadataFormState, AutoMetada
   edition: "edition",
   copyrightYear: "copyrightYear",
   isbnRaw: "isbn",
-  additionalIsbnsCsv: "additionalIsbns",
   seriesName: "seriesName",
   publisher: "publisher",
   publisherLocation: "publisherLocation",
@@ -491,7 +514,6 @@ function toMetadataFormState(metadata: AutoTextbookMetadata, tocConfidence: numb
     publicationYear: metadata.copyrightYear?.toString() ?? "",
     copyrightYear: metadata.copyrightYear?.toString() ?? "",
     isbnRaw: metadata.isbn ?? "",
-    additionalIsbnsCsv: (metadata.additionalIsbns ?? []).join(", "),
     seriesName: metadata.seriesName ?? "",
     publisher: metadata.publisher ?? "",
     publisherLocation: metadata.publisherLocation ?? "",
@@ -503,10 +525,6 @@ function toMetadataFormState(metadata: AutoTextbookMetadata, tocConfidence: numb
 }
 
 function fromMetadataFormState(form: MetadataFormState): AutoTextbookMetadata {
-  const additionalIsbns = form.additionalIsbnsCsv
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
   const authors = form.authorsCsv
     .split(",")
     .map((entry) => entry.trim())
@@ -519,7 +537,6 @@ function fromMetadataFormState(form: MetadataFormState): AutoTextbookMetadata {
     subject: form.subject.trim() || undefined,
     edition: form.edition.trim() || undefined,
     isbn: form.isbnRaw.trim() || undefined,
-    additionalIsbns: additionalIsbns.length > 0 ? additionalIsbns : undefined,
     seriesName: form.seriesName.trim() || undefined,
     publisher: form.publisher.trim() || undefined,
     publisherLocation: form.publisherLocation.trim() || undefined,
@@ -619,6 +636,18 @@ function buildSectionNotes(pageStart: number | undefined, pageEnd: number | unde
 function metadataResultToAutoMetadata(metadata: MetadataResult): AutoTextbookMetadata {
   const rawExtracted = extractMetadataFromOcrText(metadata.rawText);
   const inferredSubject = metadata.subject ?? rawExtracted.subject ?? null;
+  const typedRelated = Array.isArray(metadata.relatedIsbns)
+    ? metadata.relatedIsbns.filter((entry): entry is RelatedIsbn => Boolean(entry?.isbn?.trim()))
+    : [];
+  const typedRelatedByIsbn = new Set(typedRelated.map((entry) => entry.isbn.trim()));
+  const relatedFromLegacyAdditional = Array.isArray(metadata.additionalIsbns)
+    ? metadata.additionalIsbns
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0 && !typedRelatedByIsbn.has(entry))
+      .map((isbn) => ({ isbn, type: "other" as const }))
+    : [];
+  const normalizedRelated = [...typedRelated, ...relatedFromLegacyAdditional];
+
   return {
     title: metadata.title ?? rawExtracted.title ?? undefined,
     subtitle: metadata.subtitle ?? rawExtracted.subtitle ?? undefined,
@@ -630,8 +659,7 @@ function metadataResultToAutoMetadata(metadata: MetadataResult): AutoTextbookMet
     subject: inferredSubject ?? undefined,
     copyrightYear: metadata.copyrightYear ?? rawExtracted.copyrightYear ?? undefined,
     isbn: metadata.isbn ?? rawExtracted.isbn ?? undefined,
-    additionalIsbns: metadata.additionalIsbns,
-    relatedIsbns: metadata.relatedIsbns,
+    relatedIsbns: normalizedRelated.length > 0 ? normalizedRelated : undefined,
     platformUrl: metadata.platformUrl ?? rawExtracted.platformUrl ?? undefined,
     mhid: metadata.mhid ?? rawExtracted.mhid ?? undefined,
   };
@@ -649,7 +677,6 @@ function metadataFormToResult(form: MetadataFormState, rawText: string, source: 
     subject: form.subject.trim() || null,
     copyrightYear: form.copyrightYear ? Number(form.copyrightYear) : null,
     isbn: form.isbnRaw.trim() || null,
-    additionalIsbns: form.additionalIsbnsCsv.split(",").map((entry) => entry.trim()).filter(Boolean),
     relatedIsbns: relatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
     platformUrl: form.platformUrl.trim() || null,
     mhid: form.mhid.trim() || null,
@@ -914,11 +941,11 @@ function buildExtractionFieldList(meta: AutoTextbookMetadata): string[] {
   if (meta.edition) found.push("Edition");
   if (meta.seriesName) found.push("Series");
   if (meta.authors?.length) found.push("Authors");
-  if (meta.additionalIsbns?.length) found.push("Additional ISBNs");
+  if (meta.relatedIsbns?.length) found.push("Related ISBNs");
   return found;
 }
 
-export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToManual, testingSeedState }: AutoTextbookSetupFlowProps): React.JSX.Element {
+export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", onSaved, onSwitchToManual, testingSeedState }: AutoTextbookSetupFlowProps): React.JSX.Element {
   const language = useUIStore((state) => state.language);
   const chromeOs = useMemo(() => runtime === "extension" && isChromeOSRuntime(), [runtime]);
   const compactChromeLayout = useMemo(() => chromeOs && isSmallChromebookViewport(), [chromeOs]);
@@ -1000,11 +1027,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     metadataResult: null,
     pipelineResult: null,
   });
-  const [recaptureDialog, setRecaptureDialog] = useState<{ open: boolean; pendingOcrText: string }>({
+  const [recaptureDialog, setRecaptureDialog] = useState<{
+    open: boolean;
+    pendingOcrText: string;
+    pendingFingerprint: TocCaptureFingerprint | null;
+  }>({
     open: false,
     pendingOcrText: "",
+    pendingFingerprint: null,
   });
-  const [saveLocallyWarning, setSaveLocallyWarning] = useState<{ open: boolean }>({ open: false });
+  const [isUploadingToCloud, setIsUploadingToCloud] = useState(false);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const selectionResolverRef = useRef<((value: SelectionRect | null) => void) | null>(null);
   const selectionRectRef = useRef<SelectionRect | null>(null);
@@ -1030,6 +1062,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   // rawOcrText keeps the latest OCR capture for resume state; ocrDraft is editable.
   const [rawOcrText, setRawOcrText] = useState(testingSeedState?.ocrDraft ?? "");
   const [showOptionalMetadataFields, setShowOptionalMetadataFields] = useState(false);
+  const [tocCaptureFingerprints, setTocCaptureFingerprints] = useState<TocCaptureFingerprint[]>([]);
+  const [showHierarchyTool, setShowHierarchyTool] = useState(false);
+  const [missingHierarchyLevel, setMissingHierarchyLevel] = useState<MissingHierarchyLevel>("unit");
+  const [newHierarchyNumber, setNewHierarchyNumber] = useState("");
+  const [newHierarchyTitle, setNewHierarchyTitle] = useState("");
+  const [newHierarchyPageStart, setNewHierarchyPageStart] = useState("");
+  const [newHierarchyPageEnd, setNewHierarchyPageEnd] = useState("");
+  const [selectedHierarchyUnit, setSelectedHierarchyUnit] = useState("");
+  const [selectedHierarchyChapterIndex, setSelectedHierarchyChapterIndex] = useState("0");
+  const [selectedHierarchySectionIndex, setSelectedHierarchySectionIndex] = useState("0");
 
   // Resumable sessions (max 3).
   const [resumableDrafts, setResumableDrafts] = useState<AutoSessionDraft[]>(() => readAutoSessionDrafts());
@@ -1047,7 +1089,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       metadataForm.subtitle,
       metadataForm.grade,
       metadataForm.gradeBand,
-      metadataForm.additionalIsbnsCsv,
       metadataForm.seriesName,
       metadataForm.publisherLocation,
       metadataForm.platformUrl,
@@ -1222,6 +1263,22 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       cancelPendingAutosave();
     };
   }, [tocResult, tocPages]);
+
+  // Keep autosaved TOC pages aligned with manual TOC editor hierarchy changes.
+  useEffect(() => {
+    if (step !== "toc-editor") {
+      return;
+    }
+
+    setTocPages([
+      {
+        pageIndex: 0,
+        chapters: tocResult.chapters,
+        units: tocResult.units,
+        confidence: tocResult.confidence,
+      },
+    ]);
+  }, [step, tocResult]);
 
   const canFinishToc = tocResult.chapters.length > 0;
 
@@ -1731,12 +1788,14 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       const nextPages = [...current, {
         pageIndex: current.length,
         chapters: parsed.chapters,
+        units: parsed.units,
         confidence: parsed.confidence,
       }];
 
       const stitched = stitchTocPages(nextPages);
       const stitchedResult: ParsedTocResult = {
         chapters: stitched.chapters,
+        units: stitched.units,
         confidence: stitched.stitchingConfidence,
       };
 
@@ -2329,31 +2388,43 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       return;
     }
 
-    // If there are already chapters, show a confirmation dialog
-    if (tocResult.chapters.length > 0) {
+    const pendingFingerprint: TocCaptureFingerprint = {
+      image: fingerprintText(captured.imageDataUrl),
+      text: fingerprintText(normalizeOcrForFingerprint(captured.ocrText)),
+    };
+    const isDuplicateCapture = tocCaptureFingerprints.some((entry) => (
+      entry.image === pendingFingerprint.image
+      || entry.text === pendingFingerprint.text
+    ));
+
+    // Only prompt when this looks like a duplicate TOC capture.
+    if (isDuplicateCapture) {
       setRecaptureDialog({
         open: true,
         pendingOcrText: captured.ocrText,
+        pendingFingerprint,
       });
-      setInfoMessage("You've already captured some TOC content. Choose to replace or continue adding to the existing TOC.");
+      setInfoMessage("This TOC capture looks similar to one you've already taken. Choose to replace the current TOC or continue adding anyway.");
       return;
     }
 
-    // Otherwise, apply the new TOC directly
+    // New capture: append directly without a dialog.
     setOcrDraft(captured.ocrText);
     setStep("toc");
     applyTocFromText(captured.ocrText);
+    setTocCaptureFingerprints((current) => [...current, pendingFingerprint]);
     setInfoMessage(`TOC page captured and parsed. Continue capturing or finish TOC. (OCR: ${captured.ocrProviderId})`);
   }
 
   function handleRecaptureConfirm(): void {
-    // User chose to replace existing TOC
+    // User chose to replace existing TOC with a duplicate recapture.
     setTocResult(INITIAL_TOC_RESULT);
     setTocPages([]);
     setOcrDraft(recaptureDialog.pendingOcrText);
     setStep("toc");
     applyTocFromText(recaptureDialog.pendingOcrText);
-    setRecaptureDialog({ open: false, pendingOcrText: "" });
+    setTocCaptureFingerprints(recaptureDialog.pendingFingerprint ? [recaptureDialog.pendingFingerprint] : []);
+    setRecaptureDialog({ open: false, pendingOcrText: "", pendingFingerprint: null });
     setInfoMessage("✓ TOC replaced. Capture additional pages to add more chapters, or finish TOC.");
     appendDebugLogEntry({
       eventType: "user_action",
@@ -2363,8 +2434,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   }
 
   function handleRecaptureCancel(): void {
-    // User chose to continue adding (append)
-    setRecaptureDialog({ open: false, pendingOcrText: "" });
+    // User chose to continue adding despite duplicate detection.
+    setRecaptureDialog({ open: false, pendingOcrText: "", pendingFingerprint: null });
     const captured = {
       ocrText: recaptureDialog.pendingOcrText,
       ocrProviderId: "pending", // Will be updated by the caller
@@ -2375,7 +2446,307 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     setOcrDraft(captured.ocrText);
     setStep("toc");
     applyTocFromText(captured.ocrText);
+    if (recaptureDialog.pendingFingerprint) {
+      const pendingFingerprint = recaptureDialog.pendingFingerprint;
+      setTocCaptureFingerprints((current) => [...current, pendingFingerprint]);
+    }
     setInfoMessage("✓ TOC page added. Continue capturing or finish TOC.");
+  }
+
+  const parsePositivePageInput = (value: string): number | undefined => {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  };
+
+  const moveArrayItem = <TValue,>(items: TValue[], fromIndex: number, toIndex: number): TValue[] => {
+    if (fromIndex < 0 || fromIndex >= items.length || toIndex < 0 || toIndex >= items.length) {
+      return items;
+    }
+
+    const next = [...items];
+    const [item] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, item);
+    return next;
+  };
+
+  const syncUnitsWithChapters = (chapters: TocChapter[], currentUnits?: TocUnit[]): TocUnit[] | undefined => {
+    const unitMap = new Map<string, TocUnit>();
+
+    for (const unit of currentUnits ?? []) {
+      const key = unit.unitNumber.trim().toLowerCase();
+      if (!key) {
+        continue;
+      }
+      unitMap.set(key, {
+        ...unit,
+        chapters: [],
+      });
+    }
+
+    for (const chapter of chapters) {
+      const match = chapter.unitName?.match(/^unit\s+([A-Za-z0-9]+)/i);
+      if (!match) {
+        continue;
+      }
+
+      const unitNumber = match[1];
+      const key = unitNumber.trim().toLowerCase();
+      if (!unitMap.has(key)) {
+        unitMap.set(key, {
+          unitNumber,
+          title: chapter.unitName?.trim() || `Unit ${unitNumber}`,
+          chapters: [],
+        });
+      }
+
+      unitMap.get(key)?.chapters.push(chapter);
+    }
+
+    const units = Array.from(unitMap.values())
+      .map((unit) => {
+        const pageStart = unit.chapters.find((chapter) => typeof chapter.pageStart === "number")?.pageStart;
+        const pageEnd = [...unit.chapters].reverse().find((chapter) => typeof chapter.pageEnd === "number")?.pageEnd;
+        return {
+          ...unit,
+          pageStart: unit.pageStart ?? pageStart,
+          pageEnd: unit.pageEnd ?? pageEnd,
+        };
+      });
+
+    return units.length > 0 ? units : undefined;
+  };
+
+  const normalizeTocHierarchy = (next: ParsedTocResult): ParsedTocResult => {
+    const normalizedChapters = inferTocPageRanges(next.chapters);
+    const normalizedUnits = syncUnitsWithChapters(normalizedChapters, next.units);
+    return {
+      ...next,
+      chapters: normalizedChapters,
+      units: normalizedUnits,
+    };
+  };
+
+  function addMissingHierarchyLevel(): void {
+    const title = newHierarchyTitle.trim();
+    if (!title) {
+      setErrorMessage("Provide a title before adding a hierarchy level.");
+      return;
+    }
+
+    setTocResult((current) => {
+      const chapterIndex = Number.parseInt(selectedHierarchyChapterIndex, 10);
+      const sectionIndex = Number.parseInt(selectedHierarchySectionIndex, 10);
+
+      if (missingHierarchyLevel === "unit") {
+        const unitNumber = newHierarchyNumber.trim() || String((current.units?.length ?? 0) + 1);
+        const units = [
+          ...(current.units ?? []),
+          {
+            unitNumber,
+            title,
+            pageStart: parsePositivePageInput(newHierarchyPageStart),
+            pageEnd: parsePositivePageInput(newHierarchyPageEnd),
+            chapters: [],
+          },
+        ];
+        return normalizeTocHierarchy({ ...current, units });
+      }
+
+      if (missingHierarchyLevel === "chapter") {
+        const chapterNumber = newHierarchyNumber.trim() || String(current.chapters.length + 1);
+        const chapter: TocChapter = {
+          chapterNumber,
+          title,
+          chapterLabel: "Chapter",
+          pageStart: parsePositivePageInput(newHierarchyPageStart),
+          pageEnd: parsePositivePageInput(newHierarchyPageEnd),
+          unitName: selectedHierarchyUnit || undefined,
+          sections: [],
+        };
+        return normalizeTocHierarchy({
+          ...current,
+          chapters: [...current.chapters, chapter],
+        });
+      }
+
+      if (missingHierarchyLevel === "section") {
+        if (!current.chapters[chapterIndex]) {
+          return current;
+        }
+        const sectionNumber = newHierarchyNumber.trim()
+          || `${current.chapters[chapterIndex].chapterNumber}.${current.chapters[chapterIndex].sections.length + 1}`;
+        const chapters = current.chapters.map((chapter, idx) => {
+          if (idx !== chapterIndex) {
+            return chapter;
+          }
+          return {
+            ...chapter,
+            sections: [
+              ...chapter.sections,
+              {
+                sectionNumber,
+                title,
+                pageStart: parsePositivePageInput(newHierarchyPageStart),
+                pageEnd: parsePositivePageInput(newHierarchyPageEnd),
+              },
+            ],
+          };
+        });
+        return normalizeTocHierarchy({ ...current, chapters });
+      }
+
+      if (!current.chapters[chapterIndex]) {
+        return current;
+      }
+
+      const parentSection = current.chapters[chapterIndex].sections[sectionIndex];
+      if (!parentSection) {
+        return current;
+      }
+
+      const subsectionNumber = newHierarchyNumber.trim() || `${parentSection.sectionNumber}.1`;
+      const chapters = current.chapters.map((chapter, idx) => {
+        if (idx !== chapterIndex) {
+          return chapter;
+        }
+        return {
+          ...chapter,
+          sections: [
+            ...chapter.sections,
+            {
+              sectionNumber: subsectionNumber,
+              title,
+              pageStart: parsePositivePageInput(newHierarchyPageStart),
+              pageEnd: parsePositivePageInput(newHierarchyPageEnd),
+            },
+          ],
+        };
+      });
+
+      return normalizeTocHierarchy({ ...current, chapters });
+    });
+
+    setInfoMessage("Hierarchy level added. Autosave updated.");
+    setNewHierarchyNumber("");
+    setNewHierarchyTitle("");
+    setNewHierarchyPageStart("");
+    setNewHierarchyPageEnd("");
+  }
+
+  function assignChapterToUnit(chapterIndex: number, unitName: string): void {
+    setTocResult((current) => {
+      const chapters = current.chapters.map((chapter, indexOfChapter) => {
+        if (indexOfChapter !== chapterIndex) {
+          return chapter;
+        }
+
+        return {
+          ...chapter,
+          unitName: unitName || undefined,
+        };
+      });
+
+      return normalizeTocHierarchy({ ...current, chapters });
+    });
+  }
+
+  function reassignSectionToChapter(fromChapterIndex: number, sectionIndex: number, toChapterIndex: number): void {
+    if (fromChapterIndex === toChapterIndex) {
+      return;
+    }
+
+    setTocResult((current) => {
+      const sourceChapter = current.chapters[fromChapterIndex];
+      const targetChapter = current.chapters[toChapterIndex];
+      const movedSection = sourceChapter?.sections[sectionIndex];
+      if (!sourceChapter || !targetChapter || !movedSection) {
+        return current;
+      }
+
+      const chapters = current.chapters.map((chapter, chapterIndexValue) => {
+        if (chapterIndexValue === fromChapterIndex) {
+          return {
+            ...chapter,
+            sections: chapter.sections.filter((_, currentSectionIndex) => currentSectionIndex !== sectionIndex),
+          };
+        }
+
+        if (chapterIndexValue === toChapterIndex) {
+          return {
+            ...chapter,
+            sections: [...chapter.sections, movedSection],
+          };
+        }
+
+        return chapter;
+      });
+
+      return normalizeTocHierarchy({ ...current, chapters });
+    });
+  }
+
+  function moveChapter(chapterIndex: number, direction: -1 | 1): void {
+    setTocResult((current) => {
+      const chapters = moveArrayItem(current.chapters, chapterIndex, chapterIndex + direction);
+      return normalizeTocHierarchy({ ...current, chapters });
+    });
+  }
+
+  function moveSection(chapterIndex: number, sectionIndex: number, direction: -1 | 1): void {
+    setTocResult((current) => {
+      const chapters = current.chapters.map((chapter, currentChapterIndex) => {
+        if (currentChapterIndex !== chapterIndex) {
+          return chapter;
+        }
+
+        return {
+          ...chapter,
+          sections: moveArrayItem(chapter.sections, sectionIndex, sectionIndex + direction),
+        };
+      });
+
+      return normalizeTocHierarchy({ ...current, chapters });
+    });
+  }
+
+  function reassignSubsectionParent(chapterIndex: number, sectionIndex: number, parentSectionNumber: string): void {
+    setTocResult((current) => {
+      const chapter = current.chapters[chapterIndex];
+      const section = chapter?.sections[sectionIndex];
+      if (!chapter || !section) {
+        return current;
+      }
+
+      const tokens = section.sectionNumber.split(".").filter(Boolean);
+      if (tokens.length < 3) {
+        return current;
+      }
+
+      const tailToken = tokens[tokens.length - 1];
+      const nextSectionNumber = `${parentSectionNumber}.${tailToken}`;
+
+      const chapters = current.chapters.map((existingChapter, existingChapterIndex) => {
+        if (existingChapterIndex !== chapterIndex) {
+          return existingChapter;
+        }
+
+        return {
+          ...existingChapter,
+          sections: existingChapter.sections.map((existingSection, existingSectionIndex) => {
+            if (existingSectionIndex !== sectionIndex) {
+              return existingSection;
+            }
+
+            return {
+              ...existingSection,
+              sectionNumber: nextSectionNumber,
+            };
+          }),
+        };
+      });
+
+      return normalizeTocHierarchy({ ...current, chapters });
+    });
   }
 
   function updateChapter(index: number, update: Partial<TocChapter>): void {
@@ -2391,7 +2762,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         };
       });
 
-      return { ...current, chapters: inferTocPageRanges(chapters) };
+      return normalizeTocHierarchy({ ...current, chapters });
     });
   }
 
@@ -2423,7 +2794,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         };
       });
 
-      return { ...current, chapters: inferTocPageRanges(chapters) };
+      return normalizeTocHierarchy({ ...current, chapters });
     });
   }
 
@@ -2443,7 +2814,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       const next = [...current.chapters];
       next.splice(chapterIndex - 1, 2, merged);
-      return { ...current, chapters: inferTocPageRanges(next) };
+      return normalizeTocHierarchy({ ...current, chapters: next });
     });
   }
 
@@ -2468,7 +2839,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       const next = [...current.chapters];
       next.splice(chapterIndex, 1, left, right);
-      return { ...current, chapters: inferTocPageRanges(next) };
+      return normalizeTocHierarchy({ ...current, chapters: next });
     });
   }
 
@@ -2501,84 +2872,31 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     void handleCaptureToc();
   }
 
-  async function handleSaveLocally(): Promise<void> {
-    setSaveLocallyWarning({ open: false });
-    
-      const traceId = createAutoFlowTraceId("auto-flow-local-save");
-      emitAutoFlowDiagnostic("local_save_started", {
-        traceId,
-        context: {
-          chapterCount: tocResult.chapters.length,
-          hasCover: Boolean(coverImageDataUrl),
-          hasMetadata: Boolean(metadataForm.title),
-        },
-      });
-
-      try {
-        setIsBusy(true);
-      
-        // Save to autosave system (local storage only, no cloud upload)
-        const sessionId = draftKeyRef.current;
-        void autosaveToc(sessionId, "", tocResult, tocPages);
-      
-        // Update the local draft to reflect current state
-        const draft: AutoSessionDraft = {
-          id: activeSessionDraftIdRef.current,
-          version: 1,
-          savedAt: Date.now(),
-          coverImageDataUrl,
-          rawOcrText,
-          metadataTitle: metadataForm.title,
-          metadataSubject: metadataForm.subject,
-          metadataPublisher: metadataForm.publisher,
-          metadataFormSnapshot: metadataForm,
-          relatedIsbnsSnapshot: relatedIsbns,
-          tocResultSnapshot: tocResult,
-          tocPagesSnapshot: tocPages,
-          step,
-          stepsCompleted: {
-            cover: Boolean(coverImageDataUrl),
-            copyright: Boolean(lastCapturedOcrByStepRef.current?.title),
-            toc: tocResult.chapters.length > 0,
-          },
-        };
-      
-        saveAutoSessionDraft(draft);
-      
-        setInfoMessage("✓ Data saved locally (not uploaded to cloud). You can resume this draft later.");
-      
-        emitAutoFlowDiagnostic("local_save_completed", {
-          traceId,
-          context: {
-            tocChapters: tocResult.chapters.length,
-            metadata: metadataForm.title,
-          },
-        });
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        setErrorMessage(`Failed to save locally: ${errorMsg}`);
-      
-        emitAutoFlowDiagnostic("local_save_failed", {
-          level: "error",
-          traceId,
-          context: { error: errorMsg },
-        });
-      } finally {
-        setIsBusy(false);
-      }
-  }
-
-  async function handleSaveAutoSetup(): Promise<void> {
+  async function handleSaveAutoSetup(target: "cloud" | "local"): Promise<void> {
+    const isCloudUpload = target === "cloud";
     const traceId = createAutoFlowTraceId("auto-flow-save");
     emitAutoFlowDiagnostic("save_started", {
       traceId,
       context: {
         chapterCount: tocResult.chapters.length,
         hasCover: Boolean(coverImageDataUrl),
+        target,
         duplicateMatchId: duplicateMatch?.id ?? null,
       },
     });
     setErrorMessage(null);
+    if (isCloudUpload) {
+      setInfoMessage("Uploading textbook to cloud...");
+      setIsUploadingToCloud(true);
+    }
+
+    const autosavedState = await restoreTocAutosave(draftKeyRef.current);
+    const effectiveTocResult = autosavedState?.tocResult
+      ? {
+          ...autosavedState.tocResult,
+          chapters: inferTocPageRanges(autosavedState.tocResult.chapters),
+        }
+      : tocResult;
 
     // Validate all required steps are complete before cloud upload
     const hasCover = Boolean(coverImageDataUrl);
@@ -2588,7 +2906,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       || metadataForm.publisher.trim()
       || metadataForm.isbnRaw.trim()
     );
-    const hasToc = tocResult.chapters.length > 0;
+    const hasToc = effectiveTocResult.chapters.length > 0;
 
     if (!hasCover) {
       setErrorMessage("Capture and accept a cover image before saving Auto setup (Step 1/3).");
@@ -2597,6 +2915,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         traceId,
         context: { reason: "missing_cover_image" },
       });
+      setIsUploadingToCloud(false);
       return;
     }
 
@@ -2607,6 +2926,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         traceId,
         context: { reason: "missing_copyright_page" },
       });
+      setIsUploadingToCloud(false);
       return;
     }
 
@@ -2617,11 +2937,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         traceId,
         context: { reason: "missing_toc_chapters" },
       });
+      setIsUploadingToCloud(false);
       return;
     }
 
     if (!coverImageDataUrl) {
       setErrorMessage("Capture and accept a cover image before saving Auto setup (Step 1/3).");
+      setIsUploadingToCloud(false);
       return;
     }
 
@@ -2635,6 +2957,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         traceId,
         context: { reason: "invalid_publication_year", value: metadataForm.publicationYear },
       });
+      setIsUploadingToCloud(false);
       return;
     }
 
@@ -2645,6 +2968,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         traceId,
         context: { reason: "missing_title" },
       });
+      setIsUploadingToCloud(false);
       return;
     }
 
@@ -2747,7 +3071,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         publicationYear: parsedYear,
         copyrightYear: metadata.copyrightYear,
         isbnRaw: metadataForm.isbnRaw,
-        additionalIsbns: metadata.additionalIsbns,
         relatedIsbns: relatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
         seriesName: metadata.seriesName,
         publisher: metadata.publisher,
@@ -2759,7 +3082,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         imageModerationState: requiresAdminReview ? "pending_admin_review" as const : "clear" as const,
         imageModerationReason: requiresAdminReview ? imageModeration.reason : undefined,
         imageModerationConfidence: imageModeration.confidence,
-        cloudSyncBlockedReason: requiresAdminReview ? "pending_admin_review" as const : undefined,
+        cloudSyncBlockedReason: isCloudUpload
+          ? (requiresAdminReview ? "pending_admin_review" as const : undefined)
+          : "user_blocked" as const,
         requiresAdminReview,
         status: requiresAdminReview ? "submitted" as const : "draft" as const,
       };
@@ -2780,7 +3105,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
         const plan = buildAutoConflictResolutionPlan({
           mode: conflictResolutionMode,
-          autoTocChapters: tocResult.chapters,
+          autoTocChapters: effectiveTocResult.chapters,
           existingChapters: chapters.map((chapter) => ({
             id: chapter.id,
             index: chapter.index,
@@ -2831,7 +3156,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
         for (const chapterInstruction of plan.chapterUpserts) {
           const chapterIndexValue = Number.parseInt(chapterInstruction.autoChapter.chapterNumber, 10);
-          const chapterPageEnd = chapterInstruction.autoChapter.pageEnd ?? getChapterDerivedPageEnd(tocResult.chapters, chapterInstruction.chapterIndex);
+          const chapterPageEnd = chapterInstruction.autoChapter.pageEnd ?? getChapterDerivedPageEnd(effectiveTocResult.chapters, chapterInstruction.chapterIndex);
           const chapterPayload = {
             sourceType: "auto" as const,
             index: Number.isInteger(chapterIndexValue) ? chapterIndexValue : chapterInstruction.chapterIndex + 1,
@@ -2862,7 +3187,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             continue;
           }
 
-          const sourceSection = tocResult.chapters[sectionInstruction.chapterRef.chapterIndex]?.sections[sectionInstruction.sectionIndex];
+          const sourceSection = effectiveTocResult.chapters[sectionInstruction.chapterRef.chapterIndex]?.sections[sectionInstruction.sectionIndex];
 
           const sectionPayload = {
             sourceType: "auto" as const,
@@ -2891,7 +3216,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
               ...nextTextbookChanges,
             },
             coverDataUrl,
-            tocChapters: tocResult.chapters,
+            tocChapters: effectiveTocResult.chapters,
           },
           {
             createTextbook,
@@ -2899,6 +3224,22 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             createSection,
           }
         );
+      }
+
+      if (isCloudUpload) {
+        const cloudUploadResult = await syncNow({ intent: "manual" });
+        if (!cloudUploadResult.success) {
+          setErrorMessage(cloudUploadResult.message || "Unable to upload textbook to cloud. Please try again.");
+          emitAutoFlowDiagnostic("save_failed", {
+            level: "error",
+            traceId,
+            context: {
+              errorCode: cloudUploadResult.errorCode,
+              message: cloudUploadResult.message,
+            },
+          });
+          return;
+        }
       }
 
       clearPersistedCaptureUsage(draftKeyRef.current);
@@ -2909,7 +3250,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         message: "Auto textbook setup saved.",
         autoModeStep: "toc",
         context: {
-          chapterCount: tocResult.chapters.length,
+          chapterCount: effectiveTocResult.chapters.length,
           requiresAdminReview,
         },
       });
@@ -2918,6 +3259,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         setInfoMessage(
           "Saved locally with admin review required. Cloud sync is blocked until this textbook is approved by an admin."
         );
+      } else if (isCloudUpload) {
+        setInfoMessage("Textbook uploaded to cloud successfully.");
+      } else {
+        setInfoMessage("Textbook saved locally only.");
       }
 
       if (duplicateMatch) {
@@ -2947,7 +3292,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       emitAutoFlowDiagnostic("save_completed", {
         traceId,
         context: {
-          chapterCount: tocResult.chapters.length,
+          chapterCount: effectiveTocResult.chapters.length,
+          target,
           duplicateResolved: Boolean(duplicateMatch),
           requiresAdminReview,
         },
@@ -2965,6 +3311,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       });
     } finally {
       setIsBusy(false);
+      setIsUploadingToCloud(false);
     }
   }
 
@@ -3046,6 +3393,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                         ? "toc"
                         : draft.step;
                       setStep(nextStep);
+                      setTocCaptureFingerprints([]);
                       setResumableDrafts(deleteAutoSessionDraft(draft.id));
                     }}
                   >
@@ -3074,28 +3422,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           </p>
         ) : null}
 
-              {saveLocallyWarning.open ? (
-                <div className="capture-overlay" role="dialog" aria-modal="true" aria-label="Save locally warning">
-                  <div className="capture-overlay__panel">
-                    <h4>Save Data Locally Only?</h4>
-                    <p className="form-hint">
-                      Data will be saved to this device only. If anything happens to this device (hardware failure, reinstallation, etc.), 
-                      the data cannot be recovered unless you've backed it up to the cloud.
-                    </p>
-                    <p className="form-hint form-hint--warning">
-                      <strong>Warning:</strong> For important textbook data, we recommend uploading to the cloud to ensure it's safely backed up.
-                    </p>
-                    <div className="form-actions">
-                      <button type="button" onClick={() => void handleSaveLocally()}>
-                        Save Locally Only
-                      </button>
-                      <button type="button" className="btn-secondary" onClick={() => setSaveLocallyWarning({ open: false })}>
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
         {resumableDrafts.length > 0 ? (
           <div className="auto-session-resume__actions">
             <button
@@ -3105,6 +3431,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
               onClick={() => {
                 void clearAllTocAutosaves();
                 clearAllAutoSessionDrafts();
+                setTocCaptureFingerprints([]);
                 setResumableDrafts([]);
               }}
             >
@@ -3152,6 +3479,12 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         <div className="ocr-loading-banner" role="status" aria-live="polite">
           <span className="ocr-loading-spinner" aria-hidden="true" />
           <span className="ocr-loading-text">Analyzing image {"\u2014"} OCR is reading your page. This usually takes a few seconds&hellip;</span>
+        </div>
+      ) : null}
+      {isUploadingToCloud ? (
+        <div className="ocr-loading-banner" role="status" aria-live="polite">
+          <span className="ocr-loading-spinner" aria-hidden="true" />
+          <span className="ocr-loading-text">Uploading textbook to cloud...</span>
         </div>
       ) : null}
 
@@ -3463,13 +3796,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
               <input value={metadataForm.gradeBand} onChange={(event) => updateMetadataForm("gradeBand", event.target.value)} />
             </label>
 
-            <label>
-              Additional ISBNs (comma separated)
-              {renderConfidenceDot("additionalIsbns")}
-              <input value={metadataForm.additionalIsbnsCsv} onChange={(event) => updateMetadataForm("additionalIsbnsCsv", event.target.value)} />
-              <span className="form-hint">Use the typed Related ISBN list below when you need an edition label (Teacher, Digital, etc.).</span>
-            </label>
-
             <fieldset className="form-fieldset">
               <legend>Related ISBNs (typed)</legend>
               <p className="form-hint">Use this when the copyright page lists student, teacher, digital, workbook, or assessment ISBNs separately.</p>
@@ -3553,6 +3879,95 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       {step === "toc-editor" ? (
         <div className="auto-toc-editor">
           <h4>TOC Editor</h4>
+          <div className="form-actions">
+            <button type="button" className="btn-secondary" onClick={() => setShowHierarchyTool((current) => !current)}>
+              Add Missing Hierarchy Level
+            </button>
+          </div>
+
+          {showHierarchyTool ? (
+            <div className="panel" aria-label="Manual hierarchy editor">
+              <div className="form-grid">
+                <label>
+                  Hierarchy Level
+                  <select value={missingHierarchyLevel} onChange={(event) => setMissingHierarchyLevel(event.target.value as MissingHierarchyLevel)}>
+                    <option value="unit">Unit</option>
+                    <option value="chapter">Chapter</option>
+                    <option value="section">Section</option>
+                    <option value="subsection">Subsection</option>
+                  </select>
+                </label>
+
+                <label>
+                  Number
+                  <input value={newHierarchyNumber} onChange={(event) => setNewHierarchyNumber(event.target.value)} placeholder="Optional" />
+                </label>
+
+                <label>
+                  Title
+                  <input value={newHierarchyTitle} onChange={(event) => setNewHierarchyTitle(event.target.value)} placeholder="Required" />
+                </label>
+
+                <label>
+                  Start Page
+                  <input type="number" min={1} value={newHierarchyPageStart} onChange={(event) => setNewHierarchyPageStart(event.target.value)} placeholder="Optional" />
+                </label>
+
+                <label>
+                  End Page
+                  <input type="number" min={1} value={newHierarchyPageEnd} onChange={(event) => setNewHierarchyPageEnd(event.target.value)} placeholder="Optional" />
+                </label>
+
+                {(missingHierarchyLevel === "chapter" || missingHierarchyLevel === "unit") ? (
+                  <label>
+                    Unit Assignment
+                    <select value={selectedHierarchyUnit} onChange={(event) => setSelectedHierarchyUnit(event.target.value)}>
+                      <option value="">None</option>
+                      {(tocResult.units ?? []).map((unit) => {
+                        const unitName = `Unit ${unit.unitNumber} ${unit.title}`.trim();
+                        return (
+                          <option key={`unit-option-${unit.unitNumber}-${unit.title}`} value={unitName}>{unitName}</option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                ) : null}
+
+                {(missingHierarchyLevel === "section" || missingHierarchyLevel === "subsection") ? (
+                  <label>
+                    Parent Chapter
+                    <select value={selectedHierarchyChapterIndex} onChange={(event) => setSelectedHierarchyChapterIndex(event.target.value)}>
+                      {tocResult.chapters.map((chapter, chapterIndex) => (
+                        <option key={`missing-level-parent-chapter-${chapterIndex}`} value={String(chapterIndex)}>
+                          {chapter.chapterNumber}. {chapter.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+
+                {missingHierarchyLevel === "subsection" ? (
+                  <label>
+                    Parent Section
+                    <select value={selectedHierarchySectionIndex} onChange={(event) => setSelectedHierarchySectionIndex(event.target.value)}>
+                      {(tocResult.chapters[Number.parseInt(selectedHierarchyChapterIndex, 10)]?.sections ?? [])
+                        .filter((entry) => entry.sectionNumber.split(".").length <= 2)
+                        .map((section, sectionIndex) => (
+                          <option key={`missing-level-parent-section-${sectionIndex}`} value={String(sectionIndex)}>
+                            {section.sectionNumber} {section.title}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+
+              <div className="form-actions">
+                <button type="button" onClick={addMissingHierarchyLevel}>Create Hierarchy Level</button>
+              </div>
+            </div>
+          ) : null}
+
           {tocResult.chapters.length === 0 ? <p className="form-hint">No chapters detected yet.</p> : null}
 
           {tocResult.chapters.map((chapter, chapterIndex) => (
@@ -3591,6 +4006,21 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                     placeholder={toPageInputValue(getChapterDerivedPageEnd(tocResult.chapters, chapterIndex)) || "Auto"}
                   />
                 </label>
+                <label>
+                  Unit
+                  <select
+                    value={chapter.unitName ?? ""}
+                    onChange={(event) => assignChapterToUnit(chapterIndex, event.target.value)}
+                  >
+                    <option value="">None</option>
+                    {(tocResult.units ?? []).map((unit) => {
+                      const unitName = `Unit ${unit.unitNumber} ${unit.title}`.trim();
+                      return (
+                        <option key={`chapter-unit-${unit.unitNumber}-${unit.title}`} value={unitName}>{unitName}</option>
+                      );
+                    })}
+                  </select>
+                </label>
               </div>
 
               <div className="form-actions">
@@ -3599,6 +4029,12 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                 </button>
                 <button type="button" className="btn-secondary" onClick={() => splitChapter(chapterIndex)} disabled={chapter.sections.length < 2}>
                   Split Chapter
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => moveChapter(chapterIndex, -1)} disabled={chapterIndex === 0}>
+                  Move Chapter Up
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => moveChapter(chapterIndex, 1)} disabled={chapterIndex >= tocResult.chapters.length - 1}>
+                  Move Chapter Down
                 </button>
               </div>
 
@@ -3628,27 +4064,53 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                     onChange={(event) => updateSection(chapterIndex, sectionIndex, { pageEnd: parsePageInputValue(event.target.value) })}
                     placeholder="End page"
                   />
+                  <select
+                    aria-label={`Section parent chapter ${chapterIndex + 1}-${sectionIndex + 1}`}
+                    value={String(chapterIndex)}
+                    onChange={(event) => reassignSectionToChapter(chapterIndex, sectionIndex, Number.parseInt(event.target.value, 10))}
+                  >
+                    {tocResult.chapters.map((chapterOption, chapterOptionIndex) => (
+                      <option key={`section-parent-chapter-${chapterOptionIndex}`} value={String(chapterOptionIndex)}>
+                        {chapterOption.chapterNumber}. {chapterOption.title}
+                      </option>
+                    ))}
+                  </select>
+                  {section.sectionNumber.split(".").length > 2 ? (
+                    <select
+                      aria-label={`Subsection parent ${chapterIndex + 1}-${sectionIndex + 1}`}
+                      onChange={(event) => reassignSubsectionParent(chapterIndex, sectionIndex, event.target.value)}
+                      value={section.sectionNumber.split(".").slice(0, 2).join(".")}
+                    >
+                      {chapter.sections
+                        .filter((candidate) => candidate.sectionNumber.split(".").length <= 2)
+                        .map((candidate) => (
+                          <option key={`subsection-parent-${candidate.sectionNumber}`} value={candidate.sectionNumber}>
+                            {candidate.sectionNumber} {candidate.title}
+                          </option>
+                        ))}
+                    </select>
+                  ) : null}
+                  <button type="button" className="btn-secondary" onClick={() => moveSection(chapterIndex, sectionIndex, -1)} disabled={sectionIndex === 0}>
+                    Up
+                  </button>
+                  <button type="button" className="btn-secondary" onClick={() => moveSection(chapterIndex, sectionIndex, 1)} disabled={sectionIndex >= chapter.sections.length - 1}>
+                    Down
+                  </button>
                 </div>
               ))}
             </div>
           ))}
 
           <div className="form-actions form-actions--toc-editor">
-            <button type="button" onClick={() => void handleSaveAutoSetup()} disabled={isBusy}>
-              Confirm and Save Textbook
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => void handleSaveAutoSetup()} disabled={isBusy}>
-              Save TOC to Server
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              title="Save locally only"
-              onClick={() => setSaveLocallyWarning({ open: true })}
-              disabled={isBusy}
-            >
-              Save Locally Only
-            </button>
+            {saveMode === "cloud" ? (
+              <button type="button" onClick={() => void handleSaveAutoSetup("cloud")} disabled={isBusy}>
+                Save Textbook to Cloud
+              </button>
+            ) : (
+              <button type="button" onClick={() => void handleSaveAutoSetup("local")} disabled={isBusy}>
+                Save Textbook Locally
+              </button>
+            )}
             <button type="button" className="btn-secondary" onClick={() => setStep("toc")}>
               Back to TOC Capture
             </button>
@@ -3703,10 +4165,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       {recaptureDialog.open ? (
         <div className="capture-overlay" role="dialog" aria-modal="true" aria-label="TOC recapture confirmation">
           <div className="capture-overlay__panel">
-            <h4>Replace existing TOC?</h4>
+            <h4>Similar TOC capture detected</h4>
             <p className="form-hint">
-              You've already captured {tocResult.chapters.length} chapter{tocResult.chapters.length !== 1 ? "s" : ""}.
-              Would you like to replace the existing table of contents with this new capture, or continue adding to it?
+              This new image appears to match a TOC page you've already captured.
+              Would you like to replace the current TOC with this recapture, or continue adding it anyway?
             </p>
             <div className="form-actions">
               <button type="button" onClick={handleRecaptureConfirm}>

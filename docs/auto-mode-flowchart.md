@@ -267,7 +267,7 @@ User edits set `sourceType: "manual"` and `confidence: 1.0` for that field.
 
 Additional metadata persistence rules:
 
-- Manual edits to Additional ISBNs persist across later cover/copyright captures and OCR merges.
+- Manual edits to `Related ISBNs (typed)` persist across later cover/copyright captures and OCR merges.
 - Use `Related ISBNs (typed)` for labeled variants (teacher, digital, workbook, assessment, or custom note text).
 
 ---

@@ -70,6 +70,7 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
   const [isLookingUpISBN, setIsLookingUpISBN] = useState(false);
   const [isManualEntryMode, setIsManualEntryMode] = useState(false);
   const [entryMode, setEntryMode] = useState<"choose" | "manual" | "auto">("choose");
+  const [autoSaveMode, setAutoSaveMode] = useState<"cloud" | "local">("cloud");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -110,6 +111,7 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
       setCoverFile(null);
       setCoverDataUrl(null);
       setEntryMode("choose");
+      setAutoSaveMode("cloud");
     }
   }, [selectedTextbook]);
 
@@ -359,11 +361,13 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
       <h3>{isEditMode ? `Edit: ${selectedTextbook?.title ?? "Textbook"}` : "Add Textbook"}</h3>
 
       {!isEditMode && entryMode === "choose" ? (
+        <div>
         <div className="textbook-entry-mode-grid">
           <button
             type="button"
             className="textbook-entry-mode-card"
             onClick={() => {
+              setAutoSaveMode("cloud");
               setEntryMode("auto");
               setErrorMessage(null);
               setSuccessMessage(null);
@@ -385,13 +389,43 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
             <span>Use the existing metadata and textbook details form.</span>
           </button>
         </div>
+          <div className="form-actions textbook-entry-mode-local-actions">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setAutoSaveMode("local");
+                setEntryMode("auto");
+                setErrorMessage(null);
+                setSuccessMessage(null);
+              }}
+            >
+              Save Locally Only
+            </button>
+          </div>
+          <p className="form-hint">
+            Local data may be lost if the device is cleared or fails. Cloud sync recommended for long-term storage.
+          </p>
+        </div>
       ) : null}
 
       {!isEditMode && entryMode === "auto" ? (
         <div className="auto-workspace-panel">
           <div className="auto-workspace-panel__inner">
+            {autoSaveMode === "local" ? (
+              <div className="form-actions auto-mode-switch-actions">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setAutoSaveMode("cloud")}
+                >
+                  Enable Cloud Upload
+                </button>
+              </div>
+            ) : null}
             <AutoTextbookSetupFlow
               runtime={runtime}
+              saveMode={autoSaveMode}
               onSaved={onSaved}
               onSwitchToManual={() => {
                 setEntryMode("manual");

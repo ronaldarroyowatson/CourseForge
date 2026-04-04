@@ -93,6 +93,13 @@ export interface TocStructure {
   stitchingConfidence: number;
 }
 
+interface ParsedUnitHeading {
+  unitNumber: string;
+  unitTitle: string;
+  pageStart?: number;
+  pageEnd?: number;
+}
+
 function isPositivePage(value: number | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
@@ -179,6 +186,48 @@ function cloneTocChapters(chapters: TocChapter[]): TocChapter[] {
     ...chapter,
     sections: chapter.sections.map((section) => ({ ...section })),
   }));
+}
+
+function parseUnitHeading(line: string): ParsedUnitHeading | null {
+  const normalizedLine = line
+    .trim()
+    .replace(/^[\s\-:;,.]+|[\s\-:;,.]+$/g, "")
+    .replace(/^unit\s*([A-Za-z0-9]+)/i, "Unit $1");
+
+  const unitMatch = normalizedLine.match(/^unit\s*([A-Za-z0-9]+)\s*[:\-.]?\s*(.*)$/i);
+  if (!unitMatch) {
+    return null;
+  }
+
+  const unitNumber = unitMatch[1];
+  const descriptor = unitMatch[2]?.trim() ?? "";
+  const descriptorMatch = descriptor.match(/^(.*?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/);
+
+  let unitTitle = `Unit ${unitNumber}`;
+  let pageStart: number | undefined;
+  let pageEnd: number | undefined;
+
+  if (descriptorMatch) {
+    const descriptorTitle = descriptorMatch[1]?.trim();
+    if (descriptorTitle) {
+      unitTitle = descriptorTitle;
+    }
+    if (descriptorMatch[2]) {
+      pageStart = Number(descriptorMatch[2]);
+    }
+    if (descriptorMatch[3]) {
+      pageEnd = Number(descriptorMatch[3]);
+    }
+  } else if (descriptor) {
+    unitTitle = descriptor;
+  }
+
+  return {
+    unitNumber,
+    unitTitle,
+    pageStart,
+    pageEnd,
+  };
 }
 
 export function inferTocPageRanges(chaptersInput: TocChapter[]): TocChapter[] {
@@ -862,27 +911,12 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
   let lineHits = 0;
 
   for (const line of lines) {
-    const unitMatch = line.match(/^unit\s+([A-Za-z0-9]+)\s*[:\-]?\s*(.*)$/i);
-    if (unitMatch) {
-      const unitNumber = unitMatch[1];
-      const rawUnitDescriptor = unitMatch[2]?.trim() ?? "";
-      let unitTitle = rawUnitDescriptor || `Unit ${unitNumber}`;
-      let unitPageStart: number | undefined;
-      let unitPageEnd: number | undefined;
-
-      const descriptorMatch = rawUnitDescriptor.match(/^(.*?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/);
-      if (descriptorMatch) {
-        const descriptorTitle = descriptorMatch[1]?.trim();
-        if (descriptorTitle) {
-          unitTitle = descriptorTitle;
-        }
-        if (descriptorMatch[2]) {
-          unitPageStart = Number(descriptorMatch[2]);
-        }
-        if (descriptorMatch[3]) {
-          unitPageEnd = Number(descriptorMatch[3]);
-        }
-      }
+    const parsedUnit = parseUnitHeading(line);
+    if (parsedUnit) {
+      const unitNumber = parsedUnit.unitNumber;
+      const unitTitle = parsedUnit.unitTitle;
+      const unitPageStart = parsedUnit.pageStart;
+      const unitPageEnd = parsedUnit.pageEnd;
 
       activeUnitKey = `unit-${normalizeToken(unitNumber)}`;
       const canonicalUnitLabel = `Unit ${unitNumber}`;
@@ -1107,6 +1141,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
 
 export function mergeParsedToc(base: ParsedTocResult, incoming: ParsedTocResult): ParsedTocResult {
   const chapterMap = new Map<string, TocChapter>();
+  const unitMap = new Map<string, TocUnit>();
 
   function chapterKey(chapter: TocChapter): string {
     return `${chapter.chapterNumber}|${chapter.title.toLowerCase()}`;
@@ -1114,6 +1149,10 @@ export function mergeParsedToc(base: ParsedTocResult, incoming: ParsedTocResult)
 
   function sectionKey(section: TocSection): string {
     return `${section.sectionNumber}|${section.title.toLowerCase()}`;
+  }
+
+  function unitKey(unit: TocUnit): string {
+    return `${normalizeToken(unit.unitNumber)}|${normalizeToken(unit.title)}`;
   }
 
   for (const chapter of base.chapters) {
@@ -1149,8 +1188,44 @@ export function mergeParsedToc(base: ParsedTocResult, incoming: ParsedTocResult)
     });
   }
 
+  for (const unit of [...(base.units ?? []), ...(incoming.units ?? [])]) {
+    const key = unitKey(unit);
+    const existing = unitMap.get(key);
+    if (!existing) {
+      unitMap.set(key, {
+        ...unit,
+        chapters: [...unit.chapters],
+      });
+      continue;
+    }
+
+    const chapterMapByKey = new Map(existing.chapters.map((chapter) => [chapterKey(chapter), chapter]));
+    for (const chapter of unit.chapters) {
+      chapterMapByKey.set(chapterKey(chapter), chapter);
+    }
+
+    unitMap.set(key, {
+      ...existing,
+      pageStart: existing.pageStart ?? unit.pageStart,
+      pageEnd: existing.pageEnd ?? unit.pageEnd,
+      chapters: Array.from(chapterMapByKey.values()),
+    });
+  }
+
+  const mergedChapters = Array.from(chapterMap.values());
+  const mergedUnits = Array.from(unitMap.values())
+    .map((unit) => {
+      const chapterKeys = new Set(unit.chapters.map((chapter) => chapterKey(chapter)));
+      return {
+        ...unit,
+        chapters: mergedChapters.filter((chapter) => chapterKeys.has(chapterKey(chapter))),
+      };
+    })
+    .filter((unit) => unit.chapters.length > 0);
+
   return {
-    chapters: Array.from(chapterMap.values()),
+    chapters: mergedChapters,
+    units: mergedUnits.length > 0 ? mergedUnits : undefined,
     confidence: Math.max(base.confidence, incoming.confidence),
   };
 }

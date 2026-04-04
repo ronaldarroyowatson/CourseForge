@@ -1698,6 +1698,14 @@ body {
   font-size: 0.9rem;
 }
 
+.textbook-entry-mode-local-actions {
+  margin-top: 0.75rem;
+}
+
+.auto-mode-switch-actions {
+  margin-bottom: 0.75rem;
+}
+
 .auto-textbook-flow {
   border: 1px solid var(--border-default);
   border-radius: 8px;

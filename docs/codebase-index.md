@@ -793,6 +793,24 @@ Update summary:
 - Stabilized TOC autosave tests by removing fake-timer blocking around IndexedDB initialization and using real debounce waits.
 - Updated parser ground-truth assertion to ignore optional `units` in strict fixture parity checks.
 
+### TOC Unit Hierarchy and Manual Recovery Controls
+
+Primary file(s):
+
+- [src/core/services/textbookAutoExtractionService.ts](src/core/services/textbookAutoExtractionService.ts)
+- [src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx](src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx)
+- [src/webapp/components/textbooks/TextbookForm.tsx](src/webapp/components/textbooks/TextbookForm.tsx)
+- [src/core/services/syncService.ts](src/core/services/syncService.ts)
+- [tests/core/textbookAutoExtractionService.test.ts](tests/core/textbookAutoExtractionService.test.ts)
+- [tests/integration/autoTextbookFlow.integration.test.tsx](tests/integration/autoTextbookFlow.integration.test.tsx)
+
+Update summary:
+
+- TOC parsing now hard-detects unit headers across OCR variants and keeps units in stitched hierarchy results with chapter parentage preserved.
+- TOC editor includes an `Add Missing Hierarchy Level` tool for manual recovery (`unit | chapter | section | subsection`), with reassignment and reorder controls that preserve downstream hierarchy.
+- TOC editor hierarchy edits synchronize into TOC page snapshots so autosave and final payload generation stay aligned with manual corrections.
+- End-of-TOC save behavior is mode-specific: cloud mode shows `Save Textbook to Cloud`; local mode uses local-only persistence and sets cloud sync blocking (`user_blocked`) until explicit cloud upload is chosen later.
+
 ## How to Update This Index
 
 - Update triggers:

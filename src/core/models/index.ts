@@ -26,6 +26,7 @@ export type {
   TranslationReviewItem,
   TranslationMemoryEntry,
   TieredQuestionMetadata,
+  TocAutosaveRecord,
   UserPreferences,
   VocabTerm,
 } from "./entities";

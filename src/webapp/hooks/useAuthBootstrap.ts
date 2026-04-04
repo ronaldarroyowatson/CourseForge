@@ -114,6 +114,7 @@ export function useAuthBootstrap(): void {
 
         try {
           const syncResult = await syncNow({
+            intent: "bootstrap",
             getCurrentUserFn: () => user,
           });
 

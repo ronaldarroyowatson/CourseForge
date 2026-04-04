@@ -214,6 +214,7 @@ interface SyncErrorLike {
 }
 
 interface SyncNowDependencies {
+  intent?: "bootstrap" | "auto" | "manual";
   nowFn?: () => number;
   getCurrentUserFn?: () => { uid?: string | null } | null;
   getPendingSyncDiagnosticsFn?: () => Promise<{ pendingCount: number; byStore: Partial<Record<SyncStoreName, number>> }>;
@@ -1329,6 +1330,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
   errorCode: string | null;
   pendingCount: number;
 }> {
+  const intent = deps.intent ?? "manual";
   const now = deps.nowFn ? deps.nowFn() : Date.now();
   const getPending = deps.getPendingSyncDiagnosticsFn ?? getPendingSyncDiagnostics;
   const getUser = deps.getCurrentUserFn ?? getCurrentUser;
@@ -1400,6 +1402,29 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       errorCode: null,
       pendingCount: pending.pendingCount,
     };
+  }
+
+  if (intent === "auto") {
+    const pending = await getPending();
+    if (pending.pendingCount === 0) {
+      return {
+        success: false,
+        message: "No local changes pending. Skipping automatic cloud sync.",
+        retryable: false,
+        permissionDenied: false,
+        throttled: true,
+        writeLoopTriggered: consumeWriteLoopTriggered(),
+        writeBudgetExceeded,
+        writeCount: sessionWriteCount,
+        writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+        readCount: sessionReadCount,
+        readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
+        readBudgetExceeded,
+        retryLimit: DEFAULT_RETRY_LIMIT,
+        errorCode: null,
+        pendingCount: pending.pendingCount,
+      };
+    }
   }
 
   try {

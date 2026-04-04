@@ -1,11 +1,11 @@
 # Test Index
 
-Generated: 2026-04-03T02:36:46.862Z
+Generated: 2026-04-04T01:34:36.087Z
 
 ## Summary
 
-- Total test files: 50
-- Unit test files: 32
+- Total test files: 51
+- Unit test files: 33
 - Integration test files: 16
 - Rules test files: 2
 - Canonical sample files: 5
@@ -35,6 +35,7 @@ Generated: 2026-04-03T02:36:46.862Z
 - tests/core/syncService.moderationHold.test.ts
 - tests/core/textbookAutoExtractionService.test.ts
 - tests/core/textEncodingRegression.test.ts
+- tests/core/tocAutosaveService.test.ts
 - tests/core/tocGroundTruthPipeline.test.ts
 - tests/core/tocInferenceRules.test.ts
 - tests/core/tocPreviewPipeline.test.ts

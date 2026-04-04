@@ -1,6 +1,6 @@
-import type { TocChapter, TocSection } from "../../../../core/services/textbookAutoExtractionService";
+import type { TocChapter, TocSection, TocUnit } from "../../../../core/services/textbookAutoExtractionService";
 
-export type TocPreviewLevel = "chapter" | "section" | "subsection";
+export type TocPreviewLevel = "unit" | "chapter" | "section" | "subsection";
 
 export interface TocPreviewNodeModel {
   id: string;
@@ -15,6 +15,7 @@ export interface TocPreviewNodeModel {
   missingFields: string[];
   chapterIndex: number;
   sectionIndex?: number;
+  unitIndex?: number;
   children: TocPreviewNodeModel[];
 }
 
@@ -225,7 +226,17 @@ function buildSectionNodes(chapters: TocChapter[], chapterIndex: number, section
   return topLevelSections;
 }
 
-export function buildTocPreviewTree(chapters: TocChapter[], globalConfidence: number): TocPreviewBuildResult {
+export function buildTocPreviewTree(chapters: TocChapter[], globalConfidence: number, units?: TocUnit[]): TocPreviewBuildResult {
+  // If units are provided, build the tree with units as the top level
+  if (units && units.length > 0) {
+    return buildTocPreviewTreeWithUnits(units, chapters, globalConfidence);
+  }
+
+  // Otherwise, build the tree with chapters as the top level (legacy behavior)
+  return buildTocPreviewTreeWithoutUnits(chapters, globalConfidence);
+}
+
+function buildTocPreviewTreeWithoutUnits(chapters: TocChapter[], globalConfidence: number): TocPreviewBuildResult {
   const nodes: TocPreviewNodeModel[] = chapters.map((chapter, chapterIndex) => {
     const numberValue = chapter.chapterNumber ?? "";
     const title = chapter.title ?? "";
@@ -272,6 +283,112 @@ export function buildTocPreviewTree(chapters: TocChapter[], globalConfidence: nu
     chapterCount: nodes.length,
     sectionCount,
     subsectionCount,
+    missingCount,
+  };
+}
+
+function buildTocPreviewTreeWithUnits(units: TocUnit[], allChapters: TocChapter[], globalConfidence: number): TocPreviewBuildResult {
+  const nodes: TocPreviewNodeModel[] = units.map((unit, unitIndex) => {
+    const numberValue = unit.unitNumber ?? "";
+    const title = unit.title ?? "";
+    const pageStart = normalizePageStart(unit.pageStart);
+    const nextStart = normalizePageStart(units[unitIndex + 1]?.pageStart);
+    const pageEnd = inferSiblingEnd(pageStart, nextStart, unit.pageEnd);
+    const missingFields = collectMissingFields(numberValue, title, pageStart, { requireNumber: true });
+    const confidence = scoreNodeConfidence(globalConfidence, Boolean(numberValue.trim()), Boolean(title.trim()), typeof pageStart === "number");
+
+    // Build chapter nodes for this unit
+    const chapterNodes: TocPreviewNodeModel[] = unit.chapters.map((chapter, chapterIndexInUnit) => {
+      // Find the index of this chapter in the overall chapters array
+      const globalChapterIndex = allChapters.findIndex(
+        (ch) => ch.chapterNumber === chapter.chapterNumber && ch.title === chapter.title
+      );
+
+      const chapterNumberValue = chapter.chapterNumber ?? "";
+      const chapterTitle = chapter.title ?? "";
+      const chapterPageStart = normalizePageStart(chapter.pageStart);
+
+      // Get next chapter's start page (either next in unit or next in all chapters)
+      let nextChapterStart: number | undefined;
+      if (chapterIndexInUnit + 1 < unit.chapters.length) {
+        const nextChapter = unit.chapters[chapterIndexInUnit + 1];
+        nextChapterStart = normalizePageStart(nextChapter.pageStart);
+      } else {
+        // Look in the next unit or subsequent chapters
+        nextChapterStart = undefined;
+      }
+
+      const chapterPageEnd = inferSiblingEnd(chapterPageStart, nextChapterStart, chapter.pageEnd);
+      const chapterMissingFields = collectMissingFields(chapterNumberValue, chapterTitle, chapterPageStart, { requireNumber: true });
+      const chapterConfidence = scoreNodeConfidence(globalConfidence, Boolean(chapterNumberValue.trim()), Boolean(chapterTitle.trim()), typeof chapterPageStart === "number");
+
+      return {
+        id: `unit-${unitIndex}-chapter-${chapterIndexInUnit}`,
+        level: "chapter",
+        headingLabel: chapter.chapterLabel ?? "Chapter",
+        numberValue: chapterNumberValue,
+        title: chapterTitle,
+        pageStart: chapterPageStart,
+        pageEnd: chapterPageEnd,
+        pageRangeLabel: toRangeLabel(chapterPageStart, chapterPageEnd),
+        confidence: chapterConfidence,
+        missingFields: chapterMissingFields,
+        chapterIndex: globalChapterIndex >= 0 ? globalChapterIndex : chapterIndexInUnit,
+        children: buildSectionNodes(unit.chapters, chapterIndexInUnit, chapter.sections, globalConfidence),
+      } satisfies TocPreviewNodeModel;
+    });
+
+    return {
+      id: `unit-${unitIndex}`,
+      level: "unit",
+      headingLabel: "Unit",
+      numberValue,
+      title,
+      pageStart,
+      pageEnd,
+      pageRangeLabel: toRangeLabel(pageStart, pageEnd),
+      confidence,
+      missingFields,
+      chapterIndex: 0, // Not directly applicable for units, but required by interface
+      unitIndex,
+      children: chapterNodes,
+    } satisfies TocPreviewNodeModel;
+  });
+
+  // Count chapters and sections
+  let totalChapterCount = 0;
+  let totalSectionCount = 0;
+  let totalSubsectionCount = 0;
+
+  for (const unitNode of nodes) {
+    totalChapterCount += unitNode.children.length;
+    for (const chapterNode of unitNode.children) {
+      totalSectionCount += chapterNode.children.length;
+      for (const sectionNode of chapterNode.children) {
+        totalSubsectionCount += sectionNode.children.length;
+      }
+    }
+  }
+
+  const missingCount = nodes.reduce((sum, unitNode) => {
+    const unitMissing = unitNode.missingFields.length > 0 ? 1 : 0;
+    const chapterMissing = unitNode.children.reduce((chapterSum, chapter) => {
+      const ownMissing = chapter.missingFields.length > 0 ? 1 : 0;
+      const sectionMissing = chapter.children.reduce((sectionSum, section) => {
+        const ownSectionMissing = section.missingFields.length > 0 ? 1 : 0;
+        const subsectionMissing = section.children.reduce((subSum, subsection) => subSum + (subsection.missingFields.length > 0 ? 1 : 0), 0);
+        return sectionSum + ownSectionMissing + subsectionMissing;
+      }, 0);
+      return chapterSum + ownMissing + sectionMissing;
+    }, 0);
+    return sum + unitMissing + chapterMissing;
+  }, 0);
+
+  return {
+    nodes,
+    chapterCount: totalChapterCount,
+    sectionCount: totalSectionCount,
+    subsectionCount: totalSubsectionCount,
     missingCount,
   };
 }

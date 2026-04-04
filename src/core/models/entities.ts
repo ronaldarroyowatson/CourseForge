@@ -335,4 +335,15 @@ export interface CourseForgeEntityMap {
   glossaries: GlossaryEntry;
   ingestFingerprints: DocumentIngestFingerprint;
   extractedPresentations: ExtractedPresentation;
+  tocAutosaves: TocAutosaveRecord;
+}
+
+/** Structure for storing TOC autosave in IndexedDB */
+export interface TocAutosaveRecord {
+  id: string; // Unique autosave ID
+  draftId: string; // Associated draft textbook ID
+  sessionId: string; // Session identifier
+  tocResult: any; // ParsedTocResult with units and chapters
+  tocPages: any[]; // Stitched pages for reference
+  lastSavedAt: string; // ISO timestamp
 }

@@ -1,11 +1,12 @@
 import React, { useMemo } from "react";
-import type { TocChapter } from "../../../../core/services/textbookAutoExtractionService";
+import type { TocChapter, TocUnit } from "../../../../core/services/textbookAutoExtractionService";
 import { buildTocPreviewTree, type TocPreviewNodeModel } from "./PageRangeCalculator";
 import { TocPreviewNode } from "./TocPreviewNode";
 
 export interface TocHierarchyState {
   chapters: TocChapter[];
   confidence: number;
+  units?: TocUnit[];
 }
 
 interface TocPreviewTreeProps {
@@ -16,7 +17,7 @@ interface TocPreviewTreeProps {
 }
 
 export function TocPreviewTree({ toc, isBusy = false, onUpdateNode, onRegenerateNode }: TocPreviewTreeProps): React.JSX.Element {
-  const summary = useMemo(() => buildTocPreviewTree(toc.chapters, toc.confidence), [toc.chapters, toc.confidence]);
+  const summary = useMemo(() => buildTocPreviewTree(toc.chapters, toc.confidence, toc.units), [toc.chapters, toc.confidence, toc.units]);
 
   return (
     <section className="toc-preview-tree rounded-lg border border-teal-400/30 bg-slate-900/20 p-3 space-y-3" aria-label="Live TOC hierarchy preview">

@@ -34,6 +34,14 @@ import {
   type TocChapter,
 } from "../../../core/services/textbookAutoExtractionService";
 import {
+  autosaveToc,
+  cancelPendingAutosave,
+  clearAllTocAutosaves,
+  clearTocAutosave,
+  restoreTocAutosave,
+  initializeTocAutosave,
+} from "../../../core/services/tocAutosaveService";
+import {
   applyCorrectionRulesToText,
   didMetadataChange,
   getEffectiveCorrectionRules,
@@ -992,6 +1000,11 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     metadataResult: null,
     pipelineResult: null,
   });
+  const [recaptureDialog, setRecaptureDialog] = useState<{ open: boolean; pendingOcrText: string }>({
+    open: false,
+    pendingOcrText: "",
+  });
+  const [saveLocallyWarning, setSaveLocallyWarning] = useState<{ open: boolean }>({ open: false });
   const imageRef = useRef<HTMLImageElement | null>(null);
   const selectionResolverRef = useRef<((value: SelectionRect | null) => void) | null>(null);
   const selectionRectRef = useRef<SelectionRect | null>(null);
@@ -1157,6 +1170,58 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     const nextDrafts = saveAutoSessionDraft(draft);
     setResumableDrafts(nextDrafts.filter((entry) => entry.id !== activeSessionDraftIdRef.current));
   }, [coverImageDataUrl, rawOcrText, metadataForm, relatedIsbns, step, tocResult, tocPages]);
+
+  // Initialize the autosave system on mount and restore autosaved TOC if available
+  useEffect(() => {
+    let mounted = true;
+
+    async function initAutosaveAndRestore(): Promise<void> {
+      try {
+        await initializeTocAutosave();
+
+        if (!mounted) {
+          return;
+        }
+
+        // Try to restore autosaved TOC from previous session
+        const sessionId = draftKeyRef.current;
+        const autosavedData = await restoreTocAutosave(sessionId);
+
+        if (autosavedData && mounted) {
+          // Only restore if current TOC is still empty
+          if (tocResult.chapters.length === 0) {
+            setTocResult(autosavedData.tocResult);
+            setTocPages(autosavedData.tocPages);
+            setInfoMessage(`✓ Restored TOC from autosave (${autosavedData.tocResult.chapters.length} chapters)`);
+          }
+        }
+      } catch (error) {
+        console.error("[TOC Setup] Failed to initialize autosave or restore:", error);
+      }
+    }
+
+    void initAutosaveAndRestore();
+
+    return () => {
+      mounted = false;
+    };
+  }, []); // Run once on mount
+
+  // Autosave TOC changes (debounced)
+  useEffect(() => {
+    if (tocResult.chapters.length === 0) {
+      // Don't autosave empty TOC
+      return;
+    }
+
+    const sessionId = draftKeyRef.current;
+    void autosaveToc(sessionId, "", tocResult, tocPages);
+
+    // Cleanup on unmount: cancel pending autosave
+    return () => {
+      cancelPendingAutosave();
+    };
+  }, [tocResult, tocPages]);
 
   const canFinishToc = tocResult.chapters.length > 0;
 
@@ -2264,10 +2329,53 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       return;
     }
 
+    // If there are already chapters, show a confirmation dialog
+    if (tocResult.chapters.length > 0) {
+      setRecaptureDialog({
+        open: true,
+        pendingOcrText: captured.ocrText,
+      });
+      setInfoMessage("You've already captured some TOC content. Choose to replace or continue adding to the existing TOC.");
+      return;
+    }
+
+    // Otherwise, apply the new TOC directly
     setOcrDraft(captured.ocrText);
     setStep("toc");
     applyTocFromText(captured.ocrText);
     setInfoMessage(`TOC page captured and parsed. Continue capturing or finish TOC. (OCR: ${captured.ocrProviderId})`);
+  }
+
+  function handleRecaptureConfirm(): void {
+    // User chose to replace existing TOC
+    setTocResult(INITIAL_TOC_RESULT);
+    setTocPages([]);
+    setOcrDraft(recaptureDialog.pendingOcrText);
+    setStep("toc");
+    applyTocFromText(recaptureDialog.pendingOcrText);
+    setRecaptureDialog({ open: false, pendingOcrText: "" });
+    setInfoMessage("✓ TOC replaced. Capture additional pages to add more chapters, or finish TOC.");
+    appendDebugLogEntry({
+      eventType: "user_action",
+      message: "TOC recaptured and replaced existing data.",
+      autoModeStep: "toc",
+    });
+  }
+
+  function handleRecaptureCancel(): void {
+    // User chose to continue adding (append)
+    setRecaptureDialog({ open: false, pendingOcrText: "" });
+    const captured = {
+      ocrText: recaptureDialog.pendingOcrText,
+      ocrProviderId: "pending", // Will be updated by the caller
+      imageDataUrl: "",
+      metadataResult: null,
+      pipelineResult: null,
+    };
+    setOcrDraft(captured.ocrText);
+    setStep("toc");
+    applyTocFromText(captured.ocrText);
+    setInfoMessage("✓ TOC page added. Continue capturing or finish TOC.");
   }
 
   function updateChapter(index: number, update: Partial<TocChapter>): void {
@@ -2393,6 +2501,73 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     void handleCaptureToc();
   }
 
+  async function handleSaveLocally(): Promise<void> {
+    setSaveLocallyWarning({ open: false });
+    
+      const traceId = createAutoFlowTraceId("auto-flow-local-save");
+      emitAutoFlowDiagnostic("local_save_started", {
+        traceId,
+        context: {
+          chapterCount: tocResult.chapters.length,
+          hasCover: Boolean(coverImageDataUrl),
+          hasMetadata: Boolean(metadataForm.title),
+        },
+      });
+
+      try {
+        setIsBusy(true);
+      
+        // Save to autosave system (local storage only, no cloud upload)
+        const sessionId = draftKeyRef.current;
+        void autosaveToc(sessionId, "", tocResult, tocPages);
+      
+        // Update the local draft to reflect current state
+        const draft: AutoSessionDraft = {
+          id: activeSessionDraftIdRef.current,
+          version: 1,
+          savedAt: Date.now(),
+          coverImageDataUrl,
+          rawOcrText,
+          metadataTitle: metadataForm.title,
+          metadataSubject: metadataForm.subject,
+          metadataPublisher: metadataForm.publisher,
+          metadataFormSnapshot: metadataForm,
+          relatedIsbnsSnapshot: relatedIsbns,
+          tocResultSnapshot: tocResult,
+          tocPagesSnapshot: tocPages,
+          step,
+          stepsCompleted: {
+            cover: Boolean(coverImageDataUrl),
+            copyright: Boolean(lastCapturedOcrByStepRef.current?.title),
+            toc: tocResult.chapters.length > 0,
+          },
+        };
+      
+        saveAutoSessionDraft(draft);
+      
+        setInfoMessage("✓ Data saved locally (not uploaded to cloud). You can resume this draft later.");
+      
+        emitAutoFlowDiagnostic("local_save_completed", {
+          traceId,
+          context: {
+            tocChapters: tocResult.chapters.length,
+            metadata: metadataForm.title,
+          },
+        });
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        setErrorMessage(`Failed to save locally: ${errorMsg}`);
+      
+        emitAutoFlowDiagnostic("local_save_failed", {
+          level: "error",
+          traceId,
+          context: { error: errorMsg },
+        });
+      } finally {
+        setIsBusy(false);
+      }
+  }
+
   async function handleSaveAutoSetup(): Promise<void> {
     const traceId = createAutoFlowTraceId("auto-flow-save");
     emitAutoFlowDiagnostic("save_started", {
@@ -2404,6 +2579,53 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       },
     });
     setErrorMessage(null);
+
+    // Validate all required steps are complete before cloud upload
+    const hasCover = Boolean(coverImageDataUrl);
+    const hasCopyright = Boolean(
+      lastCapturedOcrByStepRef.current?.title
+      || metadataForm.copyrightYear.trim()
+      || metadataForm.publisher.trim()
+      || metadataForm.isbnRaw.trim()
+    );
+    const hasToc = tocResult.chapters.length > 0;
+
+    if (!hasCover) {
+      setErrorMessage("Capture and accept a cover image before saving Auto setup (Step 1/3).");
+      emitAutoFlowDiagnostic("save_validation_failed", {
+        level: "warning",
+        traceId,
+        context: { reason: "missing_cover_image" },
+      });
+      return;
+    }
+
+    if (!hasCopyright) {
+      setErrorMessage("Capture the copyright page before saving Auto setup (Step 2/3).");
+      emitAutoFlowDiagnostic("save_validation_failed", {
+        level: "warning",
+        traceId,
+        context: { reason: "missing_copyright_page" },
+      });
+      return;
+    }
+
+    if (!hasToc) {
+      setErrorMessage("Capture at least one TOC page before saving Auto setup (Step 3/3).");
+      emitAutoFlowDiagnostic("save_validation_failed", {
+        level: "warning",
+        traceId,
+        context: { reason: "missing_toc_chapters" },
+      });
+      return;
+    }
+
+    if (!coverImageDataUrl) {
+      setErrorMessage("Capture and accept a cover image before saving Auto setup (Step 1/3).");
+      return;
+    }
+
+    const coverDataUrl = coverImageDataUrl;
 
     const parsedYear = Number(metadataForm.publicationYear);
     if (!Number.isInteger(parsedYear) || parsedYear <= 0) {
@@ -2422,16 +2644,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         level: "warning",
         traceId,
         context: { reason: "missing_title" },
-      });
-      return;
-    }
-
-    if (!coverImageDataUrl) {
-      setErrorMessage("Capture and accept a cover image before saving Auto setup.");
-      emitAutoFlowDiagnostic("save_validation_failed", {
-        level: "warning",
-        traceId,
-        context: { reason: "missing_cover_image" },
       });
       return;
     }
@@ -2478,7 +2690,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             skinToneRatio: 0,
           }
         : assessImageModerationSignal({
-            skinToneRatio: await estimateSkinToneRatio(coverImageDataUrl),
+            skinToneRatio: await estimateSkinToneRatio(coverDataUrl),
             contextText: moderationContext,
           });
       setModerationAssessment(imageModeration);
@@ -2678,7 +2890,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             metadata: {
               ...nextTextbookChanges,
             },
-            coverDataUrl: coverImageDataUrl,
+            coverDataUrl,
             tocChapters: tocResult.chapters,
           },
           {
@@ -2726,6 +2938,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           setInfoMessage(syncResult.message);
         }
       }
+
+      // Clear autosave after successful TOC upload
+      const sessionId = draftKeyRef.current;
+      await clearTocAutosave(sessionId);
 
       onSaved();
       emitAutoFlowDiagnostic("save_completed", {
@@ -2840,6 +3056,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                     className="btn-secondary"
                     disabled={isBusy}
                     onClick={() => {
+                      // Delete both the session draft and its associated autosave data
+                      void clearTocAutosave(draft.id);
                       setResumableDrafts(deleteAutoSessionDraft(draft.id));
                     }}
                   >
@@ -2855,6 +3073,29 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             Queue full: finish or delete one of the 3 in-progress auto captures before starting another.
           </p>
         ) : null}
+
+              {saveLocallyWarning.open ? (
+                <div className="capture-overlay" role="dialog" aria-modal="true" aria-label="Save locally warning">
+                  <div className="capture-overlay__panel">
+                    <h4>Save Data Locally Only?</h4>
+                    <p className="form-hint">
+                      Data will be saved to this device only. If anything happens to this device (hardware failure, reinstallation, etc.), 
+                      the data cannot be recovered unless you've backed it up to the cloud.
+                    </p>
+                    <p className="form-hint form-hint--warning">
+                      <strong>Warning:</strong> For important textbook data, we recommend uploading to the cloud to ensure it's safely backed up.
+                    </p>
+                    <div className="form-actions">
+                      <button type="button" onClick={() => void handleSaveLocally()}>
+                        Save Locally Only
+                      </button>
+                      <button type="button" className="btn-secondary" onClick={() => setSaveLocallyWarning({ open: false })}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
         {resumableDrafts.length > 0 ? (
           <div className="auto-session-resume__actions">
             <button
@@ -2862,6 +3103,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
               className="btn-secondary"
               disabled={isBusy}
               onClick={() => {
+                void clearAllTocAutosaves();
                 clearAllAutoSessionDrafts();
                 setResumableDrafts([]);
               }}
@@ -3109,6 +3351,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           toc={{
             chapters: tocResult.chapters,
             confidence: tocResult.confidence,
+            units: tocResult.units,
           }}
           isBusy={isBusy}
           onUpdateNode={handlePreviewNodeUpdate}
@@ -3390,12 +3633,21 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             </div>
           ))}
 
-          <div className="form-actions">
-            <button type="button" onClick={() => void handleSaveAutoSetup()} disabled={isBusy}>
-              Save TOC to Server
-            </button>
+          <div className="form-actions form-actions--toc-editor">
             <button type="button" onClick={() => void handleSaveAutoSetup()} disabled={isBusy}>
               Confirm and Save Textbook
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => void handleSaveAutoSetup()} disabled={isBusy}>
+              Save TOC to Server
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              title="Save locally only"
+              onClick={() => setSaveLocallyWarning({ open: true })}
+              disabled={isBusy}
+            >
+              Save Locally Only
             </button>
             <button type="button" className="btn-secondary" onClick={() => setStep("toc")}>
               Back to TOC Capture
@@ -3442,6 +3694,26 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
               </button>
               <button type="button" className="btn-secondary" onClick={cancelUploadPreview}>
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {recaptureDialog.open ? (
+        <div className="capture-overlay" role="dialog" aria-modal="true" aria-label="TOC recapture confirmation">
+          <div className="capture-overlay__panel">
+            <h4>Replace existing TOC?</h4>
+            <p className="form-hint">
+              You've already captured {tocResult.chapters.length} chapter{tocResult.chapters.length !== 1 ? "s" : ""}.
+              Would you like to replace the existing table of contents with this new capture, or continue adding to it?
+            </p>
+            <div className="form-actions">
+              <button type="button" onClick={handleRecaptureConfirm}>
+                Replace Existing TOC
+              </button>
+              <button type="button" className="btn-secondary" onClick={handleRecaptureCancel}>
+                Continue Adding
               </button>
             </div>
           </div>

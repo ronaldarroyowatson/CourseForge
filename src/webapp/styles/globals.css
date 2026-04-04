@@ -2628,6 +2628,18 @@ button:not(:disabled):active {
   font-weight: 600;
 }
 
+.auto-textbook-flow .form-actions--toc-editor {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.auto-textbook-flow .form-hint--warning {
+  color: #d9534f;
+  margin-top: 1rem;
+}
+
 .auto-ocr-editor {
   width: 100%;
   min-height: 14rem;

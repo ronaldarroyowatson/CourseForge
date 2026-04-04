@@ -720,4 +720,172 @@ describe("textbookAutoExtractionService", () => {
       expect(parsed.publisherLocation).toContain("Columbus, OH 43240");
     });
   });
+
+  // Unit Hierarchy Tests
+  describe("Unit hierarchy extraction and stitching", () => {
+    it("extracts Units from OCR text with proper chapter association", () => {
+      const parsed = parseTocFromOcrText([
+        "Table of Contents",
+        "Unit 1: Foundations of Mathematics",
+        "Chapter 1 Integers 12",
+        "1.1 Absolute Value 14",
+        "1.2 Number Lines 20",
+        "Chapter 2 Expressions 28",
+        "2.1 Variables and Terms 30",
+        "Unit 2: Advanced Topics",
+        "Chapter 3 Functions 40",
+        "3.1 Function Notation 42",
+        "Chapter 4 Calculus 50",
+        "4.1 Limits 52",
+      ].join("\n"));
+
+      expect(parsed.units).toBeDefined();
+      expect(parsed.units).toHaveLength(2);
+      expect(parsed.units?.[0].unitNumber).toBe("1");
+      expect(parsed.units?.[0].title).toContain("Foundations");
+      expect(parsed.units?.[0].chapters).toHaveLength(2);
+      expect(parsed.units?.[0].chapters[0].chapterNumber).toBe("1");
+      expect(parsed.units?.[1].unitNumber).toBe("2");
+      expect(parsed.units?.[1].title).toContain("Advanced");
+      expect(parsed.units?.[1].chapters).toHaveLength(2);
+    });
+
+    it("maintains chapter sections within unit structure", () => {
+      const parsed = parseTocFromOcrText([
+        "Unit A: Fundamentals",
+        "Chapter 1 Introduction 10",
+        "1.1 Overview 12",
+        "1.2 Goals 15",
+        "1.3 Resources 18",
+        "Chapter 2 Basics 20",
+        "2.1 Theory 22",
+      ].join("\n"));
+
+      expect(parsed.units).toBeDefined();
+      const unit = parsed.units?.[0];
+      expect(unit?.chapters[0].sections).toHaveLength(3);
+      expect(unit?.chapters[0].sections[0].sectionNumber).toBe("1.1");
+      expect(unit?.chapters[1].sections).toHaveLength(1);
+    });
+
+    it("handles single unit with mixed chapter numbering", () => {
+      const parsed = parseTocFromOcrText([
+        "Unit I: Introduction",
+        "Module 1 Welcome 5",
+        "Lesson 1.1 Getting Started 7",
+        "Lesson 1.2 Setup 10",
+        "Module 2 Concepts 15",
+        "Lesson 2.1 Key Ideas 17",
+      ].join("\n"));
+
+      expect(parsed.units).toHaveLength(1);
+      expect(parsed.units?.[0].title).toContain("Introduction");
+      expect(parsed.units?.[0].chapters).toHaveLength(2);
+    });
+
+    it("stitches units correctly across multiple TOC pages", () => {
+      const page1 = parseTocFromOcrText([
+        "Unit 1: Part A",
+        "Chapter 1 First 10",
+        "1.1 Section 12",
+        "Chapter 2 Second 20",
+        "2.1 Section 22",
+      ].join("\n"));
+
+      const page2 = parseTocFromOcrText([
+        "Unit 1: Part A",
+        "Chapter 2 Second 20",
+        "2.1 Section 22",
+        "Unit 2: Part B",
+        "Chapter 3 Third 30",
+        "3.1 Section 32",
+      ].join("\n"));
+
+      const stitched = stitchTocPages([
+        { pageIndex: 0, chapters: page1.chapters, confidence: page1.confidence, units: page1.units },
+        { pageIndex: 1, chapters: page2.chapters, confidence: page2.confidence, units: page2.units },
+      ]);
+
+      expect(stitched.units).toHaveLength(2);
+      expect(stitched.units?.[0].chapters).toHaveLength(2); // Unit 1 has 2 chapters
+      expect(stitched.units?.[1].chapters).toHaveLength(1); // Unit 2 has 1 chapter
+      expect(stitched.units?.[1].chapters[0].chapterNumber).toBe("3");
+    });
+
+    it("deduplicates unit entries while preserving chapter hierarchy", () => {
+      const page1 = parseTocFromOcrText([
+        "Unit 1: Core Concepts",
+        "Chapter 1 Basics 10",
+        "1.1 Overview 12",
+      ].join("\n"));
+
+      const page2 = parseTocFromOcrText([
+        "Unit 1: Core Concepts",
+        "Chapter 1 Basics 10",
+        "1.1 Overview 12",
+        "Unit 2: Applications",
+        "Chapter 2 Real World 25",
+        "2.1 Examples 27",
+      ].join("\n"));
+
+      const stitched = stitchTocPages([
+        { pageIndex: 0, chapters: page1.chapters, confidence: page1.confidence, units: page1.units },
+        { pageIndex: 1, chapters: page2.chapters, confidence: page2.confidence, units: page2.units },
+      ]);
+
+      // Should have 2 units, not 3 (Unit 1 deduplicated)
+      expect(stitched.units).toHaveLength(2);
+      expect(stitched.chapters).toHaveLength(2); // Flattened: Chapter 1 and 2
+    });
+
+    it("preserves page ranges within unit hierarchy", () => {
+      const parsed = parseTocFromOcrText([
+        "Unit A: Advanced Topics 50",
+        "Chapter 5 Calculus 55",
+        "5.1 Derivatives 57",
+        "Chapter 6 Statistics 70",
+        "6.1 Probability 72",
+      ].join("\n"));
+
+      expect(parsed.units).toHaveLength(1);
+      const unit = parsed.units?.[0];
+      expect(unit?.pageStart).toBeDefined();
+      expect(unit?.chapters[0].pageStart).toBe(55);
+      expect(unit?.chapters[1].pageStart).toBe(70);
+    });
+
+    it("resolves units correctly when chapters reference their parent unit", () => {
+      const parsed = parseTocFromOcrText([
+        "Unit I: New Material",
+        "Chapter 1 Mathematics 8",
+        "Chapter 2 Science 18",
+        "Unit II: Review",
+        "Chapter 3 Vocabulary 30",
+        "Chapter 4 Practice 40",
+      ].join("\n"));
+
+      expect(parsed.units).toHaveLength(2);
+
+      // Check bidirectional relationship: chapters know their unit
+      expect(parsed.units?.[0].chapters[0].unitName).toContain("Unit I");
+      expect(parsed.units?.[1].chapters[0].unitName).toContain("Unit II");
+
+      // Check that flattened chapters list is also present
+      expect(parsed.chapters).toHaveLength(4);
+    });
+
+    it("handles malformed unit lines and falls back gracefully", () => {
+      const parsed = parseTocFromOcrText([
+        "Unit 1",  // Minimal unit line
+        "Chapter 1 Test 5",
+        "1.1 Subsection 7",
+        "Unit:",  // Malformed
+        "Chapter 2 Next 20",
+      ].join("\n"));
+
+      // Should extract at least the well-formed unit
+      expect(parsed.units?.length ?? 0).toBeGreaterThanOrEqual(1);
+      expect(parsed.chapters).toHaveLength(2);
+    });
+  });
 });

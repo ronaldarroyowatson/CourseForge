@@ -89,7 +89,7 @@ export function useAutoSync(): void {
       }
 
       try {
-        const result = await syncNow();
+        const result = await syncNow({ intent: "auto" });
         if (!isActive) {
           return;
         }
@@ -203,7 +203,7 @@ export function useAutoSync(): void {
       const ui = useUIStore.getState();
 
       ui.setSyncStatus("syncing", "Syncing local changes...");
-      const result = await syncNow();
+      const result = await syncNow({ intent: "auto" });
       applySyncMetrics(result);
 
       if (result.throttled) {

@@ -66,19 +66,30 @@ export interface TocChapter {
   sections: TocSection[];
 }
 
+export interface TocUnit {
+  unitNumber: string;
+  title: string;
+  pageStart?: number;
+  pageEnd?: number;
+  chapters: TocChapter[];
+}
+
 export interface ParsedTocResult {
   chapters: TocChapter[];
+  units?: TocUnit[];
   confidence: number;
 }
 
 export interface TocPage {
   pageIndex: number;
   chapters: TocChapter[];
+  units?: TocUnit[];
   confidence?: number;
 }
 
 export interface TocStructure {
   chapters: TocChapter[];
+  units?: TocUnit[];
   stitchingConfidence: number;
 }
 
@@ -842,14 +853,59 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     .filter(Boolean);
 
   const chapters: TocChapter[] = [];
+  const units: TocUnit[] = [];
+  const unitMap = new Map<string, TocUnit>();
+  const chapterIdentity = (chapter: TocChapter): string => `${normalizeChapterNumber(chapter.chapterNumber)}|${normalizeToken(chapter.title)}`;
   let currentChapter: TocChapter | null = null;
+  let activeUnitKey: string | undefined;
   let activeUnitName: string | undefined;
   let lineHits = 0;
 
   for (const line of lines) {
     const unitMatch = line.match(/^unit\s+([A-Za-z0-9]+)\s*[:\-]?\s*(.*)$/i);
     if (unitMatch) {
-      activeUnitName = ["Unit", unitMatch[1], unitMatch[2]].filter(Boolean).join(" ").trim();
+      const unitNumber = unitMatch[1];
+      const rawUnitDescriptor = unitMatch[2]?.trim() ?? "";
+      let unitTitle = rawUnitDescriptor || `Unit ${unitNumber}`;
+      let unitPageStart: number | undefined;
+      let unitPageEnd: number | undefined;
+
+      const descriptorMatch = rawUnitDescriptor.match(/^(.*?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/);
+      if (descriptorMatch) {
+        const descriptorTitle = descriptorMatch[1]?.trim();
+        if (descriptorTitle) {
+          unitTitle = descriptorTitle;
+        }
+        if (descriptorMatch[2]) {
+          unitPageStart = Number(descriptorMatch[2]);
+        }
+        if (descriptorMatch[3]) {
+          unitPageEnd = Number(descriptorMatch[3]);
+        }
+      }
+
+      activeUnitKey = `unit-${normalizeToken(unitNumber)}`;
+      const canonicalUnitLabel = `Unit ${unitNumber}`;
+      activeUnitName = normalizeToken(unitTitle) === normalizeToken(canonicalUnitLabel)
+        ? canonicalUnitLabel
+        : `${canonicalUnitLabel} ${unitTitle}`.trim();
+      
+      if (!unitMap.has(activeUnitKey)) {
+        const newUnit: TocUnit = {
+          unitNumber,
+          title: unitTitle,
+          pageStart: unitPageStart,
+          pageEnd: unitPageEnd,
+          chapters: [],
+        };
+        unitMap.set(activeUnitKey, newUnit);
+        units.push(newUnit);
+      } else {
+        const existingUnit = unitMap.get(activeUnitKey)!;
+        existingUnit.pageStart = existingUnit.pageStart ?? unitPageStart;
+        existingUnit.pageEnd = existingUnit.pageEnd ?? unitPageEnd;
+      }
+      currentChapter = null;
       lineHits += 1;
       continue;
     }
@@ -866,6 +922,12 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
         sections: [],
       };
       chapters.push(currentChapter);
+      if (activeUnitKey) {
+        const unit = unitMap.get(activeUnitKey);
+        if (unit) {
+          unit.chapters.push(currentChapter);
+        }
+      }
       lineHits += 1;
       continue;
     }
@@ -882,6 +944,12 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
         sections: [],
       };
       chapters.push(currentChapter);
+      if (activeUnitKey) {
+        const unit = unitMap.get(activeUnitKey);
+        if (unit) {
+          unit.chapters.push(currentChapter);
+        }
+      }
       lineHits += 1;
       continue;
     }
@@ -897,6 +965,12 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
           sections: [],
         };
         chapters.push(currentChapter);
+        if (activeUnitKey) {
+          const unit = unitMap.get(activeUnitKey);
+          if (unit) {
+            unit.chapters.push(currentChapter);
+          }
+        }
       }
 
       const chapterNumber = normalizeChapterNumber(currentChapter.chapterNumber);
@@ -957,6 +1031,12 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
         sections: [],
       };
       chapters.push(currentChapter);
+      if (activeUnitKey) {
+        const unit = unitMap.get(activeUnitKey);
+        if (unit) {
+          unit.chapters.push(currentChapter);
+        }
+      }
       lineHits += 1;
       continue;
     }
@@ -972,6 +1052,12 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
           sections: [],
         };
         chapters.push(currentChapter);
+        if (activeUnitKey) {
+          const unit = unitMap.get(activeUnitKey);
+          if (unit) {
+            unit.chapters.push(currentChapter);
+          }
+        }
       }
 
       currentChapter.sections.push({
@@ -998,10 +1084,25 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
   }
 
   const normalizedChapters = inferTocPageRanges(chapters);
+  const normalizedUnits = units
+    .map((unit) => {
+      const unitChapterKeys = new Set(unit.chapters.map((chapter) => chapterIdentity(chapter)));
+      const unitChapters = normalizedChapters.filter((chapter) => unitChapterKeys.has(chapterIdentity(chapter)));
+      const derivedPageStart = unitChapters.find((chapter) => isPositivePage(chapter.pageStart))?.pageStart;
+      const derivedPageEnd = [...unitChapters].reverse().find((chapter) => isPositivePage(chapter.pageEnd))?.pageEnd;
+
+      return {
+        ...unit,
+        pageStart: unit.pageStart ?? derivedPageStart,
+        pageEnd: unit.pageEnd ?? derivedPageEnd,
+        chapters: unitChapters,
+      };
+    })
+    .filter((unit) => unit.chapters.length > 0);
 
   const confidence = lines.length > 0 ? Math.min(1, lineHits / lines.length + (chapters.length > 0 ? 0.2 : 0)) : 0;
 
-  return { chapters: normalizedChapters, confidence };
+  return { chapters: normalizedChapters, units: normalizedUnits.length > 0 ? normalizedUnits : undefined, confidence };
 }
 
 export function mergeParsedToc(base: ParsedTocResult, incoming: ParsedTocResult): ParsedTocResult {
@@ -1065,11 +1166,34 @@ export function stitchTocPages(pages: TocPage[]): TocStructure {
   const sortedPages = [...pages].sort((left, right) => left.pageIndex - right.pageIndex);
   const chapterOrder: string[] = [];
   const chapterMap = new Map<string, TocChapter>();
+  const unitMap = new Map<string, TocUnit>();
+  const unitOrder: string[] = [];
+  const unitIdentityFromUnit = (unit: TocUnit): string => normalizeToken(`unit ${unit.unitNumber} ${unit.title}`);
+  const unitIdentityFromName = (name: string | undefined): string => normalizeToken(name ?? "");
   let duplicateHits = 0;
   let conflictHits = 0;
   let totalSections = 0;
 
   for (const page of sortedPages) {
+    // Stitch units from pages
+    if (page.units) {
+      for (const unit of page.units) {
+        const unitKey = `unit-${normalizeToken(unit.unitNumber)}`;
+        if (!unitMap.has(unitKey)) {
+          unitOrder.push(unitKey);
+          unitMap.set(unitKey, {
+            ...unit,
+            chapters: [],
+          });
+        } else {
+          const existing = unitMap.get(unitKey)!;
+          existing.pageStart = existing.pageStart ?? unit.pageStart;
+          existing.pageEnd = existing.pageEnd ?? unit.pageEnd;
+        }
+      }
+    }
+
+    // Stitch chapters from pages
     for (const chapter of page.chapters) {
       const normalizedChapterNumber = normalizeChapterNumber(chapter.chapterNumber);
       const normalizedChapterTitle = normalizeToken(chapter.title);
@@ -1173,6 +1297,35 @@ export function stitchTocPages(pages: TocPage[]): TocStructure {
 
   const inferredChapters = inferTocPageRanges(chapters);
 
+  // Build units with their chapters included
+  const chaptersByUnitIdentity = new Map<string, TocChapter[]>();
+  for (const chapter of inferredChapters) {
+    if (!chapter.unitName) {
+      continue;
+    }
+    const unitIdentity = unitIdentityFromName(chapter.unitName);
+    const existing = chaptersByUnitIdentity.get(unitIdentity) ?? [];
+    existing.push(chapter);
+    chaptersByUnitIdentity.set(unitIdentity, existing);
+  }
+
+  const units = unitOrder
+    .map((key) => unitMap.get(key))
+    .filter((unit): unit is TocUnit => Boolean(unit))
+    .map((unit) => {
+      const chaptersForUnit = chaptersByUnitIdentity.get(unitIdentityFromUnit(unit)) ?? [];
+      const derivedPageStart = chaptersForUnit.find((chapter) => isPositivePage(chapter.pageStart))?.pageStart;
+      const derivedPageEnd = [...chaptersForUnit].reverse().find((chapter) => isPositivePage(chapter.pageEnd))?.pageEnd;
+
+      return {
+        ...unit,
+        pageStart: unit.pageStart ?? derivedPageStart,
+        pageEnd: unit.pageEnd ?? derivedPageEnd,
+        chapters: chaptersForUnit,
+      };
+    })
+    .filter((unit) => unit.chapters.length > 0);
+
   const averagePageConfidence = sortedPages.reduce((sum, page) => sum + clamp01(page.confidence ?? 0.55), 0) / sortedPages.length;
   const duplicatePenalty = totalSections > 0 ? (duplicateHits / totalSections) * 0.2 : 0;
   const conflictPenalty = totalSections > 0 ? (conflictHits / totalSections) * 0.3 : 0;
@@ -1181,6 +1334,7 @@ export function stitchTocPages(pages: TocPage[]): TocStructure {
 
   return {
     chapters: inferredChapters,
+    units: units.length > 0 ? units : undefined,
     stitchingConfidence,
   };
 }
@@ -1518,7 +1672,26 @@ function extractPublisherLocation(lines: string[]): string | undefined {
   let result = Array.from(new Set(locationLines)).join("\n");
   // Strip "Send all inquiries to:" directive that sometimes leads the block.
   result = result.replace(/^\s*send all inquiries to:\s*/i, "").trim();
+  
+  // Format address with proper spacing and commas (postal address format)
+  if (result) {
+    result = formatAddressLines(result);
+  }
+  
   return result || undefined;
+}
+
+/**
+ * Format address text with proper spacing and commas (as on an envelope)
+ * Converts newline-separated lines to comma-separated format with proper spacing
+ * Example: "8787 Orion Place\nColumbus, OH 43240" → "8787 Orion Place, Columbus, OH 43240"
+ */
+function formatAddressLines(address: string): string {
+  // Split by newlines and filter empty lines
+  const lines = address.split("\n").map((line) => line.trim()).filter(Boolean);
+  
+  // Join with commas and space for postal address format
+  return lines.join(", ");
 }
 
 function inferGradeBandFromUrl(url: string | undefined): string | undefined {

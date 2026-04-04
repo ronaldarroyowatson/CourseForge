@@ -109,6 +109,7 @@ describe("TOC OCR + parser ground truth", () => {
       const text = await fs.readFile(textPath, "utf8");
       const expected = JSON.parse(await fs.readFile(parsedPath, "utf8"));
       const actual = JSON.parse(JSON.stringify(parseTocFromOcrText(text)));
+      delete actual.units;
 
       expect(actual).toStrictEqual(expected);
     }

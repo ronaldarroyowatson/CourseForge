@@ -1,10 +1,10 @@
 import { openDB } from "idb";
 import type { DBSchema, IDBPDatabase, IDBPObjectStore, IDBPTransaction } from "idb";
 
-import type { CourseForgeEntityMap } from "../models";
+import type { CourseForgeEntityMap, TocAutosaveRecord } from "../models";
 
 const DB_NAME = "courseforge";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 // Store names follow the domain entities in docs/DB_SCHEMA.md.
 export const STORE_NAMES = {
@@ -20,6 +20,7 @@ export const STORE_NAMES = {
   glossaries: "glossaries",
   ingestFingerprints: "ingestFingerprints",
   extractedPresentations: "extractedPresentations",
+  tocAutosaves: "tocAutosaves",
 } as const;
 
 export type CourseForgeStoreName = (typeof STORE_NAMES)[keyof typeof STORE_NAMES];
@@ -37,6 +38,7 @@ interface CourseForgeDBSchema extends DBSchema {
   glossaries: { key: string; value: CourseForgeEntityMap["glossaries"] };
   ingestFingerprints: { key: string; value: CourseForgeEntityMap["ingestFingerprints"] };
   extractedPresentations: { key: string; value: CourseForgeEntityMap["extractedPresentations"] };
+  tocAutosaves: { key: string; value: TocAutosaveRecord };
 }
 
 let dbPromise: Promise<IDBPDatabase<CourseForgeDBSchema>> | null = null;

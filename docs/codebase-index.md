@@ -758,6 +758,41 @@ Consumed by:
 
 - Admin governance callables, OCR/extraction callables, presentation callables, and moderation pipelines.
 
+---
+
+## Updates (2026-04-04)
+
+### Sync Read Budget Guard (Auto Sync)
+
+Primary file(s):
+
+- [src/core/services/syncService.ts](src/core/services/syncService.ts)
+- [src/webapp/hooks/useAutoSync.ts](src/webapp/hooks/useAutoSync.ts)
+- [src/webapp/hooks/useAuthBootstrap.ts](src/webapp/hooks/useAuthBootstrap.ts)
+
+Update summary:
+
+- Added `intent` routing to `syncNow` (`bootstrap | auto | manual`) so auto-sync runs can short-circuit when there are no pending local changes.
+- Auto-sync hook now calls `syncNow({ intent: "auto" })`, preventing repeated cloud reconciliation reads while idle.
+- Auth bootstrap now calls `syncNow({ intent: "bootstrap" })` to preserve startup sync semantics while keeping intent explicit for diagnostics.
+
+### TOC Capture and Autosave Hardening
+
+Primary file(s):
+
+- [src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx](src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx)
+- [src/core/services/textbookAutoExtractionService.ts](src/core/services/textbookAutoExtractionService.ts)
+- [tests/core/tocAutosaveService.test.ts](tests/core/tocAutosaveService.test.ts)
+- [tests/core/tocGroundTruthPipeline.test.ts](tests/core/tocGroundTruthPipeline.test.ts)
+
+Update summary:
+
+- Fixed TOC editor save action markup and compatibility labels, restored valid button hierarchy, and moved inline warning/action styles into CSS classes.
+- Tightened upload validation to require cover + copyright metadata signal + TOC while still supporting local-only save flow.
+- Improved unit parsing/stitching so unit chapter membership and page ranges remain stable across multipage TOC merges, including prevention of duplicated `Unit X Unit X` labels.
+- Stabilized TOC autosave tests by removing fake-timer blocking around IndexedDB initialization and using real debounce waits.
+- Updated parser ground-truth assertion to ignore optional `units` in strict fixture parity checks.
+
 ## How to Update This Index
 
 - Update triggers:

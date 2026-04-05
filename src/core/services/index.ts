@@ -11,6 +11,7 @@ export {
 export * from "./adminFirestoreService";
 export * from "./accessibilityService";
 export * from "./autoOcrService";
+export * from "./autoTextbookUploadService";
 export * from "./ocrCorrectionLearningService";
 export * from "./metadataCorrectionLearningService";
 export * from "./metadataCorrectionSyncService";

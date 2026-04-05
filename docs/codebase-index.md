@@ -901,3 +901,19 @@ Update summary:
 - XML/export logic:
   - API surface: [src/core/services/xml/index.ts](src/core/services/xml/index.ts)
   - Export pipeline: [src/core/services/xml/exportXml.ts](src/core/services/xml/exportXml.ts), [src/core/services/xml/exportData.ts](src/core/services/xml/exportData.ts), [src/core/services/xml/formatXml.ts](src/core/services/xml/formatXml.ts)
+
+## Updates (2026-04-04)
+
+### Auto Textbook Cloud Upload Telemetry, Resume, and Integrity Recovery
+
+- New tracked upload orchestration now lives in [src/core/services/autoTextbookUploadService.ts](src/core/services/autoTextbookUploadService.ts) and is exported via [src/core/services/index.ts](src/core/services/index.ts).
+- Upload progress is persisted to local storage and mirrored into global UI state through [src/webapp/store/uiStore.ts](src/webapp/store/uiStore.ts), enabling visibility across page navigation.
+- The Auto TOC editor now provides top and bottom save action bars in [src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx](src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx) so long TOC captures no longer force scrolling to the bottom to start upload.
+- Upload telemetry is rendered outside the Auto flow in [src/webapp/components/layout/Header.tsx](src/webapp/components/layout/Header.tsx) and [src/webapp/components/settings/SettingsPage.tsx](src/webapp/components/settings/SettingsPage.tsx), so users can monitor progress while viewing settings/write-rate indicators.
+- Resume flow performs a cloud integrity check and local/cloud diff before upload continues, then uploads only missing hierarchy records (textbook/chapter/section) and restarts from a clean cloud hierarchy if corruption/mismatch is detected.
+- Duplicate-resolution behavior now supports preserving both records when Auto metadata collides with an existing manual textbook; the new `keep_both` mode is represented in [src/core/services/autoTextbookConflictService.ts](src/core/services/autoTextbookConflictService.ts) and used by [src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx](src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx).
+- User duplicate-preference memory (for ISBN-scoped keep-both behavior) is handled by the tracked upload service and applied during Auto save decisions.
+
+Assumptions and scope note:
+
+- Integrity recovery currently targets textbook/chapter/section hierarchy continuity and ownership consistency; deeper content stores (vocab/concepts/equations/key ideas) continue to rely on existing sync reconciliation paths.

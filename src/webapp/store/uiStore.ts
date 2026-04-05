@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Textbook } from "../../core/models";
+import type { AutoTextbookUploadSnapshot } from "../../core/services/autoTextbookUploadService";
 
 export type ThemeMode = "light" | "dark";
 export type SupportedLanguage = "en" | "es" | "pt" | "zm" | "fr" | "de";
@@ -191,6 +192,9 @@ interface UIStore {
   setWriteLoopBlocked: (value: boolean) => void;
   markLocalChange: () => void;
   addSyncDebugEvent: (event: string) => void;
+  activeAutoTextbookUpload: AutoTextbookUploadSnapshot | null;
+  setAutoTextbookUpload: (snapshot: AutoTextbookUploadSnapshot) => void;
+  clearAutoTextbookUpload: () => void;
 
   // Theme state
   theme: ThemeMode;
@@ -292,6 +296,9 @@ export const useUIStore = create<UIStore>((set) => ({
     set((state) => ({
       syncDebugEvents: [`[${new Date().toISOString()}] ${event}`, ...state.syncDebugEvents].slice(0, 40),
     })),
+  activeAutoTextbookUpload: null,
+  setAutoTextbookUpload: (snapshot: AutoTextbookUploadSnapshot) => set({ activeAutoTextbookUpload: snapshot }),
+  clearAutoTextbookUpload: () => set({ activeAutoTextbookUpload: null }),
 
   // Theme defaults and actions
   theme: getInitialTheme(),

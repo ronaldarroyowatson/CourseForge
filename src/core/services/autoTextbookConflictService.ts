@@ -1,6 +1,6 @@
 import type { TocChapter } from "./textbookAutoExtractionService";
 
-export type AutoConflictResolutionMode = "overwrite_auto" | "merge_dedupe";
+export type AutoConflictResolutionMode = "overwrite_auto" | "merge_dedupe" | "keep_both";
 
 export interface ExistingHierarchyChapter {
   id: string;
@@ -87,6 +87,15 @@ export function buildAutoConflictResolutionPlan(input: {
   existingChapters: ExistingHierarchyChapter[];
   existingSectionsByChapterId: Record<string, ExistingHierarchySection[]>;
 }): AutoConflictResolutionPlan {
+  if (input.mode === "keep_both") {
+    return {
+      chapterUpserts: [],
+      sectionUpserts: [],
+      chapterIdsToDelete: [],
+      sectionIdsToDelete: [],
+    };
+  }
+
   const chapterUpserts: ChapterUpsertInstruction[] = [];
   const sectionUpserts: SectionUpsertInstruction[] = [];
 

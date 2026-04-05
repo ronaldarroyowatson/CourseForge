@@ -289,6 +289,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const readBudgetExceeded = useUIStore((state) => state.readBudgetExceeded);
   const pendingChangesCount = useUIStore((state) => state.pendingChangesCount);
   const syncStatus = useUIStore((state) => state.syncStatus);
+  const activeAutoTextbookUpload = useUIStore((state) => state.activeAutoTextbookUpload);
   const [debugEnabled, setDebugEnabled] = React.useState<boolean>(() => isDebugLoggingEnabled());
   const [debugStats, setDebugStats] = React.useState({ entries: 0, totalBytes: 0, maxTotalBytes: 1_500_000, maxUploadBytes: 500 * 1024, lastUploadTimestamp: null as number | null });
   const [debugStatus, setDebugStatus] = React.useState<string | null>(null);
@@ -1133,6 +1134,18 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           {pendingChangesCount > 0 && (
             <p className="settings-meta">Pending changes: {pendingChangesCount}</p>
           )}
+          {activeAutoTextbookUpload ? (
+            <div className="settings-upload-monitor" aria-live="polite">
+              <p className="settings-meta">
+                Textbook upload: <strong>{activeAutoTextbookUpload.title || "Untitled textbook"}</strong>
+              </p>
+              <p className="settings-meta">{activeAutoTextbookUpload.message}</p>
+              <progress className="settings-progress" max={100} value={activeAutoTextbookUpload.percentComplete} aria-label="Textbook upload progress" />
+              <p className="settings-meta">
+                {activeAutoTextbookUpload.percentComplete}% complete · {activeAutoTextbookUpload.completedItems}/{activeAutoTextbookUpload.totalItems} items · writes {activeAutoTextbookUpload.writeCount} · reads {activeAutoTextbookUpload.readCount}
+              </p>
+            </div>
+          ) : null}
           <div className="sync-safety-donuts">
             <SyncDonutChart label="Writes" used={writeCount} limit={writeBudgetLimit} exceeded={writeBudgetExceeded} showWarning />
             <SyncDonutChart label="Reads" used={readCount} limit={readBudgetLimit} exceeded={readBudgetExceeded} />

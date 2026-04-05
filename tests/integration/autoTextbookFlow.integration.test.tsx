@@ -98,6 +98,12 @@ const syncServiceMocks = vi.hoisted(() => ({
   })),
 }));
 
+const autoTextbookUploadServiceMocks = vi.hoisted(() => ({
+  getRememberedAutoDuplicatePreference: vi.fn<(isbnRaw: string) => "keep_both" | "merge_dedupe" | "overwrite_auto" | null>(() => null),
+  rememberAutoDuplicatePreference: vi.fn<(isbnRaw: string, preference: string) => void>(() => undefined),
+  runTrackedAutoTextbookCloudUpload: vi.fn<(input: unknown) => Promise<MockSyncNowResult>>(async (input: unknown) => syncServiceMocks.syncNow(input)),
+}));
+
 vi.mock("../../src/core/services/coverImageService", () => ({
   uploadTextbookCoverFromDataUrl: (textbookId: string, dataUrl: string) => coverServiceMocks.uploadTextbookCoverFromDataUrl(textbookId, dataUrl),
   uploadTextbookCoverImage: vi.fn(async () => "cover://mock"),
@@ -140,6 +146,12 @@ vi.mock("../../src/core/services/syncService", () => ({
   syncNow: (deps?: unknown) => syncServiceMocks.syncNow(deps),
 }));
 
+vi.mock("../../src/core/services/autoTextbookUploadService", () => ({
+  getRememberedAutoDuplicatePreference: (isbnRaw: string) => autoTextbookUploadServiceMocks.getRememberedAutoDuplicatePreference(isbnRaw),
+  rememberAutoDuplicatePreference: (isbnRaw: string, preference: string) => autoTextbookUploadServiceMocks.rememberAutoDuplicatePreference(isbnRaw, preference),
+  runTrackedAutoTextbookCloudUpload: (input: unknown) => autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload(input),
+}));
+
 describe("auto textbook flow integration", () => {
   beforeEach(() => {
     repositoryMocks.createTextbook.mockClear();
@@ -164,6 +176,9 @@ describe("auto textbook flow integration", () => {
     coverServiceMocks.uploadTextbookCoverFromDataUrl.mockClear();
     syncServiceMocks.findCloudTextbookByISBN.mockClear();
     syncServiceMocks.syncNow.mockClear();
+    autoTextbookUploadServiceMocks.getRememberedAutoDuplicatePreference.mockClear();
+    autoTextbookUploadServiceMocks.rememberAutoDuplicatePreference.mockClear();
+    autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload.mockClear();
 
     repositoryMocks.findTextbookByISBN.mockResolvedValue(undefined);
     repositoryMocks.fetchChaptersByTextbookId.mockResolvedValue([]);
@@ -190,6 +205,8 @@ describe("auto textbook flow integration", () => {
       errorCode: null,
       pendingCount: 0,
     });
+    autoTextbookUploadServiceMocks.getRememberedAutoDuplicatePreference.mockReturnValue(null);
+    autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload.mockImplementation(async (input: unknown) => syncServiceMocks.syncNow(input));
 
     useUIStore.setState({
       selectedTextbook: null,

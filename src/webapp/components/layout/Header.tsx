@@ -1,6 +1,11 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { doc, setDoc } from "firebase/firestore";
+import {
+  clearPersistedAutoTextbookUpload,
+  hydratePersistedAutoTextbookUpload,
+  resumePersistedAutoTextbookUpload,
+} from "../../../core/services/autoTextbookUploadService";
 import { syncNow } from "../../../core/services/syncService";
 import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
@@ -39,8 +44,13 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
   const setPermissionDeniedSyncBlocked = useUIStore((state) => state.setPermissionDeniedSyncBlocked);
   const setWriteLoopBlocked = useUIStore((state) => state.setWriteLoopBlocked);
   const syncDebugEvents = useUIStore((state) => state.syncDebugEvents);
+  const activeAutoTextbookUpload = useUIStore((state) => state.activeAutoTextbookUpload);
 
   const [showDebugPanel, setShowDebugPanel] = React.useState(false);
+
+  React.useEffect(() => {
+    hydratePersistedAutoTextbookUpload();
+  }, []);
 
   async function handleSyncNow(): Promise<void> {
     setSyncStatus("syncing", "Manual sync in progress...");
@@ -103,6 +113,15 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
       if (import.meta.env.DEV) {
         console.warn("Unable to persist theme preference:", error);
       }
+    }
+  }
+
+  async function handleResumeUpload(): Promise<void> {
+    try {
+      await resumePersistedAutoTextbookUpload();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to resume textbook upload.";
+      setSyncStatus("error", message);
     }
   }
 
@@ -212,6 +231,32 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
           </div>
         </div>
       </div>
+      {activeAutoTextbookUpload ? (
+        <section className="header-upload-monitor" aria-live="polite">
+          <div className="header-upload-monitor__meta">
+            <strong>{activeAutoTextbookUpload.title || "Untitled textbook"}</strong>
+            <p className="sync-indicator">{activeAutoTextbookUpload.message}</p>
+          </div>
+          <div className="header-upload-monitor__progress">
+            <progress max={100} value={activeAutoTextbookUpload.percentComplete} aria-label="Auto textbook upload progress" />
+            <p className="sync-indicator">
+              {activeAutoTextbookUpload.percentComplete}% complete · {activeAutoTextbookUpload.completedItems}/{activeAutoTextbookUpload.totalItems} items · writes {activeAutoTextbookUpload.writeCount} · reads {activeAutoTextbookUpload.readCount}
+            </p>
+          </div>
+          <div className="header-upload-monitor__actions">
+            {activeAutoTextbookUpload.canResume && activeAutoTextbookUpload.status !== "uploading" ? (
+              <button type="button" className="btn-secondary" onClick={() => { void handleResumeUpload(); }}>
+                Resume Upload
+              </button>
+            ) : null}
+            {activeAutoTextbookUpload.status === "completed" ? (
+              <button type="button" className="btn-secondary" onClick={() => { clearPersistedAutoTextbookUpload(); }}>
+                Dismiss
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
       {writeBudgetExceeded ? (
         <p className="error-text sync-indicator">Cloud sync paused to prevent excessive writes. Please review your data or try again later.</p>
       ) : null}

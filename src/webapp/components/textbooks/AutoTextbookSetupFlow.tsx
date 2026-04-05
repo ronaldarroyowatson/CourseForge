@@ -10,6 +10,11 @@ import { appendDebugLogEntry } from "../../../core/services";
 import { persistAutoTextbook } from "../../../core/services/autoTextbookPersistenceService";
 import { uploadTextbookCoverFromDataUrl } from "../../../core/services/coverImageService";
 import {
+  getRememberedAutoDuplicatePreference,
+  rememberAutoDuplicatePreference,
+  runTrackedAutoTextbookCloudUpload,
+} from "../../../core/services/autoTextbookUploadService";
+import {
   AUTO_MODE_SCOPE_MESSAGE,
   createInitialAutoCaptureUsage,
   DEFAULT_AUTO_CAPTURE_LIMITS,
@@ -51,7 +56,6 @@ import {
   saveCorrectionRecord,
   type MetadataResult,
 } from "../../../core/services/metadataCorrectionLearningService";
-import { syncNow } from "../../../core/services/syncService";
 import {
   extractMetadataWithOcrFallbackFromDataUrl,
   type MetadataPipelineResult,
@@ -139,6 +143,7 @@ interface DuplicateTextbookMatch {
   id: string;
   title: string;
   isbnRaw: string;
+  sourceType: "auto" | "manual";
 }
 
 interface SelectionRect {
@@ -947,6 +952,7 @@ function buildExtractionFieldList(meta: AutoTextbookMetadata): string[] {
 
 export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", onSaved, onSwitchToManual, testingSeedState }: AutoTextbookSetupFlowProps): React.JSX.Element {
   const language = useUIStore((state) => state.language);
+  const activeAutoTextbookUpload = useUIStore((state) => state.activeAutoTextbookUpload);
   const chromeOs = useMemo(() => runtime === "extension" && isChromeOSRuntime(), [runtime]);
   const compactChromeLayout = useMemo(() => chromeOs && isSmallChromebookViewport(), [chromeOs]);
   const {
@@ -1011,6 +1017,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   const [lastExtractionFields, setLastExtractionFields] = useState<string[]>([]);
   const [duplicateMatch, setDuplicateMatch] = useState<DuplicateTextbookMatch | null>(null);
   const [conflictResolutionMode, setConflictResolutionMode] = useState<AutoConflictResolutionMode>("overwrite_auto");
+  const [rememberDuplicateChoice, setRememberDuplicateChoice] = useState(false);
   const [moderationAssessment, setModerationAssessment] = useState<ImageModerationAssessment | null>(null);
   const [captureDialog, setCaptureDialog] = useState<CaptureDialogState>({ open: false, imageDataUrl: "" });
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
@@ -3037,15 +3044,24 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
       const requiresAdminReview = imageModeration.decision === "review";
 
       const trimmedIsbn = metadataForm.isbnRaw.trim();
+      const rememberedDuplicatePreference = trimmedIsbn
+        ? getRememberedAutoDuplicatePreference(trimmedIsbn)
+        : null;
       const existingDuplicate = trimmedIsbn
         ? await findTextbookByISBN(trimmedIsbn)
         : undefined;
 
       if (existingDuplicate && duplicateMatch?.id !== existingDuplicate.id) {
+        if (existingDuplicate.sourceType === "manual" && rememberedDuplicatePreference === "keep_both") {
+          setDuplicateMatch(null);
+          setConflictResolutionMode("keep_both");
+          setInfoMessage("A manual textbook already exists for this ISBN. Keeping both copies based on your saved preference.");
+        } else {
         setDuplicateMatch({
           id: existingDuplicate.id,
           title: existingDuplicate.title,
           isbnRaw: existingDuplicate.isbnRaw,
+          sourceType: existingDuplicate.sourceType,
         });
         setInfoMessage("A textbook with this ISBN already exists. Choose how to apply Auto data, then save again.");
         emitAutoFlowDiagnostic("save_duplicate_detected", {
@@ -3057,6 +3073,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
           },
         });
         return;
+        }
       }
 
       const nextTextbookChanges = {
@@ -3089,7 +3106,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         status: requiresAdminReview ? "submitted" as const : "draft" as const,
       };
 
-      if (duplicateMatch) {
+      let savedTextbookId: string | null = null;
+
+      if (duplicateMatch && conflictResolutionMode !== "keep_both") {
         const chapters = await fetchChaptersByTextbookId(duplicateMatch.id);
         const sectionsByChapterId: Record<string, Array<{ id: string; chapterId: string; index: number; title: string }>> = {};
 
@@ -3209,8 +3228,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
             ...sectionPayload,
           });
         }
+        savedTextbookId = duplicateMatch.id;
       } else {
-        await persistAutoTextbook(
+        savedTextbookId = await persistAutoTextbook(
           {
             metadata: {
               ...nextTextbookChanges,
@@ -3227,7 +3247,12 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
       }
 
       if (isCloudUpload) {
-        const cloudUploadResult = await syncNow({ intent: "manual" });
+        const cloudUploadResult = await runTrackedAutoTextbookCloudUpload({
+          sessionId: `${draftKeyRef.current}:${savedTextbookId ?? "pending"}`,
+          textbookId: savedTextbookId ?? "",
+          title: metadataForm.title.trim(),
+          isbnRaw: metadataForm.isbnRaw.trim(),
+        });
         if (!cloudUploadResult.success) {
           setErrorMessage(cloudUploadResult.message || "Unable to upload textbook to cloud. Please try again.");
           emitAutoFlowDiagnostic("save_failed", {
@@ -3267,12 +3292,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
 
       if (duplicateMatch) {
         setInfoMessage(
-          conflictResolutionMode === "overwrite_auto"
+          conflictResolutionMode === "keep_both"
+            ? "Saved the Auto textbook as a separate higher-detail copy and kept the manual copy."
+            : conflictResolutionMode === "overwrite_auto"
             ? "Existing textbook replaced with Auto metadata and hierarchy."
             : "Existing textbook merged with Auto metadata and TOC. Duplicates were avoided."
         );
         setDuplicateMatch(null);
       }
+
+      if (rememberDuplicateChoice && metadataForm.isbnRaw.trim()) {
+        rememberAutoDuplicatePreference(metadataForm.isbnRaw.trim(), conflictResolutionMode);
+      }
+      setRememberDuplicateChoice(false);
 
       if (isMetadataCorrectionSharingEnabled()) {
         const syncResult = await syncMetadataCorrectionLearning({
@@ -3313,6 +3345,62 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
       setIsBusy(false);
       setIsUploadingToCloud(false);
     }
+  }
+
+  function renderUploadTelemetryCard(): React.JSX.Element | null {
+    if (!activeAutoTextbookUpload) {
+      return null;
+    }
+
+    return (
+      <div className="auto-upload-progress-card" role="status" aria-live="polite">
+        <div className="auto-upload-progress-card__header">
+          <div>
+            <strong>{activeAutoTextbookUpload.title || "Untitled textbook"}</strong>
+            <p className="form-hint auto-upload-progress-card__meta">{activeAutoTextbookUpload.message}</p>
+          </div>
+          <span className={`auto-upload-progress-card__status auto-upload-progress-card__status--${activeAutoTextbookUpload.status}`}>
+            {activeAutoTextbookUpload.status.replace(/-/g, " ")}
+          </span>
+        </div>
+        <progress
+          className="auto-upload-progress-card__bar"
+          max={100}
+          value={activeAutoTextbookUpload.percentComplete}
+          aria-label="Cloud upload progress"
+        />
+        <div className="auto-upload-progress-card__metrics">
+          <span>{activeAutoTextbookUpload.percentComplete}% complete</span>
+          <span>{activeAutoTextbookUpload.completedItems}/{activeAutoTextbookUpload.totalItems} items</span>
+          <span>Writes: {activeAutoTextbookUpload.writeCount}</span>
+          <span>Reads: {activeAutoTextbookUpload.readCount}</span>
+        </div>
+      </div>
+    );
+  }
+
+  function renderTocSaveActions(position: "top" | "bottom"): React.JSX.Element {
+    const saveAriaLabel = saveMode === "cloud"
+      ? (position === "top" ? "Save Textbook to Cloud (Quick Access)" : "Save Textbook to Cloud")
+      : (position === "top" ? "Save Textbook Locally (Quick Access)" : "Save Textbook Locally");
+    const backAriaLabel = position === "top" ? "Back to TOC Capture (Quick Access)" : "Back to TOC Capture";
+
+    return (
+      <div className={`form-actions form-actions--toc-editor${position === "top" ? " form-actions--toc-editor-sticky" : ""}`}>
+        {saveMode === "cloud" ? (
+          <button type="button" aria-label={saveAriaLabel} onClick={() => void handleSaveAutoSetup("cloud")} disabled={isBusy}>
+            Save Textbook to Cloud
+          </button>
+        ) : (
+          <button type="button" aria-label={saveAriaLabel} onClick={() => void handleSaveAutoSetup("local")} disabled={isBusy}>
+            Save Textbook Locally
+          </button>
+        )}
+        <button type="button" aria-label={backAriaLabel} className="btn-secondary" onClick={() => setStep("toc")}>
+          Back to TOC Capture
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -3487,6 +3575,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
           <span className="ocr-loading-text">Uploading textbook to cloud...</span>
         </div>
       ) : null}
+      {renderUploadTelemetryCard()}
 
       {(step === "cover" || step === "title") && !isRunningOcr && lastExtractionFields.length > 0 ? (
         <div className="extraction-summary" aria-label="Extraction result summary">
@@ -3533,7 +3622,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
       {duplicateMatch ? (
         <div className="panel" role="group" aria-label="Duplicate textbook resolution">
           <p className="form-hint">
-            Existing textbook found: {duplicateMatch.title} (ISBN: {duplicateMatch.isbnRaw || "n/a"}).
+            Existing textbook found: {duplicateMatch.title} (ISBN: {duplicateMatch.isbnRaw || "n/a"}, source: {duplicateMatch.sourceType}).
           </p>
           <label>
             Resolution mode
@@ -3543,8 +3632,21 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
             >
               <option value="overwrite_auto">Prefer Auto: overwrite existing manual hierarchy</option>
               <option value="merge_dedupe">Merge and dedupe: keep unique manual differences</option>
+              {duplicateMatch.sourceType === "manual" ? (
+                <option value="keep_both">Keep both copies: save the new Auto textbook separately</option>
+              ) : null}
             </select>
           </label>
+          {duplicateMatch.sourceType === "manual" ? (
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={rememberDuplicateChoice}
+                onChange={(event) => setRememberDuplicateChoice(event.target.checked)}
+              />
+              Remember this choice for future Auto uploads with the same ISBN.
+            </label>
+          ) : null}
           <p className="form-hint">
             Save again to apply this choice.
           </p>
@@ -3968,6 +4070,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
             </div>
           ) : null}
 
+          {renderTocSaveActions("top")}
           {tocResult.chapters.length === 0 ? <p className="form-hint">No chapters detected yet.</p> : null}
 
           {tocResult.chapters.map((chapter, chapterIndex) => (
@@ -4101,20 +4204,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
             </div>
           ))}
 
-          <div className="form-actions form-actions--toc-editor">
-            {saveMode === "cloud" ? (
-              <button type="button" onClick={() => void handleSaveAutoSetup("cloud")} disabled={isBusy}>
-                Save Textbook to Cloud
-              </button>
-            ) : (
-              <button type="button" onClick={() => void handleSaveAutoSetup("local")} disabled={isBusy}>
-                Save Textbook Locally
-              </button>
-            )}
-            <button type="button" className="btn-secondary" onClick={() => setStep("toc")}>
-              Back to TOC Capture
-            </button>
-          </div>
+          {renderTocSaveActions("bottom")}
         </div>
       ) : null}
 

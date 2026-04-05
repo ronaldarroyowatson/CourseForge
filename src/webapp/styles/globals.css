@@ -314,6 +314,66 @@ body {
   justify-content: flex-end;
 }
 
+.header-upload-monitor {
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--cf-accent) 8%, var(--bg-panel));
+  padding: 0.8rem 0.9rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.header-upload-monitor__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.header-upload-monitor__meta p {
+  margin: 0.2rem 0 0;
+}
+
+.header-upload-monitor__progress {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.header-upload-monitor__progress progress,
+.settings-upload-monitor progress,
+.auto-upload-progress-card__bar {
+  width: 100%;
+  height: 0.8rem;
+  appearance: none;
+}
+
+.header-upload-monitor__progress progress::-webkit-progress-bar,
+.settings-upload-monitor progress::-webkit-progress-bar,
+.auto-upload-progress-card__bar::-webkit-progress-bar {
+  background: color-mix(in srgb, var(--cf-border) 70%, transparent);
+  border-radius: 999px;
+}
+
+.header-upload-monitor__progress progress::-webkit-progress-value,
+.settings-upload-monitor progress::-webkit-progress-value,
+.auto-upload-progress-card__bar::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--cf-accent), var(--cf-success));
+  border-radius: 999px;
+}
+
+.header-upload-monitor__progress progress::-moz-progress-bar,
+.settings-upload-monitor progress::-moz-progress-bar,
+.auto-upload-progress-card__bar::-moz-progress-bar {
+  background: linear-gradient(90deg, var(--cf-accent), var(--cf-success));
+  border-radius: 999px;
+}
+
+.header-upload-monitor__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .sync-now-button {
   border: 1px solid var(--primary-border);
   border-radius: 999px;
@@ -1105,6 +1165,12 @@ body {
 
 .settings-progress {
   width: 100%;
+}
+
+.settings-upload-monitor {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
 }
 
 .settings-log-tail {
@@ -2643,9 +2709,79 @@ button:not(:disabled):active {
   justify-content: center;
 }
 
+.auto-textbook-flow .form-actions--toc-editor-sticky {
+  position: sticky;
+  top: 0.35rem;
+  z-index: 5;
+  padding: 0.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--cf-surface) 92%, transparent);
+  box-shadow: var(--cf-shadow-1);
+}
+
 .auto-textbook-flow .form-hint--warning {
   color: #d9534f;
   margin-top: 1rem;
+}
+
+.auto-upload-progress-card {
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--cf-success) 9%, var(--bg-panel));
+  padding: 0.8rem 0.9rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.auto-upload-progress-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.auto-upload-progress-card__meta {
+  margin: 0.2rem 0 0;
+}
+
+.auto-upload-progress-card__status {
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.auto-upload-progress-card__status--uploading,
+.auto-upload-progress-card__status--preparing,
+.auto-upload-progress-card__status--corrupt-restart {
+  background: var(--status-submitted-bg);
+  color: var(--status-submitted-fg);
+  border-color: var(--status-submitted-border);
+}
+
+.auto-upload-progress-card__status--completed {
+  background: var(--status-approved-bg);
+  color: var(--status-approved-fg);
+  border-color: var(--status-approved-border);
+}
+
+.auto-upload-progress-card__status--paused,
+.auto-upload-progress-card__status--failed {
+  background: var(--status-rejected-bg);
+  color: var(--status-rejected-fg);
+  border-color: var(--status-rejected-border);
+}
+
+.auto-upload-progress-card__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
 }
 
 .auto-ocr-editor {

@@ -3022,7 +3022,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         writeCount: 0,
         readCount: 0,
         integrityState: "unknown",
-        canResume: true,
+        canResume: false,
         startedAt: now,
         updatedAt: now,
       };

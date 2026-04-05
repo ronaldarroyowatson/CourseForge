@@ -148,11 +148,25 @@ describe("Header – upload telemetry card Dismiss button (v1.4.51 regression su
     expect(screen.queryByRole("button", { name: "Resume Upload" })).not.toBeInTheDocument();
   });
 
-  it("shows Resume Upload button when canResume is true and status is not uploading", () => {
+  it("shows Resume Upload button when status is paused and canResume is true", () => {
     useUIStore.setState({ activeAutoTextbookUpload: makeUploadSnapshot("paused", true) });
     renderHeader();
 
     expect(screen.getByRole("button", { name: "Resume Upload" })).toBeInTheDocument();
+  });
+
+  it("hides Resume Upload button while status is preparing even if canResume is true", () => {
+    useUIStore.setState({ activeAutoTextbookUpload: makeUploadSnapshot("preparing", true) });
+    renderHeader();
+
+    expect(screen.queryByRole("button", { name: "Resume Upload" })).not.toBeInTheDocument();
+  });
+
+  it("hides Resume Upload button while status is completed even if canResume is true", () => {
+    useUIStore.setState({ activeAutoTextbookUpload: makeUploadSnapshot("completed", true) });
+    renderHeader();
+
+    expect(screen.queryByRole("button", { name: "Resume Upload" })).not.toBeInTheDocument();
   });
 
   it("hides Resume Upload button when canResume is false", () => {

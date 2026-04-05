@@ -244,7 +244,10 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
             </p>
           </div>
           <div className="header-upload-monitor__actions">
-            {activeAutoTextbookUpload.canResume && activeAutoTextbookUpload.status !== "uploading" ? (
+            {activeAutoTextbookUpload.canResume
+              && (activeAutoTextbookUpload.status === "paused"
+                || activeAutoTextbookUpload.status === "failed"
+                || activeAutoTextbookUpload.status === "corrupt-restart") ? (
               <button type="button" className="btn-secondary" onClick={() => { void handleResumeUpload(); }}>
                 Resume Upload
               </button>

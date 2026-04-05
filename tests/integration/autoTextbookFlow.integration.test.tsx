@@ -1399,7 +1399,7 @@ describe("auto textbook flow integration", () => {
       status: "preparing",
       phase: "persisting",
       title: "Quantum Physics",
-      canResume: true,
+      canResume: false,
     });
 
     // False-positive guard: clearPersistedAutoTextbookUpload must NOT be called before upload starts

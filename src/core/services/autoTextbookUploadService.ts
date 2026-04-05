@@ -55,6 +55,53 @@ interface LocalHierarchyProgress extends LocalHierarchySummary {
   completedItems: number;
 }
 
+function isPlaceholderTextbookId(textbookId: string): boolean {
+  const normalized = textbookId.trim().toLowerCase();
+  return normalized.length === 0 || normalized === "pending";
+}
+
+function toEpoch(value: string | undefined): number {
+  if (!value) {
+    return 0;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function resolveResumeTextbookId(snapshot: AutoTextbookUploadSnapshot): Promise<string | null> {
+  if (!isPlaceholderTextbookId(snapshot.textbookId)) {
+    return snapshot.textbookId;
+  }
+
+  const textbooks = await getAll(STORE_NAMES.textbooks) as Textbook[];
+  if (textbooks.length === 0) {
+    return null;
+  }
+
+  const normalizedIsbn = normalizeISBN(snapshot.isbnRaw);
+  const normalizedTitle = snapshot.title.trim().toLowerCase();
+
+  const scopedMatches = textbooks.filter((textbook) => {
+    const textbookIsbn = normalizeISBN(textbook.isbnRaw);
+    const isbnMatch = normalizedIsbn.length > 0 && textbookIsbn === normalizedIsbn;
+    const titleMatch = normalizedTitle.length > 0 && textbook.title.trim().toLowerCase() === normalizedTitle;
+    return isbnMatch || titleMatch;
+  });
+
+  const candidates = scopedMatches.length > 0 ? scopedMatches : textbooks;
+  const ranked = [...candidates].sort((left, right) => {
+    if (left.pendingSync !== right.pendingSync) {
+      return left.pendingSync ? -1 : 1;
+    }
+
+    const leftStamp = Math.max(toEpoch(left.lastModified), toEpoch(left.updatedAt), toEpoch(left.createdAt));
+    const rightStamp = Math.max(toEpoch(right.lastModified), toEpoch(right.updatedAt), toEpoch(right.createdAt));
+    return rightStamp - leftStamp;
+  });
+
+  return ranked[0]?.id ?? null;
+}
+
 function readFromStorage<T>(key: string): T | null {
   if (typeof window === "undefined") {
     return null;
@@ -659,9 +706,47 @@ export async function resumePersistedAutoTextbookUpload(): Promise<Awaited<Retur
     return null;
   }
 
+  const resolvedTextbookId = await resolveResumeTextbookId(persisted);
+  if (!resolvedTextbookId) {
+    publishSnapshot(buildSnapshot({
+      base: persisted,
+      sessionId: persisted.sessionId,
+      textbookId: persisted.textbookId,
+      title: persisted.title,
+      isbnRaw: persisted.isbnRaw,
+      status: "failed",
+      phase: "failed",
+      message: "Resume could not find the local textbook record. Please save again.",
+      totalItems: persisted.totalItems,
+      completedItems: persisted.completedItems,
+      pendingItems: persisted.pendingItems,
+      integrityState: persisted.integrityState,
+      canResume: false,
+    }));
+    return null;
+  }
+
+  if (resolvedTextbookId !== persisted.textbookId) {
+    publishSnapshot(buildSnapshot({
+      base: persisted,
+      sessionId: persisted.sessionId,
+      textbookId: resolvedTextbookId,
+      title: persisted.title,
+      isbnRaw: persisted.isbnRaw,
+      status: "preparing",
+      phase: "resuming",
+      message: "Recovered local textbook session. Resuming cloud upload.",
+      totalItems: persisted.totalItems,
+      completedItems: persisted.completedItems,
+      pendingItems: persisted.pendingItems,
+      integrityState: persisted.integrityState,
+      canResume: true,
+    }));
+  }
+
   return runTrackedAutoTextbookCloudUpload({
     sessionId: persisted.sessionId,
-    textbookId: persisted.textbookId,
+    textbookId: resolvedTextbookId,
     title: persisted.title,
     isbnRaw: persisted.isbnRaw,
   });

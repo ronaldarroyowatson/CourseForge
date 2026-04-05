@@ -10,6 +10,7 @@ import { appendDebugLogEntry } from "../../../core/services";
 import { persistAutoTextbook } from "../../../core/services/autoTextbookPersistenceService";
 import { uploadTextbookCoverFromDataUrl } from "../../../core/services/coverImageService";
 import {
+  type AutoTextbookUploadSnapshot,
   getRememberedAutoDuplicatePreference,
   rememberAutoDuplicatePreference,
   runTrackedAutoTextbookCloudUpload,
@@ -953,6 +954,7 @@ function buildExtractionFieldList(meta: AutoTextbookMetadata): string[] {
 export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", onSaved, onSwitchToManual, testingSeedState }: AutoTextbookSetupFlowProps): React.JSX.Element {
   const language = useUIStore((state) => state.language);
   const activeAutoTextbookUpload = useUIStore((state) => state.activeAutoTextbookUpload);
+  const setAutoTextbookUpload = useUIStore((state) => state.setAutoTextbookUpload);
   const chromeOs = useMemo(() => runtime === "extension" && isChromeOSRuntime(), [runtime]);
   const compactChromeLayout = useMemo(() => chromeOs && isSmallChromebookViewport(), [chromeOs]);
   const {
@@ -2997,6 +2999,32 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         message: "Metadata accepted without edits; logged as high-confidence sample.",
         autoModeStep: lastMetadataCaptureStepRef.current,
       });
+    }
+
+    if (isCloudUpload) {
+      const totalSections = effectiveTocResult.chapters.reduce((count: number, chapter: TocChapter) => count + chapter.sections.length, 0);
+      const totalItems = Math.max(1, 1 + effectiveTocResult.chapters.length + totalSections);
+      const now = new Date().toISOString();
+      const bootstrapUploadSnapshot: AutoTextbookUploadSnapshot = {
+        sessionId: `${draftKeyRef.current}:pending`,
+        textbookId: "pending",
+        title: metadataForm.title.trim() || "Untitled textbook",
+        isbnRaw: metadataForm.isbnRaw.trim(),
+        status: "preparing",
+        phase: "persisting",
+        message: "Preparing local textbook data before cloud upload telemetry starts.",
+        totalItems,
+        completedItems: 0,
+        pendingItems: totalItems,
+        percentComplete: 0,
+        writeCount: 0,
+        readCount: 0,
+        integrityState: "unknown",
+        canResume: true,
+        startedAt: now,
+        updatedAt: now,
+      };
+      setAutoTextbookUpload(bootstrapUploadSnapshot);
     }
 
     try {

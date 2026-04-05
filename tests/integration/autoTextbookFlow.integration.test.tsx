@@ -1090,6 +1090,80 @@ describe("auto textbook flow integration", () => {
     });
   });
 
+  it("shows upload telemetry card immediately when cloud save begins", async () => {
+    let resolveTrackedUpload!: (value: MockSyncNowResult) => void;
+    const deferredTrackedUpload = new Promise<MockSyncNowResult>((resolve) => {
+      resolveTrackedUpload = resolve;
+    });
+    autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload.mockImplementationOnce(() => deferredTrackedUpload);
+
+    render(
+      <AutoTextbookSetupFlow
+        saveMode="cloud"
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+          ocrDraft: "Copyright 2026",
+          metadataForm: {
+            title: "Cloud Telemetry",
+            grade: "10",
+            gradeBand: "10-11",
+            subject: "Science",
+            edition: "1",
+            publicationYear: "2026",
+            copyrightYear: "2026",
+            isbnRaw: "9781402894999",
+          },
+          tocResult: {
+            confidence: 0.9,
+            chapters: [
+              {
+                chapterNumber: "1",
+                title: "Matter",
+                pageStart: 1,
+                pageEnd: 12,
+                sections: [{ sectionNumber: "1.1", title: "Properties", pageStart: 1, pageEnd: 5 }],
+              },
+            ],
+          },
+          bypassImageModeration: true,
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
+
+    expect(screen.getByText("Preparing local textbook data before cloud upload telemetry starts.")).toBeInTheDocument();
+    expect(screen.getByText("0% complete")).toBeInTheDocument();
+    expect(screen.getByText("0/3 items")).toBeInTheDocument();
+    expect(screen.getByText("Writes: 0")).toBeInTheDocument();
+    expect(screen.getByText("Reads: 0")).toBeInTheDocument();
+
+    resolveTrackedUpload({
+      success: true,
+      message: "Cloud sync completed.",
+      retryable: false,
+      permissionDenied: false,
+      throttled: false,
+      writeLoopTriggered: false,
+      writeBudgetExceeded: false,
+      writeCount: 0,
+      writeBudgetLimit: 500,
+      readCount: 0,
+      readBudgetLimit: 5000,
+      readBudgetExceeded: false,
+      retryLimit: 3,
+      errorCode: null,
+      pendingCount: 0,
+    });
+
+    await waitFor(() => {
+      expect(autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("supports adding missing hierarchy levels and preserving downstream structure", async () => {
     render(
       <AutoTextbookSetupFlow

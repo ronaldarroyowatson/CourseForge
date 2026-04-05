@@ -760,7 +760,7 @@ Consumed by:
 
 ---
 
-## Updates (2026-04-04)
+## Updates (2026-04-04 Upload Telemetry)
 
 ### Sync Read Budget Guard (Auto Sync)
 

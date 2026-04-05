@@ -11,7 +11,9 @@ import { persistAutoTextbook } from "../../../core/services/autoTextbookPersiste
 import { uploadTextbookCoverFromDataUrl } from "../../../core/services/coverImageService";
 import {
   type AutoTextbookUploadSnapshot,
+  clearPersistedAutoTextbookUpload,
   getRememberedAutoDuplicatePreference,
+  initAutoTextbookUploadTracking,
   rememberAutoDuplicatePreference,
   runTrackedAutoTextbookCloudUpload,
 } from "../../../core/services/autoTextbookUploadService";
@@ -90,6 +92,7 @@ interface AutoTextbookSetupFlowProps {
     tocResult?: ParsedTocResult;
     tocPages?: TocPage[];
     bypassImageModeration?: boolean;
+    forceModerationAssessment?: ImageModerationAssessment;
   };
 }
 
@@ -954,7 +957,6 @@ function buildExtractionFieldList(meta: AutoTextbookMetadata): string[] {
 export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", onSaved, onSwitchToManual, testingSeedState }: AutoTextbookSetupFlowProps): React.JSX.Element {
   const language = useUIStore((state) => state.language);
   const activeAutoTextbookUpload = useUIStore((state) => state.activeAutoTextbookUpload);
-  const setAutoTextbookUpload = useUIStore((state) => state.setAutoTextbookUpload);
   const chromeOs = useMemo(() => runtime === "extension" && isChromeOSRuntime(), [runtime]);
   const compactChromeLayout = useMemo(() => chromeOs && isSmallChromebookViewport(), [chromeOs]);
   const {
@@ -3024,9 +3026,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         startedAt: now,
         updatedAt: now,
       };
-      setAutoTextbookUpload(bootstrapUploadSnapshot);
+      initAutoTextbookUploadTracking(bootstrapUploadSnapshot);
     }
 
+    let didStartCloudUpload = false;
     try {
       setIsBusy(true);
 
@@ -3048,10 +3051,11 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
             educationalContextDetected: true,
             skinToneRatio: 0,
           }
-        : assessImageModerationSignal({
+        : (testingSeedState?.forceModerationAssessment ??
+          assessImageModerationSignal({
             skinToneRatio: await estimateSkinToneRatio(coverDataUrl),
             contextText: moderationContext,
-          });
+          }));
       setModerationAssessment(imageModeration);
 
       if (imageModeration.decision === "block") {
@@ -3066,6 +3070,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
             reason: imageModeration.reason,
           },
         });
+        if (isCloudUpload) { clearPersistedAutoTextbookUpload(); }
         return;
       }
 
@@ -3100,6 +3105,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
             isbn: trimmedIsbn,
           },
         });
+        if (isCloudUpload) { clearPersistedAutoTextbookUpload(); }
         return;
         }
       }
@@ -3275,6 +3281,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
       }
 
       if (isCloudUpload) {
+        didStartCloudUpload = true;
         const cloudUploadResult = await runTrackedAutoTextbookCloudUpload({
           sessionId: `${draftKeyRef.current}:${savedTextbookId ?? "pending"}`,
           textbookId: savedTextbookId ?? "",
@@ -3359,6 +3366,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         },
       });
     } catch {
+      if (isCloudUpload && !didStartCloudUpload) {
+        clearPersistedAutoTextbookUpload();
+      }
       setErrorMessage("Unable to save Auto setup. Please verify metadata and try again.");
       emitAutoFlowDiagnostic("save_failed", {
         level: "error",

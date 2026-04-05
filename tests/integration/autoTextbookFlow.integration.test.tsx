@@ -102,6 +102,18 @@ const autoTextbookUploadServiceMocks = vi.hoisted(() => ({
   getRememberedAutoDuplicatePreference: vi.fn<(isbnRaw: string) => "keep_both" | "merge_dedupe" | "overwrite_auto" | null>(() => null),
   rememberAutoDuplicatePreference: vi.fn<(isbnRaw: string, preference: string) => void>(() => undefined),
   runTrackedAutoTextbookCloudUpload: vi.fn<(input: unknown) => Promise<MockSyncNowResult>>(async (input: unknown) => syncServiceMocks.syncNow(input)),
+  initAutoTextbookUploadTracking: vi.fn<(snapshot: unknown) => void>(() => undefined),
+  clearPersistedAutoTextbookUpload: vi.fn<() => void>(() => undefined),
+}));
+
+const textbookAutoExtractionMocks = vi.hoisted(() => ({
+  assessImageModerationSignal: vi.fn<(signal: unknown) => { decision: "allow" | "review" | "block"; confidence: number; reason: string; educationalContextDetected: boolean; skinToneRatio: number }>(() => ({
+    decision: "allow" as const,
+    confidence: 0.9,
+    reason: "Image-level screening passed.",
+    educationalContextDetected: false,
+    skinToneRatio: 0,
+  })),
 }));
 
 vi.mock("../../src/core/services/coverImageService", () => ({
@@ -150,7 +162,19 @@ vi.mock("../../src/core/services/autoTextbookUploadService", () => ({
   getRememberedAutoDuplicatePreference: (isbnRaw: string) => autoTextbookUploadServiceMocks.getRememberedAutoDuplicatePreference(isbnRaw),
   rememberAutoDuplicatePreference: (isbnRaw: string, preference: string) => autoTextbookUploadServiceMocks.rememberAutoDuplicatePreference(isbnRaw, preference),
   runTrackedAutoTextbookCloudUpload: (input: unknown) => autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload(input),
+  initAutoTextbookUploadTracking: (snapshot: unknown) => autoTextbookUploadServiceMocks.initAutoTextbookUploadTracking(snapshot),
+  clearPersistedAutoTextbookUpload: () => autoTextbookUploadServiceMocks.clearPersistedAutoTextbookUpload(),
 }));
+
+vi.mock("../../src/core/services/textbookAutoExtractionService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/core/services/textbookAutoExtractionService")>(
+    "../../src/core/services/textbookAutoExtractionService"
+  );
+  return {
+    ...actual,
+    assessImageModerationSignal: (signal: unknown) => textbookAutoExtractionMocks.assessImageModerationSignal(signal),
+  };
+});
 
 describe("auto textbook flow integration", () => {
   beforeEach(() => {
@@ -179,6 +203,8 @@ describe("auto textbook flow integration", () => {
     autoTextbookUploadServiceMocks.getRememberedAutoDuplicatePreference.mockClear();
     autoTextbookUploadServiceMocks.rememberAutoDuplicatePreference.mockClear();
     autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload.mockClear();
+    autoTextbookUploadServiceMocks.initAutoTextbookUploadTracking.mockClear();
+    autoTextbookUploadServiceMocks.clearPersistedAutoTextbookUpload.mockClear();
 
     repositoryMocks.findTextbookByISBN.mockResolvedValue(undefined);
     repositoryMocks.fetchChaptersByTextbookId.mockResolvedValue([]);
@@ -207,6 +233,20 @@ describe("auto textbook flow integration", () => {
     });
     autoTextbookUploadServiceMocks.getRememberedAutoDuplicatePreference.mockReturnValue(null);
     autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload.mockImplementation(async (input: unknown) => syncServiceMocks.syncNow(input));
+
+    // Default: simulate publishSnapshot writing to UIStore so the upload card renders in card-visibility tests
+    autoTextbookUploadServiceMocks.initAutoTextbookUploadTracking.mockImplementation((snapshot: unknown) => {
+      useUIStore.getState().setAutoTextbookUpload(snapshot as import("../../src/core/services/autoTextbookUploadService").AutoTextbookUploadSnapshot);
+    });
+
+    // Default: assessImageModerationSignal allows all images (real 1x1 white PNG fixture gives ~0 skin tone ratio anyway)
+    textbookAutoExtractionMocks.assessImageModerationSignal.mockReturnValue({
+      decision: "allow" as const,
+      confidence: 0.9,
+      reason: "Image-level screening passed.",
+      educationalContextDetected: false,
+      skinToneRatio: 0,
+    });
 
     useUIStore.setState({
       selectedTextbook: null,
@@ -1299,5 +1339,225 @@ describe("auto textbook flow integration", () => {
     );
 
     expect(screen.getByRole("button", { name: "Save Textbook to Cloud" })).toBeInTheDocument();
+  });
+
+  // ── Upload telemetry lifecycle regression tests (v1.4.51) ──────────────────
+
+  const cloudSeedState = {
+    step: "toc-editor" as const,
+    coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+    ocrDraft: "Copyright 2026",
+    metadataForm: {
+      title: "Quantum Physics",
+      grade: "11",
+      gradeBand: "11-12",
+      subject: "Science",
+      edition: "1",
+      publicationYear: "2026",
+      copyrightYear: "2026",
+      isbnRaw: "9781402891001",
+    },
+    tocResult: {
+      confidence: 0.9,
+      chapters: [
+        {
+          chapterNumber: "1",
+          title: "Wave-Particle Duality",
+          pageStart: 1,
+          pageEnd: 20,
+          sections: [{ sectionNumber: "1.1", title: "Photons", pageStart: 1, pageEnd: 10 }],
+        },
+      ],
+    },
+    bypassImageModeration: true,
+  };
+
+  it("calls initAutoTextbookUploadTracking (not setAutoTextbookUpload) when cloud save begins", async () => {
+    // Bug 1 regression: bootstrap snapshot must go through initAutoTextbookUploadTracking so it
+    // is persisted to localStorage, making Resume Upload work if the upload stalls.
+    let resolveUpload!: (v: MockSyncNowResult) => void;
+    const deferredUpload = new Promise<MockSyncNowResult>((resolve) => { resolveUpload = resolve; });
+    autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload.mockImplementationOnce(() => deferredUpload);
+
+    render(
+      <AutoTextbookSetupFlow
+        saveMode="cloud"
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={cloudSeedState}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
+
+    await waitFor(() => {
+      expect(autoTextbookUploadServiceMocks.initAutoTextbookUploadTracking).toHaveBeenCalledTimes(1);
+    });
+
+    const snapshot = autoTextbookUploadServiceMocks.initAutoTextbookUploadTracking.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(snapshot).toMatchObject({
+      status: "preparing",
+      phase: "persisting",
+      title: "Quantum Physics",
+      canResume: true,
+    });
+
+    // False-positive guard: clearPersistedAutoTextbookUpload must NOT be called before upload starts
+    expect(autoTextbookUploadServiceMocks.clearPersistedAutoTextbookUpload).not.toHaveBeenCalled();
+
+    resolveUpload({ success: true, message: "", retryable: false, permissionDenied: false, throttled: false, writeLoopTriggered: false, writeBudgetExceeded: false, writeCount: 0, writeBudgetLimit: 500, readCount: 0, readBudgetLimit: 5000, readBudgetExceeded: false, retryLimit: 3, errorCode: null, pendingCount: 0 });
+  });
+
+  it("clears bootstrap telemetry card when image moderation blocks cloud save", async () => {
+    // Bug 2 regression: early return after moderation block must clear the bootstrap snapshot
+    // so the user is not left with a stuck "Preparing..." card and a useless Resume button.
+    render(
+      <AutoTextbookSetupFlow
+        saveMode="cloud"
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          ...cloudSeedState,
+          // forceModerationAssessment bypasses estimateSkinToneRatio (which hangs in jsdom because
+          // new Image().onload never fires) and injects a "block" decision directly.
+          bypassImageModeration: false,
+          forceModerationAssessment: {
+            decision: "block" as const,
+            confidence: 0.97,
+            reason: "High skin-tone ratio without educational context.",
+            educationalContextDetected: false,
+            skinToneRatio: 0.97,
+          },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
+
+    await waitFor(() => {
+      expect(autoTextbookUploadServiceMocks.clearPersistedAutoTextbookUpload).toHaveBeenCalledTimes(1);
+    });
+
+    // False-positive guard: cloud upload must NOT have started
+    expect(autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload).not.toHaveBeenCalled();
+  });
+
+  it("clears bootstrap telemetry card when ISBN duplicate is detected mid-save", async () => {
+    // Bug 2 regression: the duplicate-detection early return must clear the bootstrap snapshot.
+    repositoryMocks.findTextbookByISBN.mockResolvedValue({
+      id: "tb-existing-99",
+      title: "Existing Book",
+      isbnRaw: "9781402891001",
+      sourceType: "auto",
+    });
+
+    render(
+      <AutoTextbookSetupFlow
+        saveMode="cloud"
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={cloudSeedState}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
+
+    await waitFor(() => {
+      expect(autoTextbookUploadServiceMocks.clearPersistedAutoTextbookUpload).toHaveBeenCalledTimes(1);
+    });
+
+    // False-positive guard: cloud upload must NOT have started
+    expect(autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload).not.toHaveBeenCalled();
+  });
+
+  it("does NOT clear bootstrap telemetry card when duplicate is absent (false positive guard)", async () => {
+    // Ensures clearPersistedAutoTextbookUpload is not called when everything succeeds.
+    render(
+      <AutoTextbookSetupFlow
+        saveMode="cloud"
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={cloudSeedState}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
+
+    await waitFor(() => {
+      expect(autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload).toHaveBeenCalledTimes(1);
+    });
+
+    expect(autoTextbookUploadServiceMocks.clearPersistedAutoTextbookUpload).not.toHaveBeenCalled();
+  });
+
+  it("clears bootstrap telemetry card when exception fires before cloud upload starts", async () => {
+    // Bug 3 regression: the catch block must clear the bootstrap when the error occurred
+    // before runTrackedAutoTextbookCloudUpload was ever called.
+    repositoryMocks.createTextbook.mockRejectedValueOnce(new Error("IndexedDB write failure"));
+
+    render(
+      <AutoTextbookSetupFlow
+        saveMode="cloud"
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={cloudSeedState}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Unable to save Auto setup/i)).toBeInTheDocument();
+    });
+
+    expect(autoTextbookUploadServiceMocks.clearPersistedAutoTextbookUpload).toHaveBeenCalledTimes(1);
+    expect(autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload).not.toHaveBeenCalled();
+  });
+
+  it("does NOT clear bootstrap from catch when cloud upload itself throws (false positive guard)", async () => {
+    // Once runTrackedAutoTextbookCloudUpload has started, it owns the snapshot lifecycle.
+    // The catch block in handleSaveAutoSetup must not redundantly clear on its behalf.
+    autoTextbookUploadServiceMocks.runTrackedAutoTextbookCloudUpload.mockRejectedValueOnce(
+      new Error("Network timeout during upload")
+    );
+
+    render(
+      <AutoTextbookSetupFlow
+        saveMode="cloud"
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={cloudSeedState}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Unable to save Auto setup/i)).toBeInTheDocument();
+    });
+
+    // After the upload function itself ran (and threw), clear must NOT be called by the save handler
+    expect(autoTextbookUploadServiceMocks.clearPersistedAutoTextbookUpload).not.toHaveBeenCalled();
+  });
+
+  it("does not call initAutoTextbookUploadTracking for local-only save", async () => {
+    // Guard: local saves must never touch upload tracking at all.
+    render(
+      <AutoTextbookSetupFlow
+        saveMode="local"
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{ ...cloudSeedState, metadataForm: { ...cloudSeedState.metadataForm, isbnRaw: "" } }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook Locally" }));
+
+    await waitFor(() => {
+      expect(repositoryMocks.createTextbook).toHaveBeenCalled();
+    });
+
+    expect(autoTextbookUploadServiceMocks.initAutoTextbookUploadTracking).not.toHaveBeenCalled();
+    expect(autoTextbookUploadServiceMocks.clearPersistedAutoTextbookUpload).not.toHaveBeenCalled();
   });
 });

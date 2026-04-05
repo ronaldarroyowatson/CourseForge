@@ -249,7 +249,7 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
                 Resume Upload
               </button>
             ) : null}
-            {activeAutoTextbookUpload.status === "completed" ? (
+            {activeAutoTextbookUpload.status !== "uploading" ? (
               <button type="button" className="btn-secondary" onClick={() => { clearPersistedAutoTextbookUpload(); }}>
                 Dismiss
               </button>

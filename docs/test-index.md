@@ -1,12 +1,12 @@
 # Test Index
 
-Generated: 2026-04-05T04:02:55.315Z
+Generated: 2026-04-05T05:32:15.328Z
 
 ## Summary
 
-- Total test files: 51
-- Unit test files: 33
-- Integration test files: 16
+- Total test files: 53
+- Unit test files: 34
+- Integration test files: 17
 - Rules test files: 2
 - Canonical sample files: 5
 
@@ -17,6 +17,7 @@ Generated: 2026-04-05T04:02:55.315Z
 - tests/core/autoOcrService.test.ts
 - tests/core/autoTextbookConflictService.test.ts
 - tests/core/autoTextbookPersistence.localization.test.ts
+- tests/core/autoTextbookUploadService.test.ts
 - tests/core/debugLogService.test.ts
 - tests/core/documentExtraction.guardrails.test.ts
 - tests/core/documentIngest.extraction.test.ts
@@ -59,6 +60,7 @@ Generated: 2026-04-05T04:02:55.315Z
 - tests/integration/extension.repositories.integration.test.ts
 - tests/integration/firebase.connection.integration.test.ts
 - tests/integration/functions.communication.integration.test.ts
+- tests/integration/Header.uploadCard.test.tsx
 - tests/integration/package-integrity.integration.test.ts
 - tests/integration/settings.updater.integration.test.tsx
 - tests/integration/startupSync.probe.test.tsx

@@ -159,6 +159,10 @@ export function clearPersistedAutoTextbookUpload(): void {
   publishSnapshot(null);
 }
 
+export function initAutoTextbookUploadTracking(snapshot: AutoTextbookUploadSnapshot): void {
+  publishSnapshot(snapshot);
+}
+
 function readDuplicatePreferences(): Record<string, AutoDuplicateResolutionPreference> {
   return readFromStorage<Record<string, AutoDuplicateResolutionPreference>>(AUTO_TEXTBOOK_DUPLICATE_PREFERENCES_KEY) ?? {};
 }
@@ -425,11 +429,11 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
       pendingItems: 0,
       canResume: false,
     });
-    useUIStore.getState().setAutoTextbookUpload(fallbackSnapshot);
+    publishSnapshot(fallbackSnapshot);
     const fallbackResult = await syncNow({ intent: "manual" });
 
     if (fallbackResult.success) {
-      useUIStore.getState().setAutoTextbookUpload(buildSnapshot({
+      publishSnapshot(buildSnapshot({
         base: fallbackSnapshot,
         sessionId: input.sessionId,
         textbookId: input.textbookId,
@@ -467,7 +471,27 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
   });
   publishSnapshot(seedSnapshot);
 
-  const cloudSummary = await fetchCloudHierarchySummary(user.uid, input.textbookId);
+  let cloudSummary: CloudHierarchySummary;
+  try {
+    cloudSummary = await fetchCloudHierarchySummary(user.uid, input.textbookId);
+  } catch (err) {
+    const pausedSnapshot = buildSnapshot({
+      base: seedSnapshot,
+      sessionId: input.sessionId,
+      textbookId: input.textbookId,
+      title: input.title,
+      isbnRaw: input.isbnRaw,
+      status: "paused",
+      phase: "failed",
+      message: "Cloud check failed. Tap Resume Upload to try again.",
+      totalItems: seedSnapshot.totalItems,
+      completedItems: seedSnapshot.completedItems,
+      pendingItems: seedSnapshot.pendingItems,
+      canResume: true,
+    });
+    publishSnapshot(pausedSnapshot);
+    throw err;
+  }
   const integrity = assessCloudIntegrity(localSummary, cloudSummary);
 
   let workingSnapshot = buildSnapshot({
@@ -487,11 +511,30 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
   });
   publishSnapshot(workingSnapshot);
 
-  if (integrity.state === "corrupt") {
-    await deleteCloudHierarchy(localSummary);
-    await resetLocalHierarchyToPending(localSummary);
-  } else {
-    await updateLocalEntitySyncState(localSummary, cloudSummary, user.uid);
+  try {
+    if (integrity.state === "corrupt") {
+      await deleteCloudHierarchy(localSummary);
+      await resetLocalHierarchyToPending(localSummary);
+    } else {
+      await updateLocalEntitySyncState(localSummary, cloudSummary, user.uid);
+    }
+  } catch (err) {
+    const pausedSnapshot = buildSnapshot({
+      base: workingSnapshot,
+      sessionId: input.sessionId,
+      textbookId: input.textbookId,
+      title: input.title,
+      isbnRaw: input.isbnRaw,
+      status: "paused",
+      phase: "failed",
+      message: "Upload preparation failed. Tap Resume Upload to try again.",
+      totalItems: workingSnapshot.totalItems,
+      completedItems: workingSnapshot.completedItems,
+      pendingItems: workingSnapshot.pendingItems,
+      canResume: true,
+    });
+    publishSnapshot(pausedSnapshot);
+    throw err;
   }
 
   const postIntegrityProgress = await getLocalHierarchyProgress(input.textbookId);

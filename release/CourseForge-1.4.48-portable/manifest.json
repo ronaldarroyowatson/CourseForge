@@ -1,7 +1,7 @@
 {
     "name":  "CourseForge",
-    "version":  "1.4.47",
-    "generatedAtUtc":  "2026-04-04T19:11:01.9887024Z",
+    "version":  "1.4.48",
+    "generatedAtUtc":  "2026-04-05T00:48:27.8136061Z",
     "dependencyVersions":  {
                                "node":  "\u003e=20 \u003c25"
                            },
@@ -123,7 +123,7 @@
                   {
                       "path":  "Check-For-CourseForge-Updates.cmd",
                       "sizeBytes":  595,
-                      "sha256":  "51d640c0d0946e600a7b00001d0c3e37e8b879f2fa6d1149930b4724db9a17f0"
+                      "sha256":  "3ab79af8265620c9a531fa9698186834e0aecf5d968349636adfd5d296a05746"
                   },
                   {
                       "path":  "CHANGELOG.md",
@@ -153,7 +153,7 @@
                   {
                       "path":  "package-manifest.json",
                       "sizeBytes":  1315,
-                      "sha256":  "baffbb14011827250987c318a7ed286b27240d85234c8307e8f6fdd5522f2f06"
+                      "sha256":  "36a3b2d413340bcbcc30b86509d309e5d31883881a5b7433b32ff2e22ee32238"
                   },
                   {
                       "path":  "LICENSE",

@@ -938,5 +938,38 @@ describe("textbookAutoExtractionService", () => {
       expect(parsed.units?.length ?? 0).toBeGreaterThanOrEqual(1);
       expect(parsed.chapters).toHaveLength(2);
     });
+
+    it("collapses duplicate numbered lesson variants when stitching noisy OCR pages", () => {
+      const firstPage = parseTocFromOcrText([
+        "MODULE 1: THE NATURE OF SCIENCE",
+        "CER Claim, Evidence, Reasoning 3",
+        "Lesson 1 The Methods of Science 12",
+        "Lesson 2 Standards of Measurement 19",
+        "Lesson 3 Communicating with Graphs 24",
+      ].join("\n"));
+
+      const noisyRecapture = parseTocFromOcrText([
+        "MODULE 1: THE NATURE OF SCIENCE",
+        "CER Claim, Evidence, Reasoning 3",
+        "Lesson 1 The Methods of Science 12",
+        "Lesson 2 Standards for Communicating with Graphs 21",
+        "Lesson 2 Standards of Measurement 19",
+        "Lesson 3 Communicating with Graphs 24",
+      ].join("\n"));
+
+      const stitched = stitchTocPages([
+        { pageIndex: 0, chapters: firstPage.chapters, units: firstPage.units, confidence: firstPage.confidence },
+        { pageIndex: 1, chapters: noisyRecapture.chapters, units: noisyRecapture.units, confidence: noisyRecapture.confidence },
+      ]);
+
+      const chapterOne = stitched.chapters[0];
+      const lessonNumbers = chapterOne.sections.map((section) => section.sectionNumber).filter(Boolean);
+      const lessonTwoEntries = chapterOne.sections.filter((section) => section.sectionNumber === "1.2");
+
+      expect(lessonNumbers).toEqual(["1.1", "1.2", "1.3"]);
+      expect(lessonTwoEntries).toHaveLength(1);
+      expect(lessonTwoEntries[0]?.title).toBe("Standards of Measurement");
+      expect(lessonTwoEntries[0]?.pageStart).toBe(19);
+    });
   });
 });

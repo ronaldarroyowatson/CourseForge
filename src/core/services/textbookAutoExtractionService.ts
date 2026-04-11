@@ -1349,7 +1349,7 @@ export function stitchTocPages(pages: TocPage[]): TocStructure {
     })
     .map((chapter) => ({
       ...chapter,
-      sections: [...chapter.sections].sort((left, right) => {
+      sections: collapseDuplicateNumberedSections([...chapter.sections].sort((left, right) => {
         const leftIsNumbered = isNumberedSection(left.sectionNumber);
         const rightIsNumbered = isNumberedSection(right.sectionNumber);
         if (leftIsNumbered !== rightIsNumbered) {
@@ -1367,7 +1367,7 @@ export function stitchTocPages(pages: TocPage[]): TocStructure {
         }
 
         return left.sectionNumber.localeCompare(right.sectionNumber, undefined, { numeric: true, sensitivity: "base" });
-      }),
+      })),
     }));
 
   const inferredChapters = inferTocPageRanges(chapters);
@@ -1988,6 +1988,83 @@ function toTitleCase(value: string): string {
   return value
     .toLowerCase()
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function scoreSectionVariant(section: TocSection): number {
+  let score = 0;
+
+  if (isNumberedSection(section.sectionNumber)) {
+    score += 2;
+  }
+
+  if (isPositivePage(section.pageStart)) {
+    score += 3;
+  }
+
+  if (isPositivePage(section.pageEnd)) {
+    score += 1;
+  }
+
+  const normalizedTitle = normalizeToken(section.title);
+  if (normalizedTitle) {
+    score += 4;
+    score += Math.min(2, normalizedTitle.split(" ").length * 0.2);
+  }
+
+  return score;
+}
+
+function selectBetterSectionVariant(prior: TocSection, incoming: TocSection): TocSection {
+  if (isPositivePage(prior.pageStart) && isPositivePage(incoming.pageStart) && prior.pageStart !== incoming.pageStart) {
+    return prior.pageStart < incoming.pageStart ? prior : incoming;
+  }
+
+  const priorScore = scoreSectionVariant(prior);
+  const incomingScore = scoreSectionVariant(incoming);
+
+  if (incomingScore > priorScore) {
+    return incoming;
+  }
+
+  return prior;
+}
+
+function mergeSectionVariants(prior: TocSection, incoming: TocSection): TocSection {
+  const preferred = selectBetterSectionVariant(prior, incoming);
+  const alternate = preferred === prior ? incoming : prior;
+  const positivePageStarts = [prior.pageStart, incoming.pageStart].filter((value): value is number => isPositivePage(value));
+  const positivePageEnds = [prior.pageEnd, incoming.pageEnd].filter((value): value is number => isPositivePage(value));
+
+  return {
+    ...preferred,
+    title: preferred.title || alternate.title,
+    pageStart: positivePageStarts.length > 0 ? Math.min(...positivePageStarts) : undefined,
+    pageEnd: positivePageEnds.length > 0 ? Math.max(...positivePageEnds) : undefined,
+  };
+}
+
+function collapseDuplicateNumberedSections(sections: TocSection[]): TocSection[] {
+  const deduped: TocSection[] = [];
+  const numberedSectionIndex = new Map<string, number>();
+
+  for (const section of sections) {
+    if (!isNumberedSection(section.sectionNumber)) {
+      deduped.push(section);
+      continue;
+    }
+
+    const sectionNumber = normalizeSectionNumber(section.sectionNumber);
+    const existingIndex = numberedSectionIndex.get(sectionNumber);
+    if (existingIndex === undefined) {
+      numberedSectionIndex.set(sectionNumber, deduped.length);
+      deduped.push(section);
+      continue;
+    }
+
+    deduped[existingIndex] = mergeSectionVariants(deduped[existingIndex], section);
+  }
+
+  return deduped;
 }
 
 function sectionMergeKey(section: TocSection): string {

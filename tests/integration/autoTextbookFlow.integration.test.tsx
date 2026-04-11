@@ -1,5 +1,5 @@
 import React from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { METADATA_CORRECTION_STORAGE_KEYS } from "../../src/core/services/metadataCorrectionLearningService";
@@ -425,6 +425,42 @@ describe("auto textbook flow integration", () => {
     fireEvent.click(screen.getByRole("button", { name: /Show optional fields/i }));
 
     expect((screen.getByDisplayValue("Teacher Edition") as HTMLInputElement).value).toBe("Teacher Edition");
+  });
+
+  it("keeps copyright-step checklist pending until that step actually extracts fields", () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "title",
+          coverImageDataUrl: "data:image/png;base64,a",
+          metadataForm: {
+            title: "Inspire Physical Science",
+            subtitle: "with Earth Science",
+            subject: "ELA",
+            edition: "Student Edition",
+            publisher: "McGraw Hill",
+            seriesName: "Inspire",
+          },
+          metadataDraft: {
+            title: "Inspire Physical Science",
+            subtitle: "with Earth Science",
+            subject: "ELA",
+            edition: "Student Edition",
+            publisher: "McGraw Hill",
+            seriesName: "Inspire",
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText(/Copyright-page field capture progress \(0\/11\):/i)).toBeInTheDocument();
+    const checklist = within(screen.getByLabelText("Extraction result summary"));
+    expect(checklist.getByText((_, element) => element?.textContent === "X Publisher")).toBeInTheDocument();
+    expect(checklist.getByText((_, element) => element?.textContent === "X Subject")).toBeInTheDocument();
+    expect(checklist.getByText((_, element) => element?.textContent === "X ISBN")).toBeInTheDocument();
+    expect(checklist.queryByText((_, element) => element?.textContent === "OK Subject")).not.toBeInTheDocument();
   });
 
   it("restores full TOC tree when resuming a queued TOC draft", async () => {

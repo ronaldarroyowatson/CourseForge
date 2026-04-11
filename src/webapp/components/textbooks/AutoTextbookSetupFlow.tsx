@@ -73,6 +73,7 @@ import { captureVisibleChromeTab, isChromeOSRuntime, isSmallChromebookViewport }
 import { getCurrentUser } from "../../../firebase/auth";
 
 type AutoFlowStep = "cover" | "title" | "toc" | "toc-editor";
+type MetadataCaptureStep = "cover" | "title";
 
 const RELATED_ISBN_TYPES: RelatedIsbnType[] = ["student", "teacher", "digital", "workbook", "assessment", "other"];
 
@@ -123,6 +124,11 @@ interface CaptureResult {
   ocrProviderId: string;
   metadataResult: MetadataResult | null;
   pipelineResult: MetadataPipelineResult | null;
+}
+
+interface ExtractionChecklistItem {
+  field: string;
+  extracted: boolean;
 }
 
 function fingerprintText(value: string): string {
@@ -221,6 +227,11 @@ const KNOWN_TEXTBOOK_DOMAINS = [
   "mydigitalpublication.com",
   "mcgrawhill.com",
 ];
+
+const METADATA_CAPTURE_CHECKLIST_FIELDS: Record<MetadataCaptureStep, string[]> = {
+  cover: ["Title", "Subtitle", "Publisher", "Subject", "Edition", "Series"],
+  title: ["Publisher", "Publisher Location", "Copyright Year", "ISBN", "Related ISBNs", "Publisher URL", "MHID", "Grade Band", "Subject", "Edition", "Series"],
+};
 
 const AUTO_CAPTURE_USAGE_STORAGE_KEY = "courseforge.autoCaptureUsageByDraft";
 
@@ -954,6 +965,14 @@ function buildExtractionFieldList(meta: AutoTextbookMetadata): string[] {
   return found;
 }
 
+function buildExtractionChecklist(step: MetadataCaptureStep, extractedFields: string[], extractionStep: MetadataCaptureStep | null): ExtractionChecklistItem[] {
+  const activeFields = extractionStep === step ? new Set(extractedFields) : new Set<string>();
+  return METADATA_CAPTURE_CHECKLIST_FIELDS[step].map((field) => ({
+    field,
+    extracted: activeFields.has(field),
+  }));
+}
+
 export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", onSaved, onSwitchToManual, testingSeedState }: AutoTextbookSetupFlowProps): React.JSX.Element {
   const language = useUIStore((state) => state.language);
   const activeAutoTextbookUpload = useUIStore((state) => state.activeAutoTextbookUpload);
@@ -1019,6 +1038,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [ocrProviderStatus, setOcrProviderStatus] = useState<string | null>(null);
   const [lastExtractionFields, setLastExtractionFields] = useState<string[]>([]);
+  const [lastExtractionStep, setLastExtractionStep] = useState<MetadataCaptureStep | null>(null);
   const [duplicateMatch, setDuplicateMatch] = useState<DuplicateTextbookMatch | null>(null);
   const [conflictResolutionMode, setConflictResolutionMode] = useState<AutoConflictResolutionMode>("overwrite_auto");
   const [rememberDuplicateChoice, setRememberDuplicateChoice] = useState(false);
@@ -1063,6 +1083,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingUploadLimitResultRef = useRef<ReturnType<typeof enforceAutoCaptureLimit> | null>(null);
+    const metadataExtractionChecklist = useMemo(() => {
+      if (step !== "cover" && step !== "title") {
+        return [];
+      }
+
+      return buildExtractionChecklist(step, lastExtractionFields, lastExtractionStep);
+    }, [lastExtractionFields, lastExtractionStep, step]);
   // Scroll target for metadata fields revealed after successful OCR.
   const metadataFormRef = useRef<HTMLDivElement>(null);
   const stepTopRef = useRef<HTMLElement>(null);
@@ -1622,6 +1649,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
     upsertAutoMetadataConfidence(scoreMetadataConfidence(cleanedText, parsed));
     applyMetadataDraft(merged);
     setLastExtractionFields(buildExtractionFieldList(parsed));
+    setLastExtractionStep(sourceStep);
     setErrorMessage(null);
     setInfoMessage("Metadata extracted. Review and correct the fields below before accepting.");
     appendDebugLogEntry({
@@ -1679,6 +1707,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
     applyMetadataDraft(merged);
     setOcrDraft(result.rawText);
     setLastExtractionFields(buildExtractionFieldList(metadataResultToAutoMetadata(result)));
+    setLastExtractionStep(sourceStep);
     setErrorMessage(null);
     setInfoMessage("Metadata extracted. Review and correct the fields below before accepting.");
     appendDebugLogEntry({
@@ -3622,19 +3651,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
       ) : null}
       {renderUploadTelemetryCard()}
 
-      {(step === "cover" || step === "title") && !isRunningOcr && lastExtractionFields.length > 0 ? (
+      {(step === "cover" || step === "title") && !isRunningOcr ? (
         <div className="extraction-summary" aria-label="Extraction result summary">
           <p className="extraction-summary__header">
-            <strong>Fields extracted this capture ({lastExtractionFields.length}):</strong>
+            <strong>{step === "cover" ? "Cover field capture progress" : "Copyright-page field capture progress"} ({metadataExtractionChecklist.filter((item) => item.extracted).length}/{metadataExtractionChecklist.length}):</strong>
           </p>
           <ul className="extraction-summary__list">
-            {lastExtractionFields.map((field) => (
-              <li key={field} className="extraction-summary__item">
-                <span className="extraction-summary__check" aria-hidden="true">OK</span> {field}
+            {metadataExtractionChecklist.map((item) => (
+              <li key={item.field} className="extraction-summary__item">
+                <span className="extraction-summary__check" aria-hidden="true">{item.extracted ? "OK" : "X"}</span> {item.field}
               </li>
             ))}
           </ul>
-          <p className="form-hint extraction-summary__hint">Scroll down to review and correct each field before clicking <strong>Accept</strong>.</p>
+          <p className="form-hint extraction-summary__hint">Fields stay marked with X until this step actually extracts them. Review and correct each field before clicking <strong>Accept</strong>.</p>
         </div>
       ) : null}
 

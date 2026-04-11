@@ -917,3 +917,9 @@ Update summary:
 Assumptions and scope note:
 
 - Integrity recovery currently targets textbook/chapter/section hierarchy continuity and ownership consistency; deeper content stores (vocab/concepts/equations/key ideas) continue to rely on existing sync reconciliation paths.
+
+### Auto Metadata Checklist and TOC Duplicate-Lesson Dedupe
+
+- The Auto metadata review banner in [src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx](src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx) now shows a step-scoped checklist instead of reusing the last capture's positive field list, so entering the copyright step no longer inherits green checks from the cover step.
+- Cover and copyright checklist items stay pending until that same step actually extracts them; existing carried-forward metadata values no longer count as fresh extraction proof for the active step.
+- TOC stitching in [src/core/services/textbookAutoExtractionService.ts](src/core/services/textbookAutoExtractionService.ts) now collapses conflicting duplicate numbered lesson variants before page-range inference, reducing OCR-noise cases where the same lesson number appeared twice with mismatched titles/pages and distorted downstream ranges in [src/webapp/components/textbooks/tocPreview/PageRangeCalculator.ts](src/webapp/components/textbooks/tocPreview/PageRangeCalculator.ts).

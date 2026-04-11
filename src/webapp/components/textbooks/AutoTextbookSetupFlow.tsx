@@ -3168,11 +3168,18 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         });
 
         if (coverImageDataUrl) {
-          const coverImageUrl = await uploadTextbookCoverFromDataUrl(duplicateMatch.id, coverImageDataUrl);
-          await editTextbook(duplicateMatch.id, {
-            ...nextTextbookChanges,
-            coverImageUrl,
-          });
+          try {
+            const coverImageUrl = await uploadTextbookCoverFromDataUrl(duplicateMatch.id, coverImageDataUrl);
+            await editTextbook(duplicateMatch.id, {
+              ...nextTextbookChanges,
+              coverImageUrl,
+            });
+          } catch (error) {
+            await editTextbook(duplicateMatch.id, nextTextbookChanges);
+            if (import.meta.env.DEV) {
+              console.warn("Cover upload failed while resolving duplicate textbook; continuing without cover image.", error);
+            }
+          }
         } else {
           await editTextbook(duplicateMatch.id, nextTextbookChanges);
         }

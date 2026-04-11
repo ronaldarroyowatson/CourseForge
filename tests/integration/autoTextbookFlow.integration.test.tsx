@@ -994,6 +994,75 @@ describe("auto textbook flow integration", () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
+  it("continues duplicate cloud save when cover upload fails (fail-open guard)", async () => {
+    const onSaved = vi.fn();
+    const validCoverDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=";
+
+    repositoryMocks.findTextbookByISBN.mockResolvedValue({
+      id: "tb-existing-fail-open",
+      title: "Manual Biology",
+      isbnRaw: "9781402894994",
+      sourceType: "manual",
+    });
+    repositoryMocks.fetchChaptersByTextbookId.mockResolvedValue([]);
+    repositoryMocks.fetchSectionsByChapterId.mockResolvedValue([]);
+    coverServiceMocks.uploadTextbookCoverFromDataUrl.mockRejectedValueOnce(new Error("Storage timeout"));
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={onSaved}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: validCoverDataUrl,
+          tocResult: {
+            confidence: 0.9,
+            chapters: [
+              {
+                chapterNumber: "1",
+                title: "Cells",
+                sections: [{ sectionNumber: "1.1", title: "Cell Theory" }],
+              },
+            ],
+          },
+          bypassImageModeration: true,
+          metadataForm: {
+            title: "Auto Biology",
+            grade: "9",
+            gradeBand: "9-10",
+            subject: "Science",
+            edition: "1",
+            publicationYear: "2026",
+            isbnRaw: "9781402894994",
+          },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
+
+    expect(await screen.findByText(/Existing textbook found:/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Save Textbook to Cloud" })).not.toBeDisabled();
+    });
+
+    fireEvent.change(screen.getByLabelText("Resolution mode"), { target: { value: "merge_dedupe" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Textbook to Cloud" }));
+
+    await waitFor(() => {
+      expect(repositoryMocks.editTextbook).toHaveBeenCalledWith(
+        "tb-existing-fail-open",
+        expect.objectContaining({
+          title: "Auto Biology",
+          sourceType: "auto",
+        })
+      );
+    });
+
+    expect(syncServiceMocks.syncNow).toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
   it("shows Save Locally Only on homepage only and not at TOC-end", () => {
     render(<TextbookForm onSaved={() => undefined} />);
     expect(screen.getByRole("button", { name: "Save Locally Only" })).toBeInTheDocument();

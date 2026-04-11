@@ -1,6 +1,26 @@
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { firebaseStorage } from "../../firebase/storage";
 
+const COVER_UPLOAD_TIMEOUT_MS = 15000;
+
+function withTimeout<T>(operation: Promise<T>, timeoutMs: number, operationName: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timerId = window.setTimeout(() => {
+      reject(new Error(`${operationName} timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+
+    operation
+      .then((value) => {
+        window.clearTimeout(timerId);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timerId);
+        reject(error);
+      });
+  });
+}
+
 /**
  * Upload a File object to Firebase Storage under /textbookCovers/{textbookId}
  * and return the public download URL.
@@ -10,9 +30,13 @@ export async function uploadTextbookCoverImage(
   file: File
 ): Promise<string> {
   const storageRef = ref(firebaseStorage, `textbookCovers/${textbookId}`);
-  const snapshot = await uploadBytes(storageRef, file, {
-    contentType: file.type || "image/jpeg",
-  });
+  const snapshot = await withTimeout(
+    uploadBytes(storageRef, file, {
+      contentType: file.type || "image/jpeg",
+    }),
+    COVER_UPLOAD_TIMEOUT_MS,
+    "Cover image upload"
+  );
   return getDownloadURL(snapshot.ref);
 }
 
@@ -26,7 +50,11 @@ export async function uploadTextbookCoverFromDataUrl(
 ): Promise<string> {
   const blob = dataUrlToBlob(dataUrl);
   const storageRef = ref(firebaseStorage, `textbookCovers/${textbookId}`);
-  const snapshot = await uploadBytes(storageRef, blob, { contentType: blob.type });
+  const snapshot = await withTimeout(
+    uploadBytes(storageRef, blob, { contentType: blob.type }),
+    COVER_UPLOAD_TIMEOUT_MS,
+    "Cover image upload"
+  );
   return getDownloadURL(snapshot.ref);
 }
 

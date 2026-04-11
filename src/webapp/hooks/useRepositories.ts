@@ -288,10 +288,18 @@ export function useRepositories() {
     const textbook = buildTextbookFromInput(input);
 
     // Upload cover image if provided as a file or data-URL
-    if (input.coverFile) {
-      textbook.coverImageUrl = await uploadTextbookCoverImage(textbook.id, input.coverFile);
-    } else if (input.coverDataUrl) {
-      textbook.coverImageUrl = await uploadTextbookCoverFromDataUrl(textbook.id, input.coverDataUrl);
+    try {
+      if (input.coverFile) {
+        textbook.coverImageUrl = await uploadTextbookCoverImage(textbook.id, input.coverFile);
+      } else if (input.coverDataUrl) {
+        textbook.coverImageUrl = await uploadTextbookCoverFromDataUrl(textbook.id, input.coverDataUrl);
+      }
+    } catch (error) {
+      // Fail-open: preserve textbook save/upload path even if cover storage upload fails.
+      textbook.coverImageUrl = null;
+      if (import.meta.env.DEV) {
+        console.warn("Cover upload failed during createTextbook; continuing without cover image.", error);
+      }
     }
 
     const id = await saveTextbook(textbook);

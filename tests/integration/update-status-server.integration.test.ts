@@ -63,6 +63,38 @@ async function startStatusServer(
   return child;
 }
 
+async function startBlockingListener(port: number) {
+  const script = [
+    "const http = require('http');",
+    "const server = http.createServer((req, res) => {",
+    "  res.writeHead(200, { 'Content-Type': 'text/plain' });",
+    "  res.end('busy');",
+    "});",
+    `server.listen(${port}, '127.0.0.1', () => console.log('blocking-listener-ready'));`,
+    "process.on('SIGTERM', () => server.close(() => process.exit(0)));",
+  ].join("\n");
+
+  const child = spawn("node", ["-e", script], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Timed out waiting for blocking listener startup")), 10000);
+    child.stdout.on("data", (chunk) => {
+      if (chunk.toString().includes("blocking-listener-ready")) {
+        clearTimeout(timeout);
+        resolve();
+      }
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`Blocking listener exited early with code ${code}`));
+    });
+  });
+
+  return child;
+}
+
 async function stopServer(child: ChildProcess) {
   if (child.killed || child.exitCode !== null) {
     return;
@@ -70,6 +102,17 @@ async function stopServer(child: ChildProcess) {
 
   child.kill("SIGTERM");
   await once(child, "exit");
+}
+
+async function waitForServerExit(child: ChildProcess, timeoutMs = 10000) {
+  if (child.exitCode !== null) {
+    return;
+  }
+
+  await Promise.race([
+    once(child, "exit").then(() => undefined),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for process exit")), timeoutMs)),
+  ]);
 }
 
 async function startReleaseServer(payload: unknown) {
@@ -718,6 +761,65 @@ describe("local update status endpoint", () => {
       });
       expect(invalidResponse.status).toBe(422);
     } finally {
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns port health map and cleanup diagnostics for occupied ports", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+    writeFileSync(join(root, "package-manifest.json"), JSON.stringify({ version: "1.2.72" }, null, 2), "utf8");
+
+    let blocker: ChildProcess | null = null;
+    try {
+      const statusPort = await getAvailablePort();
+      const busyPort = await getAvailablePort();
+      child = await startStatusServer(root, statusPort, {
+        env: {
+          COURSEFORGE_MANAGED_PORTS: `${statusPort},9090`,
+        },
+      });
+
+      blocker = await startBlockingListener(busyPort);
+
+      const healthResponse = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${statusPort}/api/port-health?port=${busyPort}`);
+      const healthPayload = await healthResponse.json();
+
+      expect(healthResponse.status).toBe(200);
+      expect(healthPayload.ok).toBe(true);
+      expect(healthPayload.requestedPort).toBe(busyPort);
+      expect(Array.isArray(healthPayload.records)).toBe(true);
+      expect(healthPayload.records.some((entry: { port: number; state: string }) => entry.port === busyPort && entry.state === "occupied")).toBe(true);
+
+      const cleanupResponse = await fetch(`http://127.0.0.1:${statusPort}/api/port-cleanup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          port: busyPort,
+          force: true,
+          includeAllManagedPorts: false,
+        }),
+      });
+      const cleanupPayload = await cleanupResponse.json();
+
+      expect(cleanupResponse.status).toBe(200);
+      expect(cleanupPayload.ok).toBe(true);
+      expect(cleanupPayload.cleanup.unresolvedPorts).toEqual([]);
+      await waitForServerExit(blocker);
+      blocker = null;
+    } finally {
+      if (blocker && blocker.exitCode === null) {
+        blocker.kill("SIGTERM");
+        await waitForServerExit(blocker).catch(() => undefined);
+      }
       if (child) {
         await stopServer(child);
         child = null;

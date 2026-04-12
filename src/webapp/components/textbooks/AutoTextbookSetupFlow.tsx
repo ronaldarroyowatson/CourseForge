@@ -1219,7 +1219,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   const traceEvent = (input: {
     step: string;
     component: string;
-    category: "orchestration" | "communication" | "ocr" | "agent" | "field" | "structure" | "upload" | "cache" | "error";
+    category: "orchestration" | "communication" | "ocr" | "agent" | "field" | "structure" | "upload" | "cache" | "port" | "error";
     action: string;
     severity?: "info" | "warning" | "error";
     message: string;
@@ -1314,6 +1314,55 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         })),
       },
     });
+
+    try {
+      const response = await fetch("/api/port-health", {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error(`port-health-http-${response.status}`);
+      }
+
+      const payload = await response.json() as {
+        requestedPort?: number;
+        occupiedPorts?: number[];
+        records?: Array<{
+          port: number;
+          state: string;
+          holderPid: number | null;
+          inUseByOther: boolean;
+        }>;
+      };
+
+      traceEvent({
+        step,
+        component: "port-detector",
+        category: "port",
+        action: "port_scan",
+        message: Array.isArray(payload.occupiedPorts) && payload.occupiedPorts.length > 0
+          ? `Detected occupied managed ports: ${payload.occupiedPorts.join(", ")}`
+          : "No occupied managed ports detected.",
+        details: {
+          trigger,
+          requestedPort: payload.requestedPort ?? null,
+          occupiedPorts: payload.occupiedPorts ?? [],
+          records: payload.records ?? [],
+        },
+      });
+    } catch (error) {
+      traceEvent({
+        step,
+        component: "port-detector",
+        category: "port",
+        action: "port_scan_failed",
+        severity: "warning",
+        message: "Port diagnostics endpoint unavailable during cache scan.",
+        details: {
+          trigger,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   };
 
     const metadataExtractionChecklist = useMemo(() => {

@@ -6,7 +6,7 @@ export interface AutoCaptureTraceEvent {
   timestamp: string;
   step: string;
   component: string;
-  category: "orchestration" | "communication" | "ocr" | "agent" | "field" | "structure" | "upload" | "cache" | "error";
+  category: "orchestration" | "communication" | "ocr" | "agent" | "field" | "structure" | "upload" | "cache" | "port" | "error";
   action: string;
   severity: AutoCaptureTraceSeverity;
   message: string;

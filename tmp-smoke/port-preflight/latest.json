@@ -1,0 +1,58 @@
+{
+  "context": "test:rules",
+  "at": "2026-04-12T05:20:21.108Z",
+  "strictMode": false,
+  "ports": [
+    3000,
+    8080,
+    9090,
+    9150
+  ],
+  "unresolvedPorts": [],
+  "records": [
+    {
+      "port": 3000,
+      "stateBefore": "free",
+      "holderPid": null,
+      "gracefulAttempted": false,
+      "gracefulResult": false,
+      "forceAttempted": false,
+      "forceResult": false,
+      "stateAfter": "free",
+      "unresolved": false
+    },
+    {
+      "port": 8080,
+      "stateBefore": "free",
+      "holderPid": null,
+      "gracefulAttempted": false,
+      "gracefulResult": false,
+      "forceAttempted": false,
+      "forceResult": false,
+      "stateAfter": "free",
+      "unresolved": false
+    },
+    {
+      "port": 9090,
+      "stateBefore": "free",
+      "holderPid": null,
+      "gracefulAttempted": false,
+      "gracefulResult": false,
+      "forceAttempted": false,
+      "forceResult": false,
+      "stateAfter": "free",
+      "unresolved": false
+    },
+    {
+      "port": 9150,
+      "stateBefore": "free",
+      "holderPid": null,
+      "gracefulAttempted": false,
+      "gracefulResult": false,
+      "forceAttempted": false,
+      "forceResult": false,
+      "stateAfter": "free",
+      "unresolved": false
+    }
+  ]
+}

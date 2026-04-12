@@ -183,3 +183,27 @@ Testing requirements for cache telemetry:
 - unit tests must assert stuck upload cache detection and clear-path telemetry
 - unit tests must assert failed-clear telemetry paths for locked/corrupted cache operations
 - integration tests must keep single-instance and upload control coverage to ensure cache conflict actions are traceable
+
+## 12. Port Telemetry Standards
+
+Port behavior is a first-class debug target and must be treated similarly to cache behavior during startup and tests.
+
+Required port telemetry coverage:
+
+- managed port map snapshots with state per port: `free`, `occupied`, `listening-self`
+- owning process id when available
+- cleanup attempts: graceful signal, forced termination, and final state
+- unresolved port conflicts recorded in diagnostics and updater logs
+
+Operational requirements:
+
+- run port preflight cleanup before test entrypoints via `scripts/preflight-port-cleanup.mjs`
+- record latest preflight report under `tmp-smoke/port-preflight/latest.json`
+- expose runtime diagnostics through `/api/port-health` and `/api/port-cleanup`
+- include the latest port health and cleanup snapshots in `/api/updater-diagnostics`
+
+Testing requirements for port telemetry:
+
+- integration tests must cover occupied-port detection through `/api/port-health`
+- integration tests must cover cleanup success/failure through `/api/port-cleanup`
+- startup tests must verify conflict recovery behavior and clear log diagnostics for unresolved ports

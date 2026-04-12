@@ -331,7 +331,8 @@ function expectLogPathDiagnostics(logDetails: ReturnType<typeof readLauncherLog>
 
 describe("portable launcher staged-update flow", () => {
   it.skipIf(process.platform !== "win32")("applies a staged update before startup and refreshes runtime version", async () => {
-    const { root, binDir, pendingDir } = createTestInstallRoot();
+    const port = await getAvailablePort();
+    const { root, binDir, pendingDir } = createTestInstallRoot(port);
 
     try {
       const result = runLauncher(root, binDir, { robocopyMode: "success" });
@@ -357,7 +358,8 @@ describe("portable launcher staged-update flow", () => {
   }, 60000);
 
   it.skipIf(process.platform !== "win32")("keeps staged artifacts when apply fails so the failure can be retried and diagnosed", async () => {
-    const { root, binDir, pendingDir } = createTestInstallRoot();
+    const port = await getAvailablePort();
+    const { root, binDir, pendingDir } = createTestInstallRoot(port);
 
     try {
       const result = runLauncher(root, binDir, { robocopyMode: "fail" });

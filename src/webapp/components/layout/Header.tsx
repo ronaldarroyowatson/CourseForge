@@ -3,7 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { doc, setDoc } from "firebase/firestore";
 import {
   clearPersistedAutoTextbookUpload,
+  deletePendingAutoTextbookUpload,
+  forceRemoveAutoTextbookUpload,
   hydratePersistedAutoTextbookUpload,
+  requestCancelAutoTextbookUpload,
   resumePersistedAutoTextbookUpload,
 } from "../../../core/services/autoTextbookUploadService";
 import { syncNow } from "../../../core/services/syncService";
@@ -47,6 +50,23 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
   const activeAutoTextbookUpload = useUIStore((state) => state.activeAutoTextbookUpload);
 
   const [showDebugPanel, setShowDebugPanel] = React.useState(false);
+
+  const isUploadStuck = React.useCallback((snapshot: typeof activeAutoTextbookUpload): boolean => {
+    if (!snapshot) {
+      return false;
+    }
+
+    if (snapshot.status !== "preparing") {
+      return false;
+    }
+
+    const updatedAtMs = Date.parse(snapshot.updatedAt);
+    if (!Number.isFinite(updatedAtMs)) {
+      return false;
+    }
+
+    return (Date.now() - updatedAtMs) >= 45_000;
+  }, []);
 
   React.useEffect(() => {
     hydratePersistedAutoTextbookUpload();
@@ -122,6 +142,27 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to resume textbook upload.";
       setSyncStatus("error", message);
+    }
+  }
+
+  async function handleCancelUpload(): Promise<void> {
+    const cancelled = await requestCancelAutoTextbookUpload();
+    if (!cancelled) {
+      setSyncStatus("error", "No active upload to cancel.");
+    }
+  }
+
+  async function handleDeletePendingUpload(): Promise<void> {
+    const deleted = await deletePendingAutoTextbookUpload();
+    if (!deleted) {
+      setSyncStatus("error", "Pending upload could not be deleted in its current state.");
+    }
+  }
+
+  async function handleForceRemoveUpload(): Promise<void> {
+    const removed = await forceRemoveAutoTextbookUpload();
+    if (!removed) {
+      setSyncStatus("error", "No upload state was available to force-remove.");
     }
   }
 
@@ -244,6 +285,24 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
             </p>
           </div>
           <div className="header-upload-monitor__actions">
+            {(activeAutoTextbookUpload.status === "preparing" || activeAutoTextbookUpload.status === "uploading") ? (
+              <button type="button" className="btn-secondary" onClick={() => { void handleCancelUpload(); }}>
+                Cancel Upload
+              </button>
+            ) : null}
+
+            {activeAutoTextbookUpload.status !== "uploading" && activeAutoTextbookUpload.status !== "completed" ? (
+              <button type="button" className="btn-secondary" onClick={() => { void handleDeletePendingUpload(); }}>
+                Delete Pending Upload
+              </button>
+            ) : null}
+
+            {(activeAutoTextbookUpload.status === "corrupt-restart" || isUploadStuck(activeAutoTextbookUpload)) ? (
+              <button type="button" className="btn-secondary" onClick={() => { void handleForceRemoveUpload(); }}>
+                Force Remove
+              </button>
+            ) : null}
+
             {activeAutoTextbookUpload.canResume
               && (activeAutoTextbookUpload.status === "paused"
                 || activeAutoTextbookUpload.status === "failed"

@@ -1,11 +1,11 @@
 # Test Index
 
-Generated: 2026-04-12T03:02:34.076Z
+Generated: 2026-04-12T04:31:23.355Z
 
 ## Summary
 
-- Total test files: 56
-- Unit test files: 36
+- Total test files: 58
+- Unit test files: 38
 - Integration test files: 18
 - Rules test files: 2
 - Canonical sample files: 5
@@ -20,6 +20,8 @@ Generated: 2026-04-12T03:02:34.076Z
 - tests/core/autoTextbookPersistence.localization.test.ts
 - tests/core/autoTextbookUploadResume.test.ts
 - tests/core/autoTextbookUploadService.test.ts
+- tests/core/cacheControlService.test.ts
+- tests/core/cacheTelemetryService.test.ts
 - tests/core/debugLogService.test.ts
 - tests/core/documentExtraction.guardrails.test.ts
 - tests/core/documentIngest.extraction.test.ts

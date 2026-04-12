@@ -18,6 +18,8 @@ export * from "./metadataCorrectionLearningService";
 export * from "./metadataCorrectionSyncService";
 export * from "./metadataExtractionPipelineService";
 export * from "./coverImageService";
+export * from "./cacheControlService";
+export * from "./cacheTelemetryService";
 export * from "./debugLogService";
 export {
   appendDebugLogEntry,

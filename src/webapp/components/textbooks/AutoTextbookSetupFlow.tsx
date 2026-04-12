@@ -28,6 +28,13 @@ import {
   runTrackedAutoTextbookCloudUpload,
 } from "../../../core/services/autoTextbookUploadService";
 import {
+  detectCourseForgeCacheState,
+  getCurrentCacheMapSnapshot,
+  recordCacheRegression,
+  recordCacheUsage,
+  resetCacheTelemetryMap,
+} from "../../../core/services/cacheTelemetryService";
+import {
   AUTO_MODE_SCOPE_MESSAGE,
   createInitialAutoCaptureUsage,
   DEFAULT_AUTO_CAPTURE_LIMITS,
@@ -1212,7 +1219,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   const traceEvent = (input: {
     step: string;
     component: string;
-    category: "orchestration" | "communication" | "ocr" | "agent" | "field" | "structure" | "upload" | "error";
+    category: "orchestration" | "communication" | "ocr" | "agent" | "field" | "structure" | "upload" | "cache" | "error";
     action: string;
     severity?: "info" | "warning" | "error";
     message: string;
@@ -1283,6 +1290,32 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
     });
   };
 
+  const detectAndTraceCaches = async (trigger: string): Promise<void> => {
+    if (!verboseDebugEnabled) {
+      return;
+    }
+
+    const detected = await detectCourseForgeCacheState(`auto-flow:${trigger}`);
+    traceEvent({
+      step,
+      component: "cache-detector",
+      category: "cache",
+      action: "cache_scan",
+      message: detected.length > 0
+        ? `Detected ${detected.length} cache entries before extraction.`
+        : "No CourseForge cache entries detected before extraction.",
+      details: {
+        trigger,
+        detectedCount: detected.length,
+        entries: detected.map((entry) => ({
+          layer: entry.layer,
+          identifier: entry.identifier,
+          timestamp: entry.timestamp,
+        })),
+      },
+    });
+  };
+
     const metadataExtractionChecklist = useMemo(() => {
       if (step !== "cover" && step !== "title") {
         return [];
@@ -1322,6 +1355,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   );
   const isSessionCapacityReached = resumableDrafts.length >= MAX_AUTO_SESSION_DRAFTS && !currentSessionHasWork;
   const isInteractionLocked = isBusy || isRunningOcr;
+  useEffect(() => {
+    resetCacheTelemetryMap();
+    void detectAndTraceCaches("flow-start");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    void detectAndTraceCaches(`step-${step}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
   useEffect(() => {
     setAutoCaptureVerboseDebugEnabled(verboseDebugEnabled);
     if (!verboseDebugEnabled) {
@@ -1868,6 +1911,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
     const parsed = extractMetadataFromOcrText(cleanedText);
     const merged = mergeCapturedMetadataForStep(metadataDraft, parsed, sourceStep);
     if (sourceStep === "title" && metadataDraft.subject && !parsed.subject && !merged.subject) {
+      recordCacheRegression({
+        cause: "stale-metadata-subject",
+        source: "metadataDraft.subject",
+        effect: "Subject candidate was cleared to avoid stale cached value overriding title extraction.",
+        staleIdentifier: "metadata.subject",
+        details: {
+          previousSubject: metadataDraft.subject,
+          source: "ocr_text_parser",
+        },
+      });
       traceEvent({
         step: sourceStep,
         component: "metadata-merger",
@@ -1917,6 +1970,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
     const incomingMetadata = metadataResultToAutoMetadata(result);
     const merged = mergeCapturedMetadataForStep(metadataDraft, incomingMetadata, sourceStep);
     if (sourceStep === "title" && metadataDraft.subject && !incomingMetadata.subject && !merged.subject) {
+      recordCacheRegression({
+        cause: "stale-pipeline-subject",
+        source: `pipeline:${result.source}`,
+        effect: "Subject candidate was cleared after pipeline validation to avoid stale cache regression.",
+        staleIdentifier: "metadataPipeline.subject",
+        details: {
+          previousSubject: metadataDraft.subject,
+          source: `pipeline:${result.source}`,
+        },
+      });
       traceEvent({
         step: sourceStep,
         component: "metadata-merger",
@@ -3763,6 +3826,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
 
       if (isCloudUpload) {
         didStartCloudUpload = true;
+        recordCacheUsage({
+          layer: "cached-upload-state",
+          identifier: "courseforge.autoTextbookUpload.v1",
+          component: "cloud-upload",
+          status: "used",
+          reason: "Tracked upload state persisted for resumable cloud sync.",
+          details: {
+            draftSession: `${draftKeyRef.current}:${savedTextbookId ?? "pending"}`,
+          },
+        });
         traceEvent({
           step: "toc",
           component: "cloud-upload",
@@ -3863,6 +3936,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
       const sessionId = draftKeyRef.current;
       await clearTocAutosave(sessionId);
 
+      traceEvent({
+        step: "toc",
+        component: "cache-map",
+        category: "cache",
+        action: "cache_map_finalized",
+        message: "Final cache map generated for completed run.",
+        details: {
+          cacheMap: getCurrentCacheMapSnapshot(),
+        },
+      });
       onSaved();
       if (activeTraceRunRef.current) {
         activeTraceRunRef.current = completeAutoCaptureTraceRun(activeTraceRunRef.current, "completed");
@@ -3901,6 +3984,17 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         eventType: "error",
         message: "Auto textbook setup save failed.",
         autoModeStep: "toc",
+      });
+      traceEvent({
+        step: "toc",
+        component: "cache-map",
+        category: "cache",
+        action: "cache_map_finalized",
+        severity: "warning",
+        message: "Final cache map generated for failed run.",
+        details: {
+          cacheMap: getCurrentCacheMapSnapshot(),
+        },
       });
       if (activeTraceRunRef.current) {
         activeTraceRunRef.current = completeAutoCaptureTraceRun(activeTraceRunRef.current, "failed");

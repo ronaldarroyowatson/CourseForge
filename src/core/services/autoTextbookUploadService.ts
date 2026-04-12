@@ -4,13 +4,26 @@ import type { Chapter, Section, Textbook } from "../models";
 import { getAll, save, STORE_NAMES } from "./db";
 import { normalizeISBN } from "./isbnService";
 import { syncNow } from "./syncService";
+import { appendDebugLogEntry } from "./debugLogService";
+import { recordCacheDetection, recordCacheUsage } from "./cacheTelemetryService";
 import { getCurrentUser } from "../../firebase/auth";
 import { firestoreDb } from "../../firebase/firestore";
 import { useUIStore } from "../../webapp/store/uiStore";
 
 const AUTO_TEXTBOOK_UPLOAD_STORAGE_KEY = "courseforge.autoTextbookUpload.v1";
 const AUTO_TEXTBOOK_DUPLICATE_PREFERENCES_KEY = "courseforge.autoTextbookDuplicatePreferences.v1";
+const AUTO_TEXTBOOK_UPLOAD_CONTROL_KEY = "courseforge.autoTextbookUpload.control.v1";
 const UPLOAD_POLL_INTERVAL_MS = 350;
+const STUCK_PREPARING_THRESHOLD_MS = 45_000;
+
+type UploadControlAction = "none" | "cancel" | "delete" | "force-remove";
+
+interface AutoTextbookUploadControlState {
+  sessionId: string;
+  action: UploadControlAction;
+  reason?: string;
+  requestedAt: string;
+}
 
 export type AutoTextbookUploadStatus = "preparing" | "uploading" | "paused" | "failed" | "completed" | "corrupt-restart";
 export type AutoTextbookUploadPhase = "persisting" | "integrity-check" | "uploading" | "resuming" | "completed" | "failed";
@@ -132,6 +145,27 @@ function writeToStorage<T>(key: string, value: T | null): void {
   window.localStorage.setItem(key, JSON.stringify(value));
 }
 
+function readUploadControlState(): AutoTextbookUploadControlState | null {
+  return readFromStorage<AutoTextbookUploadControlState>(AUTO_TEXTBOOK_UPLOAD_CONTROL_KEY);
+}
+
+function writeUploadControlState(value: AutoTextbookUploadControlState | null): void {
+  writeToStorage(AUTO_TEXTBOOK_UPLOAD_CONTROL_KEY, value);
+}
+
+function clearUploadControlState(): void {
+  writeUploadControlState(null);
+}
+
+function getRequestedUploadAction(sessionId: string): UploadControlAction {
+  const state = readUploadControlState();
+  if (!state || state.sessionId !== sessionId) {
+    return "none";
+  }
+
+  return state.action;
+}
+
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
@@ -191,23 +225,192 @@ function publishSnapshot(snapshot: AutoTextbookUploadSnapshot | null): void {
 }
 
 export function readPersistedAutoTextbookUpload(): AutoTextbookUploadSnapshot | null {
-  return readFromStorage<AutoTextbookUploadSnapshot>(AUTO_TEXTBOOK_UPLOAD_STORAGE_KEY);
+  const snapshot = readFromStorage<AutoTextbookUploadSnapshot>(AUTO_TEXTBOOK_UPLOAD_STORAGE_KEY);
+  if (snapshot) {
+    recordCacheDetection({
+      layer: "cached-upload-state",
+      identifier: AUTO_TEXTBOOK_UPLOAD_STORAGE_KEY,
+      component: "auto-upload-service",
+      details: {
+        sessionId: snapshot.sessionId,
+        status: snapshot.status,
+        updatedAt: snapshot.updatedAt,
+      },
+    });
+  }
+
+  return snapshot;
 }
 
 export function hydratePersistedAutoTextbookUpload(): AutoTextbookUploadSnapshot | null {
   const snapshot = readPersistedAutoTextbookUpload();
   if (snapshot) {
+    recordCacheUsage({
+      layer: "cached-upload-state",
+      identifier: AUTO_TEXTBOOK_UPLOAD_STORAGE_KEY,
+      component: "auto-upload-service",
+      status: "used",
+      reason: "Hydrating persisted upload state on startup.",
+      details: {
+        sessionId: snapshot.sessionId,
+        status: snapshot.status,
+      },
+    });
     useUIStore.getState().setAutoTextbookUpload(snapshot);
   }
   return snapshot;
 }
 
 export function clearPersistedAutoTextbookUpload(): void {
+  recordCacheUsage({
+    layer: "cached-upload-state",
+    identifier: AUTO_TEXTBOOK_UPLOAD_STORAGE_KEY,
+    component: "auto-upload-service",
+    status: "ignored",
+    reason: "Clearing persisted upload cache state.",
+  });
   publishSnapshot(null);
+  clearUploadControlState();
 }
 
 export function initAutoTextbookUploadTracking(snapshot: AutoTextbookUploadSnapshot): void {
+  clearUploadControlState();
   publishSnapshot(snapshot);
+}
+
+function shouldAllowPendingUploadDelete(status: AutoTextbookUploadStatus): boolean {
+  return status === "preparing" || status === "paused" || status === "failed" || status === "corrupt-restart";
+}
+
+export function isAutoTextbookUploadStuck(snapshot: AutoTextbookUploadSnapshot, nowMs = Date.now()): boolean {
+  if (snapshot.status !== "preparing") {
+    return false;
+  }
+
+  const updatedAt = Date.parse(snapshot.updatedAt);
+  if (!Number.isFinite(updatedAt)) {
+    return false;
+  }
+
+  const stuck = (nowMs - updatedAt) >= STUCK_PREPARING_THRESHOLD_MS;
+  if (stuck) {
+    recordCacheUsage({
+      layer: "cached-upload-state",
+      identifier: AUTO_TEXTBOOK_UPLOAD_STORAGE_KEY,
+      component: "auto-upload-service",
+      status: "stale",
+      reason: "Upload state stuck in preparing threshold window.",
+      details: {
+        updatedAt: snapshot.updatedAt,
+        thresholdMs: STUCK_PREPARING_THRESHOLD_MS,
+      },
+    });
+  }
+
+  return stuck;
+}
+
+export async function requestCancelAutoTextbookUpload(reason = "User canceled pending upload."): Promise<boolean> {
+  const snapshot = readPersistedAutoTextbookUpload() ?? useUIStore.getState().activeAutoTextbookUpload;
+  if (!snapshot) {
+    return false;
+  }
+
+  writeUploadControlState({
+    sessionId: snapshot.sessionId,
+    action: "cancel",
+    reason,
+    requestedAt: new Date().toISOString(),
+  });
+
+  const pausedSnapshot = buildSnapshot({
+    base: snapshot,
+    sessionId: snapshot.sessionId,
+    textbookId: snapshot.textbookId,
+    title: snapshot.title,
+    isbnRaw: snapshot.isbnRaw,
+    status: "paused",
+    phase: "failed",
+    message: "Upload canceled by user.",
+    totalItems: snapshot.totalItems,
+    completedItems: snapshot.completedItems,
+    pendingItems: snapshot.pendingItems,
+    integrityState: snapshot.integrityState,
+    canResume: false,
+  });
+  publishSnapshot(pausedSnapshot);
+
+  await appendDebugLogEntry({
+    eventType: "user_action",
+    message: "Auto textbook upload canceled.",
+    autoModeStep: "manual",
+    context: {
+      sessionId: snapshot.sessionId,
+      textbookId: snapshot.textbookId,
+      status: snapshot.status,
+      reason,
+    },
+  });
+
+  return true;
+}
+
+export async function deletePendingAutoTextbookUpload(reason = "User deleted pending upload."): Promise<boolean> {
+  const snapshot = readPersistedAutoTextbookUpload() ?? useUIStore.getState().activeAutoTextbookUpload;
+  if (!snapshot || !shouldAllowPendingUploadDelete(snapshot.status)) {
+    return false;
+  }
+
+  writeUploadControlState({
+    sessionId: snapshot.sessionId,
+    action: "delete",
+    reason,
+    requestedAt: new Date().toISOString(),
+  });
+
+  clearPersistedAutoTextbookUpload();
+  await appendDebugLogEntry({
+    eventType: "user_action",
+    message: "Pending auto textbook upload deleted.",
+    autoModeStep: "manual",
+    context: {
+      sessionId: snapshot.sessionId,
+      textbookId: snapshot.textbookId,
+      status: snapshot.status,
+      reason,
+    },
+  });
+
+  return true;
+}
+
+export async function forceRemoveAutoTextbookUpload(reason = "Upload force-removed from limbo state."): Promise<boolean> {
+  const snapshot = readPersistedAutoTextbookUpload() ?? useUIStore.getState().activeAutoTextbookUpload;
+  if (!snapshot) {
+    return false;
+  }
+
+  writeUploadControlState({
+    sessionId: snapshot.sessionId,
+    action: "force-remove",
+    reason,
+    requestedAt: new Date().toISOString(),
+  });
+
+  clearPersistedAutoTextbookUpload();
+  await appendDebugLogEntry({
+    eventType: "warning",
+    message: "Auto textbook upload force-removed.",
+    autoModeStep: "manual",
+    context: {
+      sessionId: snapshot.sessionId,
+      textbookId: snapshot.textbookId,
+      status: snapshot.status,
+      reason,
+    },
+  });
+
+  return true;
 }
 
 function readDuplicatePreferences(): Record<string, AutoDuplicateResolutionPreference> {
@@ -460,6 +663,28 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
   title: string;
   isbnRaw: string;
 }): Promise<Awaited<ReturnType<typeof syncNow>>> {
+  const requestedAction = getRequestedUploadAction(input.sessionId);
+  if (requestedAction === "cancel" || requestedAction === "delete" || requestedAction === "force-remove") {
+    clearUploadControlState();
+    return {
+      success: false,
+      message: "Upload canceled before cloud sync started.",
+      retryable: false,
+      permissionDenied: false,
+      throttled: false,
+      writeLoopTriggered: false,
+      writeBudgetExceeded: false,
+      writeCount: 0,
+      writeBudgetLimit: 500,
+      readCount: 0,
+      readBudgetLimit: 5000,
+      readBudgetExceeded: false,
+      retryLimit: 3,
+      errorCode: "cancelled",
+      pendingCount: 0,
+    };
+  }
+
   const user = getCurrentUser();
   const localSummary = await getLocalHierarchySummary(input.textbookId);
   if (!user?.uid || !localSummary) {
@@ -603,6 +828,7 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
     });
     useUIStore.getState().setAutoTextbookUpload(completedSnapshot);
     writeToStorage(AUTO_TEXTBOOK_UPLOAD_STORAGE_KEY, null);
+    clearUploadControlState();
     return {
       success: true,
       message: completedSnapshot.message,
@@ -649,6 +875,33 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
 
   try {
     const result = await syncNow({ intent: "manual" });
+
+    if (getRequestedUploadAction(input.sessionId) === "cancel") {
+      clearUploadControlState();
+      publishSnapshot(buildSnapshot({
+        base: workingSnapshot,
+        sessionId: input.sessionId,
+        textbookId: input.textbookId,
+        title: input.title,
+        isbnRaw: input.isbnRaw,
+        status: "paused",
+        phase: "failed",
+        message: "Upload canceled by user.",
+        totalItems: workingSnapshot.totalItems,
+        completedItems: workingSnapshot.completedItems,
+        pendingItems: workingSnapshot.pendingItems,
+        canResume: false,
+      }));
+
+      return {
+        ...result,
+        success: false,
+        retryable: false,
+        errorCode: "cancelled",
+        message: "Upload canceled by user.",
+      };
+    }
+
     const finalProgress = await getLocalHierarchyProgress(input.textbookId);
 
     if (!result.success) {
@@ -692,6 +945,7 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
     });
     useUIStore.getState().setAutoTextbookUpload(completedSnapshot);
     writeToStorage(AUTO_TEXTBOOK_UPLOAD_STORAGE_KEY, null);
+    clearUploadControlState();
     return result;
   } finally {
     if (progressPollId !== null) {

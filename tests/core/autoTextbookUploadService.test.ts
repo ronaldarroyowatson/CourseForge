@@ -2,9 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   clearPersistedAutoTextbookUpload,
+  deletePendingAutoTextbookUpload,
+  forceRemoveAutoTextbookUpload,
   hydratePersistedAutoTextbookUpload,
   initAutoTextbookUploadTracking,
+  isAutoTextbookUploadStuck,
   readPersistedAutoTextbookUpload,
+  requestCancelAutoTextbookUpload,
   type AutoTextbookUploadSnapshot,
 } from "../../src/core/services/autoTextbookUploadService";
 import { useUIStore } from "../../src/webapp/store/uiStore";
@@ -172,6 +176,50 @@ describe("autoTextbookUploadService – localStorage persistence round-trip", ()
 
     useUIStore.setState({ activeAutoTextbookUpload: null });
     expect(hydratePersistedAutoTextbookUpload()).toBeNull();
+    expect(useUIStore.getState().activeAutoTextbookUpload).toBeNull();
+  });
+});
+
+describe("autoTextbookUploadService – stuck/pending controls", () => {
+  beforeEach(() => {
+    window.localStorage.removeItem(AUTO_TEXTBOOK_UPLOAD_STORAGE_KEY);
+    useUIStore.setState({ activeAutoTextbookUpload: null });
+  });
+
+  it("marks old preparing snapshots as stuck", () => {
+    const snapshot = makeSnapshot({
+      status: "preparing",
+      updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    expect(isAutoTextbookUploadStuck(snapshot, Date.now())).toBe(true);
+  });
+
+  it("supports canceling an active upload", async () => {
+    initAutoTextbookUploadTracking(makeSnapshot({ status: "uploading", phase: "uploading" }));
+    const canceled = await requestCancelAutoTextbookUpload("test cancel");
+
+    expect(canceled).toBe(true);
+    expect(useUIStore.getState().activeAutoTextbookUpload).toMatchObject({
+      status: "paused",
+      canResume: false,
+    });
+  });
+
+  it("deletes pending uploads", async () => {
+    initAutoTextbookUploadTracking(makeSnapshot({ status: "preparing", phase: "integrity-check" }));
+    const deleted = await deletePendingAutoTextbookUpload("test delete");
+
+    expect(deleted).toBe(true);
+    expect(readPersistedAutoTextbookUpload()).toBeNull();
+    expect(useUIStore.getState().activeAutoTextbookUpload).toBeNull();
+  });
+
+  it("force-removes limbo uploads", async () => {
+    initAutoTextbookUploadTracking(makeSnapshot({ status: "corrupt-restart" }));
+    const removed = await forceRemoveAutoTextbookUpload("test force remove");
+
+    expect(removed).toBe(true);
+    expect(readPersistedAutoTextbookUpload()).toBeNull();
     expect(useUIStore.getState().activeAutoTextbookUpload).toBeNull();
   });
 });

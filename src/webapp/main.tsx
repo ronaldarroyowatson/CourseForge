@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, HashRouter } from "react-router-dom";
 
 import { initDB } from "../core/services/db";
+import { clearAllCourseForgeCachesOnDevStartup } from "../core/services/cacheControlService";
 import { App } from "./App";
 import "./styles/globals.css";
 
@@ -14,6 +15,7 @@ if (!rootElement) {
 
 // Warm the shared DB connection at startup so onboarding data can load immediately.
 void initDB();
+void clearAllCourseForgeCachesOnDevStartup();
 
 const useHashRouter = typeof window !== "undefined" && window.location.protocol === "file:";
 const Router = useHashRouter ? HashRouter : BrowserRouter;

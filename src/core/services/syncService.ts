@@ -361,6 +361,27 @@ export function resetSyncSafetyStateForTests(): void {
   readBudgetDateKey = getUtcDateKey();
 }
 
+export function clearSyncRuntimeCaches(): void {
+  recentWrites.clear();
+  lastSyncAttemptAt = 0;
+  writeLoopTriggered = false;
+  writeBudgetExceeded = false;
+  sessionWriteCount = 0;
+  writeBudgetDateKey = "";
+  readBudgetExceeded = false;
+  sessionReadCount = 0;
+  readBudgetDateKey = "";
+
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.removeItem(WRITE_BUDGET_STORAGE_KEY);
+      window.localStorage.removeItem(READ_BUDGET_STORAGE_KEY);
+    } catch {
+      // Best-effort cleanup only.
+    }
+  }
+}
+
 /**
  * Test-only helper to simulate budget exhaustion without mutating Firestore.
  */

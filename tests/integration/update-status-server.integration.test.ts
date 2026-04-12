@@ -26,10 +26,24 @@ async function getAvailablePort() {
   return port;
 }
 
-async function startStatusServer(root: string, port: number) {
-  const child = spawn("node", [join(root, "courseforge-serve.js"), join(root, "webapp"), String(port), "127.0.0.1"], {
+async function startStatusServer(
+  root: string,
+  port: number,
+  options: { extraArgs?: string[]; env?: NodeJS.ProcessEnv } = {}
+) {
+  const child = spawn("node", [
+    join(root, "courseforge-serve.js"),
+    join(root, "webapp"),
+    String(port),
+    "127.0.0.1",
+    ...(options.extraArgs ?? []),
+  ], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      ...(options.env ?? {}),
+    },
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -672,6 +686,73 @@ describe("local update status endpoint", () => {
       if (child) {
         await stopServer(child);
         child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("supports upload control API for cancel and rejects invalid actions", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+    writeFileSync(join(root, "package-manifest.json"), JSON.stringify({ version: "1.2.72" }, null, 2), "utf8");
+
+    try {
+      const port = await getAvailablePort();
+      child = await startStatusServer(root, port);
+
+      const cancelResponse = await fetch(`http://127.0.0.1:${port}/api/upload-control`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel", sessionId: "session-1", reason: "timeout" }),
+      });
+      expect(cancelResponse.status).toBe(202);
+
+      const invalidResponse = await fetch(`http://127.0.0.1:${port}/api/upload-control`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "not-valid" }),
+      });
+      expect(invalidResponse.status).toBe(422);
+    } finally {
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("switches to the running instance when a second launch requests switch", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-single-instance-"));
+    const webappDir = join(root, "webapp");
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+    writeFileSync(join(root, "package-manifest.json"), JSON.stringify({ version: "1.2.72" }, null, 2), "utf8");
+
+    let first: ChildProcess | null = null;
+    try {
+      const port = await getAvailablePort();
+      first = await startStatusServer(root, port);
+
+      const second = spawn("node", [join(root, "courseforge-serve.js"), join(root, "webapp"), String(port), "127.0.0.1", "switch"], {
+        cwd: root,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      const [exitCode] = await once(second, "exit");
+      expect(exitCode).toBe(0);
+
+      const response = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/update-status`);
+      expect(response.status).toBe(200);
+    } finally {
+      if (first) {
+        await stopServer(first);
       }
       rmSync(root, { recursive: true, force: true });
     }

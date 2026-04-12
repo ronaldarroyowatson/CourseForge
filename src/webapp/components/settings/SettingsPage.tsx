@@ -12,12 +12,16 @@ import {
 } from "../../../core/services/autoOcrService";
 import { fetchLanguageRegistryFromUrl } from "../../../core/services/translationWorkflowService";
 import {
+  clearAllCourseForgeCaches,
   clearDebugLogEntries,
+  deletePendingAutoTextbookUpload,
+  forceRemoveAutoTextbookUpload,
   getDebugLoggingPolicy,
   getDebugLogStorageStats,
   isDebugLoggingEnabled,
   isMetadataCorrectionSharingEnabled,
   readLocalCorrectionRecords,
+  requestCancelAutoTextbookUpload,
   setMetadataCorrectionSharingEnabled,
   setDebugLoggingEnabled,
   uploadAndClearDebugLogs,
@@ -291,6 +295,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const syncStatus = useUIStore((state) => state.syncStatus);
   const activeAutoTextbookUpload = useUIStore((state) => state.activeAutoTextbookUpload);
   const [debugEnabled, setDebugEnabled] = React.useState<boolean>(() => isDebugLoggingEnabled());
+  const [cacheResetStatus, setCacheResetStatus] = React.useState<string | null>(null);
   const [debugStats, setDebugStats] = React.useState({ entries: 0, totalBytes: 0, maxTotalBytes: 1_500_000, maxUploadBytes: 500 * 1024, lastUploadTimestamp: null as number | null });
   const [debugStatus, setDebugStatus] = React.useState<string | null>(null);
   const [isUploadingDebugLog, setIsUploadingDebugLog] = React.useState(false);
@@ -365,6 +370,48 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
       localTrainingStatus,
     };
   }, [metadataPipelineRuntime, metadataTrainingStats]);
+
+  const isUploadStuck = React.useCallback((snapshot: typeof activeAutoTextbookUpload): boolean => {
+    if (!snapshot) {
+      return false;
+    }
+
+    if (snapshot.status !== "preparing") {
+      return false;
+    }
+
+    const updatedAtMs = Date.parse(snapshot.updatedAt);
+    if (!Number.isFinite(updatedAtMs)) {
+      return false;
+    }
+
+    return (Date.now() - updatedAtMs) >= 45_000;
+  }, []);
+
+  async function handleClearAllCaches(): Promise<void> {
+    setCacheResetStatus("Clearing local cache layers...");
+    try {
+      const summary = await clearAllCourseForgeCaches("settings-manual");
+      setCacheResetStatus(
+        `Cache cleared. localStorage=${summary.localStorageKeysRemoved.length}, sessionStorage=${summary.sessionStorageKeysRemoved.length}, indexedDB=${summary.indexedDbDeleted.length}, swCaches=${summary.serviceWorkerCachesDeleted.length}.`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown cache clear error.";
+      setCacheResetStatus(`Cache clear failed: ${message}`);
+    }
+  }
+
+  async function handleCancelUploadFromSettings(): Promise<void> {
+    await requestCancelAutoTextbookUpload("Canceled from Settings upload monitor.");
+  }
+
+  async function handleDeletePendingUploadFromSettings(): Promise<void> {
+    await deletePendingAutoTextbookUpload("Deleted pending upload from Settings upload monitor.");
+  }
+
+  async function handleForceRemoveFromSettings(): Promise<void> {
+    await forceRemoveAutoTextbookUpload("Force-removed upload from Settings upload monitor.");
+  }
   const secondChoiceProviderId = ocrProviderOrder.find((providerId) => providerId !== ocrProviderOrder[0] && providerId !== "local_tesseract") ?? "cloud_github_models_vision";
   const retryVisualTotal = Math.max(1, Math.min(5, retryLimit || 3));
   const retryVisualUsed = Math.max(0, Math.min(retryVisualTotal, retryCount));
@@ -1166,12 +1213,35 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
               <p className="settings-meta">
                 {activeAutoTextbookUpload.percentComplete}% complete · {activeAutoTextbookUpload.completedItems}/{activeAutoTextbookUpload.totalItems} items · writes {activeAutoTextbookUpload.writeCount} · reads {activeAutoTextbookUpload.readCount}
               </p>
+              <div className="form-actions">
+                {(activeAutoTextbookUpload.status === "preparing" || activeAutoTextbookUpload.status === "uploading") ? (
+                  <button type="button" className="btn-secondary" onClick={() => { void handleCancelUploadFromSettings(); }}>
+                    Cancel Upload
+                  </button>
+                ) : null}
+                {activeAutoTextbookUpload.status !== "uploading" && activeAutoTextbookUpload.status !== "completed" ? (
+                  <button type="button" className="btn-secondary" onClick={() => { void handleDeletePendingUploadFromSettings(); }}>
+                    Delete Pending Upload
+                  </button>
+                ) : null}
+                {(activeAutoTextbookUpload.status === "corrupt-restart" || isUploadStuck(activeAutoTextbookUpload)) ? (
+                  <button type="button" className="btn-secondary" onClick={() => { void handleForceRemoveFromSettings(); }}>
+                    Force Remove
+                  </button>
+                ) : null}
+              </div>
             </div>
           ) : null}
           <div className="sync-safety-donuts">
             <SyncDonutChart label="Writes" used={writeCount} limit={writeBudgetLimit} exceeded={writeBudgetExceeded} showWarning />
             <SyncDonutChart label="Reads" used={readCount} limit={readBudgetLimit} exceeded={readBudgetExceeded} />
           </div>
+          <div className="form-actions">
+            <button type="button" className="btn-secondary" onClick={() => { void handleClearAllCaches(); }}>
+              Clear All Cached Data
+            </button>
+          </div>
+          {cacheResetStatus ? <p className="settings-meta">{cacheResetStatus}</p> : null}
         </article>
 
         <article className="settings-card">

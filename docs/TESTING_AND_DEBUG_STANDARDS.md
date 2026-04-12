@@ -157,3 +157,29 @@ Before merging test or debug changes, confirm:
 - no canonical sample is unused
 - test index was regenerated
 - bugfix workflow passes without Problems pane errors
+
+## 11. Cache Telemetry Standards
+
+Cache behavior is a first-class debug target. Every debug-enabled run must emit cache telemetry before extraction starts and include a final cache map snapshot at run completion.
+
+Required cache telemetry coverage:
+
+- cache detection by layer: local storage, session storage, IndexedDB, in-memory, temporary cache storage, persisted metadata, cached OCR, cached second-agent, cached TOC, cached upload state, UI state, token/session state
+- cache identifiers: keys, database names, cache names, or stable IDs
+- cache timestamps when available
+- cache decision outcomes: `used`, `ignored`, `stale`, `regenerated`, `cleared`, `failed-clear`
+- cache regression records that explain stale-source cause and output impact (for example stale subject, stale TOC hierarchy, stuck upload state)
+
+When cache clearing runs (startup or manual):
+
+- log every removed cache identifier
+- log count summaries by layer
+- log clear failures (locked/corrupted/inaccessible) as `failed-clear`
+- log fallback behavior when forced cleanup is required
+
+Testing requirements for cache telemetry:
+
+- unit tests must assert stale detection and regression capture for metadata and TOC
+- unit tests must assert stuck upload cache detection and clear-path telemetry
+- unit tests must assert failed-clear telemetry paths for locked/corrupted cache operations
+- integration tests must keep single-instance and upload control coverage to ensure cache conflict actions are traceable

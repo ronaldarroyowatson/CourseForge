@@ -1,12 +1,12 @@
 # Test Index
 
-Generated: 2026-04-12T05:05:45.733Z
+Generated: 2026-04-12T20:37:58.857Z
 
 ## Summary
 
-- Total test files: 58
-- Unit test files: 38
-- Integration test files: 18
+- Total test files: 65
+- Unit test files: 43
+- Integration test files: 20
 - Rules test files: 2
 - Canonical sample files: 5
 
@@ -23,9 +23,12 @@ Generated: 2026-04-12T05:05:45.733Z
 - tests/core/cacheControlService.test.ts
 - tests/core/cacheTelemetryService.test.ts
 - tests/core/debugLogService.test.ts
+- tests/core/designSystemRecovery.test.ts
+- tests/core/designSystemService.test.ts
 - tests/core/documentExtraction.guardrails.test.ts
 - tests/core/documentIngest.extraction.test.ts
 - tests/core/equationFormatService.test.ts
+- tests/core/fibonacciLayout.test.ts
 - tests/core/gameTextService.test.ts
 - tests/core/glossaryService.test.ts
 - tests/core/i18nService.test.ts
@@ -34,8 +37,10 @@ Generated: 2026-04-12T05:05:45.733Z
 - tests/core/metadataCorrectionLearningService.test.ts
 - tests/core/metadataCorrectionSafeguards.test.ts
 - tests/core/metadataExtractionPipelineService.test.ts
+- tests/core/motionChoreography.test.ts
 - tests/core/premiumUsage.limits.test.ts
 - tests/core/presentationService.conversion.test.ts
+- tests/core/programCli.designRecovery.test.ts
 - tests/core/syncNow.safety.test.ts
 - tests/core/syncService.moderationHold.test.ts
 - tests/core/textbookAutoExtractionService.test.ts
@@ -59,6 +64,7 @@ Generated: 2026-04-12T05:05:45.733Z
 - tests/integration/autoTextbookFlow.integration.test.tsx
 - tests/integration/chromeos.deployment.integration.test.ts
 - tests/integration/correctionReviewPanel.integration.test.tsx
+- tests/integration/designSystemSettingsCard.integration.test.tsx
 - tests/integration/documentIngest.panel.integration.test.tsx
 - tests/integration/extension.auth.communication.integration.test.ts
 - tests/integration/extension.repositories.integration.test.ts
@@ -67,6 +73,7 @@ Generated: 2026-04-12T05:05:45.733Z
 - tests/integration/Header.uploadCard.test.tsx
 - tests/integration/package-integrity.integration.test.ts
 - tests/integration/settings.updater.integration.test.tsx
+- tests/integration/skeleton.render.integration.test.tsx
 - tests/integration/startupSync.probe.test.tsx
 - tests/integration/update-status-server.integration.test.ts
 - tests/integration/useRepositories.coverUpload.integration.test.tsx

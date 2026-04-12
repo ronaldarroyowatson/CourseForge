@@ -1,6 +1,6 @@
 import React from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { METADATA_CORRECTION_STORAGE_KEYS } from "../../src/core/services/metadataCorrectionLearningService";
 import { persistAutoTextbook } from "../../src/core/services/autoTextbookPersistenceService";
@@ -177,6 +177,10 @@ vi.mock("../../src/core/services/textbookAutoExtractionService", async () => {
 });
 
 describe("auto textbook flow integration", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("clears stale cover subject during title capture when title extraction has no subject", () => {
     const merged = mergeCapturedMetadataForStep(
       {
@@ -279,6 +283,14 @@ describe("auto textbook flow integration", () => {
     window.localStorage.removeItem(AUTO_SESSION_DRAFTS_KEY);
     window.localStorage.removeItem("courseforge.autoSessionDraft.v1");
     metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl.mockClear();
+
+    const clipboardWriteText = vi.fn(async (_value: string) => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: clipboardWriteText,
+      },
+    });
   });
 
   it("switches from Auto setup back to Manual entry", () => {
@@ -680,6 +692,47 @@ describe("auto textbook flow integration", () => {
 
     const traceOutput = await screen.findByLabelText("Auto capture debug trace");
     expect(traceOutput.textContent).toContain("session_started");
+    expect(screen.getByRole("button", { name: "Copy full debug trace" })).toBeInTheDocument();
+  });
+
+  it("supports full debug trace copy interactions and preserves exact long text", async () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          verboseDebugEnabled: true,
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "View Debug Trace" }));
+
+    const traceOutput = await screen.findByLabelText("Auto capture debug trace");
+    const copyButton = screen.getByRole("button", { name: "Copy full debug trace" });
+
+    fireEvent.mouseEnter(copyButton);
+    expect(copyButton.className).toContain("auto-debug-trace__copy-btn--hover");
+
+    const expectedTrace = traceOutput.textContent ?? "";
+    expect(expectedTrace.length).toBeGreaterThan(100);
+
+    fireEvent.click(copyButton);
+
+    const clipboardWriteText = navigator.clipboard.writeText as unknown as ReturnType<typeof vi.fn>;
+    expect(clipboardWriteText).toHaveBeenCalledTimes(1);
+    expect(clipboardWriteText).toHaveBeenCalledWith(expectedTrace);
+    await waitFor(() => {
+      expect(copyButton.className).toContain("auto-debug-trace__copy-btn--pressed");
+    });
+    await waitFor(() => {
+      expect(copyButton.textContent).toBe("Copied!");
+      expect(copyButton.className).toContain("auto-debug-trace__copy-btn--copied");
+    });
+
+    await waitFor(() => {
+      expect(copyButton.textContent).toBe("Copy Full Debug Trace");
+    }, { timeout: 2600 });
   });
 
   it("restores full TOC tree when resuming a queued TOC draft", async () => {

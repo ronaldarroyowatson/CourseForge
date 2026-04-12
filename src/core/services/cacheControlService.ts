@@ -209,5 +209,23 @@ export async function clearAllCourseForgeCachesOnDevStartup(): Promise<CacheClea
     return null;
   }
 
-  return clearAllCourseForgeCaches("dev-startup");
+  const summary = await clearAllCourseForgeCaches("dev-startup");
+
+  // Log that cloud settings in Firestore are NOT cleared during dev-startup
+  // (only local copies are flushed). This satisfies the debug requirement to
+  // record whether cloud settings were preserved or flushed on each dev start.
+  await appendDebugLogEntry({
+    eventType: "info",
+    message: "Dev-startup cache flush complete. Cloud settings in Firestore were preserved (not deleted).",
+    context: {
+      localStorageRemoved: summary.localStorageKeysRemoved.length,
+      sessionStorageRemoved: summary.sessionStorageKeysRemoved.length,
+      indexedDbDeleted: summary.indexedDbDeleted.length,
+      serviceWorkerCachesDeleted: summary.serviceWorkerCachesDeleted.length,
+      coverageNote: "design-tokens, layout-preferences, motion-settings, ui-state, metadata, ocr-responses all cleared via courseforge.* prefix sweep",
+      cloudFirestorePreserved: true,
+    },
+  });
+
+  return summary;
 }

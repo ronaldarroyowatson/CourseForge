@@ -1,6 +1,18 @@
 import { create } from "zustand";
 import type { Textbook } from "../../core/models";
 import type { AutoTextbookUploadSnapshot } from "../../core/services/autoTextbookUploadService";
+import {
+  type DesignTokenPreferences,
+  type DesignTokens,
+  applyDesignTokensToDocument,
+  DEFAULT_DESIGN_TOKEN_PREFERENCES,
+  detectSystemDesignDefaults,
+  generateDesignTokens,
+  initializeDesignTokenPreferencesOnFirstRun,
+  logDesignSystemDebugEvent,
+  sanitizeDesignTokenPreferences,
+  saveLocalDesignTokenPreferences,
+} from "../../core/services/designSystemService";
 
 export type ThemeMode = "light" | "dark";
 export type SupportedLanguage = "en" | "es" | "pt" | "zm" | "fr" | "de";
@@ -19,6 +31,16 @@ const THEME_STORAGE_KEY = "courseforge.theme";
 const AUTO_RETRIES_STORAGE_KEY = "courseforge.automaticRetriesEnabled";
 const LANGUAGE_STORAGE_KEY = "courseforge.language";
 const ACCESSIBILITY_STORAGE_KEY = "courseforge.accessibility";
+
+const initialDesignResolution = initializeDesignTokenPreferencesOnFirstRun();
+const initialDesignPreferences = sanitizeDesignTokenPreferences(initialDesignResolution.preferences);
+const initialDesignTokens = generateDesignTokens(initialDesignPreferences);
+for (const trace of initialDesignResolution.traces) {
+  void logDesignSystemDebugEvent(`design-first-run:${trace.step}:${trace.status}`, {
+    message: trace.message,
+    details: trace.details ?? {},
+  });
+}
 
 const SUPPORTED_LANGUAGES: SupportedLanguage[] = ["en", "es", "pt", "zm", "fr", "de"];
 
@@ -205,6 +227,11 @@ interface UIStore {
   accessibility: AccessibilityPreferences;
   setAccessibility: (next: AccessibilityPreferences) => void;
   patchAccessibility: (partial: Partial<AccessibilityPreferences>) => void;
+  designTokenPreferences: DesignTokenPreferences;
+  designTokens: DesignTokens;
+  setDesignTokenPreferences: (next: Partial<DesignTokenPreferences>) => void;
+  resetDesignTokenPreferences: () => void;
+  applySystemDesignTokenDefaults: () => void;
 
   // Selected textbook for editing
   selectedTextbookId: string | null;
@@ -355,6 +382,62 @@ export const useUIStore = create<UIStore>((set) => ({
       }
       return { accessibility: next };
     }),
+  designTokenPreferences: initialDesignPreferences,
+  designTokens: initialDesignTokens,
+  setDesignTokenPreferences: (next: Partial<DesignTokenPreferences>) =>
+    set((state) => {
+      const merged = sanitizeDesignTokenPreferences({
+        ...state.designTokenPreferences,
+        ...next,
+      });
+
+      const generated = generateDesignTokens(merged);
+      applyDesignTokensToDocument(generated);
+      saveLocalDesignTokenPreferences(merged);
+      void logDesignSystemDebugEvent("Design tokens updated.", {
+        gamma: merged.gamma,
+        typeRatio: merged.typeRatio,
+        spacingRatio: merged.spacingRatio,
+        strokePreset: merged.strokePreset,
+        motionTimingMs: merged.motionTimingMs,
+      });
+
+      return {
+        designTokenPreferences: merged,
+        designTokens: generated,
+      };
+    }),
+  resetDesignTokenPreferences: () =>
+    set(() => {
+      const next = sanitizeDesignTokenPreferences(DEFAULT_DESIGN_TOKEN_PREFERENCES);
+      const generated = generateDesignTokens(next);
+      applyDesignTokensToDocument(generated);
+      saveLocalDesignTokenPreferences(next);
+      void logDesignSystemDebugEvent("Design tokens reset to defaults.");
+
+      return {
+        designTokenPreferences: next,
+        designTokens: generated,
+      };
+    }),
+  applySystemDesignTokenDefaults: () =>
+    set((state) => {
+      const systemDefaults = detectSystemDesignDefaults();
+      const next = sanitizeDesignTokenPreferences({
+        ...state.designTokenPreferences,
+        ...systemDefaults,
+        useSystemDefaults: true,
+      });
+      const generated = generateDesignTokens(next);
+      applyDesignTokensToDocument(generated);
+      saveLocalDesignTokenPreferences(next);
+      void logDesignSystemDebugEvent("System defaults applied to design tokens.", systemDefaults as Record<string, unknown>);
+
+      return {
+        designTokenPreferences: next,
+        designTokens: generated,
+      };
+    }),
 
   // Selected textbook defaults
   selectedTextbookId: null,
@@ -386,3 +469,4 @@ export const useUIStore = create<UIStore>((set) => ({
 applyTheme(getInitialTheme());
 applyLanguage(detectInitialLanguage());
 applyAccessibilityPreferences(getInitialAccessibilityPreferences());
+applyDesignTokensToDocument(initialDesignTokens);

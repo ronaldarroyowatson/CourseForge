@@ -15,6 +15,18 @@ const AUTO_TEXTBOOK_DUPLICATE_PREFERENCES_KEY = "courseforge.autoTextbookDuplica
 const AUTO_TEXTBOOK_UPLOAD_CONTROL_KEY = "courseforge.autoTextbookUpload.control.v1";
 const UPLOAD_POLL_INTERVAL_MS = 350;
 const STUCK_PREPARING_THRESHOLD_MS = 45_000;
+const UPLOAD_SYNC_TIMEOUT_MS = 45_000;
+const MAX_SYNC_ATTEMPTS = 3;
+const THROTTLE_RETRY_DELAY_MS = 5_250;
+
+type SyncNowResult = Awaited<ReturnType<typeof syncNow>>;
+type UploadTraceCallback = (event: {
+  category: "communication" | "upload" | "error";
+  action: string;
+  message: string;
+  severity?: "info" | "warning" | "error";
+  details?: Record<string, unknown>;
+}) => void;
 
 type UploadControlAction = "none" | "cancel" | "delete" | "force-remove";
 
@@ -657,12 +669,99 @@ function startProgressPoll(input: {
   }, UPLOAD_POLL_INTERVAL_MS);
 }
 
+function emitUploadTrace(trace: UploadTraceCallback | undefined, event: {
+  category: "communication" | "upload" | "error";
+  action: string;
+  message: string;
+  severity?: "info" | "warning" | "error";
+  details?: Record<string, unknown>;
+}): void {
+  if (!trace) {
+    return;
+  }
+
+  trace(event);
+}
+
+function waitMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function runSyncWithTimeout(): Promise<SyncNowResult> {
+  let timeoutId: number | null = null;
+  try {
+    return await Promise.race([
+      syncNow({ intent: "manual" }),
+      new Promise<SyncNowResult>((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+          reject(Object.assign(new Error("Cloud sync timeout"), { code: "timeout" }));
+        }, UPLOAD_SYNC_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+}
+
+function timeoutResultTemplate(message: string): SyncNowResult {
+  return {
+    success: false,
+    message,
+    retryable: true,
+    permissionDenied: false,
+    throttled: false,
+    writeLoopTriggered: false,
+    writeBudgetExceeded: false,
+    writeCount: 0,
+    writeBudgetLimit: 500,
+    readCount: 0,
+    readBudgetLimit: 5000,
+    readBudgetExceeded: false,
+    retryLimit: 3,
+    errorCode: "timeout",
+    pendingCount: 0,
+  };
+}
+
+function normalizeUploadFailureResult(result: SyncNowResult): SyncNowResult {
+  if (result.success) {
+    return result;
+  }
+
+  if (result.throttled) {
+    return {
+      ...result,
+      retryable: true,
+      message: "Upload sync was throttled by recent activity. Wait a few seconds and resume upload.",
+    };
+  }
+
+  return result;
+}
+
 export async function runTrackedAutoTextbookCloudUpload(input: {
   sessionId: string;
   textbookId: string;
   title: string;
   isbnRaw: string;
+  trace?: UploadTraceCallback;
 }): Promise<Awaited<ReturnType<typeof syncNow>>> {
+  emitUploadTrace(input.trace, {
+    category: "communication",
+    action: "cloud_upload_payload_prepared",
+    message: "Prepared cloud upload request payload.",
+    details: {
+      sessionId: input.sessionId,
+      textbookId: input.textbookId,
+      title: input.title,
+      isbnRaw: input.isbnRaw,
+    },
+  });
+
   const requestedAction = getRequestedUploadAction(input.sessionId);
   if (requestedAction === "cancel" || requestedAction === "delete" || requestedAction === "force-remove") {
     clearUploadControlState();
@@ -746,6 +845,17 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
   let cloudSummary: CloudHierarchySummary;
   try {
     cloudSummary = await fetchCloudHierarchySummary(user.uid, input.textbookId);
+    emitUploadTrace(input.trace, {
+      category: "communication",
+      action: "cloud_integrity_response_received",
+      message: "Received cloud hierarchy response for integrity checks.",
+      details: {
+        textbookPresent: cloudSummary.textbookPresent,
+        ownerMismatch: cloudSummary.ownerMismatch,
+        cloudChapterCount: cloudSummary.chapterIds.length,
+        cloudSectionCount: cloudSummary.sectionIds.length,
+      },
+    });
   } catch (err) {
     const pausedSnapshot = buildSnapshot({
       base: seedSnapshot,
@@ -762,6 +872,15 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
       canResume: true,
     });
     publishSnapshot(pausedSnapshot);
+    emitUploadTrace(input.trace, {
+      category: "error",
+      action: "cloud_integrity_response_failed",
+      severity: "error",
+      message: "Cloud integrity request failed before upload.",
+      details: {
+        error: err instanceof Error ? err.message : String(err),
+      },
+    });
     throw err;
   }
   const integrity = assessCloudIntegrity(localSummary, cloudSummary);
@@ -782,6 +901,17 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
     canResume: true,
   });
   publishSnapshot(workingSnapshot);
+  emitUploadTrace(input.trace, {
+    category: integrity.state === "corrupt" ? "error" : "upload",
+    action: "cloud_integrity_assessed",
+    severity: integrity.state === "corrupt" ? "warning" : "info",
+    message: integrity.message,
+    details: {
+      integrityState: integrity.state,
+      localChapterCount: localSummary.chapters.length,
+      localSectionCount: localSummary.sections.length,
+    },
+  });
 
   try {
     if (integrity.state === "corrupt") {
@@ -874,7 +1004,61 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
   }
 
   try {
-    const result = await syncNow({ intent: "manual" });
+    let syncAttempt = 0;
+    let result: SyncNowResult = timeoutResultTemplate("Upload sync did not start.");
+
+    while (syncAttempt < MAX_SYNC_ATTEMPTS) {
+      syncAttempt += 1;
+      emitUploadTrace(input.trace, {
+        category: "communication",
+        action: "cloud_sync_attempt_started",
+        message: "Starting cloud sync attempt.",
+        details: {
+          attempt: syncAttempt,
+          maxAttempts: MAX_SYNC_ATTEMPTS,
+        },
+      });
+
+      try {
+        result = await runSyncWithTimeout();
+      } catch (error) {
+        result = timeoutResultTemplate("Cloud sync timed out while uploading textbook data.");
+        emitUploadTrace(input.trace, {
+          category: "error",
+          action: "cloud_sync_timeout",
+          severity: "warning",
+          message: "Cloud sync timed out during upload.",
+          details: {
+            attempt: syncAttempt,
+            maxAttempts: MAX_SYNC_ATTEMPTS,
+            timeoutMs: UPLOAD_SYNC_TIMEOUT_MS,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        });
+      }
+
+      if (!result.success && result.throttled && syncAttempt < MAX_SYNC_ATTEMPTS) {
+        emitUploadTrace(input.trace, {
+          category: "upload",
+          action: "cloud_sync_throttled_retrying",
+          severity: "warning",
+          message: "Cloud sync was throttled. Retrying after cooldown.",
+          details: {
+            attempt: syncAttempt,
+            maxAttempts: MAX_SYNC_ATTEMPTS,
+            retryDelayMs: THROTTLE_RETRY_DELAY_MS,
+            writeCount: result.writeCount,
+            pendingCount: result.pendingCount,
+          },
+        });
+        await waitMs(THROTTLE_RETRY_DELAY_MS);
+        continue;
+      }
+
+      break;
+    }
+
+    const normalizedResult = normalizeUploadFailureResult(result);
 
     if (getRequestedUploadAction(input.sessionId) === "cancel") {
       clearUploadControlState();
@@ -894,7 +1078,7 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
       }));
 
       return {
-        ...result,
+        ...normalizedResult,
         success: false,
         retryable: false,
         errorCode: "cancelled",
@@ -904,26 +1088,46 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
 
     const finalProgress = await getLocalHierarchyProgress(input.textbookId);
 
-    if (!result.success) {
+    if (!normalizedResult.success) {
+      const shouldPause = normalizedResult.retryable
+        || normalizedResult.throttled
+        || normalizedResult.writeBudgetExceeded
+        || normalizedResult.errorCode === "timeout"
+        || normalizedResult.errorCode === "unavailable"
+        || normalizedResult.errorCode === "network-request-failed";
       const failedSnapshot = buildSnapshot({
         base: workingSnapshot,
         sessionId: input.sessionId,
         textbookId: input.textbookId,
         title: input.title,
         isbnRaw: input.isbnRaw,
-        status: result.retryable ? "paused" : "failed",
+        status: shouldPause ? "paused" : "failed",
         phase: "failed",
-        message: result.message,
+        message: normalizedResult.message,
         totalItems: finalProgress?.totalItems ?? workingSnapshot.totalItems,
         completedItems: finalProgress?.completedItems ?? workingSnapshot.completedItems,
         pendingItems: finalProgress?.pendingItems ?? workingSnapshot.pendingItems,
-        writeCount: result.writeCount,
-        readCount: result.readCount,
+        writeCount: normalizedResult.writeCount,
+        readCount: normalizedResult.readCount,
         integrityState: workingSnapshot.integrityState,
-        canResume: true,
+        canResume: shouldPause,
       });
       publishSnapshot(failedSnapshot);
-      return result;
+      emitUploadTrace(input.trace, {
+        category: "error",
+        action: "cloud_sync_attempt_failed",
+        severity: "error",
+        message: "Cloud upload sync attempt failed.",
+        details: {
+          message: normalizedResult.message,
+          errorCode: normalizedResult.errorCode,
+          throttled: normalizedResult.throttled,
+          retryable: normalizedResult.retryable,
+          writeBudgetExceeded: normalizedResult.writeBudgetExceeded,
+          pendingCount: normalizedResult.pendingCount,
+        },
+      });
+      return normalizedResult;
     }
 
     const completedSnapshot = buildSnapshot({
@@ -938,15 +1142,25 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
       totalItems: finalProgress?.totalItems ?? workingSnapshot.totalItems,
       completedItems: finalProgress?.completedItems ?? workingSnapshot.totalItems,
       pendingItems: finalProgress?.pendingItems ?? 0,
-      writeCount: result.writeCount,
-      readCount: result.readCount,
+      writeCount: normalizedResult.writeCount,
+      readCount: normalizedResult.readCount,
       integrityState: "verified",
       canResume: false,
     });
     useUIStore.getState().setAutoTextbookUpload(completedSnapshot);
     writeToStorage(AUTO_TEXTBOOK_UPLOAD_STORAGE_KEY, null);
     clearUploadControlState();
-    return result;
+    emitUploadTrace(input.trace, {
+      category: "upload",
+      action: "cloud_sync_completed",
+      message: "Cloud upload sync completed successfully.",
+      details: {
+        writeCount: normalizedResult.writeCount,
+        readCount: normalizedResult.readCount,
+        pendingCount: normalizedResult.pendingCount,
+      },
+    });
+    return normalizedResult;
   } finally {
     if (progressPollId !== null) {
       window.clearInterval(progressPollId);

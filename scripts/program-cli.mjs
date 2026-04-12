@@ -14,6 +14,7 @@ const baseDir = localAppData
 const configPath = path.join(baseDir, "debug-config.json");
 const logPath = path.join(baseDir, "debug-log.jsonl");
 const rotatedPrefix = path.join(baseDir, "debug-log");
+const designResetPath = path.join(baseDir, "design-token-recovery.json");
 
 const defaultConfig = {
   enabled: true,
@@ -21,6 +22,23 @@ const defaultConfig = {
   rotateBytes: 300_000,
   maxRotatedFiles: 4,
   requireApprovalForDeleteAfterSync: true,
+};
+
+const defaultDesignTokens = {
+  gamma: 2.2,
+  typeRatio: 1.25,
+  strokePreset: "sweet-spot",
+  spacingRatio: 1.25,
+  motionTimingMs: 300,
+  motionEasing: "ease-in-out",
+  primaryHue: 212,
+  semanticColors: {
+    error: "#d14343",
+    success: "#1f9d62",
+    pending: "#d9a227",
+    new: "#2f76d2",
+  },
+  useSystemDefaults: false,
 };
 
 function ensureDir() {
@@ -244,11 +262,45 @@ function setEnabled(enabled) {
 
 function showHelp() {
   console.log("Usage:");
+  console.log("  program settings reset-design-tokens");
   console.log("  program debug <feature> [--severity info|warn|error] [--sourceType automatic|manual] [--message text]");
   console.log("  program debug dump-log [--sourceType automatic|manual] [--output path] [--sync-cloud] [--approve-delete]");
   console.log("  program debug clear-log");
   console.log("  program debug enable");
   console.log("  program debug disable");
+}
+
+function resetDesignTokens() {
+  ensureDir();
+  fs.writeFileSync(
+    designResetPath,
+    JSON.stringify({
+      requestedAt: new Date().toISOString(),
+      resetToDefaults: true,
+      defaults: defaultDesignTokens,
+    }, null, 2),
+    "utf8"
+  );
+
+  const recoveryLogEntry = {
+    timestamp: new Date().toISOString(),
+    subsystem: "settings",
+    severity: "info",
+    sourceType: "manual",
+    sourceKind: "cli",
+    message: "CLI recovery command executed: reset design tokens.",
+    errorContext: null,
+    stackTrace: null,
+  };
+  fs.appendFileSync(logPath, `${JSON.stringify(recoveryLogEntry)}\n`, "utf8");
+
+  console.log(`Design token recovery payload written to ${designResetPath}`);
+  console.log("Use this payload to restore defaults in app-level recovery tooling.");
+}
+
+if (command === "settings" && subcommand === "reset-design-tokens") {
+  resetDesignTokens();
+  process.exit(0);
 }
 
 if (command !== "debug") {

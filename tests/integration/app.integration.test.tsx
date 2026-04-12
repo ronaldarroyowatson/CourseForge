@@ -92,6 +92,7 @@ vi.mock("../../src/firebase/auth", () => ({
   signOutCurrentUser: authMocks.signOutCurrentUser,
   getAdminClaim: authMocks.getAdminClaim,
   saveUserProfileToFirestore: authMocks.saveUserProfileToFirestore,
+  getCurrentUser: () => null,
 }));
 
 vi.mock("../../src/core/services/syncService", () => ({

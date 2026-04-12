@@ -1121,6 +1121,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
     testingSeedState?.verboseDebugEnabled ?? isAutoCaptureVerboseDebugEnabled()
   );
   const [showVerboseTrace, setShowVerboseTrace] = useState(false);
+  const [copyTraceHover, setCopyTraceHover] = useState(false);
+  const [copyTracePressed, setCopyTracePressed] = useState(false);
+  const [copyTraceCopied, setCopyTraceCopied] = useState(false);
   const [latestTraceRun, setLatestTraceRun] = useState<AutoCaptureTraceRun | null>(() => readLatestAutoCaptureTraceRun());
   const [metadataDraft, setMetadataDraft] = useState<AutoTextbookMetadata>(testingSeedState?.metadataDraft ?? {});
   const [metadataConfidence, setMetadataConfidence] = useState<AutoMetadataConfidenceMap>(testingSeedState?.metadataConfidence ?? {});
@@ -1199,6 +1202,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingUploadLimitResultRef = useRef<ReturnType<typeof enforceAutoCaptureLimit> | null>(null);
+  const copyTraceFeedbackTimerRef = useRef<number | null>(null);
+  const copyTracePressTimerRef = useRef<number | null>(null);
 
   const ensureTraceRun = (): AutoCaptureTraceRun | null => {
     if (!verboseDebugEnabled) {
@@ -1441,6 +1446,51 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
     return latestTraceRun ? JSON.stringify(latestTraceRun, null, 2) : "";
   }, [latestTraceRun]);
 
+  const copyFullDebugTrace = async (): Promise<void> => {
+    if (!latestTraceRunJson) {
+      return;
+    }
+
+    setCopyTracePressed(true);
+    if (copyTracePressTimerRef.current !== null) {
+      window.clearTimeout(copyTracePressTimerRef.current);
+    }
+    copyTracePressTimerRef.current = window.setTimeout(() => {
+      setCopyTracePressed(false);
+      copyTracePressTimerRef.current = null;
+    }, 160);
+
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+        await navigator.clipboard.writeText(latestTraceRunJson);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = latestTraceRunJson;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.pointerEvents = "none";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+
+      setCopyTraceCopied(true);
+      if (copyTraceFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyTraceFeedbackTimerRef.current);
+      }
+      copyTraceFeedbackTimerRef.current = window.setTimeout(() => {
+        setCopyTraceCopied(false);
+        copyTraceFeedbackTimerRef.current = null;
+      }, 1800);
+    } catch {
+      setCopyTraceCopied(false);
+      setInfoMessage("Unable to copy debug trace. Please select the trace text manually.");
+    }
+  };
+
   useEffect(() => {
     const cancelAutoScroll = (): void => {
       autoScrollTokenRef.current += 1;
@@ -1454,6 +1504,17 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
       window.removeEventListener("wheel", cancelAutoScroll);
       window.removeEventListener("touchmove", cancelAutoScroll);
       window.removeEventListener("keydown", cancelAutoScroll);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (copyTraceFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyTraceFeedbackTimerRef.current);
+      }
+      if (copyTracePressTimerRef.current !== null) {
+        window.clearTimeout(copyTracePressTimerRef.current);
+      }
     };
   }, []);
 
@@ -3901,6 +3962,17 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
           textbookId: savedTextbookId ?? "",
           title: metadataForm.title.trim(),
           isbnRaw: metadataForm.isbnRaw.trim(),
+          trace: ({ category, action, message, severity, details }) => {
+            traceEvent({
+              step: "toc",
+              component: "cloud-upload",
+              category: category === "error" ? "error" : "communication",
+              action,
+              severity,
+              message,
+              details,
+            });
+          },
         });
         if (!cloudUploadResult.success) {
           setErrorMessage(cloudUploadResult.message || "Unable to upload textbook to cloud. Please try again.");
@@ -4389,7 +4461,27 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         ) : null}
         {verboseDebugEnabled && showVerboseTrace ? (
           latestTraceRun
-            ? <pre className="ocr-draft" aria-label="Auto capture debug trace">{latestTraceRunJson}</pre>
+            ? <div className="auto-debug-trace" role="group" aria-label="Auto capture debug trace panel">
+                <div className="auto-debug-trace__actions">
+                  <button
+                    type="button"
+                    className={[
+                      "btn-secondary",
+                      "auto-debug-trace__copy-btn",
+                      copyTraceHover ? "auto-debug-trace__copy-btn--hover" : "",
+                      copyTracePressed ? "auto-debug-trace__copy-btn--pressed" : "",
+                      copyTraceCopied ? "auto-debug-trace__copy-btn--copied" : "",
+                    ].filter(Boolean).join(" ")}
+                    onMouseEnter={() => setCopyTraceHover(true)}
+                    onMouseLeave={() => setCopyTraceHover(false)}
+                    onClick={() => void copyFullDebugTrace()}
+                    aria-label="Copy full debug trace"
+                  >
+                    {copyTraceCopied ? "Copied!" : "Copy Full Debug Trace"}
+                  </button>
+                </div>
+                <pre className="ocr-draft auto-debug-trace__content" aria-label="Auto capture debug trace">{latestTraceRunJson}</pre>
+              </div>
             : <p className="form-hint">No debug trace has been recorded for this run yet.</p>
         ) : null}
       </div>

@@ -923,3 +923,34 @@ Assumptions and scope note:
 - The Auto metadata review banner in [src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx](src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx) now shows a step-scoped checklist instead of reusing the last capture's positive field list, so entering the copyright step no longer inherits green checks from the cover step.
 - Cover and copyright checklist items stay pending until that same step actually extracts them; existing carried-forward metadata values no longer count as fresh extraction proof for the active step.
 - TOC stitching in [src/core/services/textbookAutoExtractionService.ts](src/core/services/textbookAutoExtractionService.ts) now collapses conflicting duplicate numbered lesson variants before page-range inference, reducing OCR-noise cases where the same lesson number appeared twice with mismatched titles/pages and distorted downstream ranges in [src/webapp/components/textbooks/tocPreview/PageRangeCalculator.ts](src/webapp/components/textbooks/tocPreview/PageRangeCalculator.ts).
+
+## Updates (2026-04-12)
+
+### Verbose Trace Copy UX and Upload Communication Recovery
+
+- The verbose trace panel in [src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx](src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx) now includes an interactive full-copy action with hover, press, and copied-success states while keeping the full JSON trace scrollable/selectable in place.
+- Trace rendering now preserves complete JSON payload fidelity for long runs and is still gated behind the verbose-debug toggle in the Auto setup flow.
+- Tracked cloud upload in [src/core/services/autoTextbookUploadService.ts](src/core/services/autoTextbookUploadService.ts) now emits detailed communication-stage trace hooks for request payload, integrity response, retry attempts, timeout, and completion/failure outcomes.
+- Communication pipeline recovery now auto-retries throttled upload sync attempts with cooldown, marks timeout failures as resumable, and avoids non-resumable hard-fail states for transient communication errors.
+- Regression coverage was added in [tests/core/autoTextbookUploadResume.test.ts](tests/core/autoTextbookUploadResume.test.ts) and [tests/integration/autoTextbookFlow.integration.test.tsx](tests/integration/autoTextbookFlow.integration.test.tsx) for throttled-upload recovery and full-trace copy interactions.
+
+### Permanent Codex Update: Design System, Layout, Motion, Cache Flush, And Trace Governance
+
+Primary file(s):
+
+- [.github/copilot-instructions.md](.github/copilot-instructions.md)
+- [src/core/services/designSystemService.ts](src/core/services/designSystemService.ts)
+- [src/webapp/components/settings/DesignSystemSettingsCard.tsx](src/webapp/components/settings/DesignSystemSettingsCard.tsx)
+- [src/webapp/components/skeleton/Skeleton.tsx](src/webapp/components/skeleton/Skeleton.tsx)
+- [src/webapp/main.tsx](src/webapp/main.tsx)
+
+Update summary:
+
+- Repository-level agent instructions now treat the token-driven atomic design system as permanent architecture: tokens -> atoms -> molecules -> organisms -> pages.
+- Future UI work is expected to use centralized tokens for color, type, stroke, spacing, motion, semantic states, skeleton loading, settings safety, persistence, and recovery paths.
+- Fibonacci layout methodology is now a permanent rule for multi-card compositions, with Example Card occupying the larger ratio and Controls Card occupying the smaller ratio by default.
+- Motion choreography is standardized as `ease-in` for entering, `ease-in-out` for moving, and `ease-out` for exiting, with timing sourced from motion settings and direction sourced from directional-flow.
+- Structure-aware skeleton loaders are now part of the permanent design contract for known-layout loading states.
+- First-run OS/browser preference detection, cloud settings choice handling, corrupted-settings recovery, and CLI recovery expectations are now encoded as permanent instruction-level behavior for future agents and refactors.
+- Development-mode cache flushing is now a canonical prototyping rule to reduce stale-state regressions for UI and design-system work.
+- Debug/trace expectations now explicitly include layout choices, Fibonacci ratio decisions, motion decisions, cache flush events, system detection attempts, cloud settings handling, corruption recovery actions, skeleton activation, preview updates, and fallback logic.

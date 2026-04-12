@@ -20,7 +20,7 @@ void clearAllCourseForgeCachesOnDevStartup();
 const useHashRouter = typeof window !== "undefined" && window.location.protocol === "file:";
 const Router = useHashRouter ? HashRouter : BrowserRouter;
 
-if (typeof window !== "undefined" && window.location.protocol !== "file:" && "serviceWorker" in navigator) {
+if (import.meta.env.PROD && typeof window !== "undefined" && window.location.protocol !== "file:" && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     void navigator.serviceWorker.register("./sw.js").then((registration) => {
       // Keep registration fresh so updates are discovered quickly.

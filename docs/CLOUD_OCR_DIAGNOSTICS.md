@@ -135,3 +135,34 @@ Subject handling no longer applies a silent default during auto textbook persist
 - Subject remains blank unless extraction or explicit user input provides it
 - Generic `English` wording alone is no longer sufficient evidence to infer `ELA`
 - Legacy queued draft subject summaries no longer overwrite the current editable subject form value during resume
+
+## Upload Communication Recovery
+
+Cloud upload now emits and handles a dedicated communication pipeline trace during the tracked upload phase.
+
+New behavior:
+
+- cloud upload request payload is logged before sync execution
+- integrity-check response shape is logged (textbook present, owner mismatch, chapter/section counts)
+- throttled sync responses trigger an automatic cooldown retry loop (up to 3 attempts)
+- sync timeout events are captured as retryable failures with resumable upload state
+- non-terminal failures keep upload in a resumable `paused` state instead of hard-failing when recovery is still possible
+
+Additional trace actions now include:
+
+- `cloud_upload_payload_prepared`
+- `cloud_integrity_response_received`
+- `cloud_integrity_assessed`
+- `cloud_sync_attempt_started`
+- `cloud_sync_throttled_retrying`
+- `cloud_sync_timeout`
+- `cloud_sync_attempt_failed`
+- `cloud_sync_completed`
+
+## Full Trace Copy UX
+
+When verbose trace mode is enabled and expanded, the trace panel now supports one-click full-copy:
+
+- `Copy Full Debug Trace` button preserves full JSON output exactly (line breaks, indentation, and whitespace)
+- button has hover highlighting, press animation, and temporary `Copied!` success state
+- trace output remains fully scrollable and text-selectable even without using copy button

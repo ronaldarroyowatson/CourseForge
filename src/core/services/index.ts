@@ -21,6 +21,7 @@ export * from "./coverImageService";
 export * from "./cacheControlService";
 export * from "./cacheTelemetryService";
 export * from "./debugLogService";
+export * from "./designSystemService";
 export {
   appendDebugLogEntry,
   clearDebugLogEntries,

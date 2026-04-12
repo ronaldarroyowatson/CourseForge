@@ -32,6 +32,7 @@ import { getSupportedLanguages, t as translate } from "../../../core/services/i1
 import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
+import { DesignSystemSettingsCard } from "./DesignSystemSettingsCard";
 
 interface SettingsPageProps {
   onBack?: () => void;
@@ -1041,6 +1042,8 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
       </div>
 
       <div className="settings-grid">
+        <DesignSystemSettingsCard userId={userId} />
+
         <article className={`settings-card settings-card--expandable ${showSyncPreferences ? "settings-card--expanded" : ""}`}>
           <div className="settings-card__head">
             <h3>Sync Preferences</h3>
@@ -1509,6 +1512,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
             </p>
           ) : null}
         </article>
+
       </div>
     </section>
   );

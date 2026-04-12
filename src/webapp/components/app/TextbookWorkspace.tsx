@@ -20,6 +20,7 @@ import { SectionForm } from "../sections/SectionForm";
 import { SectionList } from "../sections/SectionList";
 import { SectionNavigationBar } from "../sections/SectionNavigationBar";
 import { SettingsPage } from "../settings/SettingsPage";
+import { SkeletonPageLayout } from "../skeleton/Skeleton";
 import { TextbookForm } from "../textbooks/TextbookForm";
 import { TextbookList } from "../textbooks/TextbookList";
 
@@ -680,6 +681,17 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
             </AccordionTile>
           );
         })}
+      </div>
+    );
+  }
+
+  if (!showAdminPage && !showSettingsPage && isLoadingTextbooks) {
+    return (
+      <div className="app-shell">
+        <main className="app-main">
+          <Header isSettingsView={false} />
+          <SkeletonPageLayout cardCount={4} />
+        </main>
       </div>
     );
   }

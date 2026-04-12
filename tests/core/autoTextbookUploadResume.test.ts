@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useUIStore } from "../../src/webapp/store/uiStore";
 
@@ -42,7 +42,7 @@ const syncNowMock = vi.hoisted(() => vi.fn<(deps?: unknown) => Promise<{
   pendingCount: 0,
 })));
 
-const getCurrentUserMock = vi.hoisted(() => vi.fn(() => null));
+const getCurrentUserMock = vi.hoisted(() => vi.fn<() => { uid: string } | null>(() => null));
 
 vi.mock("../../src/core/services/db", () => ({
   STORE_NAMES: {
@@ -76,6 +76,7 @@ vi.mock("firebase/firestore", () => ({
 
 import {
   initAutoTextbookUploadTracking,
+  runTrackedAutoTextbookCloudUpload,
   resumePersistedAutoTextbookUpload,
   type AutoTextbookUploadSnapshot,
 } from "../../src/core/services/autoTextbookUploadService";
@@ -107,6 +108,10 @@ function makePersistedSnapshot(overrides: Partial<AutoTextbookUploadSnapshot> = 
 }
 
 describe("autoTextbookUploadService resume recovery", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     dbMockState.textbooks = [];
     dbMockState.chapters = [];
@@ -146,6 +151,87 @@ describe("autoTextbookUploadService resume recovery", () => {
     expect(syncNowMock).not.toHaveBeenCalled();
     expect(useUIStore.getState().activeAutoTextbookUpload).toMatchObject({
       status: "failed",
+      canResume: false,
+    });
+  });
+
+  it("retries throttled sync attempts and completes upload when retry succeeds", async () => {
+    vi.useFakeTimers();
+
+    getCurrentUserMock.mockReturnValue({ uid: "user-1" });
+    dbMockState.textbooks = [
+      {
+        id: "tb-retry-001",
+        title: "Methods of Science",
+        isbnRaw: "9781402891001",
+        pendingSync: true,
+      },
+    ];
+    dbMockState.chapters = [
+      {
+        id: "chapter-1",
+        textbookId: "tb-retry-001",
+        pendingSync: true,
+      },
+    ];
+    dbMockState.sections = [
+      {
+        id: "section-1",
+        chapterId: "chapter-1",
+        pendingSync: true,
+      },
+    ];
+
+    syncNowMock
+      .mockResolvedValueOnce({
+        success: false,
+        message: "Sync skipped to avoid excessive write frequency.",
+        retryable: false,
+        permissionDenied: false,
+        throttled: true,
+        writeLoopTriggered: false,
+        writeBudgetExceeded: false,
+        writeCount: 4,
+        writeBudgetLimit: 500,
+        readCount: 0,
+        readBudgetLimit: 5000,
+        readBudgetExceeded: false,
+        retryLimit: 3,
+        errorCode: null,
+        pendingCount: 3,
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        message: "Cloud sync completed.",
+        retryable: false,
+        permissionDenied: false,
+        throttled: false,
+        writeLoopTriggered: false,
+        writeBudgetExceeded: false,
+        writeCount: 7,
+        writeBudgetLimit: 500,
+        readCount: 12,
+        readBudgetLimit: 5000,
+        readBudgetExceeded: false,
+        retryLimit: 3,
+        errorCode: null,
+        pendingCount: 0,
+      });
+
+    const resultPromise = runTrackedAutoTextbookCloudUpload({
+      sessionId: "retry:test",
+      textbookId: "tb-retry-001",
+      title: "Methods of Science",
+      isbnRaw: "9781402891001",
+    });
+
+    await vi.advanceTimersByTimeAsync(5350);
+    const result = await resultPromise;
+
+    expect(result.success).toBe(true);
+    expect(syncNowMock).toHaveBeenCalledTimes(2);
+    expect(useUIStore.getState().activeAutoTextbookUpload).toMatchObject({
+      status: "completed",
       canResume: false,
     });
   });

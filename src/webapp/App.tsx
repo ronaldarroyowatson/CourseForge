@@ -7,6 +7,7 @@ import { LoginPage } from "./components/auth/LoginPage";
 import { RequireAdmin } from "./components/auth/RequireAdmin";
 import { RequireAuth } from "./components/auth/RequireAuth";
 import { TextbookWorkspace } from "./components/app/TextbookWorkspace";
+import { SkeletonPageLayout } from "./components/skeleton/Skeleton";
 import { useAuthStore } from "./store/authStore";
 
 /**
@@ -49,7 +50,7 @@ export function App(): React.JSX.Element | null {
   const authStatus = useAuthStore((state) => state.authStatus);
 
   if (authStatus === "loading") {
-    return null;
+    return <SkeletonPageLayout cardCount={2} />;
   }
 
   return (

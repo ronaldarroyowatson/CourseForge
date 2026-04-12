@@ -234,6 +234,19 @@ export interface MetadataPipelineResult {
   originalOcrOutput: OcrMetadataOutput | null;
 }
 
+export interface MetadataPipelineTraceRecord {
+  step: MetadataPageType;
+  component: "pipeline" | "vision" | "ocr" | "agent" | "mapping";
+  action: string;
+  severity?: "info" | "warning" | "error";
+  details?: Record<string, unknown>;
+}
+
+export interface MetadataPipelineExtractionOptions {
+  confidenceThreshold?: number;
+  traceRecorder?: (record: MetadataPipelineTraceRecord) => void;
+}
+
 interface VisionCallableResponse {
   success?: boolean;
   message?: string;
@@ -549,6 +562,66 @@ function mergeVisionAndOcrMetadata(
   return backfillMissingHighValueFields(mergedBase, mergedBase.rawText);
 }
 
+function normalizeSubjectLabel(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === "math" || normalized === "mathematics") {
+    return "Math";
+  }
+
+  if (normalized === "science" || normalized.includes("physical science") || normalized.includes("earth science")) {
+    return "Science";
+  }
+
+  if (normalized === "social studies" || normalized === "history") {
+    return "Social Studies";
+  }
+
+  if (normalized === "ela" || normalized === "english language arts") {
+    return "ELA";
+  }
+
+  if (normalized === "computer science") {
+    return "Computer Science";
+  }
+
+  return value.trim();
+}
+
+function hasSubjectEvidence(subject: string, rawText: string): boolean {
+  const source = rawText.toLowerCase();
+  if (subject === "Science") {
+    return /physical science|earth science|life science|science|biology|chemistry|physics|anatomy|geology/.test(source);
+  }
+
+  if (subject === "Math") {
+    return /math|mathematics|algebra|geometry|calculus|numbers?/.test(source);
+  }
+
+  if (subject === "Social Studies") {
+    return /social studies|history|government|civics|geography/.test(source);
+  }
+
+  if (subject === "ELA") {
+    // Require an explicit ELA-specific phrase to confirm evidence.
+    // "reading" and "writing" alone are not sufficient — they appear in every subject.
+    return /english language arts|language arts|\bliterature\b|\bgrammar\b/.test(source);
+  }
+
+  if (subject === "Computer Science") {
+    return /computer science|coding|programming|algorithm/.test(source);
+  }
+
+  return false;
+}
+
 /**
  * Cross-validates the subject field from vision output against OCR-derived text.
  * Prevents the vision model from overriding a clearly science-subject text with "ELA"
@@ -559,15 +632,18 @@ function crossValidateSubject(
   ocrRawText: string,
   ocrSubject: string | null
 ): string | null {
-  if (!visionSubject) return ocrSubject;
-  const lower = ocrRawText.toLowerCase();
-  const hasStrongScienceKeywords = /physical science|earth science|life science|biology|chemistry|physics|anatomy|geology/.test(lower);
-  const visionIsScienceCategory = /science/i.test(visionSubject);
-  if (hasStrongScienceKeywords && !visionIsScienceCategory) {
-    // OCR text clearly indicates a science subject - trust OCR subject over vision's guess
-    return ocrSubject ?? visionSubject;
+  const normalizedVisionSubject = normalizeSubjectLabel(visionSubject);
+  const normalizedOcrSubject = normalizeSubjectLabel(ocrSubject);
+
+  if (normalizedVisionSubject && normalizedOcrSubject && normalizedVisionSubject !== normalizedOcrSubject) {
+    return normalizedOcrSubject;
   }
-  return visionSubject;
+
+  if (normalizedVisionSubject && !hasSubjectEvidence(normalizedVisionSubject, ocrRawText)) {
+    return normalizedOcrSubject;
+  }
+
+  return normalizedVisionSubject ?? normalizedOcrSubject;
 }
 
 function crossValidateVisionSubjectFromRawText(metadata: MetadataResult): MetadataResult {
@@ -678,10 +754,24 @@ export async function extractMetadataFromImage(
 export async function extractMetadataWithOcrFallbackFromDataUrl(
   imageDataUrl: string,
   context: MetadataExtractionContext,
-  options: { confidenceThreshold?: number } = {}
+  options: MetadataPipelineExtractionOptions = {}
 ): Promise<MetadataPipelineResult> {
+  const emitTrace = (record: MetadataPipelineTraceRecord): void => {
+    options.traceRecorder?.(record);
+  };
   const traceId = createMetadataPipelineTraceId();
   const confidenceThreshold = clampConfidence(options.confidenceThreshold, DEFAULT_VISION_CONFIDENCE_THRESHOLD);
+
+  emitTrace({
+    step: context.pageType,
+    component: "pipeline",
+    action: "started",
+    details: {
+      traceId,
+      imageBytes: imageDataUrl.length,
+      confidenceThreshold,
+    },
+  });
 
   void emitMetadataPipelineDiagnostic("started", {
     traceId,
@@ -716,6 +806,14 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
 
   let originalVisionOutput: MetadataResult | null = null;
   try {
+    emitTrace({
+      step: context.pageType,
+      component: "vision",
+      action: "request_started",
+      details: {
+        traceId,
+      },
+    });
     void emitMetadataPipelineDiagnostic("vision_attempt_started", {
       traceId,
       context: { pageType: context.pageType },
@@ -738,6 +836,16 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
         source: originalVisionOutput.source,
       },
     });
+    emitTrace({
+      step: context.pageType,
+      component: "vision",
+      action: "request_succeeded",
+      details: {
+        traceId,
+        confidence: originalVisionOutput.confidence,
+        subject: originalVisionOutput.subject,
+      },
+    });
   } catch {
     originalVisionOutput = null;
     updateMetadataPipelineRuntimeStatus({
@@ -753,6 +861,15 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
       level: "warning",
       traceId,
       context: { pageType: context.pageType },
+    });
+    emitTrace({
+      step: context.pageType,
+      component: "vision",
+      action: "request_failed",
+      severity: "warning",
+      details: {
+        traceId,
+      },
     });
   }
 
@@ -789,6 +906,16 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
         subject: enrichedVisionOutput.subject,
       },
     });
+    emitTrace({
+      step: context.pageType,
+      component: "pipeline",
+      action: "completed_vision_only",
+      details: {
+        traceId,
+        subject: enrichedVisionOutput.subject,
+        parsedFields,
+      },
+    });
     return {
       result: enrichedVisionOutput,
       originalVisionOutput,
@@ -818,6 +945,16 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     ocrAttemptCount += 1;
     let ocrResult: Awaited<ReturnType<typeof extractTextFromImageWithFallback>>;
     try {
+      emitTrace({
+        step: context.pageType,
+        component: "ocr",
+        action: "request_started",
+        details: {
+          traceId,
+          attempt: ocrAttemptCount,
+          maxAttempts: maxOcrAttempts,
+        },
+      });
       ocrResult = await extractTextFromImageWithFallback(imageDataUrl);
       if (!ocrResult || typeof ocrResult.text !== "string" || typeof ocrResult.providerId !== "string") {
         throw new Error("OCR enrichment returned an invalid response payload.");
@@ -831,6 +968,18 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
           attempt: ocrAttemptCount,
           maxAttempts: maxOcrAttempts,
           pageType: context.pageType,
+          message: lastOcrError.message,
+        },
+      });
+      emitTrace({
+        step: context.pageType,
+        component: "ocr",
+        action: "request_failed",
+        severity: "warning",
+        details: {
+          traceId,
+          attempt: ocrAttemptCount,
+          maxAttempts: maxOcrAttempts,
           message: lastOcrError.message,
         },
       });
@@ -855,6 +1004,17 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
         rawTextLength: ocrResult.text.length,
       },
     });
+    emitTrace({
+      step: context.pageType,
+      component: "ocr",
+      action: "request_succeeded",
+      details: {
+        traceId,
+        attempt: ocrAttemptCount,
+        providerId: ocrResult.providerId,
+        rawTextLength: ocrResult.text.length,
+      },
+    });
 
     const correctedRawText = postProcessOcrText(ocrResult.text, context);
     const ocrMetadata = backfillMissingHighValueFields(autoMetadataToMetadataResult(correctedRawText, "ocr"), correctedRawText);
@@ -869,6 +1029,18 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
         providerId: ocrResult.providerId,
       };
     }
+
+    emitTrace({
+      step: context.pageType,
+      component: "mapping",
+      action: "field_mapping_completed",
+      details: {
+        traceId,
+        attempt: ocrAttemptCount,
+        subject: candidateResult.subject,
+        parsedFields: summarizeMetadataFields(candidateResult),
+      },
+    });
 
     const missingCriticalFields = collectMissingFields(candidateResult, TITLE_CRITICAL_FIELDS);
     const missingTargetFields = collectMissingFields(candidateResult, TITLE_TARGET_DEBUG_FIELDS);
@@ -927,6 +1099,17 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
           message: lastOcrError?.message ?? "All OCR attempts failed.",
         },
       });
+      emitTrace({
+        step: context.pageType,
+        component: "pipeline",
+        action: "completed_with_vision_after_ocr_failure",
+        severity: "warning",
+        details: {
+          traceId,
+          attempts: ocrAttemptCount,
+          message: lastOcrError?.message ?? "All OCR attempts failed.",
+        },
+      });
 
       return {
         result: enrichedVisionOutput,
@@ -955,6 +1138,17 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
         missingCriticalFields: finalMissingCriticalFields,
         missingTargetFields: finalMissingTargetFields,
         failureSnapshot,
+      },
+    });
+    emitTrace({
+      step: context.pageType,
+      component: "pipeline",
+      action: "critical_fields_missing_after_attempts",
+      severity: "warning",
+      details: {
+        traceId,
+        missingCriticalFields: finalMissingCriticalFields,
+        missingTargetFields: finalMissingTargetFields,
       },
     });
   }
@@ -987,6 +1181,19 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     },
   });
 
+  emitTrace({
+    step: context.pageType,
+    component: "pipeline",
+    action: "completed",
+    details: {
+      traceId,
+      path: bestPath,
+      ocrAttempts: ocrAttemptCount,
+      parsedFields,
+      missingCriticalFields: finalMissingCriticalFields,
+    },
+  });
+
   return {
     result: bestResult,
     originalVisionOutput,
@@ -997,7 +1204,7 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
 export async function extractMetadataWithOcrFallback(
   imageBuffer: ArrayBuffer | Uint8Array,
   context: MetadataExtractionContext,
-  options: { confidenceThreshold?: number } = {}
+  options: MetadataPipelineExtractionOptions = {}
 ): Promise<MetadataPipelineResult> {
   const imageDataUrl = imageBufferToDataUrl(imageBuffer);
   return extractMetadataWithOcrFallbackFromDataUrl(imageDataUrl, context, options);

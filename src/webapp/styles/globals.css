@@ -2312,8 +2312,19 @@ body {
 }
 
 .extraction-summary__check {
-  color: #16a050;
   font-weight: bold;
+}
+
+.extraction-summary__check--success {
+  color: #16a050;
+}
+
+.extraction-summary__check--pending {
+  color: #2563eb;
+}
+
+.extraction-summary__check--failed {
+  color: #c0392b;
 }
 
 .extraction-summary__hint {

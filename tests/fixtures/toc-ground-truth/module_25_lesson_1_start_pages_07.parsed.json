@@ -6,7 +6,7 @@
       "chapterLabel": "Module",
       "pageStart": 627,
       "pageEnd": 660,
-      "unitName": "Unit 7",
+      "unitName": "Unit 7 EARTH",
       "sections": [
         {
           "sectionNumber": "",
@@ -64,7 +64,7 @@
       "chapterLabel": "Module",
       "pageStart": 661,
       "pageEnd": 693,
-      "unitName": "Unit 7",
+      "unitName": "Unit 7 EARTH",
       "sections": [
         {
           "sectionNumber": "",
@@ -122,7 +122,7 @@
       "chapterLabel": "Module",
       "pageStart": 694,
       "pageEnd": 732,
-      "unitName": "Unit 7",
+      "unitName": "Unit 7 EARTH",
       "sections": [
         {
           "sectionNumber": "",
@@ -180,7 +180,7 @@
       "chapterLabel": "Module",
       "pageStart": 733,
       "pageEnd": 757,
-      "unitName": "Unit 7",
+      "unitName": "Unit 7 EARTH",
       "sections": [
         {
           "sectionNumber": "",
@@ -236,5 +236,5 @@
       ]
     }
   ],
-  "confidence": 0.96
+  "confidence": 0.98
 }

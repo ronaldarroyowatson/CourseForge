@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { METADATA_CORRECTION_STORAGE_KEYS } from "../../src/core/services/metadataCorrectionLearningService";
 import { persistAutoTextbook } from "../../src/core/services/autoTextbookPersistenceService";
 import type { TocChapter } from "../../src/core/services/textbookAutoExtractionService";
-import { AutoTextbookSetupFlow } from "../../src/webapp/components/textbooks/AutoTextbookSetupFlow";
+import { AutoTextbookSetupFlow, mergeCapturedMetadataForStep } from "../../src/webapp/components/textbooks/AutoTextbookSetupFlow";
 import { TextbookForm } from "../../src/webapp/components/textbooks/TextbookForm";
 import { useUIStore } from "../../src/webapp/store/uiStore";
 
@@ -177,6 +177,26 @@ vi.mock("../../src/core/services/textbookAutoExtractionService", async () => {
 });
 
 describe("auto textbook flow integration", () => {
+  it("clears stale cover subject during title capture when title extraction has no subject", () => {
+    const merged = mergeCapturedMetadataForStep(
+      {
+        title: "Inspire Physical Science",
+        subject: "ELA",
+        publisher: "McGraw Hill",
+      },
+      {
+        title: "Inspire Physical Science",
+        subtitle: "with Earth Science",
+        edition: "Student Edition",
+        publisher: "McGraw Hill",
+        subject: undefined,
+      },
+      "title"
+    );
+
+    expect(merged.subject).toBeUndefined();
+  });
+
   beforeEach(() => {
     repositoryMocks.createTextbook.mockClear();
     repositoryMocks.editTextbook.mockClear();
@@ -457,10 +477,209 @@ describe("auto textbook flow integration", () => {
 
     expect(screen.getByText(/Copyright-page field capture progress \(0\/11\):/i)).toBeInTheDocument();
     const checklist = within(screen.getByLabelText("Extraction result summary"));
-    expect(checklist.getByText((_, element) => element?.textContent === "X Publisher")).toBeInTheDocument();
-    expect(checklist.getByText((_, element) => element?.textContent === "X Subject")).toBeInTheDocument();
+    expect(checklist.getByText((_, element) => element?.textContent === "- Publisher")).toBeInTheDocument();
+    expect(checklist.getByText((_, element) => element?.textContent === "- Subject")).toBeInTheDocument();
+    expect(checklist.getByText((_, element) => element?.textContent === "- ISBN")).toBeInTheDocument();
+    expect(checklist.queryByText((_, element) => element?.textContent === "✓ Subject")).not.toBeInTheDocument();
+  });
+
+  it("renders pending, failed, and success extraction states deterministically", () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "title",
+          coverImageDataUrl: "data:image/png;base64,a",
+          lastExtractionStep: "title",
+          lastExtractionFields: ["Publisher", "Subject"],
+          metadataForm: {
+            title: "Inspire Physical Science",
+            subtitle: "with Earth Science",
+            subject: "Science",
+            edition: "Student Edition",
+            publisher: "McGraw Hill",
+            seriesName: "Inspire",
+          },
+          metadataDraft: {
+            title: "Inspire Physical Science",
+            subtitle: "with Earth Science",
+            subject: "Science",
+            edition: "Student Edition",
+            publisher: "McGraw Hill",
+            seriesName: "Inspire",
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText(/Copyright-page field capture progress \(2\/11\):/i)).toBeInTheDocument();
+    const checklist = within(screen.getByLabelText("Extraction result summary"));
+    expect(checklist.getByText((_, element) => element?.textContent === "✓ Publisher")).toBeInTheDocument();
+    expect(checklist.getByText((_, element) => element?.textContent === "✓ Subject")).toBeInTheDocument();
     expect(checklist.getByText((_, element) => element?.textContent === "X ISBN")).toBeInTheDocument();
-    expect(checklist.queryByText((_, element) => element?.textContent === "OK Subject")).not.toBeInTheDocument();
+  });
+
+  it("shows blue dash (pending) for optional Related ISBNs field when not extracted, not red X", () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "title",
+          coverImageDataUrl: "data:image/png;base64,a",
+          lastExtractionStep: "title",
+          // Only required fields extracted — no related ISBNs
+          lastExtractionFields: ["Publisher", "Copyright Year", "ISBN", "Publisher URL"],
+          metadataForm: {
+            title: "Inspire Physical Science",
+            publisher: "McGraw Hill",
+            copyrightYear: "2021",
+            isbnRaw: "9780076716852",
+            platformUrl: "https://mheducation.com/prek-12",
+          },
+          metadataDraft: {
+            title: "Inspire Physical Science",
+            publisher: "McGraw Hill",
+          },
+        }}
+      />
+    );
+
+    const checklist = within(screen.getByLabelText("Extraction result summary"));
+    // Required fields not extracted → red X
+    expect(checklist.getByText((_, element) => element?.textContent === "✓ Publisher")).toBeInTheDocument();
+    expect(checklist.getByText((_, element) => element?.textContent === "✓ ISBN")).toBeInTheDocument();
+    // Optional field not extracted → blue dash, NOT red X
+    expect(checklist.getByText((_, element) => element?.textContent === "- Related ISBNs")).toBeInTheDocument();
+    expect(checklist.queryByText((_, element) => element?.textContent === "X Related ISBNs")).not.toBeInTheDocument();
+  });
+
+  it("still shows red X for truly required fields missing after copyright extraction", () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "title",
+          coverImageDataUrl: "data:image/png;base64,a",
+          lastExtractionStep: "title",
+          // Only publisher extracted — ISBN is required and missing
+          lastExtractionFields: ["Publisher"],
+          metadataForm: {
+            title: "Inspire Physical Science",
+            publisher: "McGraw Hill",
+          },
+          metadataDraft: {
+            title: "Inspire Physical Science",
+            publisher: "McGraw Hill",
+          },
+        }}
+      />
+    );
+
+    const checklist = within(screen.getByLabelText("Extraction result summary"));
+    expect(checklist.getByText((_, element) => element?.textContent === "✓ Publisher")).toBeInTheDocument();
+    // ISBN is required — must show red X when missing
+    expect(checklist.getByText((_, element) => element?.textContent === "X ISBN")).toBeInTheDocument();
+    // Publisher URL is required — must show red X
+    expect(checklist.getByText((_, element) => element?.textContent === "X Publisher URL")).toBeInTheDocument();
+  });
+
+  it("keeps subject blank when no subject has been extracted", () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "title",
+          coverImageDataUrl: "data:image/png;base64,a",
+          metadataForm: {
+            title: "Inspire Physical Science",
+            subtitle: "",
+            subject: "",
+            edition: "",
+            publisher: "",
+            seriesName: "",
+          },
+          metadataDraft: {
+            title: "Inspire Physical Science",
+          },
+        }}
+      />
+    );
+
+    const subjectSelect = screen.getByLabelText("Subject") as HTMLSelectElement;
+    expect(subjectSelect.value).toBe("");
+  });
+
+  it("does not restore legacy draft metadataSubject when form snapshot subject is blank", async () => {
+    const now = Date.now();
+    window.localStorage.setItem(
+      AUTO_SESSION_DRAFTS_KEY,
+      JSON.stringify([
+        {
+          id: "resume-stale-subject",
+          version: 1,
+          savedAt: now,
+          coverImageDataUrl: "data:image/png;base64,a",
+          rawOcrText: "Workbook",
+          metadataTitle: "Workbook",
+          metadataSubject: "ELA",
+          metadataPublisher: "Unknown Publisher",
+          metadataFormSnapshot: {
+            title: "Workbook",
+            subtitle: "",
+            grade: "",
+            gradeBand: "",
+            subject: "",
+            edition: "",
+            publicationYear: "2026",
+            copyrightYear: "",
+            isbnRaw: "",
+            seriesName: "",
+            publisher: "Unknown Publisher",
+            publisherLocation: "",
+            platformUrl: "",
+            mhid: "",
+            authorsCsv: "",
+            tocExtractionConfidence: "",
+          },
+          step: "title",
+          stepsCompleted: { cover: true, copyright: false, toc: false },
+        },
+      ])
+    );
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    const subjectSelect = await screen.findByLabelText("Subject") as HTMLSelectElement;
+    expect(subjectSelect.value).toBe("");
+  });
+
+  it("shows verbose trace viewer when debug mode is enabled", async () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          verboseDebugEnabled: true,
+        }}
+      />
+    );
+
+    expect(screen.getByLabelText("Verbose debug settings")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View Debug Trace" }));
+
+    const traceOutput = await screen.findByLabelText("Auto capture debug trace");
+    expect(traceOutput.textContent).toContain("session_started");
   });
 
   it("restores full TOC tree when resuming a queued TOC draft", async () => {

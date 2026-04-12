@@ -106,3 +106,32 @@ OCR text is post-processed before metadata is mapped into CourseForge fields:
 - high-confidence vision subject guesses are cross-checked against the raw OCR/page text so explicit textbook signals like `Physical Science` and `Earth Science` override incidental terms from surrounding copy
 
 This safeguard set is regression-tested against the Inspire Physical Science copyright-page screenshot content, including mixed-column OCR ordering, copyright text, address block, ISBN, MHID, and the `mheducation.com/prek-12` URL.
+
+## Verbose Auto-Capture Trace Mode
+
+Auto textbook capture now includes an opt-in, pipeline-wide verbose trace map.
+
+How to use it:
+
+- In Auto setup UI, enable `Enable verbose debug logging for this run`
+- Run cover/title/TOC capture and optionally save/upload
+- Use `View Debug Trace` to inspect the full structured run map
+
+Trace coverage includes:
+
+- orchestration events (`capture_requested`, `capture_completed`, save start/end)
+- communication events for OCR and metadata pipeline requests/responses/failures
+- OCR provider outcomes and retry attempts
+- metadata field-level decisions (detected/missing/rejected/overwritten)
+- TOC structure events (page parse + page stitch hierarchy details)
+- upload/finalization payload preparation, validation failures, and cloud upload outcomes
+
+The trace is designed to expose all meaningful decisions (fallbacks, rejections, skips, failures) so regressions can be diagnosed from a single run without guessing.
+
+## Subject Safety Note
+
+Subject handling no longer applies a silent default during auto textbook persistence.
+
+- Subject remains blank unless extraction or explicit user input provides it
+- Generic `English` wording alone is no longer sufficient evidence to infer `ELA`
+- Legacy queued draft subject summaries no longer overwrite the current editable subject form value during resume

@@ -343,6 +343,28 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     ocrProviderHealth,
     ocrProviderStatus,
   }), [metadataSharingEnabled, metadataTrainingStats, metadataSyncRuntime, metadataPipelineRuntime, ocrProviderHealth, ocrProviderStatus]);
+  const metadataLearningStatus = React.useMemo(() => {
+    const connectionStatus = metadataPipelineRuntime.secondaryAgent.attempted
+      ? metadataPipelineRuntime.secondaryAgent.succeeded
+        ? "Connected"
+        : "Error"
+      : "Waiting";
+
+    const dataReceived = metadataPipelineRuntime.ocr.rawTextLength > 0;
+    const dataProcessed = metadataPipelineRuntime.parsedFieldsCount > 0 || metadataPipelineRuntime.secondaryAgent.succeeded;
+    const localTrainingStatus = metadataTrainingStats.totalCorrections > 0
+      ? metadataTrainingStats.acceptedCorrections > 0
+        ? "Forwarded"
+        : "Collected (pending review)"
+      : "No corrections yet";
+
+    return {
+      connectionStatus,
+      dataReceived,
+      dataProcessed,
+      localTrainingStatus,
+    };
+  }, [metadataPipelineRuntime, metadataTrainingStats]);
   const secondChoiceProviderId = ocrProviderOrder.find((providerId) => providerId !== ocrProviderOrder[0] && providerId !== "local_tesseract") ?? "cloud_github_models_vision";
   const retryVisualTotal = Math.max(1, Math.min(5, retryLimit || 3));
   const retryVisualUsed = Math.max(0, Math.min(retryVisualTotal, retryCount));
@@ -1262,11 +1284,17 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
               <p className="settings-meta">Last correction: {metadataTrainingStats.lastCorrectionAt ? new Date(metadataTrainingStats.lastCorrectionAt).toLocaleString() : "None yet"}</p>
               <p className="settings-meta">Cloud OCR health: {metadataPipelineHealth.cloudStatus}</p>
               <p className="settings-meta">Secondary metadata agent: {metadataPipelineHealth.secondaryAgentStatus}</p>
+              <p className="settings-meta">Secondary agent connection: <strong>{metadataLearningStatus.connectionStatus}</strong></p>
+              <p className="settings-meta">Data received from OCR: <strong>{metadataLearningStatus.dataReceived ? "Yes" : "No"}</strong></p>
+              <p className="settings-meta">Data processed by pipeline: <strong>{metadataLearningStatus.dataProcessed ? "Yes" : "No"}</strong></p>
+              <p className="settings-meta">Training data passed to local OCR: <strong>{metadataLearningStatus.localTrainingStatus}</strong></p>
               <p className="settings-meta">
                 Last pipeline path: <strong>{metadataPipelineRuntime.path ?? "none"}</strong>
                 {metadataPipelineRuntime.ocr.providerId ? ` | OCR provider: ${metadataPipelineRuntime.ocr.providerId}` : ""}
                 {metadataPipelineRuntime.ocr.rawTextLength > 0 ? ` | OCR chars: ${metadataPipelineRuntime.ocr.rawTextLength}` : ""}
               </p>
+              <p className="settings-meta">Pipeline confidence score: <strong>{metadataTrainingStats.averageConfidencePct}%</strong></p>
+              <p className="settings-meta">Corrections logged: <strong>{metadataTrainingStats.totalCorrections}</strong> | Accepted: <strong>{metadataTrainingStats.acceptedCorrections}</strong> | Flagged: <strong>{metadataTrainingStats.flaggedCorrections}</strong></p>
               <p className="settings-meta">Pipeline trace: {metadataPipelineRuntime.traceId ?? "none"}</p>
               <p className="settings-meta">Local learning: {metadataPipelineHealth.learningStatus}</p>
               <p className="settings-meta">Correction sync: {metadataPipelineHealth.syncStatus}</p>

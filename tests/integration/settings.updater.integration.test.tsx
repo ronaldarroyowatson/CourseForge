@@ -237,6 +237,10 @@ describe("Settings updater communication", () => {
       expect(screen.getByText("Cloud OCR health: Cloud OCR providers are ready. Local OCR remains the final fallback.")).toBeInTheDocument();
       expect(screen.getByText("Local learning: Local learning has 2 correction samples recorded.")).toBeInTheDocument();
       expect(screen.getByText("Correction sync: 1 correction sample is held for review before upload.")).toBeInTheDocument();
+      expect(screen.getByText("Secondary agent connection:", { exact: false })).toBeInTheDocument();
+      expect(screen.getByText("Data received from OCR:", { exact: false })).toBeInTheDocument();
+      expect(screen.getByText("Data processed by pipeline:", { exact: false })).toBeInTheDocument();
+      expect(screen.getByText("Training data passed to local OCR:", { exact: false })).toBeInTheDocument();
     });
   });
 

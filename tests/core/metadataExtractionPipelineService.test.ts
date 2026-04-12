@@ -98,6 +98,96 @@ describe("metadataExtractionPipelineService", () => {
     expect(ocrMock).toHaveBeenCalledTimes(1);
   });
 
+  it("clears subject when vision claims a subject but OCR text has no matching evidence", async () => {
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "Student Edition",
+            publisher: "Unknown Publisher",
+            subject: "ELA",
+            confidence: 0.92,
+            rawText: "Student Edition\nLevel 3\nWorkbook",
+          },
+        },
+      },
+    });
+
+    ocrMock.mockResolvedValue({
+      text: "Student Edition\nLevel 3\nWorkbook",
+      providerId: "cloud_openai_vision",
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "title", publisherHint: null }
+    );
+
+    expect(result.result.subject).toBeNull();
+  });
+
+  it("prefers OCR-derived subject when vision subject conflicts", async () => {
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "Algebra Foundations",
+            publisher: "Northbridge Press",
+            subject: "Science",
+            confidence: 0.88,
+            rawText: "Algebra Foundations\nMathematics\nChapter 1 Numbers",
+          },
+        },
+      },
+    });
+
+    ocrMock.mockResolvedValue({
+      text: "Algebra Foundations\nMathematics\nChapter 1 Numbers",
+      providerId: "cloud_github_models_vision",
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "title", publisherHint: null }
+    );
+
+    expect(result.result.subject).toBe("Math");
+  });
+
+  it("clears ELA when vision claims ELA but raw text only mentions reading or writing generically", async () => {
+    // Regression: a single occurrence of "reading" used to pass hasSubjectEvidence("ELA")
+    // allowing the vision "ELA" claim to survive even when OCR couldn't confirm ELA.
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "Interactive Student Notebook",
+            publisher: "McGraw-Hill Education",
+            subject: "ELA",
+            confidence: 0.91,
+            rawText: "Interactive Student Notebook\nReading Support\nGrade 7\nMcGraw-Hill Education",
+          },
+        },
+      },
+    });
+
+    ocrMock.mockResolvedValue({
+      text: "Interactive Student Notebook\nReading Support\nGrade 7\nMcGraw-Hill Education",
+      providerId: "cloud_openai_vision",
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "cover", publisherHint: null }
+    );
+
+    // Vision said "ELA" but the raw text only has "reading" once — not enough ELA-specific evidence.
+    expect(result.result.subject).toBeNull();
+  });
+
   it("enriches high-confidence title-page vision output with OCR backfill for missing MHID/copyright fields", async () => {
     callableMock.mockResolvedValue({
       data: {
@@ -386,6 +476,61 @@ describe("metadataExtractionPipelineService", () => {
     expect(runtime.ocr.rawTextLength).toBeGreaterThan(10);
     expect(runtime.parsedFieldsCount).toBeGreaterThan(0);
     expect(runtime.parsedFields).toContain("title");
+  });
+
+  it("emits comprehensive trace records across vision failure, OCR fallback, and field mapping", async () => {
+    callableMock.mockRejectedValue(new Error("vision unavailable"));
+    ocrMock.mockResolvedValue({
+      text: [
+        "Inspire Physical Science",
+        "with Earth Science",
+        "McGraw Hill Education",
+        "ISBN: 978-0-07-671685-2",
+      ].join("\n"),
+      providerId: "cloud_openai_vision",
+    });
+
+    const records: Array<{ component: string; action: string; severity?: string }> = [];
+
+    await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "title", publisherHint: "McGraw-Hill Education" },
+      {
+        traceRecorder: (record) => {
+          records.push({ component: record.component, action: record.action, severity: record.severity });
+        },
+      }
+    );
+
+    expect(records.some((record) => record.component === "pipeline" && record.action === "started")).toBe(true);
+    expect(records.some((record) => record.component === "vision" && record.action === "request_failed")).toBe(true);
+    expect(records.some((record) => record.component === "ocr" && record.action === "request_started")).toBe(true);
+    expect(records.some((record) => record.component === "ocr" && record.action === "request_succeeded")).toBe(true);
+    expect(records.some((record) => record.component === "mapping" && record.action === "field_mapping_completed")).toBe(true);
+    expect(records.some((record) => record.component === "pipeline" && record.action === "completed")).toBe(true);
+  });
+
+  it("records repeated OCR communication failures in trace output", async () => {
+    callableMock.mockRejectedValue(new Error("vision unavailable"));
+    ocrMock.mockRejectedValue(new Error("ocr timeout"));
+
+    const records: Array<{ component: string; action: string; severity?: string }> = [];
+
+    await expect(
+      extractMetadataWithOcrFallbackFromDataUrl(
+        "data:image/png;base64,AAA",
+        { pageType: "title", publisherHint: null },
+        {
+          traceRecorder: (record) => {
+            records.push({ component: record.component, action: record.action, severity: record.severity });
+          },
+        }
+      )
+    ).rejects.toThrow("ocr timeout");
+
+    const ocrFailures = records.filter((record) => record.component === "ocr" && record.action === "request_failed");
+    expect(ocrFailures.length).toBeGreaterThanOrEqual(1);
+    expect(records.some((record) => record.component === "vision" && record.action === "request_failed")).toBe(true);
   });
 
   it("preserves raw OCR and returns parsed metadata for downstream form mapping", async () => {

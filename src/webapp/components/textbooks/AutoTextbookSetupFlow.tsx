@@ -7,6 +7,16 @@ import {
 } from "../../../core/services/autoTextbookConflictService";
 import { extractTextFromImageWithFallback } from "../../../core/services/autoOcrService";
 import { appendDebugLogEntry } from "../../../core/services";
+import {
+  completeAutoCaptureTraceRun,
+  isAutoCaptureVerboseDebugEnabled,
+  readLatestAutoCaptureTraceRun,
+  recordAutoCaptureFieldDecision,
+  recordAutoCaptureTraceEvent,
+  setAutoCaptureVerboseDebugEnabled,
+  startAutoCaptureTraceRun,
+  type AutoCaptureTraceRun,
+} from "../../../core/services/autoCaptureTraceService";
 import { persistAutoTextbook } from "../../../core/services/autoTextbookPersistenceService";
 import { uploadTextbookCoverFromDataUrl } from "../../../core/services/coverImageService";
 import {
@@ -61,6 +71,7 @@ import {
 } from "../../../core/services/metadataCorrectionLearningService";
 import {
   extractMetadataWithOcrFallbackFromDataUrl,
+  type MetadataPipelineTraceRecord,
   type MetadataPipelineResult,
 } from "../../../core/services/metadataExtractionPipelineService";
 import { syncMetadataCorrectionLearning } from "../../../core/services/metadataCorrectionSyncService";
@@ -92,8 +103,11 @@ interface AutoTextbookSetupFlowProps {
     ocrDraft?: string;
     tocResult?: ParsedTocResult;
     tocPages?: TocPage[];
+    lastExtractionFields?: string[];
+    lastExtractionStep?: MetadataCaptureStep | null;
     bypassImageModeration?: boolean;
     forceModerationAssessment?: ImageModerationAssessment;
+    verboseDebugEnabled?: boolean;
   };
 }
 
@@ -128,7 +142,7 @@ interface CaptureResult {
 
 interface ExtractionChecklistItem {
   field: string;
-  extracted: boolean;
+  status: "pending" | "failed" | "success";
 }
 
 function fingerprintText(value: string): string {
@@ -232,6 +246,11 @@ const METADATA_CAPTURE_CHECKLIST_FIELDS: Record<MetadataCaptureStep, string[]> =
   cover: ["Title", "Subtitle", "Publisher", "Subject", "Edition", "Series"],
   title: ["Publisher", "Publisher Location", "Copyright Year", "ISBN", "Related ISBNs", "Publisher URL", "MHID", "Grade Band", "Subject", "Edition", "Series"],
 };
+
+// Fields that are genuinely optional — absence after extraction attempt shows blue dash, not red X.
+const OPTIONAL_CHECKLIST_FIELDS = new Set<string>([
+  "Related ISBNs",
+]);
 
 const AUTO_CAPTURE_USAGE_STORAGE_KEY = "courseforge.autoCaptureUsageByDraft";
 
@@ -655,7 +674,14 @@ function buildSectionNotes(pageStart: number | undefined, pageEnd: number | unde
 
 function metadataResultToAutoMetadata(metadata: MetadataResult): AutoTextbookMetadata {
   const rawExtracted = extractMetadataFromOcrText(metadata.rawText);
-  const inferredSubject = metadata.subject ?? rawExtracted.subject ?? null;
+  const normalizedPipelineSubject = metadata.subject?.trim() || null;
+  const normalizedRawSubject = rawExtracted.subject?.trim() || null;
+
+  // Keep first-pass behavior aligned with "Re-parse OCR text": if OCR-derived
+  // subject conflicts with pipeline subject, trust OCR for the editable form.
+  const inferredSubject = normalizedPipelineSubject && normalizedRawSubject && normalizedPipelineSubject !== normalizedRawSubject
+    ? normalizedRawSubject
+    : normalizedPipelineSubject ?? normalizedRawSubject ?? null;
   const typedRelated = Array.isArray(metadata.relatedIsbns)
     ? metadata.relatedIsbns.filter((entry): entry is RelatedIsbn => Boolean(entry?.isbn?.trim()))
     : [];
@@ -704,6 +730,25 @@ function metadataFormToResult(form: MetadataFormState, rawText: string, source: 
     rawText,
     source,
   };
+}
+
+export function mergeCapturedMetadataForStep(
+  base: AutoTextbookMetadata,
+  incoming: AutoTextbookMetadata,
+  sourceStep: MetadataCaptureStep
+): AutoTextbookMetadata {
+  const merged = mergeAutoMetadata(base, incoming);
+
+  // Title-page capture should not preserve a stale subject inferred from cover capture.
+  // If title extraction cannot identify subject, keep it blank for user review.
+  if (sourceStep === "title" && !incoming.subject) {
+    return {
+      ...merged,
+      subject: undefined,
+    };
+  }
+
+  return merged;
 }
 
 async function captureDisplayFrame(input?: { preferChromeTabCapture?: boolean }): Promise<string> {
@@ -899,6 +944,59 @@ function createAutoFlowTraceId(prefix = "auto-flow"): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const TRACEABLE_METADATA_FIELDS: Array<{ key: keyof AutoTextbookMetadata; label: string }> = [
+  { key: "title", label: "title" },
+  { key: "subtitle", label: "subtitle" },
+  { key: "edition", label: "edition" },
+  { key: "authors", label: "authors" },
+  { key: "publisher", label: "publisher" },
+  { key: "publisherLocation", label: "publisherLocation" },
+  { key: "subject", label: "subject" },
+  { key: "gradeBand", label: "gradeBand" },
+  { key: "isbn", label: "isbn" },
+  { key: "relatedIsbns", label: "relatedIsbns" },
+  { key: "seriesName", label: "seriesName" },
+  { key: "copyrightYear", label: "copyrightYear" },
+  { key: "platformUrl", label: "platformUrl" },
+  { key: "mhid", label: "mhid" },
+];
+
+function fieldHasValue(value: unknown): boolean {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+
+  return true;
+}
+
+function stringifyTraceValue(value: unknown): string | number | boolean | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return JSON.stringify(value);
+  }
+
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
 function emitAutoFlowDiagnostic(
   event: string,
   options: {
@@ -966,10 +1064,15 @@ function buildExtractionFieldList(meta: AutoTextbookMetadata): string[] {
 }
 
 function buildExtractionChecklist(step: MetadataCaptureStep, extractedFields: string[], extractionStep: MetadataCaptureStep | null): ExtractionChecklistItem[] {
-  const activeFields = extractionStep === step ? new Set(extractedFields) : new Set<string>();
+  const extractionAttemptedForStep = extractionStep === step;
+  const activeFields = extractionAttemptedForStep ? new Set(extractedFields) : new Set<string>();
   return METADATA_CAPTURE_CHECKLIST_FIELDS[step].map((field) => ({
     field,
-    extracted: activeFields.has(field),
+    status: activeFields.has(field)
+      ? "success"
+      : !extractionAttemptedForStep || OPTIONAL_CHECKLIST_FIELDS.has(field)
+        ? "pending"
+        : "failed",
   }));
 }
 
@@ -1007,6 +1110,11 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   );
   const [step, setStep] = useState<AutoFlowStep>(testingSeedState?.step ?? "cover");
   const [usage, setUsage] = useState(() => testingSeedState?.usage ?? readPersistedCaptureUsage(draftKeyRef.current) ?? createInitialAutoCaptureUsage());
+  const [verboseDebugEnabled, setVerboseDebugEnabledState] = useState<boolean>(
+    testingSeedState?.verboseDebugEnabled ?? isAutoCaptureVerboseDebugEnabled()
+  );
+  const [showVerboseTrace, setShowVerboseTrace] = useState(false);
+  const [latestTraceRun, setLatestTraceRun] = useState<AutoCaptureTraceRun | null>(() => readLatestAutoCaptureTraceRun());
   const [metadataDraft, setMetadataDraft] = useState<AutoTextbookMetadata>(testingSeedState?.metadataDraft ?? {});
   const [metadataConfidence, setMetadataConfidence] = useState<AutoMetadataConfidenceMap>(testingSeedState?.metadataConfidence ?? {});
   const [metadataForm, setMetadataForm] = useState<MetadataFormState>(() => ({
@@ -1037,8 +1145,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [ocrProviderStatus, setOcrProviderStatus] = useState<string | null>(null);
-  const [lastExtractionFields, setLastExtractionFields] = useState<string[]>([]);
-  const [lastExtractionStep, setLastExtractionStep] = useState<MetadataCaptureStep | null>(null);
+  const [lastExtractionFields, setLastExtractionFields] = useState<string[]>(testingSeedState?.lastExtractionFields ?? []);
+  const [lastExtractionStep, setLastExtractionStep] = useState<MetadataCaptureStep | null>(testingSeedState?.lastExtractionStep ?? null);
   const [duplicateMatch, setDuplicateMatch] = useState<DuplicateTextbookMatch | null>(null);
   const [conflictResolutionMode, setConflictResolutionMode] = useState<AutoConflictResolutionMode>("overwrite_auto");
   const [rememberDuplicateChoice, setRememberDuplicateChoice] = useState(false);
@@ -1073,6 +1181,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   const selectionRectRef = useRef<SelectionRect | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const flowSessionTraceIdRef = useRef<string>(createAutoFlowTraceId("auto-flow-session"));
+  const activeTraceRunRef = useRef<AutoCaptureTraceRun | null>(null);
   const lastMetadataPipelineRef = useRef<MetadataPipelineResult | null>(null);
   const lastMetadataCaptureStepRef = useRef<"cover" | "title">("cover");
   const coverFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1083,6 +1192,97 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingUploadLimitResultRef = useRef<ReturnType<typeof enforceAutoCaptureLimit> | null>(null);
+
+  const ensureTraceRun = (): AutoCaptureTraceRun | null => {
+    if (!verboseDebugEnabled) {
+      return null;
+    }
+
+    if (!activeTraceRunRef.current || activeTraceRunRef.current.status !== "running") {
+      activeTraceRunRef.current = startAutoCaptureTraceRun({
+        sessionTraceId: flowSessionTraceIdRef.current,
+        enabled: true,
+      });
+    }
+
+    setLatestTraceRun(activeTraceRunRef.current);
+    return activeTraceRunRef.current;
+  };
+
+  const traceEvent = (input: {
+    step: string;
+    component: string;
+    category: "orchestration" | "communication" | "ocr" | "agent" | "field" | "structure" | "upload" | "error";
+    action: string;
+    severity?: "info" | "warning" | "error";
+    message: string;
+    details?: Record<string, unknown>;
+  }): void => {
+    const run = ensureTraceRun();
+    if (!run) {
+      return;
+    }
+
+    activeTraceRunRef.current = recordAutoCaptureTraceEvent(run, {
+      step: input.step,
+      component: input.component,
+      category: input.category,
+      action: input.action,
+      severity: input.severity ?? "info",
+      message: input.message,
+      details: input.details,
+    });
+    setLatestTraceRun(activeTraceRunRef.current);
+  };
+
+  const traceMetadataFieldDecisions = (
+    metadata: AutoTextbookMetadata,
+    step: MetadataCaptureStep,
+    source: string,
+    details?: Record<string, unknown>
+  ): void => {
+    const run = ensureTraceRun();
+    if (!run) {
+      return;
+    }
+
+    let nextRun = run;
+    for (const field of TRACEABLE_METADATA_FIELDS) {
+      const rawValue = metadata[field.key];
+      const detected = fieldHasValue(rawValue);
+      nextRun = recordAutoCaptureFieldDecision(nextRun, {
+        step,
+        component: "metadata-mapper",
+        fieldKey: field.label,
+        value: stringifyTraceValue(rawValue),
+        source,
+        status: detected ? "detected" : "missing",
+        details,
+      });
+    }
+
+    activeTraceRunRef.current = nextRun;
+    setLatestTraceRun(nextRun);
+  };
+
+  const traceMetadataPipelineRecord = (record: MetadataPipelineTraceRecord): void => {
+    traceEvent({
+      step: record.step,
+      component: `metadata-${record.component}`,
+      category: record.component === "ocr"
+        ? "ocr"
+        : record.component === "agent"
+          ? "agent"
+          : record.component === "mapping"
+            ? "field"
+            : "communication",
+      action: record.action,
+      severity: record.severity,
+      message: `Metadata ${record.component} ${record.action}`,
+      details: record.details,
+    });
+  };
+
     const metadataExtractionChecklist = useMemo(() => {
       if (step !== "cover" && step !== "title") {
         return [];
@@ -1122,6 +1322,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   );
   const isSessionCapacityReached = resumableDrafts.length >= MAX_AUTO_SESSION_DRAFTS && !currentSessionHasWork;
   const isInteractionLocked = isBusy || isRunningOcr;
+  useEffect(() => {
+    setAutoCaptureVerboseDebugEnabled(verboseDebugEnabled);
+    if (!verboseDebugEnabled) {
+      activeTraceRunRef.current = null;
+    }
+  }, [verboseDebugEnabled]);
+
   const optionalMetadataValueCount = useMemo(() => {
     const values = [
       metadataForm.subtitle,
@@ -1138,6 +1345,9 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
 
     return values.filter((value) => value.trim().length > 0).length;
   }, [metadataForm, relatedIsbns.length]);
+  const latestTraceRunJson = useMemo(() => {
+    return latestTraceRun ? JSON.stringify(latestTraceRun, null, 2) : "";
+  }, [latestTraceRun]);
 
   useEffect(() => {
     const cancelAutoScroll = (): void => {
@@ -1156,6 +1366,17 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   }, []);
 
   useEffect(() => {
+    traceEvent({
+      step: "cover",
+      component: "session",
+      category: "orchestration",
+      action: "session_started",
+      message: "Auto textbook session initialized.",
+      details: {
+        runtime,
+        initialStep: testingSeedState?.step ?? "cover",
+      },
+    });
     emitAutoFlowDiagnostic("session_started", {
       traceId: flowSessionTraceIdRef.current,
       context: {
@@ -1645,7 +1866,34 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
     }
 
     const parsed = extractMetadataFromOcrText(cleanedText);
-    const merged = mergeAutoMetadata(metadataDraft, parsed);
+    const merged = mergeCapturedMetadataForStep(metadataDraft, parsed, sourceStep);
+    if (sourceStep === "title" && metadataDraft.subject && !parsed.subject && !merged.subject) {
+      traceEvent({
+        step: sourceStep,
+        component: "metadata-merger",
+        category: "field",
+        action: "subject_cleared_after_title_capture",
+        message: "Cleared stale subject because title capture did not confirm subject.",
+        details: {
+          previousSubject: metadataDraft.subject,
+          source: "ocr_text_parser",
+        },
+      });
+    }
+    traceEvent({
+      step: sourceStep,
+      component: "metadata-parser",
+      category: "field",
+      action: "ocr_text_parsed",
+      message: "Parsed metadata fields from OCR text.",
+      details: {
+        cleanedLength: cleanedText.length,
+        extractedFields: buildExtractionFieldList(parsed),
+      },
+    });
+    traceMetadataFieldDecisions(parsed, sourceStep, "ocr_text_parser", {
+      cleanedLength: cleanedText.length,
+    });
     upsertAutoMetadataConfidence(scoreMetadataConfidence(cleanedText, parsed));
     applyMetadataDraft(merged);
     setLastExtractionFields(buildExtractionFieldList(parsed));
@@ -1666,8 +1914,22 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   }
 
   function applyMetadataFromPipelineResult(result: MetadataResult, sourceStep: "cover" | "title"): void {
-    const merged = mergeAutoMetadata(metadataDraft, metadataResultToAutoMetadata(result));
-    const scored = scoreMetadataConfidence(result.rawText, metadataResultToAutoMetadata(result));
+    const incomingMetadata = metadataResultToAutoMetadata(result);
+    const merged = mergeCapturedMetadataForStep(metadataDraft, incomingMetadata, sourceStep);
+    if (sourceStep === "title" && metadataDraft.subject && !incomingMetadata.subject && !merged.subject) {
+      traceEvent({
+        step: sourceStep,
+        component: "metadata-merger",
+        category: "field",
+        action: "subject_cleared_after_title_capture",
+        message: "Cleared stale subject because title pipeline result did not confirm subject.",
+        details: {
+          previousSubject: metadataDraft.subject,
+          source: `pipeline:${result.source}`,
+        },
+      });
+    }
+    const scored = scoreMetadataConfidence(result.rawText, incomingMetadata);
 
     const fieldConfidence: AutoMetadataConfidenceMap = {
       ...scored,
@@ -1704,9 +1966,24 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
     };
 
     upsertAutoMetadataConfidence(fieldConfidence);
+    traceEvent({
+      step: sourceStep,
+      component: "metadata-pipeline",
+      category: "field",
+      action: "pipeline_result_applied",
+      message: "Applied metadata pipeline result to editable form.",
+      details: {
+        source: result.source,
+        confidence: result.confidence,
+        extractedFields: buildExtractionFieldList(incomingMetadata),
+      },
+    });
+    traceMetadataFieldDecisions(incomingMetadata, sourceStep, `pipeline:${result.source}`, {
+      confidence: result.confidence,
+    });
     applyMetadataDraft(merged);
     setOcrDraft(result.rawText);
-    setLastExtractionFields(buildExtractionFieldList(metadataResultToAutoMetadata(result)));
+    setLastExtractionFields(buildExtractionFieldList(incomingMetadata));
     setLastExtractionStep(sourceStep);
     setErrorMessage(null);
     setInfoMessage("Metadata extracted. Review and correct the fields below before accepting.");
@@ -1717,7 +1994,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
       context: {
         source: result.source,
         confidence: result.confidence,
-        extractedFields: buildExtractionFieldList(metadataResultToAutoMetadata(result)),
+        extractedFields: buildExtractionFieldList(incomingMetadata),
         hasTitle: Boolean(result.title),
         hasPublisher: Boolean(result.publisher),
       },
@@ -1818,6 +2095,18 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
     }
 
     const parsed = parseTocFromOcrText(rawText);
+    traceEvent({
+      step: "toc",
+      component: "toc-parser",
+      category: "structure",
+      action: "toc_page_parsed",
+      message: "Parsed TOC page into structural hierarchy.",
+      details: {
+        chapterCount: parsed.chapters.length,
+        unitCount: parsed.units?.length ?? 0,
+        confidence: parsed.confidence,
+      },
+    });
 
     if (!isLikelyTocText(rawText) && parsed.chapters.length === 0) {
       setErrorMessage(AUTO_MODE_SCOPE_MESSAGE);
@@ -1856,6 +2145,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
           pages: nextPages.length,
         },
       });
+      traceEvent({
+        step: "toc",
+        component: "toc-stitcher",
+        category: "structure",
+        action: "toc_pages_stitched",
+        message: "Stitched TOC pages into final hierarchy.",
+        details: {
+          chapters: stitchedResult.chapters.length,
+          units: stitchedResult.units?.length ?? 0,
+          pages: nextPages.length,
+          confidence: stitchedResult.confidence,
+        },
+      });
 
       return nextPages;
     });
@@ -1863,6 +2165,17 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
 
   async function captureForStep(targetStep: "cover" | "title" | "toc"): Promise<CaptureResult | null> {
     const traceId = createAutoFlowTraceId(`auto-flow-${targetStep}`);
+    traceEvent({
+      step: targetStep,
+      component: "capture-orchestrator",
+      category: "orchestration",
+      action: "capture_requested",
+      message: "Capture requested for auto textbook step.",
+      details: {
+        traceId,
+        usage,
+      },
+    });
     emitAutoFlowDiagnostic("capture_requested", {
       traceId,
       context: {
@@ -1889,6 +2202,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         autoModeStep: targetStep,
         context: { usage, limits: DEFAULT_AUTO_CAPTURE_LIMITS },
       });
+      traceEvent({
+        step: targetStep,
+        component: "capture-orchestrator",
+        category: "orchestration",
+        action: "capture_blocked_limit",
+        severity: "warning",
+        message: "Capture blocked by usage limits.",
+        details: {
+          traceId,
+          usage,
+          limits: DEFAULT_AUTO_CAPTURE_LIMITS,
+        },
+      });
       return null;
     }
 
@@ -1908,6 +2234,17 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
       });
 
       const rawImage = await captureDisplayFrame({ preferChromeTabCapture: chromeOs });
+      traceEvent({
+        step: targetStep,
+        component: "capture-orchestrator",
+        category: "communication",
+        action: "frame_captured",
+        message: "Screen frame captured for OCR pipeline.",
+        details: {
+          traceId,
+          imageBytes: rawImage.length,
+        },
+      });
       emitAutoFlowDiagnostic("frame_captured", {
         traceId,
         context: {
@@ -1988,10 +2325,16 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
             imageBytes: cropped.length,
           },
         });
-        pipelineResult = await extractMetadataWithOcrFallbackFromDataUrl(cropped, {
-          pageType: targetStep,
-          publisherHint: metadataForm.publisher || null,
-        });
+        pipelineResult = await extractMetadataWithOcrFallbackFromDataUrl(
+          cropped,
+          {
+            pageType: targetStep,
+            publisherHint: metadataForm.publisher || null,
+          },
+          {
+            traceRecorder: traceMetadataPipelineRecord,
+          }
+        );
         setIsRunningOcr(false);
 
         metadataResult = pipelineResult.result;
@@ -2004,6 +2347,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
             metadataSource: pipelineResult.result.source,
             originalOcrProviderId: pipelineResult.originalOcrOutput?.providerId ?? null,
             confidence: pipelineResult.result.confidence,
+          },
+        });
+        traceEvent({
+          step: targetStep,
+          component: "metadata-pipeline",
+          category: "communication",
+          action: "metadata_pipeline_completed",
+          message: "Metadata pipeline request completed.",
+          details: {
+            traceId,
+            source: pipelineResult.result.source,
+            confidence: pipelineResult.result.confidence,
+            ocrProviderId: pipelineResult.originalOcrOutput?.providerId ?? null,
           },
         });
         ocrProviderStatusMessage = `Metadata source: ${pipelineResult.result.source}${pipelineResult.originalOcrOutput ? ` (OCR: ${pipelineResult.originalOcrOutput.providerId})` : ""}`;
@@ -2028,6 +2384,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
             ocrProviderId: ocr.providerId,
             textLength: ocr.text.length,
             attempts: ocr.attempts,
+          },
+        });
+        traceEvent({
+          step: "toc",
+          component: "toc-ocr",
+          category: "ocr",
+          action: "toc_ocr_completed",
+          message: "TOC OCR request completed.",
+          details: {
+            traceId,
+            providerId: ocr.providerId,
+            attempts: ocr.attempts,
+            textLength: ocr.text.length,
           },
         });
         ocrProviderStatusMessage = `OCR provider: ${ocr.providerId}`;
@@ -2058,6 +2427,18 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
           usageAfterCapture: limitResult.nextUsage,
         },
       });
+      traceEvent({
+        step: targetStep,
+        component: "capture-orchestrator",
+        category: "orchestration",
+        action: "capture_completed",
+        message: "Capture step completed.",
+        details: {
+          traceId,
+          ocrProviderId,
+          metadataSource: metadataResult?.source ?? null,
+        },
+      });
       return {
         imageDataUrl: cropped,
         ocrText,
@@ -2082,6 +2463,18 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         message: "Display capture failed.",
         autoModeStep: targetStep,
         context: { detail: message },
+      });
+      traceEvent({
+        step: targetStep,
+        component: "capture-orchestrator",
+        category: "error",
+        action: "capture_failed",
+        severity: "error",
+        message: "Capture step failed.",
+        details: {
+          traceId,
+          message,
+        },
       });
       return null;
     } finally {
@@ -2915,6 +3308,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
   async function handleSaveAutoSetup(target: "cloud" | "local"): Promise<void> {
     const isCloudUpload = target === "cloud";
     const traceId = createAutoFlowTraceId("auto-flow-save");
+    traceEvent({
+      step: "toc",
+      component: "save-orchestrator",
+      category: "upload",
+      action: "save_started",
+      message: "Auto textbook save process started.",
+      details: {
+        traceId,
+        target,
+        chapterCount: tocResult.chapters.length,
+        hasCover: Boolean(coverImageDataUrl),
+      },
+    });
     emitAutoFlowDiagnostic("save_started", {
       traceId,
       context: {
@@ -2955,6 +3361,14 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         traceId,
         context: { reason: "missing_cover_image" },
       });
+      traceEvent({
+        step: "toc",
+        component: "save-validator",
+        category: "upload",
+        action: "missing_cover",
+        severity: "warning",
+        message: "Save blocked because cover image is missing.",
+      });
       setIsUploadingToCloud(false);
       return;
     }
@@ -2966,6 +3380,14 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         traceId,
         context: { reason: "missing_copyright_page" },
       });
+      traceEvent({
+        step: "toc",
+        component: "save-validator",
+        category: "upload",
+        action: "missing_copyright",
+        severity: "warning",
+        message: "Save blocked because copyright metadata is missing.",
+      });
       setIsUploadingToCloud(false);
       return;
     }
@@ -2976,6 +3398,14 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         level: "warning",
         traceId,
         context: { reason: "missing_toc_chapters" },
+      });
+      traceEvent({
+        step: "toc",
+        component: "save-validator",
+        category: "upload",
+        action: "missing_toc",
+        severity: "warning",
+        message: "Save blocked because TOC chapters are missing.",
       });
       setIsUploadingToCloud(false);
       return;
@@ -3169,6 +3599,21 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         status: requiresAdminReview ? "submitted" as const : "draft" as const,
       };
 
+      traceEvent({
+        step: "toc",
+        component: "save-orchestrator",
+        category: "upload",
+        action: "save_payload_prepared",
+        message: "Prepared textbook payload for persistence/upload.",
+        details: {
+          title: nextTextbookChanges.title,
+          subject: nextTextbookChanges.subject,
+          chapterCount: effectiveTocResult.chapters.length,
+          relatedIsbnCount: nextTextbookChanges.relatedIsbns.length,
+          requiresAdminReview,
+        },
+      });
+
       let savedTextbookId: string | null = null;
 
       if (duplicateMatch && conflictResolutionMode !== "keep_both") {
@@ -3318,6 +3763,17 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
 
       if (isCloudUpload) {
         didStartCloudUpload = true;
+        traceEvent({
+          step: "toc",
+          component: "cloud-upload",
+          category: "communication",
+          action: "cloud_upload_started",
+          message: "Started tracked cloud upload sync.",
+          details: {
+            textbookId: savedTextbookId ?? "",
+            title: metadataForm.title.trim(),
+          },
+        });
         const cloudUploadResult = await runTrackedAutoTextbookCloudUpload({
           sessionId: `${draftKeyRef.current}:${savedTextbookId ?? "pending"}`,
           textbookId: savedTextbookId ?? "",
@@ -3334,6 +3790,22 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
               message: cloudUploadResult.message,
             },
           });
+          traceEvent({
+            step: "toc",
+            component: "cloud-upload",
+            category: "error",
+            action: "cloud_upload_failed",
+            severity: "error",
+            message: "Cloud upload failed.",
+            details: {
+              errorCode: cloudUploadResult.errorCode,
+              message: cloudUploadResult.message,
+            },
+          });
+          if (activeTraceRunRef.current) {
+            activeTraceRunRef.current = completeAutoCaptureTraceRun(activeTraceRunRef.current, "failed");
+            setLatestTraceRun(activeTraceRunRef.current);
+          }
           return;
         }
       }
@@ -3392,6 +3864,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
       await clearTocAutosave(sessionId);
 
       onSaved();
+      if (activeTraceRunRef.current) {
+        activeTraceRunRef.current = completeAutoCaptureTraceRun(activeTraceRunRef.current, "completed");
+        setLatestTraceRun(activeTraceRunRef.current);
+      }
       emitAutoFlowDiagnostic("save_completed", {
         traceId,
         context: {
@@ -3410,11 +3886,26 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
         level: "error",
         traceId,
       });
+      traceEvent({
+        step: "toc",
+        component: "save-orchestrator",
+        category: "error",
+        action: "save_failed",
+        severity: "error",
+        message: "Auto textbook save failed.",
+        details: {
+          traceId,
+        },
+      });
       appendDebugLogEntry({
         eventType: "error",
         message: "Auto textbook setup save failed.",
         autoModeStep: "toc",
       });
+      if (activeTraceRunRef.current) {
+        activeTraceRunRef.current = completeAutoCaptureTraceRun(activeTraceRunRef.current, "failed");
+        setLatestTraceRun(activeTraceRunRef.current);
+      }
     } finally {
       setIsBusy(false);
       setIsUploadingToCloud(false);
@@ -3529,7 +4020,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
                         : {
                             ...metadataForm,
                             title: draft.metadataTitle || metadataForm.title,
-                            subject: draft.metadataSubject || metadataForm.subject,
+                            subject: metadataForm.subject,
                             publisher: draft.metadataPublisher || metadataForm.publisher,
                           };
                       const nextRelatedIsbns = draft.relatedIsbnsSnapshot ?? [];
@@ -3654,16 +4145,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
       {(step === "cover" || step === "title") && !isRunningOcr ? (
         <div className="extraction-summary" aria-label="Extraction result summary">
           <p className="extraction-summary__header">
-            <strong>{step === "cover" ? "Cover field capture progress" : "Copyright-page field capture progress"} ({metadataExtractionChecklist.filter((item) => item.extracted).length}/{metadataExtractionChecklist.length}):</strong>
+            <strong>{step === "cover" ? "Cover field capture progress" : "Copyright-page field capture progress"} ({metadataExtractionChecklist.filter((item) => item.status === "success").length}/{metadataExtractionChecklist.length}):</strong>
           </p>
           <ul className="extraction-summary__list">
             {metadataExtractionChecklist.map((item) => (
               <li key={item.field} className="extraction-summary__item">
-                <span className="extraction-summary__check" aria-hidden="true">{item.extracted ? "OK" : "X"}</span> {item.field}
+                <span className={`extraction-summary__check extraction-summary__check--${item.status}`} aria-hidden="true">
+                  {item.status === "success" ? "✓" : item.status === "failed" ? "X" : "-"}
+                </span>{" "}
+                {item.field}
               </li>
             ))}
           </ul>
-          <p className="form-hint extraction-summary__hint">Fields stay marked with X until this step actually extracts them. Review and correct each field before clicking <strong>Accept</strong>.</p>
+          <p className="form-hint extraction-summary__hint">Legend: ✓ = extracted and valid, - = pending capture, X = extraction attempted but still missing. Review and correct each field before clicking <strong>Accept</strong>.</p>
         </div>
       ) : null}
 
@@ -3726,6 +4220,36 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
           </p>
         </div>
       ) : null}
+
+      <div className="panel" role="group" aria-label="Verbose debug settings">
+        <label className="settings-toggle">
+          <input
+            type="checkbox"
+            checked={verboseDebugEnabled}
+            onChange={(event) => setVerboseDebugEnabledState(event.target.checked)}
+          />
+          Enable verbose debug logging for this run
+        </label>
+        <p className="form-hint">
+          Captures a complete run map across OCR communication, metadata parsing, field decisions, TOC structure, and upload/finalization behavior.
+        </p>
+        {verboseDebugEnabled ? (
+          <div className="form-actions">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setShowVerboseTrace((current) => !current)}
+            >
+              {showVerboseTrace ? "Hide Debug Trace" : "View Debug Trace"}
+            </button>
+          </div>
+        ) : null}
+        {verboseDebugEnabled && showVerboseTrace ? (
+          latestTraceRun
+            ? <pre className="ocr-draft" aria-label="Auto capture debug trace">{latestTraceRunJson}</pre>
+            : <p className="form-hint">No debug trace has been recorded for this run yet.</p>
+        ) : null}
+      </div>
 
       <input
         ref={coverFileInputRef}
@@ -3906,6 +4430,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", saveMode = "cloud", 
             Subject
             {renderConfidenceDot("subject")}
             <select value={metadataForm.subject} onChange={(event) => updateMetadataForm("subject", event.target.value)}>
+              <option value="">-- Subject not extracted yet --</option>
               {SUBJECTS.map((subject) => (
                 <option key={subject} value={subject}>{subject}</option>
               ))}

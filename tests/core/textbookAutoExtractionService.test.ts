@@ -76,6 +76,56 @@ describe("textbookAutoExtractionService", () => {
     expect(metadata.subject).toBe("Science");
   });
 
+  it("leaves subject undefined when OCR text is too ambiguous", () => {
+    const metadata = extractMetadataFromOcrText([
+      "Student Edition",
+      "Workbook",
+      "Copyright 2026",
+      "Northbridge Press",
+    ].join("\n"));
+
+    expect(metadata.subject).toBeUndefined();
+  });
+
+  it("does not infer ELA from generic English-only wording", () => {
+    const metadata = extractMetadataFromOcrText([
+      "Student Edition",
+      "English Version",
+      "Workbook",
+      "Copyright 2026",
+    ].join("\n"));
+
+    expect(metadata.subject).toBeUndefined();
+  });
+
+  it("does not infer ELA when book only mentions reading and writing generically", () => {
+    // Regression: "reading" + "writing" together used to score elaScore=2 and trigger ELA.
+    // These words appear in companion notebooks, skill guides, and supplement books for ANY subject.
+    const cases = [
+      ["Interactive Student Notebook", "Reading and Writing Support", "McGraw-Hill Education", "Grade 7"],
+      ["Student Resource Guide", "Reading and Writing Skills for Academic Success", "Pearson", "Grade 10"],
+      ["Reading and Writing Strategies", "Science Companion Workbook", "Grade 6"],
+      ["Algebra 1", "Student Edition with Reading and Writing Workshop", "Savvas Learning", "Grade 8"],
+    ];
+    for (const lines of cases) {
+      const metadata = extractMetadataFromOcrText(lines.join("\n"));
+      expect(metadata.subject).not.toBe("ELA");
+    }
+  });
+
+  it("infers ELA when book explicitly names language arts or grammar", () => {
+    const cases: [string[], string][] = [
+      [["Language Arts", "Grade 5", "McGraw-Hill Education"], "ELA"],
+      [["English Language Arts", "Student Edition", "Grade 3", "Pearson"], "ELA"],
+      [["Grammar Workshop", "Level Orange", "Sadlier", "Grade 6"], "ELA"],
+      [["American Literature", "Student Edition", "Holt McDougal", "Grade 11"], "ELA"],
+    ];
+    for (const [lines, expectedSubject] of cases) {
+      const metadata = extractMetadataFromOcrText(lines.join("\n"));
+      expect(metadata.subject).toBe(expectedSubject);
+    }
+  });
+
   it("extracts rich metadata from a copyright page", () => {
     const metadata = extractMetadataFromOcrText([
       "Student Edition",
@@ -896,6 +946,44 @@ describe("textbookAutoExtractionService", () => {
       expect(parsed.chapters[1].sections.map((section) => section.sectionNumber)).toEqual(["2.1"]);
     });
 
+    it("captures split-line unit titles before chapter parsing and nests chapters under that unit", () => {
+      const parsed = parseTocFromOcrText([
+        "Unit 1",
+        "Motion and Forces",
+        "Chapter 1 Motion 12",
+        "1.1 Position and Distance 14",
+        "Chapter 2 Forces 22",
+        "2.1 Balanced Forces 24",
+      ].join("\n"));
+
+      expect(parsed.units).toHaveLength(1);
+      expect(parsed.units?.[0].unitNumber).toBe("1");
+      expect(parsed.units?.[0].title).toBe("Motion and Forces");
+      expect(parsed.units?.[0].chapters.map((chapter) => chapter.chapterNumber)).toEqual(["1", "2"]);
+      expect(parsed.chapters.every((chapter) => chapter.unitName?.includes("Unit 1 Motion and Forces"))).toBe(true);
+    });
+
+    it("re-attaches unmatched chapters to the nearest unit to avoid orphan chapter nodes", () => {
+      const parsed = parseTocFromOcrText([
+        "Unit 1: Foundations",
+        "Chapter 1 Basics 10",
+        "1.1 Intro 12",
+        "Chapter 2 Practice 18",
+        "2.1 Exercises 20",
+        "Unit 2: Applications",
+        "Chapter 3 Systems 30",
+        "3.1 Modeling 32",
+      ].join("\n"));
+
+      const assignedChapterKeys = new Set(
+        (parsed.units ?? []).flatMap((unit) => unit.chapters).map((chapter) => `${chapter.chapterNumber}|${chapter.title}`)
+      );
+      const orphans = parsed.chapters.filter((chapter) => !assignedChapterKeys.has(`${chapter.chapterNumber}|${chapter.title}`));
+
+      expect(parsed.units?.length ?? 0).toBeGreaterThan(0);
+      expect(orphans).toHaveLength(0);
+    });
+
     it("preserves downstream hierarchy when units are stitched across page boundaries", () => {
       const firstPage = parseTocFromOcrText([
         "Unit 1: Foundations",
@@ -970,6 +1058,128 @@ describe("textbookAutoExtractionService", () => {
       expect(lessonTwoEntries).toHaveLength(1);
       expect(lessonTwoEntries[0]?.title).toBe("Standards of Measurement");
       expect(lessonTwoEntries[0]?.pageStart).toBe(19);
+    });
+
+    it("captures single-word all-caps unit titles on a split line (e.g., UNIT 2 / ENERGY)", () => {
+      // Reproduces the Inspire Physical Science spread-view TOC page 2:
+      // "UNIT 2" on one line, "ENERGY" on the next (single all-caps word)
+      const parsed = parseTocFromOcrText([
+        "UNIT 2",
+        "ENERGY",
+        "ENCOUNTER THE PHENOMENON",
+        "How can energy be collected and stored for daily use?",
+        "STEM UNIT 2 PROJECT ............. 85",
+        "MODULE 4: WORK AND ENERGY",
+        "Lesson 1 Work and Machines 88",
+        "Lesson 2 Describing Energy 95",
+        "Lesson 3 Conservation of Energy 101",
+        "MODULE 5: THERMAL ENERGY",
+        "Lesson 1 Temperature, Thermal Energy, and Heat 114",
+        "Lesson 2 Conduction, Convection, and Radiation 120",
+      ].join("\n"));
+
+      expect(parsed.units).toBeDefined();
+      const unit2 = parsed.units?.find((unit) => unit.unitNumber === "2");
+      expect(unit2).toBeDefined();
+      // Title "ENERGY" captured from the split line
+      expect(unit2?.title).toBe("ENERGY");
+      // Modules 4 and 5 correctly nested under Unit 2
+      expect(unit2?.chapters.map((chapter) => chapter.chapterNumber)).toContain("4");
+      expect(unit2?.chapters.map((chapter) => chapter.chapterNumber)).toContain("5");
+    });
+
+    it("stitches multi-page TOC correctly when second page unit has no inline title (unit title = canonical label)", () => {
+      // Reproduces the bug where "UNIT 2" (no inline title) caused unitIdentityFromUnit
+      // to compute "unit 2 unit 2" while chapter.unitName = "Unit 2", preventing correct matching.
+      const page1 = parseTocFromOcrText([
+        "UNIT 1: MOTION AND FORCES",
+        "MODULE 1: THE NATURE OF SCIENCE",
+        "Lesson 1 Methods of Science 4",
+        "MODULE 2: MOTION",
+        "Lesson 1 Describing Motion 38",
+        "MODULE 3: FORCES AND NEWTON'S LAWS",
+        "Lesson 1 Forces 60",
+      ].join("\n"));
+
+      // Second page: UNIT 2 alone on a line (no inline title), then modules
+      const page2 = parseTocFromOcrText([
+        "UNIT 2",
+        "ENERGY",
+        "MODULE 4: WORK AND ENERGY",
+        "Lesson 1 Work and Machines 88",
+        "MODULE 5: THERMAL ENERGY",
+        "Lesson 1 Temperature 114",
+      ].join("\n"));
+
+      const stitched = stitchTocPages([
+        { pageIndex: 0, chapters: page1.chapters, units: page1.units, confidence: page1.confidence },
+        { pageIndex: 1, chapters: page2.chapters, units: page2.units, confidence: page2.confidence },
+      ]);
+
+      // Both units must be present after stitching
+      expect(stitched.units).toBeDefined();
+      expect(stitched.units?.map((unit) => unit.unitNumber)).toContain("1");
+      expect(stitched.units?.map((unit) => unit.unitNumber)).toContain("2");
+
+      // Unit 2 must contain modules 4 and 5, not zero chapters
+      const unit2 = stitched.units?.find((unit) => unit.unitNumber === "2");
+      expect(unit2).toBeDefined();
+      expect(unit2?.chapters.length).toBeGreaterThanOrEqual(2);
+      expect(unit2?.chapters.map((chapter) => chapter.chapterNumber)).toContain("4");
+      expect(unit2?.chapters.map((chapter) => chapter.chapterNumber)).toContain("5");
+
+      // All chapters (modules 1-5) must be in the flat list
+      expect(stitched.chapters.map((chapter) => chapter.chapterNumber)).toEqual(
+        expect.arrayContaining(["1", "2", "3", "4", "5"])
+      );
+    });
+
+    it("keeps complete hierarchy across TOC pages when Unit 2 modules continue on page two", () => {
+      const page1 = parseTocFromOcrText([
+        "UNIT 1: MOTION AND FORCES",
+        "MODULE 1: THE NATURE OF SCIENCE",
+        "Lesson 1 Methods of Science 4",
+        "MODULE 2: MOTION",
+        "Lesson 1 Describing Motion 38",
+        "MODULE 3: FORCES AND NEWTON'S LAWS",
+        "Lesson 1 Forces 60",
+      ].join("\n"));
+
+      const page2 = parseTocFromOcrText([
+        "UNIT 2",
+        "ENERGY",
+        "ENCOUNTER THE PHENOMENON",
+        "How can energy be collected and stored for daily use?",
+        "MODULE 4: WORK AND ENERGY",
+        "Lesson 1 Work and Machines 88",
+        "MODULE 5: THERMAL ENERGY",
+        "Lesson 1 Temperature, Thermal Energy, and Heat 114",
+        "MODULE 6: ELECTRICITY",
+        "Lesson 1 Electric Charge 140",
+        "MODULE 7: MAGNETISM AND ITS USES",
+        "Lesson 1 Magnetism 166",
+        "MODULE 8: ENERGY SOURCES AND THE ENVIRONMENT",
+        "Lesson 1 Fossile Fuels 192",
+      ].join("\n"));
+
+      const stitched = stitchTocPages([
+        { pageIndex: 0, chapters: page1.chapters, units: page1.units, confidence: page1.confidence },
+        { pageIndex: 1, chapters: page2.chapters, units: page2.units, confidence: page2.confidence },
+      ]);
+
+      expect(stitched.units).toBeDefined();
+      expect(stitched.units?.map((unit) => unit.unitNumber)).toEqual(expect.arrayContaining(["1", "2"]));
+
+      const unit2 = stitched.units?.find((unit) => unit.unitNumber === "2");
+      expect(unit2).toBeDefined();
+      expect(unit2?.title).toBe("ENERGY");
+      expect(unit2?.chapters.map((chapter) => chapter.chapterNumber)).toEqual(
+        expect.arrayContaining(["4", "5", "6", "7", "8"])
+      );
+
+      expect(stitched.chapters.map((chapter) => chapter.chapterNumber)).toEqual(
+        expect.arrayContaining(["1", "2", "3", "4", "5", "6", "7", "8"])
+      );
     });
   });
 });

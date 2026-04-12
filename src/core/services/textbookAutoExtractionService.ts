@@ -905,9 +905,46 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
   const units: TocUnit[] = [];
   const unitMap = new Map<string, TocUnit>();
   const chapterIdentity = (chapter: TocChapter): string => `${normalizeChapterNumber(chapter.chapterNumber)}|${normalizeToken(chapter.title)}`;
+  const isLikelyStandaloneUnitTitle = (line: string): boolean => {
+    if (!line.trim()) {
+      return false;
+    }
+
+    if (/^(?:chapter|ch\.?|module|lesson)\b/i.test(line)) {
+      return false;
+    }
+
+    if (/^\d+(?:\.\d+)+\b/.test(line)) {
+      return false;
+    }
+
+    if (/table of contents/i.test(line)) {
+      return false;
+    }
+
+    if (/encounter the phenomenon|claim,?\s*evidence,?\s*reasoning|go further|wrap-?up|project\b/i.test(line)) {
+      return false;
+    }
+
+    if (/\?|^(why|how|what|when|where|who)\b/i.test(line.trim())) {
+      return false;
+    }
+
+    const words = line.split(/\s+/).filter(Boolean);
+    if (/\b\d{2,3}\b/.test(line)) {
+      return false;
+    }
+    if (words.length >= 2) {
+      return true;
+    }
+    // Allow single-word titles only when ALL CAPS (e.g., "ENERGY", "MOTION")
+    const word = words[0] ?? "";
+    return word.length >= 3 && word === word.toUpperCase() && /^[A-Z][A-Z]+$/.test(word);
+  };
   let currentChapter: TocChapter | null = null;
   let activeUnitKey: string | undefined;
   let activeUnitName: string | undefined;
+  let pendingStandaloneUnitTitleKey: string | null = null;
   let lineHits = 0;
 
   for (const line of lines) {
@@ -920,9 +957,11 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
 
       activeUnitKey = `unit-${normalizeToken(unitNumber)}`;
       const canonicalUnitLabel = `Unit ${unitNumber}`;
+      const hasExplicitUnitTitle = normalizeToken(unitTitle) !== normalizeToken(canonicalUnitLabel);
       activeUnitName = normalizeToken(unitTitle) === normalizeToken(canonicalUnitLabel)
         ? canonicalUnitLabel
         : `${canonicalUnitLabel} ${unitTitle}`.trim();
+      pendingStandaloneUnitTitleKey = hasExplicitUnitTitle ? null : activeUnitKey;
       
       if (!unitMap.has(activeUnitKey)) {
         const newUnit: TocUnit = {
@@ -944,8 +983,23 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       continue;
     }
 
+    if (pendingStandaloneUnitTitleKey && isLikelyStandaloneUnitTitle(line)) {
+      const pendingUnit = unitMap.get(pendingStandaloneUnitTitleKey);
+      if (pendingUnit) {
+        const canonicalUnitLabel = `Unit ${pendingUnit.unitNumber}`;
+        pendingUnit.title = line.trim();
+        activeUnitName = `${canonicalUnitLabel} ${pendingUnit.title}`.trim();
+        lineHits += 1;
+        pendingStandaloneUnitTitleKey = null;
+        continue;
+      }
+
+      pendingStandaloneUnitTitleKey = null;
+    }
+
     const moduleMatch = line.match(/^module\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/i);
     if (moduleMatch) {
+      pendingStandaloneUnitTitleKey = null;
       currentChapter = {
         chapterNumber: moduleMatch[1],
         title: moduleMatch[2].trim(),
@@ -968,6 +1022,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
 
     const chapterMatch = line.match(/^(?:chapter|ch\.?)\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/i);
     if (chapterMatch) {
+      pendingStandaloneUnitTitleKey = null;
       currentChapter = {
         chapterNumber: chapterMatch[1],
         title: chapterMatch[2].trim(),
@@ -990,6 +1045,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
 
     const lessonMatch = line.match(/^lesson\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/i);
     if (lessonMatch) {
+      pendingStandaloneUnitTitleKey = null;
       if (!currentChapter) {
         currentChapter = {
           chapterNumber: normalizeChapterNumber(lessonMatch[1]),
@@ -1055,6 +1111,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
 
     const numericChapterMatch = line.match(/^([0-9]{1,2})\s+(.+?)\s+(\d+)(?:\s*[-–]\s*(\d+))?$/);
     if (numericChapterMatch && !/^\d+\.\d+/.test(line)) {
+      pendingStandaloneUnitTitleKey = null;
       currentChapter = {
         chapterNumber: numericChapterMatch[1],
         title: numericChapterMatch[2].trim(),
@@ -1077,6 +1134,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
 
     const sectionMatch = line.match(/^([0-9]+(?:\.[0-9]+)+)\s+(.+?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/);
     if (sectionMatch) {
+      pendingStandaloneUnitTitleKey = null;
       if (!currentChapter) {
         currentChapter = {
           chapterNumber: sectionMatch[1].split(".")[0],
@@ -1133,6 +1191,49 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       };
     })
     .filter((unit) => unit.chapters.length > 0);
+
+  if (normalizedUnits.length > 0) {
+    const assignedChapterKeys = new Set(
+      normalizedUnits
+        .flatMap((unit) => unit.chapters)
+        .map((chapter) => chapterIdentity(chapter))
+    );
+    const orphanChapters = normalizedChapters.filter((chapter) => !assignedChapterKeys.has(chapterIdentity(chapter)));
+
+    for (const orphanChapter of orphanChapters) {
+      const chapterStart = orphanChapter.pageStart;
+      let targetUnit = normalizedUnits.find((unit) => {
+        if (!orphanChapter.unitName) {
+          return false;
+        }
+
+        return normalizeToken(`Unit ${unit.unitNumber} ${unit.title}`) === normalizeToken(orphanChapter.unitName);
+      });
+
+      if (!targetUnit && isPositivePage(chapterStart)) {
+        targetUnit = normalizedUnits.find((unit) => {
+          if (!isPositivePage(unit.pageStart)) {
+            return false;
+          }
+
+          if (isPositivePage(unit.pageEnd)) {
+            return chapterStart >= unit.pageStart && chapterStart <= unit.pageEnd;
+          }
+
+          return chapterStart >= unit.pageStart;
+        });
+      }
+
+      if (!targetUnit) {
+        targetUnit = normalizedUnits[normalizedUnits.length - 1];
+      }
+
+      if (!targetUnit.chapters.some((chapter) => chapterIdentity(chapter) === chapterIdentity(orphanChapter))) {
+        orphanChapter.unitName = `Unit ${targetUnit.unitNumber} ${targetUnit.title}`.trim();
+        targetUnit.chapters.push(orphanChapter);
+      }
+    }
+  }
 
   const confidence = lines.length > 0 ? Math.min(1, lineHits / lines.length + (chapters.length > 0 ? 0.2 : 0)) : 0;
 
@@ -1243,7 +1344,12 @@ export function stitchTocPages(pages: TocPage[]): TocStructure {
   const chapterMap = new Map<string, TocChapter>();
   const unitMap = new Map<string, TocUnit>();
   const unitOrder: string[] = [];
-  const unitIdentityFromUnit = (unit: TocUnit): string => normalizeToken(`unit ${unit.unitNumber} ${unit.title}`);
+  const unitIdentityFromUnit = (unit: TocUnit): string => {
+    const canonicalNorm = normalizeToken(`unit ${unit.unitNumber}`);
+    const titleNorm = normalizeToken(unit.title);
+    // When the stored title IS the canonical label (e.g., unit.title = "Unit 2"), avoid doubling.
+    return titleNorm === canonicalNorm ? canonicalNorm : normalizeToken(`unit ${unit.unitNumber} ${unit.title}`);
+  };
   const unitIdentityFromName = (name: string | undefined): string => normalizeToken(name ?? "");
   let duplicateHits = 0;
   let conflictHits = 0;
@@ -1956,11 +2062,12 @@ function inferSubject(text: string): string | undefined {
     /civics/g,
   ]);
   const elaScore = countSubjectSignals(source, [
+    /english language arts/g,
     /language arts/g,
     /literature/g,
     /grammar/g,
-    /reading/g,
-    /english/g,
+    // "reading" and "writing" intentionally excluded: they appear as verbs/nouns
+    // in every textbook subject area and cause false-positive ELA classification.
   ]);
   const computerScienceScore = countSubjectSignals(source, [
     /computer science/g,
@@ -1968,11 +2075,11 @@ function inferSubject(text: string): string | undefined {
     /programming/g,
   ]);
 
-  if (scienceScore > 0 && scienceScore >= mathScore) return "Science";
-  if (mathScore > 0) return "Math";
-  if (socialStudiesScore > 0) return "Social Studies";
-  if (elaScore > 0) return "ELA";
-  if (computerScienceScore > 0) return "Computer Science";
+  if (scienceScore >= 1 && scienceScore >= mathScore) return "Science";
+  if (mathScore >= 1) return "Math";
+  if (socialStudiesScore >= 1) return "Social Studies";
+  if (elaScore >= 1) return "ELA";
+  if (computerScienceScore >= 1) return "Computer Science";
   return undefined;
 }
 
@@ -2169,7 +2276,8 @@ function hasSubjectSignal(rawText: string, subject?: string): boolean {
     return /history|social studies|government|civics/.test(rawText.toLowerCase());
   }
   if (normalized === "ela") {
-    return /language arts|literature|reading|grammar|english/.test(rawText.toLowerCase());
+    // "reading" and "writing" excluded — they appear in every subject area.
+    return /english language arts|language arts|\bliterature\b|\bgrammar\b/.test(rawText.toLowerCase());
   }
   if (normalized === "computer science") {
     return /computer science|coding|programming/.test(rawText.toLowerCase());

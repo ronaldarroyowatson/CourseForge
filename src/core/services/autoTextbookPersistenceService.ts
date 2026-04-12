@@ -141,7 +141,7 @@ export async function persistAutoTextbook(
     subtitle: input.metadata.subtitle,
     grade: input.metadata.grade.trim() || input.metadata.gradeBand?.trim() || "Unspecified",
     gradeBand: input.metadata.gradeBand,
-    subject: input.metadata.subject.trim() || "Other",
+    subject: input.metadata.subject.trim(),
     edition: input.metadata.edition.trim() || "Unknown",
     publicationYear: input.metadata.publicationYear,
     copyrightYear: input.metadata.copyrightYear,

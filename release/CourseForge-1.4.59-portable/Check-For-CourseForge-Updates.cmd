@@ -6,7 +6,7 @@ if not exist "%ROOT%AutoUpdate-CourseForge.ps1" (
   endlocal
   exit /b 1
 )
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%AutoUpdate-CourseForge.ps1" -CurrentVersion "1.4.58" -Owner "ronaldarroyowatson" -Repo "CourseForge" -CheckOnly
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%AutoUpdate-CourseForge.ps1" -CurrentVersion "1.4.59" -Owner "ronaldarroyowatson" -Repo "CourseForge" -CheckOnly
 set EXITCODE=%ERRORLEVEL%
 if "%EXITCODE%"=="2" (
   echo Update available.

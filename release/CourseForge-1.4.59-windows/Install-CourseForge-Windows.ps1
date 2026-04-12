@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $script:ProductName = "CourseForge"
-$script:ProductVersion = "1.4.58"
+$script:ProductVersion = "1.4.59"
 $script:RegistryPath = "HKCU:\Software\CourseForge"
 $script:UninstallRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CourseForge"
 $script:UserRoot = Join-Path $env:LOCALAPPDATA "CourseForge"

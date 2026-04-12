@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 
 import {
   type CloudSettingsDecision,
@@ -21,6 +22,7 @@ import { useUIStore } from "../../store/uiStore";
 
 interface DesignSystemSettingsCardProps {
   userId: string | null;
+  placementClassName?: string;
 }
 
 type PersistenceMode = "local" | "cloud" | "merge";
@@ -46,6 +48,8 @@ const SPACING_PRESETS: RatioPreset[] = [
   { label: "Authoritative", value: 1.5, description: "Strong rhythm" },
   { label: "Clean", value: 2.0, description: "Very open" },
 ];
+
+const RATIO_PRESET_SNAP_EPSILON = 0.004;
 
 const STROKE_PRESET_OPTIONS: Array<{ label: string; value: DesignTokenPreferences["strokePreset"]; descriptor: string }> = [
   { label: "Common", value: "common", descriptor: "1 -> 1.5 -> 2" },
@@ -88,7 +92,18 @@ function motionDescription(value: number): string {
   return "XL (complex operations)";
 }
 
-export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardProps): React.JSX.Element {
+function resolveClosestPreset(value: number, presets: RatioPreset[]): RatioPreset {
+  return presets.reduce((closest, candidate) => {
+    return Math.abs(candidate.value - value) < Math.abs(closest.value - value) ? candidate : closest;
+  }, presets[0]);
+}
+
+function describePreset(value: number, presets: RatioPreset[]): string {
+  const closest = resolveClosestPreset(value, presets);
+  return `${closest.label} (${closest.description})`;
+}
+
+export function DesignSystemSettingsCard({ userId, placementClassName }: DesignSystemSettingsCardProps): React.JSX.Element {
   const prefs = useUIStore((state) => state.designTokenPreferences);
   const tokens = useUIStore((state) => state.designTokens);
   const setPrefs = useUIStore((state) => state.setDesignTokenPreferences);
@@ -103,25 +118,85 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
   const [cloudPromptStatus, setCloudPromptStatus] = React.useState<string | null>(null);
   const [cloudDecisionBusy, setCloudDecisionBusy] = React.useState(false);
   const [corruptionStatus, setCorruptionStatus] = React.useState<string | null>(null);
+  const [isExpanded, setIsExpanded] = React.useState(false);
+  const [isCollapsing, setIsCollapsing] = React.useState(false);
+  const [collapseRequested, setCollapseRequested] = React.useState<false | string>(false);
   const [localDiagnostics, setLocalDiagnostics] = React.useState(() => readLocalDesignTokenDiagnostics());
   const confirmedRef = React.useRef<DesignTokenPreferences>(prefs);
   const countdownIdRef = React.useRef<number | null>(null);
+  const collapseAfterDialogRef = React.useRef(false);
+  const collapseTimerRef = React.useRef<number | null>(null);
   const fibonacciContainerRef = React.useRef<HTMLDivElement>(null);
+  const sectionRefs = React.useRef<Record<string, HTMLElement | null>>({});
 
   React.useEffect(() => {
     setLocalDiagnostics(readLocalDesignTokenDiagnostics());
   }, [prefs]);
 
   React.useEffect(() => {
-    const containerWidth =
-      fibonacciContainerRef.current?.offsetWidth ?? (typeof window !== "undefined" ? window.innerWidth : 1024);
-    const decision = selectTwoCardLayout(containerWidth);
-    void logFibonacciLayoutDecision(decision, {
-      directionalFlow: prefs.directionalFlow,
-      containerWidth,
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!isExpanded) {
+      return;
+    }
+
+    const captureLayoutDecision = (): void => {
+      const containerWidth =
+        fibonacciContainerRef.current?.offsetWidth ?? (typeof window !== "undefined" ? window.innerWidth : 1024);
+      const decision = selectTwoCardLayout(containerWidth);
+      void logFibonacciLayoutDecision(decision, {
+        directionalFlow: prefs.directionalFlow,
+        containerWidth,
+        responsiveFallbackApplied: decision.mode === "vertical",
+      });
+    };
+
+    captureLayoutDecision();
+    window.addEventListener("resize", captureLayoutDecision);
+
+    return () => {
+      window.removeEventListener("resize", captureLayoutDecision);
+    };
+  }, [isExpanded, prefs.directionalFlow]);
+
+  React.useEffect(() => {
+    if (!isExpanded) {
+      return;
+    }
+
+    const alignmentPairs = [
+      { control: "gamma", preview: "color-scale" },
+      { control: "type-ratio", preview: "type-scale" },
+      { control: "organizer-colors", preview: "organizers" },
+      { control: "motion-controls", preview: "motion-preview" },
+    ];
+
+    for (const pair of alignmentPairs) {
+      const controlNode = sectionRefs.current[pair.control];
+      const previewNode = sectionRefs.current[pair.preview];
+      if (!controlNode || !previewNode) {
+        void logDesignSystemDebugEvent("Alignment check fallback: section ref missing.", {
+          control: pair.control,
+          preview: pair.preview,
+        });
+        continue;
+      }
+
+      const topDelta = Math.abs(controlNode.getBoundingClientRect().top - previewNode.getBoundingClientRect().top);
+      if (topDelta > 28) {
+        void logDesignSystemDebugEvent("Alignment mismatch detected and normalized by paired section ordering.", {
+          control: pair.control,
+          preview: pair.preview,
+          topDelta,
+          correction: "paired-section-order",
+        });
+      } else {
+        void logDesignSystemDebugEvent("Alignment check passed.", {
+          control: pair.control,
+          preview: pair.preview,
+          topDelta,
+        });
+      }
+    }
+  }, [isExpanded, prefs.gamma, prefs.motionTimingMs, prefs.spacingRatio, prefs.typeRatio]);
 
   React.useEffect(() => {
     if (!userId) {
@@ -209,9 +284,47 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
     setStatus("Changes reverted automatically for safety.");
     setSecondsLeft(12);
     void logDesignSystemDebugEvent("Design token safety auto-revert triggered.");
+    if (collapseAfterDialogRef.current) {
+      setCollapseRequested("auto-revert");
+    }
   }, [secondsLeft, setPrefs, showKeepDialog]);
 
+  // ─── Collapse animation effect ────────────────────────────────────────
+  React.useEffect(() => {
+    if (!collapseRequested) {
+      return;
+    }
+
+    void logDesignSystemDebugEvent("Design system controls: collapse animation started.", {
+      trigger: collapseRequested,
+      easing: "ease-out",
+      timingMs: prefs.motionTimingMs,
+    });
+    setIsCollapsing(true);
+
+    if (collapseTimerRef.current !== null) {
+      window.clearTimeout(collapseTimerRef.current);
+    }
+
+    collapseTimerRef.current = window.setTimeout(() => {
+      setIsCollapsing(false);
+      setIsExpanded(false);
+      setCollapseRequested(false);
+      void logDesignSystemDebugEvent("Design system controls: collapsed state restored.", {
+        trigger: collapseRequested,
+        returnedToBottomRight: true,
+      });
+    }, prefs.motionTimingMs + 30);
+
+    return () => {
+      if (collapseTimerRef.current !== null) {
+        window.clearTimeout(collapseTimerRef.current);
+      }
+    };
+  }, [collapseRequested, prefs.motionTimingMs]);
+
   async function handleSave(): Promise<void> {
+    collapseAfterDialogRef.current = true;
     setShowKeepDialog(true);
     setSecondsLeft(12);
 
@@ -351,6 +464,9 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
     setSecondsLeft(12);
     setStatus("Changes confirmed.");
     void logDesignSystemDebugEvent("Design token changes confirmed by user.");
+    if (collapseAfterDialogRef.current) {
+      setCollapseRequested("save-confirmed");
+    }
   }
 
   function setSemanticColor(key: keyof DesignTokenPreferences["semanticColors"], value: string): void {
@@ -362,265 +478,495 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
     });
   }
 
+  function handleExpandToggle(): void {
+    if (isExpanded || isCollapsing) {
+      setCollapseRequested("toggle-button");
+      return;
+    }
+
+    setIsExpanded(true);
+    void logDesignSystemDebugEvent("Design system controls: collapsed state initialized.", {
+      collapsed: false,
+      expanding: true,
+      cardOrder: "last",
+    });
+    void logDesignSystemDebugEvent("Design system controls expanded.", {
+      zHeight: 1050,
+      easing: "ease-in",
+      directionalFlow: prefs.directionalFlow,
+      fibonacciRatioBig: 3,
+      fibonacciRatioSmall: 2,
+      exampleCardSide: prefs.directionalFlow === "right-to-left" ? "right" : "left",
+      controlsCardSide: prefs.directionalFlow === "right-to-left" ? "left" : "right",
+    });
+  }
+
+  function setSectionRef(key: string): (node: HTMLElement | null) => void {
+    return (node) => {
+      sectionRefs.current[key] = node;
+    };
+  }
+
+  function handleTypeRatioChange(rawValue: number): void {
+    const closest = resolveClosestPreset(rawValue, TYPE_RATIO_PRESETS);
+    const distance = Math.abs(closest.value - rawValue);
+
+    setPrefs({ typeRatio: rawValue });
+
+    if (distance <= RATIO_PRESET_SNAP_EPSILON) {
+      void logDesignSystemDebugEvent("Type ratio snapped to preset.", {
+        rawValue,
+        preset: closest.label,
+        descriptor: closest.description,
+      });
+      return;
+    }
+
+    void logDesignSystemDebugEvent("Type ratio manually adjusted.", {
+      rawValue,
+      nearestPreset: closest.label,
+      descriptor: closest.description,
+    });
+  }
+
+  function handleSpacingRatioChange(rawValue: number): void {
+    const closest = resolveClosestPreset(rawValue, SPACING_PRESETS);
+    const distance = Math.abs(closest.value - rawValue);
+
+    setPrefs({ spacingRatio: rawValue });
+
+    if (distance <= RATIO_PRESET_SNAP_EPSILON) {
+      void logDesignSystemDebugEvent("Spacing ratio snapped to preset.", {
+        rawValue,
+        preset: closest.label,
+        descriptor: closest.description,
+      });
+      return;
+    }
+
+    void logDesignSystemDebugEvent("Spacing ratio manually adjusted.", {
+      rawValue,
+      nearestPreset: closest.label,
+      descriptor: closest.description,
+    });
+  }
+
   return (
-    <article className="settings-card cf-ds-card settings-card--full" aria-live="polite">
-      <h3>Design System Controls (New)</h3>
-      <p className="settings-meta">Single source of truth for color, type, stroke, spacing, and motion tokens.</p>
-
-      {cloudPromptVisible ? (
-        <div className="cf-keep-dialog" role="group" aria-label="Cloud settings choices">
-          <p>Cloud settings were detected for this account. Choose how to proceed.</p>
-          <div className="form-actions">
-            <button type="button" disabled={cloudDecisionBusy} onClick={() => { void handleCloudDecision("apply-cloud"); }}>Apply Cloud Settings</button>
-            <button type="button" className="btn-secondary" disabled={cloudDecisionBusy} onClick={() => { void handleCloudDecision("keep-local"); }}>Keep Local Settings</button>
-            <button type="button" className="btn-secondary" disabled={cloudDecisionBusy} onClick={() => { void handleCloudDecision("merge-local-into-cloud"); }}>Merge Local Into Cloud</button>
-            <button type="button" className="btn-secondary" disabled={cloudDecisionBusy} onClick={() => { void handleCloudDecision("delete-cloud-use-local-defaults"); }}>Delete Cloud Settings and Use Local Defaults</button>
-          </div>
-        </div>
-      ) : null}
-
-      {cloudPromptStatus ? <p className="settings-meta">{cloudPromptStatus}</p> : null}
-
-      {localDiagnostics.corrupted ? (
-        <div className="cf-keep-dialog" role="group" aria-label="Corrupted settings recovery">
-          <p>Saved settings appear invalid. Choose a recovery option.</p>
-          <p className="settings-meta">Invalid fields: {localDiagnostics.invalidFields.join(", ") || "unknown"}</p>
-          <div className="form-actions">
-            <button type="button" onClick={() => { void handleDeleteOldSettings(); }}>Delete Old Settings</button>
-            <button type="button" className="btn-secondary" onClick={() => resetPrefs()}>Reset to Defaults</button>
-            <button type="button" className="btn-secondary" onClick={() => { void handleRepairSettings(); }}>Try to Repair Settings</button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => {
-                setCorruptionStatus(`Debug details: ${JSON.stringify(localDiagnostics.raw).slice(0, 260)}`);
-              }}
-            >
-              View Debug Details
-            </button>
-          </div>
-          {corruptionStatus ? <p className="settings-meta">{corruptionStatus}</p> : null}
-        </div>
-      ) : null}
-
-      {/* ── Fibonacci two-card split: Example Card (3) + Controls (2) ── */}
-      <div
-        ref={fibonacciContainerRef}
-        className="cf-ds-fibonacci-layout"
-        data-flow={prefs.directionalFlow}
+    <>
+      {/* Collapsed trigger card — always fixed bottom-right */}
+      <article
+        className={`settings-card cf-ds-card settings-card--design-system ${placementClassName ?? ""}`.trim()}
+        aria-live="polite"
       >
-        {/* Left pane — Example Card (flex: 3) */}
-        <div className="cf-ds-fibonacci-layout__example">
-          <div className="cf-example-card" aria-label="example card preview">
-            <div className="cf-example-card__row">
-              <h4>Buttons</h4>
-              <div className="cf-example-card__button-grid">
-                <DemoButton variant="primary" size="sm" />
-                <DemoButton variant="primary" size="md" state="hover" />
-                <DemoButton variant="primary" size="lg" state="active" />
-                <DemoButton variant="secondary" size="md" />
-                <DemoButton variant="ghost" size="md" />
-                <DemoButton variant="destructive" size="md" />
-                <DemoButton variant="secondary" size="sm" state="disabled" />
-                <DemoButton variant="secondary" size="lg" state="loading" />
-              </div>
-            </div>
-
-            <div className="cf-example-card__row">
-              <h4>Cards</h4>
-              <div className="cf-example-card__cards">
-                <article className="cf-sample-card">
-                  <h5>Email card</h5>
-                  <p>Subject: Weekly curriculum update</p>
-                  <button type="button" className="cf-ds-btn cf-ds-btn--primary cf-ds-btn--sm">Open</button>
-                </article>
-                <article className="cf-sample-card cf-sample-card--disabled">
-                  <h5>Disabled card</h5>
-                  <p>This section is not available yet.</p>
-                </article>
-                <article className="cf-sample-card cf-sample-card--default">
-                  <h5>Default card</h5>
-                  <p>Color, title, description, and action all follow tokens.</p>
-                  <button type="button" className="cf-ds-btn cf-ds-btn--secondary cf-ds-btn--sm">Action</button>
-                </article>
-              </div>
-            </div>
-
-            <div className="cf-example-card__row">
-              <h4>Organizer Buttons</h4>
-              <div className="cf-example-card__organizers">
-                <span className="cf-organizer cf-organizer--new">New</span>
-                <span className="cf-organizer cf-organizer--active">Active</span>
-                <span className="cf-organizer cf-organizer--pending">Pending</span>
-                <span className="cf-organizer cf-organizer--error">Error</span>
-              </div>
-            </div>
-
-            <div className="cf-example-card__row">
-              <h4>Motion Preview</h4>
-              <p className="settings-meta">Hover to preview. Timing: {prefs.motionTimingMs}ms | Flow: {prefs.directionalFlow}</p>
-              <div className="cf-motion-row">
-                <div className="cf-motion-box__item">
-                  <span className="cf-motion-box cf-motion-box--enter" title="Enter — ease-in" />
-                  <span className="cf-motion-box__label">Ease In</span>
-                </div>
-                <div className="cf-motion-box__item">
-                  <span className="cf-motion-box cf-motion-box--move" title="Move — ease-in-out" />
-                  <span className="cf-motion-box__label">Ease In-Out</span>
-                </div>
-                <div className="cf-motion-box__item">
-                  <span className="cf-motion-box cf-motion-box--exit" title="Exit — ease-out" />
-                  <span className="cf-motion-box__label">Ease Out</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="cf-example-card__row">
-              <h4>Type Scale</h4>
-              <p className="cf-type-base">Body text (base)</p>
-              <p className="cf-type-lg">Subheading text (text-lg)</p>
-              <p className="cf-type-2xl">Heading text (text-2xl)</p>
-              <p className="cf-type-3xl">Title text (text-3xl)</p>
-              <p className="cf-type-4xl">text-4xl</p>
-              <p className="cf-type-5xl">text-5xl</p>
-            </div>
+        <div className="settings-card__head cf-ds-card__head">
+          <div>
+            <h3>Design System Controls (New)</h3>
+            {!isExpanded && !isCollapsing ? (
+              <p className="settings-meta">Single source of truth for color, type, stroke, spacing, and motion tokens.</p>
+            ) : null}
           </div>
+          <button type="button" className="btn-secondary settings-card__toggle" onClick={handleExpandToggle}>
+            {isExpanded || isCollapsing ? "Collapse" : "Expand"}
+          </button>
         </div>
 
-        {/* Right pane — Controls (flex: 2) */}
-        <div className="cf-ds-fibonacci-layout__controls">
-          <div className="cf-ds-settings-grid">
-            <label>
-              Gamma: {prefs.gamma.toFixed(2)}
-              <input type="range" min={2} max={2.4} step={0.05} value={prefs.gamma} onChange={(event) => setPrefs({ gamma: Number(event.target.value) })} />
-            </label>
+        {!isExpanded && !isCollapsing ? (
+          <p className="settings-meta">Collapsed by default. Expand to edit live design controls.</p>
+        ) : null}
+      </article>
 
-            <label>
-              Type ratio: {prefs.typeRatio.toFixed(3)}
-              <input type="range" min={1.067} max={1.5} step={0.001} value={prefs.typeRatio} onChange={(event) => setPrefs({ typeRatio: Number(event.target.value) })} />
-            </label>
+      {/* Full-screen expanded overlay — portaled to document.body */}
+      {(isExpanded || isCollapsing) ? createPortal(
+        <>
+          {/* Backdrop scrim — click-outside collapses */}
+          <div
+            className={`cf-ds-card-backdrop${isCollapsing ? " cf-ds-card-backdrop--collapsing" : ""}`}
+            onClick={() => { setCollapseRequested("click-outside"); }}
+            aria-hidden="true"
+          />
 
-            <div className="cf-ds-chip-row">
-              {TYPE_RATIO_PRESETS.map((preset) => (
-                <button key={preset.value} type="button" className="btn-secondary" onClick={() => setPrefs({ typeRatio: preset.value })}>
-                  {preset.label} ({preset.description})
+          {/* Expanded overlay panel */}
+          <div className={`cf-ds-card-overlay${isCollapsing ? " cf-ds-card-overlay--collapsing" : ""}`}>
+            <div className="cf-ds-card-overlay__inner">
+              {/* Overlay header */}
+              <div className="settings-card__head cf-ds-card__head">
+                <div>
+                  <h3>Design System Controls (New)</h3>
+                  <p className="settings-meta">Single source of truth for color, type, stroke, spacing, and motion tokens.</p>
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary settings-card__toggle"
+                  onClick={() => { setCollapseRequested("toggle-button"); }}
+                >
+                  Collapse
                 </button>
-              ))}
-            </div>
+              </div>
 
-            <label>
-              Stroke preset
-              <select value={prefs.strokePreset} onChange={(event) => setPrefs({ strokePreset: event.target.value as DesignTokenPreferences["strokePreset"] })}>
-                {STROKE_PRESET_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label} - {option.descriptor}</option>
-                ))}
-              </select>
-            </label>
+              {cloudPromptVisible ? (
+                <div className="cf-keep-dialog" role="group" aria-label="Cloud settings choices">
+                  <p>Cloud settings were detected for this account. Choose how to proceed.</p>
+                  <div className="form-actions">
+                    <button type="button" disabled={cloudDecisionBusy} onClick={() => { void handleCloudDecision("apply-cloud"); }}>Apply Cloud Settings</button>
+                    <button type="button" className="btn-secondary" disabled={cloudDecisionBusy} onClick={() => { void handleCloudDecision("keep-local"); }}>Keep Local Settings</button>
+                    <button type="button" className="btn-secondary" disabled={cloudDecisionBusy} onClick={() => { void handleCloudDecision("merge-local-into-cloud"); }}>Merge Local Into Cloud</button>
+                    <button type="button" className="btn-secondary" disabled={cloudDecisionBusy} onClick={() => { void handleCloudDecision("delete-cloud-use-local-defaults"); }}>Delete Cloud Settings and Use Local Defaults</button>
+                  </div>
+                </div>
+              ) : null}
 
-            <label>
-              Spacing ratio: {prefs.spacingRatio.toFixed(3)}
-              <input type="range" min={1.25} max={2} step={0.001} value={prefs.spacingRatio} onChange={(event) => setPrefs({ spacingRatio: Number(event.target.value) })} />
-            </label>
+              {cloudPromptStatus ? <p className="settings-meta">{cloudPromptStatus}</p> : null}
 
-            <div className="cf-ds-chip-row">
-              {SPACING_PRESETS.map((preset) => (
-                <button key={preset.value} type="button" className="btn-secondary" onClick={() => setPrefs({ spacingRatio: preset.value })}>
-                  {preset.label} ({preset.description})
-                </button>
-              ))}
-            </div>
+              {localDiagnostics.corrupted ? (
+                <div className="cf-keep-dialog" role="group" aria-label="Corrupted settings recovery">
+                  <p>Saved settings appear invalid. Choose a recovery option.</p>
+                  <p className="settings-meta">Invalid fields: {localDiagnostics.invalidFields.join(", ") || "unknown"}</p>
+                  <div className="form-actions">
+                    <button type="button" onClick={() => { void handleDeleteOldSettings(); }}>Delete Old Settings</button>
+                    <button type="button" className="btn-secondary" onClick={() => resetPrefs()}>Reset to Defaults</button>
+                    <button type="button" className="btn-secondary" onClick={() => { void handleRepairSettings(); }}>Try to Repair Settings</button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => {
+                        setCorruptionStatus(`Debug details: ${JSON.stringify(localDiagnostics.raw).slice(0, 260)}`);
+                      }}
+                    >
+                      View Debug Details
+                    </button>
+                  </div>
+                  {corruptionStatus ? <p className="settings-meta">{corruptionStatus}</p> : null}
+                </div>
+              ) : null}
 
-            <label>
-              Motion timing: {prefs.motionTimingMs}ms ({motionDescription(prefs.motionTimingMs)})
-              <input type="range" min={100} max={500} step={10} value={prefs.motionTimingMs} onChange={(event) => setPrefs({ motionTimingMs: Number(event.target.value) })} />
-            </label>
-
-            <label>
-              Motion easing
-              <select value={prefs.motionEasing} onChange={(event) => setPrefs({ motionEasing: event.target.value as DesignTokenPreferences["motionEasing"] })}>
-                <option value="ease-in">ease-in</option>
-                <option value="ease-out">ease-out</option>
-                <option value="ease-in-out">ease-in-out</option>
-              </select>
-            </label>
-
-            <label>
-              Directional flow
-              <select
-                value={prefs.directionalFlow}
-                onChange={(event) => {
-                  setPrefs({ directionalFlow: event.target.value as DesignTokenPreferences["directionalFlow"] });
-                  void logDesignSystemDebugEvent("Directional flow changed.", { directionalFlow: event.target.value });
-                }}
+              {/* Two-card Fibonacci layout: Example (flex:3) | Controls (flex:2) */}
+              <div
+                ref={fibonacciContainerRef}
+                className="cf-ds-fibonacci-layout"
+                data-flow={prefs.directionalFlow}
               >
-                <option value="left-to-right">Left to Right (LTR)</option>
-                <option value="right-to-left">Right to Left (RTL)</option>
-              </select>
-            </label>
+                {/* Example Card */}
+                <div className="cf-ds-fibonacci-layout__example">
+                  <div className="cf-example-card" aria-label="example card preview">
+                    <div className="cf-example-card__row" ref={setSectionRef("buttons")}>
+                      <h4>Buttons</h4>
+                      <div className="cf-example-card__button-grid">
+                        <DemoButton variant="primary" size="sm" />
+                        <DemoButton variant="primary" size="md" state="hover" />
+                        <DemoButton variant="primary" size="lg" state="active" />
+                        <DemoButton variant="secondary" size="md" />
+                        <DemoButton variant="ghost" size="md" />
+                        <DemoButton variant="destructive" size="md" />
+                        <DemoButton variant="secondary" size="sm" state="disabled" />
+                        <DemoButton variant="secondary" size="lg" state="loading" />
+                      </div>
+                    </div>
 
-            <div className="cf-ds-semantic-grid">
-              <label>Error
-                <input type="color" aria-label="error color" value={prefs.semanticColors.error} onChange={(event) => setSemanticColor("error", event.target.value)} />
+                    <div className="cf-example-card__row">
+                      <h4>Cards</h4>
+                      <div className="cf-example-card__cards">
+                        <article className="cf-sample-card">
+                          <h5>Email card</h5>
+                          <p>Subject: Weekly curriculum update</p>
+                          <button type="button" className="cf-ds-btn cf-ds-btn--primary cf-ds-btn--sm">Open</button>
+                        </article>
+                        <article className="cf-sample-card cf-sample-card--disabled">
+                          <h5>Disabled card</h5>
+                          <p>This section is not available yet.</p>
+                        </article>
+                        <article className="cf-sample-card cf-sample-card--default">
+                          <h5>Default card</h5>
+                          <p>Color, title, description, and action all follow tokens.</p>
+                          <button type="button" className="cf-ds-btn cf-ds-btn--secondary cf-ds-btn--sm">Action</button>
+                        </article>
+                      </div>
+                    </div>
+
+                    <div className="cf-example-card__row" ref={setSectionRef("organizers")}>
+                      <h4>Organizer Buttons</h4>
+                      <div className="cf-example-card__organizers">
+                        <span className="cf-organizer cf-organizer--new">New</span>
+                        <span className="cf-organizer cf-organizer--active">Active</span>
+                        <span className="cf-organizer cf-organizer--pending">Pending</span>
+                        <span className="cf-organizer cf-organizer--error">Error</span>
+                      </div>
+                    </div>
+
+                    <div className="cf-example-card__row" ref={setSectionRef("motion-preview")}>
+                      <h4>Motion Preview</h4>
+                      <p className="settings-meta">Hover to preview. Timing: {prefs.motionTimingMs}ms | Flow: {prefs.directionalFlow}</p>
+                      <div
+                        className="cf-motion-row"
+                        onMouseEnter={() => {
+                          void logDesignSystemDebugEvent("Motion preview animation cycle started.", {
+                            motionTimingMs: prefs.motionTimingMs,
+                            motionEasing: prefs.motionEasing,
+                            directionalFlow: prefs.directionalFlow,
+                          });
+                        }}
+                      >
+                        <div className="cf-motion-box__item">
+                          <span className="cf-motion-box cf-motion-box--enter" title="Enter - ease-in" />
+                          <span className="cf-motion-box__label">Ease In</span>
+                        </div>
+                        <div className="cf-motion-box__item">
+                          <span className="cf-motion-box cf-motion-box--move" title="Move - ease-in-out" />
+                          <span className="cf-motion-box__label">Ease In-Out</span>
+                        </div>
+                        <div className="cf-motion-box__item">
+                          <span className="cf-motion-box cf-motion-box--exit" title="Exit - ease-out" />
+                          <span className="cf-motion-box__label">Ease Out</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="cf-example-card__row" ref={setSectionRef("type-scale")}>
+                      <h4>Type Scale</h4>
+                      <p className="cf-type-base">Body text (base)</p>
+                      <p className="cf-type-lg">Subheading text (text-lg)</p>
+                      <p className="cf-type-2xl">Heading text (text-2xl)</p>
+                      <p className="cf-type-3xl">Title text (text-3xl)</p>
+                      <p className="cf-type-4xl">text-4xl</p>
+                      <p className="cf-type-5xl">text-5xl</p>
+                    </div>
+
+                    <div className="cf-example-card__row" ref={setSectionRef("color-scale")}>
+                      <h4>Color Scale</h4>
+                      <div className="cf-ds-swatches" aria-label="primary color swatches">
+                        {tokens.color.primary.map((_, index) => (
+                          <span key={`shade-${index}`} className={`cf-ds-swatch cf-ds-swatch--${index + 1}`} title={`Shade ${index + 1}`} />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Controls Card — aligned with Example Card rows */}
+                <div className="cf-ds-fibonacci-layout__controls">
+                  <div className="cf-ds-settings-grid">
+                    <section className="cf-ds-control-group" ref={setSectionRef("gamma")}>
+                      <label>
+                        Gamma: {prefs.gamma.toFixed(2)}
+                        <input
+                          type="range"
+                          min={2}
+                          max={2.4}
+                          step={0.05}
+                          value={prefs.gamma}
+                          onChange={(event) => {
+                            const gamma = Number(event.target.value);
+                            setPrefs({ gamma });
+                            void logDesignSystemDebugEvent("Gamma changed.", { gamma });
+                          }}
+                        />
+                      </label>
+                    </section>
+
+                    <section className="cf-ds-control-group" ref={setSectionRef("type-ratio")}>
+                      <p className="settings-meta">Type ratio preset: {describePreset(prefs.typeRatio, TYPE_RATIO_PRESETS)}</p>
+                      <label>
+                        Type ratio: {prefs.typeRatio.toFixed(3)}
+                        <input
+                          type="range"
+                          min={1.067}
+                          max={1.5}
+                          step={0.001}
+                          value={prefs.typeRatio}
+                          list="cf-type-ratio-presets"
+                          onChange={(event) => {
+                            const rawValue = Number(event.target.value);
+                            handleTypeRatioChange(rawValue);
+                            void logDesignSystemDebugEvent("Type ratio descriptor changed.", {
+                              descriptor: describePreset(rawValue, TYPE_RATIO_PRESETS),
+                            });
+                          }}
+                        />
+                      </label>
+                      <datalist id="cf-type-ratio-presets">
+                        {TYPE_RATIO_PRESETS.map((preset) => (
+                          <option key={preset.value} value={preset.value} label={preset.label} />
+                        ))}
+                      </datalist>
+                    </section>
+
+                    <section className="cf-ds-control-group">
+                      <label>
+                        Stroke preset
+                        <select value={prefs.strokePreset} onChange={(event) => setPrefs({ strokePreset: event.target.value as DesignTokenPreferences["strokePreset"] })}>
+                          {STROKE_PRESET_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label} - {option.descriptor}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </section>
+
+                    <section className="cf-ds-control-group" ref={setSectionRef("organizer-colors")}>
+                      <p className="settings-meta">Organizer colors (aligned with preview order)</p>
+                      <div className="cf-ds-semantic-grid">
+                        <label>New
+                          <input type="color" aria-label="new color" value={prefs.semanticColors.new} onChange={(event) => setSemanticColor("new", event.target.value)} />
+                        </label>
+                        <label>Active
+                          <input type="color" aria-label="active color" value={prefs.semanticColors.success} onChange={(event) => setSemanticColor("success", event.target.value)} />
+                        </label>
+                        <label>Pending
+                          <input type="color" aria-label="pending color" value={prefs.semanticColors.pending} onChange={(event) => setSemanticColor("pending", event.target.value)} />
+                        </label>
+                        <label>Error
+                          <input type="color" aria-label="error color" value={prefs.semanticColors.error} onChange={(event) => setSemanticColor("error", event.target.value)} />
+                        </label>
+                      </div>
+                    </section>
+
+                    <section className="cf-ds-control-group" ref={setSectionRef("motion-controls")}>
+                      <label>
+                        Motion timing: {prefs.motionTimingMs}ms ({motionDescription(prefs.motionTimingMs)})
+                        <input
+                          type="range"
+                          min={100}
+                          max={500}
+                          step={10}
+                          value={prefs.motionTimingMs}
+                          onChange={(event) => {
+                            const motionTimingMs = Number(event.target.value);
+                            setPrefs({ motionTimingMs });
+                            void logDesignSystemDebugEvent("Motion timing changed.", { motionTimingMs });
+                          }}
+                        />
+                      </label>
+
+                      <label>
+                        Motion easing
+                        <select
+                          value={prefs.motionEasing}
+                          onChange={(event) => {
+                            const motionEasing = event.target.value as DesignTokenPreferences["motionEasing"];
+                            setPrefs({ motionEasing });
+                            void logDesignSystemDebugEvent("Motion easing changed.", { motionEasing });
+                          }}
+                        >
+                          <option value="ease-in">ease-in</option>
+                          <option value="ease-in-out">ease-in-out</option>
+                          <option value="ease-out">ease-out</option>
+                        </select>
+                      </label>
+
+                      <button
+                        type="button"
+                        className={`theme-toggle flow-toggle ${prefs.directionalFlow === "right-to-left" ? "flow-toggle--right" : "flow-toggle--left"}`}
+                        onClick={() => {
+                          const nextFlow = prefs.directionalFlow === "left-to-right" ? "right-to-left" : "left-to-right";
+                          setPrefs({ directionalFlow: nextFlow });
+                          void logDesignSystemDebugEvent("Directional flow changed.", {
+                            directionalFlow: nextFlow,
+                            exampleCardSide: nextFlow === "left-to-right" ? "left" : "right",
+                            controlsCardSide: nextFlow === "left-to-right" ? "right" : "left",
+                          });
+                        }}
+                        aria-label="Toggle directional flow"
+                      >
+                        <span className="theme-toggle__label">{prefs.directionalFlow === "left-to-right" ? "Left" : "Right"}</span>
+                        <span className="theme-toggle__track" aria-hidden="true">
+                          <span className="theme-toggle__thumb" />
+                        </span>
+                      </button>
+                    </section>
+
+                    <section className="cf-ds-control-group">
+                      <p className="settings-meta">Spacing ratio preset: {describePreset(prefs.spacingRatio, SPACING_PRESETS)}</p>
+                      <label>
+                        Spacing ratio: {prefs.spacingRatio.toFixed(3)}
+                        <input
+                          type="range"
+                          min={1.25}
+                          max={2}
+                          step={0.001}
+                          value={prefs.spacingRatio}
+                          list="cf-spacing-ratio-presets"
+                          onChange={(event) => {
+                            const rawValue = Number(event.target.value);
+                            handleSpacingRatioChange(rawValue);
+                          }}
+                        />
+                      </label>
+                      <datalist id="cf-spacing-ratio-presets">
+                        {SPACING_PRESETS.map((preset) => (
+                          <option key={preset.value} value={preset.value} label={preset.label} />
+                        ))}
+                      </datalist>
+                    </section>
+                  </div>
+                </div>
+              </div>
+
+              <label>
+                Save mode
+                <select value={persistenceMode} onChange={(event) => setPersistenceMode(event.target.value as PersistenceMode)}>
+                  <option value="local">Use Local Settings</option>
+                  <option value="cloud" disabled={!userId}>Use Cloud Settings</option>
+                  <option value="merge" disabled={!userId}>Merge and Update Cloud</option>
+                </select>
               </label>
-              <label>Success
-                <input type="color" aria-label="success color" value={prefs.semanticColors.success} onChange={(event) => setSemanticColor("success", event.target.value)} />
-              </label>
-              <label>Pending
-                <input type="color" aria-label="pending color" value={prefs.semanticColors.pending} onChange={(event) => setSemanticColor("pending", event.target.value)} />
-              </label>
-              <label>New
-                <input type="color" aria-label="new color" value={prefs.semanticColors.new} onChange={(event) => setSemanticColor("new", event.target.value)} />
-              </label>
+
+              <div className="form-actions">
+                <button type="button" onClick={() => { void handleSave(); }}>Save</button>
+                <button type="button" className="btn-secondary" onClick={() => { void handleLoadCloudSettings(); }} disabled={!userId}>Load Cloud Settings</button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    resetPrefs();
+                    setCollapseRequested("reset");
+                    void logDesignSystemDebugEvent("Design token reset to defaults. Collapsing.", { trigger: "reset" });
+                  }}
+                >
+                  Reset to defaults
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => applySystemDefaults()}>Use System Defaults</button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setCollapseRequested("cancel");
+                    void logDesignSystemDebugEvent("Design system controls cancelled. Collapsing.", { trigger: "cancel" });
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+
+              {status ? <p className="settings-meta">{status}</p> : null}
+
+              {showKeepDialog ? (
+                <div className="cf-keep-dialog" role="dialog" aria-modal="true" aria-label="Keep Changes">
+                  <p>Keep Changes? Reverting in {secondsLeft}s if not confirmed.</p>
+                  <div className="form-actions">
+                    <button type="button" onClick={handleConfirmKeepChanges}>Keep Changes</button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => {
+                        setPrefs(confirmedRef.current);
+                        setShowKeepDialog(false);
+                        setSecondsLeft(12);
+                        setStatus("Changes reverted.");
+                        void logDesignSystemDebugEvent("Design token changes reverted manually.");
+                        if (collapseAfterDialogRef.current) {
+                          setCollapseRequested("save-reverted");
+                        }
+                      }}
+                    >
+                      Revert Now
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
-
-          <div className="cf-ds-swatches" aria-label="primary color swatches">
-            {tokens.color.primary.map((_, index) => (
-              <span key={`shade-${index}`} className={`cf-ds-swatch cf-ds-swatch--${index + 1}`} title={`Shade ${index + 1}`} />
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <label>
-        Save mode
-        <select value={persistenceMode} onChange={(event) => setPersistenceMode(event.target.value as PersistenceMode)}>
-          <option value="local">Use Local Settings</option>
-          <option value="cloud" disabled={!userId}>Use Cloud Settings</option>
-          <option value="merge" disabled={!userId}>Merge and Update Cloud</option>
-        </select>
-      </label>
-
-      <div className="form-actions">
-        <button type="button" onClick={() => { void handleSave(); }}>Save</button>
-        <button type="button" className="btn-secondary" onClick={() => { void handleLoadCloudSettings(); }} disabled={!userId}>Load Cloud Settings</button>
-        <button type="button" className="btn-secondary" onClick={() => resetPrefs()}>Reset to defaults</button>
-        <button type="button" className="btn-secondary" onClick={() => applySystemDefaults()}>Use System Defaults</button>
-      </div>
-
-      {status ? <p className="settings-meta">{status}</p> : null}
-
-      {showKeepDialog ? (
-        <div className="cf-keep-dialog" role="dialog" aria-modal="true" aria-label="Keep Changes">
-          <p>Keep Changes? Reverting in {secondsLeft}s if not confirmed.</p>
-          <div className="form-actions">
-            <button type="button" onClick={handleConfirmKeepChanges}>Keep Changes</button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => {
-                setPrefs(confirmedRef.current);
-                setShowKeepDialog(false);
-                setSecondsLeft(12);
-                setStatus("Changes reverted.");
-                void logDesignSystemDebugEvent("Design token changes reverted manually.");
-              }}
-            >
-              Revert Now
-            </button>
-          </div>
-        </div>
+        </>,
+        document.body,
       ) : null}
-    </article>
+    </>
   );
 }
+

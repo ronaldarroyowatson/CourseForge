@@ -9,6 +9,10 @@ function resetDesignState(): void {
   useUIStore.getState().resetDesignTokenPreferences();
 }
 
+function expandDesignSystemCard(): void {
+  fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+}
+
 describe("DesignSystemSettingsCard", () => {
   beforeEach(() => {
     window.localStorage.setItem("courseforge.debugLog.enabled", "false");
@@ -21,6 +25,7 @@ describe("DesignSystemSettingsCard", () => {
 
   it("updates preview tokens immediately when sliders change", async () => {
     render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
 
     const sliders = screen.getAllByRole("slider");
     expect(sliders.length).toBeGreaterThanOrEqual(4);
@@ -42,6 +47,7 @@ describe("DesignSystemSettingsCard", () => {
   it("reverts changes through keep-changes safety dialog", async () => {
     const before = useUIStore.getState().designTokenPreferences;
     render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
 
     const sliders = screen.getAllByRole("slider");
     fireEvent.change(sliders[1], { target: { value: "1.5" } });
@@ -60,6 +66,7 @@ describe("DesignSystemSettingsCard", () => {
     vi.useFakeTimers();
     const before = useUIStore.getState().designTokenPreferences;
     render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
 
     const sliders = screen.getAllByRole("slider");
     fireEvent.change(sliders[1], { target: { value: "1.5" } });

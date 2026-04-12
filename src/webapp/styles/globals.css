@@ -200,6 +200,8 @@ body {
   padding: 0.9rem 1rem;
   display: grid;
   gap: 0.55rem;
+  position: relative;
+  z-index: 1100;
 }
 
 .app-header h1 {
@@ -317,9 +319,111 @@ body {
   gap: 10px;
 }
 
+.cf-ds-card__head {
+  align-items: flex-start;
+}
+
+/* ─── Design System card: fixed bottom-right when collapsed ─────────── */
+.settings-card--design-system {
+  position: fixed;
+  bottom: 1.2rem;
+  right: 1.2rem;
+  z-index: 1052;
+  max-width: 320px;
+  min-width: 200px;
+  box-shadow: var(--cf-shadow-3);
+}
+
+.settings-card--design-system:not(.cf-ds-card--expanded) {
+  gap: 4px;
+  cursor: pointer;
+}
+
+/* ─── Backdrop for expanded overlay ─────────────────────────────────── */
+.cf-ds-card-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1049;
+  background: rgba(0, 0, 0, 0.45);
+  animation: cf-ds-backdrop-enter var(--cf-ds-motion-ms, 250ms) ease-in forwards;
+}
+
+.cf-ds-card-backdrop--collapsing {
+  animation: cf-ds-backdrop-exit var(--cf-ds-motion-ms, 250ms) ease-out forwards;
+}
+
+/* ─── Full-screen expanded overlay ──────────────────────────────────── */
+.cf-ds-card-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1050;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 90px 2rem 3rem;
+  animation: cf-ds-overlay-enter var(--cf-ds-motion-ms, 250ms) ease-in forwards;
+  transform-origin: bottom right;
+}
+
+.cf-ds-card-overlay--collapsing {
+  animation: cf-ds-overlay-exit var(--cf-ds-motion-ms, 250ms) ease-out forwards;
+}
+
+.cf-ds-card-overlay__inner {
+  width: 100%;
+  max-width: 1400px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: var(--cf-shadow-3);
+}
+
+/* ─── Expand / Collapse keyframe animations ──────────────────────────── */
+@keyframes cf-ds-overlay-enter {
+  from {
+    opacity: 0;
+    transform: translateY(60px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cf-ds-overlay-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(60px) scale(0.97);
+  }
+}
+
+@keyframes cf-ds-backdrop-enter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes cf-ds-backdrop-exit {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
 .cf-ds-settings-grid {
   display: grid;
   gap: 10px;
+}
+
+.cf-ds-control-group {
+  display: grid;
+  gap: 8px;
 }
 
 .cf-ds-chip-row {
@@ -352,8 +456,13 @@ body {
 
 .cf-ds-semantic-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+}
+
+.cf-ds-semantic-grid label {
+  display: grid;
+  gap: 4px;
 }
 
 .cf-example-card {
@@ -514,6 +623,7 @@ body {
 .cf-motion-box__label {
   font-size: 10px;
   color: var(--text-secondary);
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -524,6 +634,10 @@ body {
   align-items: flex-start;
   gap: calc(var(--cf-ds-space-2, 16px) * 2);
   margin: 0.75rem 0;
+}
+
+.cf-ds-fibonacci-layout[data-flow="right-to-left"] {
+  flex-direction: row-reverse;
 }
 
 .cf-ds-fibonacci-layout__example {
@@ -545,6 +659,15 @@ body {
   .cf-ds-fibonacci-layout__controls {
     flex: none;
     width: 100%;
+  }
+
+  .cf-ds-semantic-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-card--design-system-last-ltr,
+  .settings-card--design-system-last-rtl {
+    grid-column: auto;
   }
 }
 
@@ -667,6 +790,15 @@ body {
 }
 
 .theme-toggle--light .theme-toggle__thumb {
+  transform: translateX(1.02rem);
+}
+
+.flow-toggle {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.flow-toggle--right .theme-toggle__thumb {
   transform: translateX(1.02rem);
 }
 
@@ -1251,6 +1383,14 @@ body {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.8rem;
+}
+
+.settings-card--design-system-last-ltr {
+  grid-column: 3;
+}
+
+.settings-card--design-system-last-rtl {
+  grid-column: 1;
 }
 
 .settings-card {

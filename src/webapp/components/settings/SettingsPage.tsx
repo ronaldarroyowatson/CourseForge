@@ -28,6 +28,7 @@ import {
 } from "../../../core/services";
 import { readMetadataPipelineRuntimeStatus, type MetadataPipelineRuntimeStatus } from "../../../core/services/metadataExtractionPipelineService";
 import { readMetadataCorrectionSyncRuntimeState, type MetadataCorrectionSyncRuntimeState } from "../../../core/services/metadataCorrectionSyncService";
+import { logDesignSystemDebugEvent } from "../../../core/services/designSystemService";
 import { getSupportedLanguages, t as translate } from "../../../core/services/i18nService";
 import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
@@ -295,6 +296,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const pendingChangesCount = useUIStore((state) => state.pendingChangesCount);
   const syncStatus = useUIStore((state) => state.syncStatus);
   const activeAutoTextbookUpload = useUIStore((state) => state.activeAutoTextbookUpload);
+  const directionalFlow = useUIStore((state) => state.designTokenPreferences.directionalFlow);
   const [debugEnabled, setDebugEnabled] = React.useState<boolean>(() => isDebugLoggingEnabled());
   const [cacheResetStatus, setCacheResetStatus] = React.useState<string | null>(null);
   const [debugStats, setDebugStats] = React.useState({ entries: 0, totalBytes: 0, maxTotalBytes: 1_500_000, maxUploadBytes: 500 * 1024, lastUploadTimestamp: null as number | null });
@@ -1035,6 +1037,27 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     return compareSemver(sb, sa) > 0 ? b : a;
   })();
 
+  React.useEffect(() => {
+    const orderedCards = [
+      "sync-preferences",
+      "language",
+      "accessibility",
+      "sync-safety-status",
+      "ai-service-resilience",
+      "metadata-learning",
+      "debug-log",
+      "app-updates",
+      "design-system-controls",
+    ];
+
+    void logDesignSystemDebugEvent("Settings card ordering resolved.", {
+      directionalFlow,
+      orderedCards,
+      designSystemCardPosition: orderedCards.length,
+      fallbackBehavior: "design-system-card-forced-last",
+    });
+  }, [directionalFlow]);
+
   return (
     <section className="settings-page placeholder-panel">
       <div className="settings-page__header">
@@ -1042,7 +1065,6 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
       </div>
 
       <div className="settings-grid">
-        <DesignSystemSettingsCard userId={userId} />
 
         <article className={`settings-card settings-card--expandable ${showSyncPreferences ? "settings-card--expanded" : ""}`}>
           <div className="settings-card__head">
@@ -1512,6 +1534,11 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
             </p>
           ) : null}
         </article>
+
+        <DesignSystemSettingsCard
+          userId={userId}
+          placementClassName={directionalFlow === "right-to-left" ? "settings-card--design-system-last-rtl" : "settings-card--design-system-last-ltr"}
+        />
 
       </div>
     </section>

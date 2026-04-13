@@ -1,6 +1,6 @@
 {
-    "generatedAtUtc":  "2026-04-12T21:55:18.2061829Z",
-    "version":  "1.4.59",
+    "generatedAtUtc":  "2026-04-13T03:22:00.6371556Z",
+    "version":  "1.4.60",
     "files":  [
                   {
                       "path":  "AutoUpdate-CourseForge.ps1",
@@ -8,7 +8,7 @@
                   },
                   {
                       "path":  "Check-For-CourseForge-Updates.cmd",
-                      "hash":  "A28B87C424AC96EF04D2C4E464388042C9B0DB078AC746F927119E52735AEFC2"
+                      "hash":  "4A4671CE82CD95FE429F288DD308E86DAEDC5EA85C335BE62671EC17E6E538C6"
                   },
                   {
                       "path":  "Start-CourseForge.cmd",
@@ -24,7 +24,7 @@
                   },
                   {
                       "path":  "courseforge-serve.js",
-                      "hash":  "2747E73E3099A2C13B0F6437409CEAF1202D153A747F4A95D98F8E8FB7A6E3EA"
+                      "hash":  "E276C1B6823FEA25165D80051515C179535F8FDB7BA3A71C6B94435CDF72B383"
                   },
                   {
                       "path":  "boot-splash.html",
@@ -36,7 +36,7 @@
                   },
                   {
                       "path":  "Install-CourseForge-Windows.ps1",
-                      "hash":  "A50CF765880820E1847C6E70C827D120E3C1D7CCEBEBA7037365534792B678F9"
+                      "hash":  "DB048CABCA21792175CC51D5BBF8A6BB62255F3861C7E0E4F263E3619766174A"
                   },
                   {
                       "path":  "Install-CourseForge-Windows.cmd",
@@ -60,11 +60,11 @@
                   },
                   {
                       "path":  "package-manifest.json",
-                      "hash":  "B2F7F0DE8C2EB555AD6408C9E9B937742D34CEC4F3C3A4C09FA43D6848728BC3"
+                      "hash":  "1728D9E7A86AD66FE1199FCA4073D6597B3C965B117358582B50FE6C0C683873"
                   },
                   {
                       "path":  "webapp/index.html",
-                      "hash":  "541B86D9BFE518B0DE88F0EC936EAAFA5F0219E6AD6807E8CEB04DD78B205B08"
+                      "hash":  "51FBD7D3832CEDDE06B3047FA7F47EBF3872B9C945D454FE4B1AFA83223399BB"
                   },
                   {
                       "path":  "extension/manifest.json",

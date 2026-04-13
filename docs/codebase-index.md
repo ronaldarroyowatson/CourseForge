@@ -811,6 +811,32 @@ Update summary:
 - TOC editor hierarchy edits synchronize into TOC page snapshots so autosave and final payload generation stay aligned with manual corrections.
 - End-of-TOC save behavior is mode-specific: cloud mode shows `Save Textbook to Cloud`; local mode uses local-only persistence and sets cloud sync blocking (`user_blocked`) until explicit cloud upload is chosen later.
 
+### Design System Controls Preview Layout Refinement (2026-04-12)
+
+Primary file(s):
+
+- [src/webapp/components/settings/DesignSystemSettingsCard.tsx](src/webapp/components/settings/DesignSystemSettingsCard.tsx)
+- [src/webapp/styles/globals.css](src/webapp/styles/globals.css)
+- [tests/integration/designSystemSettingsCard.integration.test.tsx](tests/integration/designSystemSettingsCard.integration.test.tsx)
+
+Update summary:
+
+- The Example Card preview now uses denser preview layouts for modular-scale inspection: Type Scale is rendered as a 2x3 grid and Spacing Scale as a 2x2 grid to reduce vertical space while preserving token comparisons.
+- Motion Preview remains horizontally paired with Motion Controls but now scales its preview cluster to occupy most of the available row width, improving legibility of timing and directional-flow behavior.
+- Button contrast validation was tightened for `ghost` and `secondary sm` preview buttons with explicit light/dark theme treatments and runtime debug validation of contrast calculations.
+
+### Windows Port Cleanup PID Matching Hardening (2026-04-13)
+
+Primary file(s):
+
+- [scripts/installer/courseforge-serve.js](scripts/installer/courseforge-serve.js)
+- [scripts/preflight-port-cleanup.mjs](scripts/preflight-port-cleanup.mjs)
+
+Update summary:
+
+- Windows port ownership detection now filters `netstat` results down to exact local `LISTENING` sockets for the requested port instead of matching any line containing `:<port>`.
+- This prevents updater port-cleanup flows and preflight cleanup from selecting unrelated PIDs during high socket churn, which previously could terminate the wrong process and destabilize sequential updater integration runs.
+
 ## How to Update This Index
 
 - Update triggers:

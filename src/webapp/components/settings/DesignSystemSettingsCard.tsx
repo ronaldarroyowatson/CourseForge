@@ -103,6 +103,35 @@ function describePreset(value: number, presets: RatioPreset[]): string {
   return `${closest.label} (${closest.description})`;
 }
 
+function parseRgbChannels(value: string): [number, number, number] | null {
+  const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (!match) {
+    return null;
+  }
+
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function relativeLuminance(red: number, green: number, blue: number): number {
+  const convert = (channel: number): number => {
+    const normalized = channel / 255;
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+
+  const r = convert(red);
+  const g = convert(green);
+  const b = convert(blue);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(background: [number, number, number], foreground: [number, number, number]): number {
+  const backgroundLum = relativeLuminance(background[0], background[1], background[2]);
+  const foregroundLum = relativeLuminance(foreground[0], foreground[1], foreground[2]);
+  const lighter = Math.max(backgroundLum, foregroundLum);
+  const darker = Math.min(backgroundLum, foregroundLum);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 export function DesignSystemSettingsCard({ userId, placementClassName }: DesignSystemSettingsCardProps): React.JSX.Element {
   const prefs = useUIStore((state) => state.designTokenPreferences);
   const tokens = useUIStore((state) => state.designTokens);
@@ -127,11 +156,57 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
   const collapseAfterDialogRef = React.useRef(false);
   const collapseTimerRef = React.useRef<number | null>(null);
   const fibonacciContainerRef = React.useRef<HTMLDivElement>(null);
+  const collapsedCardRef = React.useRef<HTMLElement | null>(null);
+  const overlayContentRef = React.useRef<HTMLDivElement | null>(null);
   const sectionRefs = React.useRef<Record<string, HTMLElement | null>>({});
 
   React.useEffect(() => {
     setLocalDiagnostics(readLocalDesignTokenDiagnostics());
   }, [prefs]);
+
+  React.useEffect(() => {
+    void logDesignSystemDebugEvent("Design system controls title updated.", {
+      title: "Design System Controls",
+      removedSuffix: "(New)",
+    });
+  }, []);
+
+  React.useEffect(() => {
+    if (isExpanded || isCollapsing) {
+      return;
+    }
+
+    const node = collapsedCardRef.current;
+    if (!node) {
+      return;
+    }
+
+    const container = node.closest(".settings-grid");
+    if (!(container instanceof HTMLElement)) {
+      void logDesignSystemDebugEvent("Design system layout fallback triggered: settings grid container missing.", {
+        fallback: "card-remains-in-current-grid-slot",
+      });
+      return;
+    }
+
+    const cardRect = node.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    void logDesignSystemDebugEvent("Design system layout container detected for collapsed card.", {
+      containerClassName: container.className,
+      containerRect: {
+        top: Math.round(containerRect.top),
+        left: Math.round(containerRect.left),
+        width: Math.round(containerRect.width),
+        height: Math.round(containerRect.height),
+      },
+      cardRect: {
+        top: Math.round(cardRect.top),
+        left: Math.round(cardRect.left),
+        width: Math.round(cardRect.width),
+        height: Math.round(cardRect.height),
+      },
+    });
+  }, [isCollapsing, isExpanded, prefs.directionalFlow]);
 
   React.useEffect(() => {
     if (!isExpanded) {
@@ -162,41 +237,361 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       return;
     }
 
+    const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+    void logDesignSystemDebugEvent("Design system mode detection applied for preview contrast.", {
+      theme,
+      exampleCardSurfaceToken: "--bg-panel",
+      organizerBorderToken: theme === "dark" ? "semantic + white mix" : "semantic base",
+      organizerTextToken: theme === "dark" ? "--text-primary (light)" : "--text-primary (dark)",
+    });
+  }, [isExpanded]);
+
+  React.useLayoutEffect(() => {
     const alignmentPairs = [
-      { control: "gamma", preview: "color-scale" },
-      { control: "type-ratio", preview: "type-scale" },
+      { control: "button-controls", preview: "buttons" },
       { control: "organizer-colors", preview: "organizers" },
       { control: "motion-controls", preview: "motion-preview" },
+      { control: "type-ratio", preview: "type-scale" },
+      { control: "spacing-scale", preview: "spacing-preview" },
+      { control: "gamma", preview: "color-scale" },
     ];
 
-    for (const pair of alignmentPairs) {
-      const controlNode = sectionRefs.current[pair.control];
-      const previewNode = sectionRefs.current[pair.preview];
-      if (!controlNode || !previewNode) {
-        void logDesignSystemDebugEvent("Alignment check fallback: section ref missing.", {
-          control: pair.control,
-          preview: pair.preview,
+    if (!isExpanded) {
+      for (const pair of alignmentPairs) {
+        const controlNode = sectionRefs.current[pair.control];
+        if (controlNode) {
+          controlNode.style.removeProperty("margin-top");
+        }
+      }
+      return;
+    }
+
+    let frameId: number | null = null;
+
+    const runAlignment = (reason: string): void => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        for (const pair of alignmentPairs) {
+          const controlNode = sectionRefs.current[pair.control];
+          const previewNode = sectionRefs.current[pair.preview];
+          if (!controlNode || !previewNode) {
+            void logDesignSystemDebugEvent("Alignment check fallback: section ref missing.", {
+              control: pair.control,
+              preview: pair.preview,
+              reason,
+            });
+            continue;
+          }
+
+          controlNode.style.removeProperty("margin-top");
+          const controlTop = controlNode.getBoundingClientRect().top;
+          const previewTop = previewNode.getBoundingClientRect().top;
+          const topDelta = Math.round(previewTop - controlTop);
+
+          if (Math.abs(topDelta) <= 8) {
+            void logDesignSystemDebugEvent("Alignment check passed.", {
+              control: pair.control,
+              preview: pair.preview,
+              topDelta,
+              reason,
+            });
+            continue;
+          }
+
+          if (topDelta > 8) {
+            controlNode.style.marginTop = `${topDelta}px`;
+            void logDesignSystemDebugEvent("Dynamic control repositioning applied.", {
+              control: pair.control,
+              preview: pair.preview,
+              topDelta,
+              reason,
+              correction: "control-margin-top",
+            });
+            continue;
+          }
+
+          void logDesignSystemDebugEvent("Alignment drift detected with fallback applied.", {
+            control: pair.control,
+            preview: pair.preview,
+            topDelta,
+            reason,
+            correction: "layout-order-preserved-no-negative-margin",
+          });
+        }
+      });
+    };
+
+    void logDesignSystemDebugEvent("Control relocation map applied.", {
+      controlsByPreviewOrder: ["button-controls", "organizer-colors", "motion-controls", "type-ratio", "spacing-scale", "gamma"],
+    });
+
+    void logDesignSystemDebugEvent("Motion preview boxes repositioned to right-side cluster.", {
+      section: "motion-preview",
+      alignmentTarget: "motion-controls",
+      orientation: "horizontal",
+    });
+
+    void logDesignSystemDebugEvent("Spacing scale controls relocated below type ratio controls.", {
+      section: "spacing-scale",
+      relation: "follows-type-ratio",
+      alignmentTarget: "spacing-preview",
+    });
+
+    runAlignment("expanded-layout-initial");
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => runAlignment("resize-observer")) : null;
+
+    if (observer) {
+      for (const pair of alignmentPairs) {
+        const controlNode = sectionRefs.current[pair.control];
+        const previewNode = sectionRefs.current[pair.preview];
+        if (controlNode) {
+          observer.observe(controlNode);
+        }
+        if (previewNode) {
+          observer.observe(previewNode);
+        }
+      }
+
+      if (fibonacciContainerRef.current) {
+        observer.observe(fibonacciContainerRef.current);
+      }
+    }
+
+    const handleResize = (): void => runAlignment("window-resize");
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      window.removeEventListener("resize", handleResize);
+      observer?.disconnect();
+    };
+  }, [isExpanded, prefs.directionalFlow, prefs.gamma, prefs.motionTimingMs, prefs.spacingRatio, prefs.typeRatio]);
+
+  React.useEffect(() => {
+    if (!isExpanded || !overlayContentRef.current) {
+      return;
+    }
+
+    const emailCard = overlayContentRef.current.querySelector<HTMLElement>('[aria-label="Email input example"]');
+    const emailInput = overlayContentRef.current.querySelector<HTMLInputElement>("#cf-ds-email-input");
+    if (!emailCard || !emailInput) {
+      return;
+    }
+
+    const logEmailSizing = (reason: string): void => {
+      const cardRect = emailCard.getBoundingClientRect();
+      const inputRect = emailInput.getBoundingClientRect();
+      const overflowDetected = inputRect.right > cardRect.right + 0.5 || inputRect.left < cardRect.left - 0.5;
+
+      void logDesignSystemDebugEvent("Email input size calculated.", {
+        reason,
+        cardWidth: Math.round(cardRect.width),
+        inputWidth: Math.round(inputRect.width),
+        overflowDetected,
+      });
+
+      if (overflowDetected) {
+        void logDesignSystemDebugEvent("Email input overflow detected and constrained by sizing rules.", {
+          reason,
+          cardWidth: Math.round(cardRect.width),
+          inputWidth: Math.round(inputRect.width),
         });
+      }
+    };
+
+    logEmailSizing("expanded-layout-initial");
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => logEmailSizing("resize-observer")) : null;
+    observer?.observe(emailCard);
+    observer?.observe(emailInput);
+
+    const handleResize = (): void => logEmailSizing("window-resize");
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      observer?.disconnect();
+    };
+  }, [isExpanded, prefs.typeRatio, prefs.spacingRatio]);
+
+  React.useEffect(() => {
+    if (!isExpanded || !overlayContentRef.current) {
+      return;
+    }
+
+    const motionSection = sectionRefs.current["motion-preview"];
+    const motionRow = overlayContentRef.current.querySelector<HTMLElement>(".cf-motion-row--right");
+    if (!motionSection || !motionRow) {
+      return;
+    }
+
+    const logMotionSizing = (reason: string): void => {
+      const sectionRect = motionSection.getBoundingClientRect();
+      const rowRect = motionRow.getBoundingClientRect();
+      const widthPercent = sectionRect.width > 0 ? Number(((rowRect.width / sectionRect.width) * 100).toFixed(2)) : 0;
+      const overflowDetected = rowRect.right > sectionRect.right + 0.5 || rowRect.left < sectionRect.left - 0.5;
+
+      void logDesignSystemDebugEvent("Motion preview container size detected.", {
+        reason,
+        sectionWidth: Math.round(sectionRect.width),
+        rowWidth: Math.round(rowRect.width),
+        appliedWidthPercent: widthPercent,
+        overflowDetected,
+      });
+    };
+
+    logMotionSizing("expanded-layout-initial");
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => logMotionSizing("resize-observer")) : null;
+    observer?.observe(motionSection);
+    observer?.observe(motionRow);
+
+    const handleResize = (): void => logMotionSizing("window-resize");
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      observer?.disconnect();
+    };
+  }, [isExpanded, prefs.directionalFlow, prefs.motionTimingMs, prefs.typeRatio, prefs.spacingRatio]);
+
+  React.useEffect(() => {
+    if (!isExpanded) {
+      return;
+    }
+
+    void logDesignSystemDebugEvent("Type scale preview grid layout created.", {
+      layout: "2x3",
+      ordering: ["text-5xl", "text-4xl", "text-3xl", "text-2xl", "text-lg", "base"],
+      spacingToken: "--cf-ds-space-*",
+    });
+
+    void logDesignSystemDebugEvent("Type scale preview dynamic resizing applied.", {
+      typeRatio: prefs.typeRatio,
+      sizes: {
+        text5xl: tokens.type.scale["text-5xl"],
+        text4xl: tokens.type.scale["text-4xl"],
+        text3xl: tokens.type.scale["text-3xl"],
+        text2xl: tokens.type.scale["text-2xl"],
+        textLg: tokens.type.scale["text-lg"],
+        base: tokens.type.base,
+      },
+    });
+
+    void logDesignSystemDebugEvent("Spacing scale preview grid layout created.", {
+      layout: "2x2",
+      spacingRatio: prefs.spacingRatio,
+      spacingTokens: tokens.spacing.values.slice(1, 5),
+    });
+  }, [isExpanded, prefs.spacingRatio, prefs.typeRatio, tokens.spacing.values, tokens.type.base, tokens.type.scale]);
+
+  React.useEffect(() => {
+    if (!isExpanded || !overlayContentRef.current) {
+      return;
+    }
+
+    const contrastTargets = [
+      { selector: ".cf-ds-btn--ghost", label: "ghost-button" },
+      { selector: ".cf-ds-btn--secondary.cf-ds-btn--sm", label: "secondary-sm-button" },
+    ];
+
+    for (const target of contrastTargets) {
+      const node = overlayContentRef.current.querySelector<HTMLElement>(target.selector);
+      if (!node) {
         continue;
       }
 
-      const topDelta = Math.abs(controlNode.getBoundingClientRect().top - previewNode.getBoundingClientRect().top);
-      if (topDelta > 28) {
-        void logDesignSystemDebugEvent("Alignment mismatch detected and normalized by paired section ordering.", {
-          control: pair.control,
-          preview: pair.preview,
-          topDelta,
-          correction: "paired-section-order",
-        });
-      } else {
-        void logDesignSystemDebugEvent("Alignment check passed.", {
-          control: pair.control,
-          preview: pair.preview,
-          topDelta,
-        });
+      const computed = window.getComputedStyle(node);
+      const background = parseRgbChannels(computed.backgroundColor);
+      const foreground = parseRgbChannels(computed.color);
+      if (!background || !foreground) {
+        continue;
       }
+
+      const ratio = contrastRatio(background, foreground);
+      void logDesignSystemDebugEvent("Button contrast validation computed.", {
+        target: target.label,
+        backgroundColor: computed.backgroundColor,
+        textColor: computed.color,
+        contrastRatio: Number(ratio.toFixed(2)),
+        validContrast: ratio >= 4.5,
+      });
     }
-  }, [isExpanded, prefs.gamma, prefs.motionTimingMs, prefs.spacingRatio, prefs.typeRatio]);
+  }, [isExpanded, prefs.gamma, prefs.motionTimingMs, prefs.semanticColors.error, prefs.semanticColors.new, prefs.semanticColors.pending, prefs.semanticColors.success]);
+
+  React.useEffect(() => {
+    if (!isExpanded || !overlayContentRef.current) {
+      return;
+    }
+
+    const cards = overlayContentRef.current.querySelectorAll<HTMLElement>(".cf-sample-card");
+    cards.forEach((card, index) => {
+      const computed = window.getComputedStyle(card);
+      const background = parseRgbChannels(computed.backgroundColor);
+      const foreground = parseRgbChannels(computed.color);
+      if (!background || !foreground) {
+        return;
+      }
+
+      const ratio = contrastRatio(background, foreground);
+      const validContrast = ratio >= 4.5;
+      void logDesignSystemDebugEvent("Card contrast validation computed.", {
+        card: card.getAttribute("aria-label") ?? `sample-card-${index + 1}`,
+        backgroundColor: computed.backgroundColor,
+        textColor: computed.color,
+        contrastRatio: Number(ratio.toFixed(2)),
+        validContrast,
+      });
+    });
+  }, [
+    isExpanded,
+    prefs.gamma,
+    prefs.semanticColors.error,
+    prefs.semanticColors.new,
+    prefs.semanticColors.pending,
+    prefs.semanticColors.success,
+  ]);
+
+  React.useEffect(() => {
+    if (!isExpanded || isCollapsing) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      const overlayNode = overlayContentRef.current;
+      if (!overlayNode) {
+        return;
+      }
+
+      if (overlayNode.contains(target)) {
+        return;
+      }
+
+      void logDesignSystemDebugEvent("Design system click-off detected.", {
+        trigger: "pointerdown-outside-overlay",
+      });
+      requestCollapse("click-off-global");
+      void logDesignSystemDebugEvent("Design system click-off collapse triggered.", {
+        trigger: "click-off-global",
+        easing: "ease-out",
+      });
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+    };
+  }, [isCollapsing, isExpanded]);
 
   React.useEffect(() => {
     if (!userId) {
@@ -244,6 +639,14 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       motionTimingMs: prefs.motionTimingMs,
       motionEasing: prefs.motionEasing,
     });
+    void logDesignSystemDebugEvent("Email input example rendered with tokenized styles.", {
+      component: "email-input-preview",
+      typeToken: "--cf-ds-type-base",
+      spacingToken: "--cf-ds-space-*",
+      strokeToken: "--cf-ds-stroke-*",
+      colorTokens: ["--bg-panel", "--text-primary", "--cf-ds-primary-3"],
+      motionTokens: ["--cf-ds-motion-ms", "--cf-ds-motion-easing"],
+    });
   }, [prefs.gamma, prefs.motionEasing, prefs.motionTimingMs, prefs.spacingRatio, prefs.strokePreset, prefs.typeRatio]);
 
   React.useEffect(() => {
@@ -285,7 +688,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
     setSecondsLeft(12);
     void logDesignSystemDebugEvent("Design token safety auto-revert triggered.");
     if (collapseAfterDialogRef.current) {
-      setCollapseRequested("auto-revert");
+      requestCollapse("auto-revert");
     }
   }, [secondsLeft, setPrefs, showKeepDialog]);
 
@@ -322,6 +725,14 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       }
     };
   }, [collapseRequested, prefs.motionTimingMs]);
+
+  function requestCollapse(trigger: string): void {
+    setCollapseRequested(trigger);
+    void logDesignSystemDebugEvent("Design system collapse trigger received.", {
+      trigger,
+      easing: "ease-out",
+    });
+  }
 
   async function handleSave(): Promise<void> {
     collapseAfterDialogRef.current = true;
@@ -465,7 +876,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
     setStatus("Changes confirmed.");
     void logDesignSystemDebugEvent("Design token changes confirmed by user.");
     if (collapseAfterDialogRef.current) {
-      setCollapseRequested("save-confirmed");
+      requestCollapse("save-confirmed");
     }
   }
 
@@ -480,7 +891,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
 
   function handleExpandToggle(): void {
     if (isExpanded || isCollapsing) {
-      setCollapseRequested("toggle-button");
+      requestCollapse("toggle-button");
       return;
     }
 
@@ -553,14 +964,15 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
 
   return (
     <>
-      {/* Collapsed trigger card — always fixed bottom-right */}
+      {/* Collapsed trigger card — in Settings grid layout */}
       <article
-        className={`settings-card cf-ds-card settings-card--design-system ${placementClassName ?? ""}`.trim()}
+        ref={collapsedCardRef}
+        className={`settings-card cf-ds-card settings-card--design-system ${isExpanded || isCollapsing ? "cf-ds-card--expanded" : ""} ${placementClassName ?? ""}`.trim()}
         aria-live="polite"
       >
         <div className="settings-card__head cf-ds-card__head">
           <div>
-            <h3>Design System Controls (New)</h3>
+            <h3>Design System Controls</h3>
             {!isExpanded && !isCollapsing ? (
               <p className="settings-meta">Single source of truth for color, type, stroke, spacing, and motion tokens.</p>
             ) : null}
@@ -581,23 +993,23 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
           {/* Backdrop scrim — click-outside collapses */}
           <div
             className={`cf-ds-card-backdrop${isCollapsing ? " cf-ds-card-backdrop--collapsing" : ""}`}
-            onClick={() => { setCollapseRequested("click-outside"); }}
+            onClick={() => { requestCollapse("click-outside"); }}
             aria-hidden="true"
           />
 
           {/* Expanded overlay panel */}
           <div className={`cf-ds-card-overlay${isCollapsing ? " cf-ds-card-overlay--collapsing" : ""}`}>
-            <div className="cf-ds-card-overlay__inner">
+            <div ref={overlayContentRef} className="cf-ds-card-overlay__inner">
               {/* Overlay header */}
               <div className="settings-card__head cf-ds-card__head">
                 <div>
-                  <h3>Design System Controls (New)</h3>
+                  <h3>Design System Controls</h3>
                   <p className="settings-meta">Single source of truth for color, type, stroke, spacing, and motion tokens.</p>
                 </div>
                 <button
                   type="button"
                   className="btn-secondary settings-card__toggle"
-                  onClick={() => { setCollapseRequested("toggle-button"); }}
+                  onClick={() => { requestCollapse("toggle-button"); }}
                 >
                   Collapse
                 </button>
@@ -649,7 +1061,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                 <div className="cf-ds-fibonacci-layout__example">
                   <div className="cf-example-card" aria-label="example card preview">
                     <div className="cf-example-card__row" ref={setSectionRef("buttons")}>
-                      <h4>Buttons</h4>
+                      <h4 className="cf-ds-section-title">Buttons</h4>
                       <div className="cf-example-card__button-grid">
                         <DemoButton variant="primary" size="sm" />
                         <DemoButton variant="primary" size="md" state="hover" />
@@ -663,19 +1075,22 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                     </div>
 
                     <div className="cf-example-card__row">
-                      <h4>Cards</h4>
+                      <h4 className="cf-ds-section-title">Cards</h4>
                       <div className="cf-example-card__cards">
-                        <article className="cf-sample-card">
-                          <h5>Email card</h5>
-                          <p>Subject: Weekly curriculum update</p>
-                          <button type="button" className="cf-ds-btn cf-ds-btn--primary cf-ds-btn--sm">Open</button>
+                        <article className="cf-sample-card" aria-label="Email input example">
+                          <h5 className="cf-ds-card-subtitle">Email</h5>
+                          <label className="cf-ds-email-field" htmlFor="cf-ds-email-input">
+                            Email
+                            <input id="cf-ds-email-input" type="email" placeholder="teacher@school.org" className="cf-ds-input" />
+                          </label>
+                          <button type="button" className="cf-ds-btn cf-ds-btn--primary cf-ds-btn--sm">Submit</button>
                         </article>
                         <article className="cf-sample-card cf-sample-card--disabled">
-                          <h5>Disabled card</h5>
+                          <h5 className="cf-ds-card-subtitle">Disabled card</h5>
                           <p>This section is not available yet.</p>
                         </article>
                         <article className="cf-sample-card cf-sample-card--default">
-                          <h5>Default card</h5>
+                          <h5 className="cf-ds-card-subtitle">Default card</h5>
                           <p>Color, title, description, and action all follow tokens.</p>
                           <button type="button" className="cf-ds-btn cf-ds-btn--secondary cf-ds-btn--sm">Action</button>
                         </article>
@@ -683,7 +1098,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                     </div>
 
                     <div className="cf-example-card__row" ref={setSectionRef("organizers")}>
-                      <h4>Organizer Buttons</h4>
+                      <h4 className="cf-ds-section-title">Organizer Buttons</h4>
                       <div className="cf-example-card__organizers">
                         <span className="cf-organizer cf-organizer--new">New</span>
                         <span className="cf-organizer cf-organizer--active">Active</span>
@@ -693,45 +1108,59 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                     </div>
 
                     <div className="cf-example-card__row" ref={setSectionRef("motion-preview")}>
-                      <h4>Motion Preview</h4>
-                      <p className="settings-meta">Hover to preview. Timing: {prefs.motionTimingMs}ms | Flow: {prefs.directionalFlow}</p>
-                      <div
-                        className="cf-motion-row"
-                        onMouseEnter={() => {
-                          void logDesignSystemDebugEvent("Motion preview animation cycle started.", {
-                            motionTimingMs: prefs.motionTimingMs,
-                            motionEasing: prefs.motionEasing,
-                            directionalFlow: prefs.directionalFlow,
-                          });
-                        }}
-                      >
-                        <div className="cf-motion-box__item">
-                          <span className="cf-motion-box cf-motion-box--enter" title="Enter - ease-in" />
-                          <span className="cf-motion-box__label">Ease In</span>
-                        </div>
-                        <div className="cf-motion-box__item">
-                          <span className="cf-motion-box cf-motion-box--move" title="Move - ease-in-out" />
-                          <span className="cf-motion-box__label">Ease In-Out</span>
-                        </div>
-                        <div className="cf-motion-box__item">
-                          <span className="cf-motion-box cf-motion-box--exit" title="Exit - ease-out" />
-                          <span className="cf-motion-box__label">Ease Out</span>
+                      <h4 className="cf-ds-section-title">Motion Preview</h4>
+                      <div className="cf-motion-preview-layout">
+                        <p className="settings-meta">Hover to preview. Timing: {prefs.motionTimingMs}ms | Flow: {prefs.directionalFlow}</p>
+                        <div
+                          className="cf-motion-row cf-motion-row--right"
+                          onMouseEnter={() => {
+                            void logDesignSystemDebugEvent("Motion preview animation cycle started.", {
+                              motionTimingMs: prefs.motionTimingMs,
+                              motionEasing: prefs.motionEasing,
+                              directionalFlow: prefs.directionalFlow,
+                            });
+                          }}
+                        >
+                          <div className="cf-motion-box__item">
+                            <span className="cf-motion-box cf-motion-box--enter" title="Enter - ease-in" />
+                            <span className="cf-motion-box__label">Ease In</span>
+                          </div>
+                          <div className="cf-motion-box__item">
+                            <span className="cf-motion-box cf-motion-box--move" title="Move - ease-in-out" />
+                            <span className="cf-motion-box__label">Ease In-Out</span>
+                          </div>
+                          <div className="cf-motion-box__item">
+                            <span className="cf-motion-box cf-motion-box--exit" title="Exit - ease-out" />
+                            <span className="cf-motion-box__label">Ease Out</span>
+                          </div>
                         </div>
                       </div>
                     </div>
 
                     <div className="cf-example-card__row" ref={setSectionRef("type-scale")}>
-                      <h4>Type Scale</h4>
-                      <p className="cf-type-base">Body text (base)</p>
-                      <p className="cf-type-lg">Subheading text (text-lg)</p>
-                      <p className="cf-type-2xl">Heading text (text-2xl)</p>
-                      <p className="cf-type-3xl">Title text (text-3xl)</p>
-                      <p className="cf-type-4xl">text-4xl</p>
-                      <p className="cf-type-5xl">text-5xl</p>
+                      <h4 className="cf-ds-section-title">Type Scale</h4>
+                      <div className="cf-type-scale-grid" aria-label="type scale preview">
+                        <p className="cf-type-scale-grid__item cf-type-5xl">text-5xl</p>
+                        <p className="cf-type-scale-grid__item cf-type-2xl">Heading text (text-2xl)</p>
+                        <p className="cf-type-scale-grid__item cf-type-4xl">text-4xl</p>
+                        <p className="cf-type-scale-grid__item cf-type-lg">Subheading text (text-lg)</p>
+                        <p className="cf-type-scale-grid__item cf-type-3xl">Title text (text-3xl)</p>
+                        <p className="cf-type-scale-grid__item cf-type-base">Body text (base)</p>
+                      </div>
+                    </div>
+
+                    <div className="cf-example-card__row" ref={setSectionRef("spacing-preview")}>
+                      <h4 className="cf-ds-section-title">Spacing Scale Preview</h4>
+                      <div className="cf-spacing-preview" aria-label="spacing scale preview">
+                        <span className="cf-spacing-preview__item cf-spacing-preview__item--1">space-1</span>
+                        <span className="cf-spacing-preview__item cf-spacing-preview__item--2">space-2</span>
+                        <span className="cf-spacing-preview__item cf-spacing-preview__item--3">space-3</span>
+                        <span className="cf-spacing-preview__item cf-spacing-preview__item--4">space-4</span>
+                      </div>
                     </div>
 
                     <div className="cf-example-card__row" ref={setSectionRef("color-scale")}>
-                      <h4>Color Scale</h4>
+                      <h4 className="cf-ds-section-title">Color Scale</h4>
                       <div className="cf-ds-swatches" aria-label="primary color swatches">
                         {tokens.color.primary.map((_, index) => (
                           <span key={`shade-${index}`} className={`cf-ds-swatch cf-ds-swatch--${index + 1}`} title={`Shade ${index + 1}`} />
@@ -744,52 +1173,8 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                 {/* Controls Card — aligned with Example Card rows */}
                 <div className="cf-ds-fibonacci-layout__controls">
                   <div className="cf-ds-settings-grid">
-                    <section className="cf-ds-control-group" ref={setSectionRef("gamma")}>
-                      <label>
-                        Gamma: {prefs.gamma.toFixed(2)}
-                        <input
-                          type="range"
-                          min={2}
-                          max={2.4}
-                          step={0.05}
-                          value={prefs.gamma}
-                          onChange={(event) => {
-                            const gamma = Number(event.target.value);
-                            setPrefs({ gamma });
-                            void logDesignSystemDebugEvent("Gamma changed.", { gamma });
-                          }}
-                        />
-                      </label>
-                    </section>
-
-                    <section className="cf-ds-control-group" ref={setSectionRef("type-ratio")}>
-                      <p className="settings-meta">Type ratio preset: {describePreset(prefs.typeRatio, TYPE_RATIO_PRESETS)}</p>
-                      <label>
-                        Type ratio: {prefs.typeRatio.toFixed(3)}
-                        <input
-                          type="range"
-                          min={1.067}
-                          max={1.5}
-                          step={0.001}
-                          value={prefs.typeRatio}
-                          list="cf-type-ratio-presets"
-                          onChange={(event) => {
-                            const rawValue = Number(event.target.value);
-                            handleTypeRatioChange(rawValue);
-                            void logDesignSystemDebugEvent("Type ratio descriptor changed.", {
-                              descriptor: describePreset(rawValue, TYPE_RATIO_PRESETS),
-                            });
-                          }}
-                        />
-                      </label>
-                      <datalist id="cf-type-ratio-presets">
-                        {TYPE_RATIO_PRESETS.map((preset) => (
-                          <option key={preset.value} value={preset.value} label={preset.label} />
-                        ))}
-                      </datalist>
-                    </section>
-
-                    <section className="cf-ds-control-group">
+                    <section className="cf-ds-control-group" ref={setSectionRef("button-controls")}>
+                      <h4 className="cf-ds-section-title">Button Controls</h4>
                       <label>
                         Stroke preset
                         <select value={prefs.strokePreset} onChange={(event) => setPrefs({ strokePreset: event.target.value as DesignTokenPreferences["strokePreset"] })}>
@@ -798,9 +1183,11 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                           ))}
                         </select>
                       </label>
+                      <p className="settings-meta">Buttons inherit stroke, spacing, and color token scales.</p>
                     </section>
 
                     <section className="cf-ds-control-group" ref={setSectionRef("organizer-colors")}>
+                      <h4 className="cf-ds-section-title">Organizer Colors</h4>
                       <p className="settings-meta">Organizer colors (aligned with preview order)</p>
                       <div className="cf-ds-semantic-grid">
                         <label>New
@@ -819,6 +1206,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                     </section>
 
                     <section className="cf-ds-control-group" ref={setSectionRef("motion-controls")}>
+                      <h4 className="cf-ds-section-title">Motion Controls</h4>
                       <label>
                         Motion timing: {prefs.motionTimingMs}ms ({motionDescription(prefs.motionTimingMs)})
                         <input
@@ -872,7 +1260,36 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                       </button>
                     </section>
 
-                    <section className="cf-ds-control-group">
+                    <section className="cf-ds-control-group" ref={setSectionRef("type-ratio")}>
+                      <h4 className="cf-ds-section-title">Type Ratio</h4>
+                      <p className="settings-meta">Type ratio preset: {describePreset(prefs.typeRatio, TYPE_RATIO_PRESETS)}</p>
+                      <label>
+                        Type ratio: {prefs.typeRatio.toFixed(3)}
+                        <input
+                          type="range"
+                          min={1.067}
+                          max={1.5}
+                          step={0.001}
+                          value={prefs.typeRatio}
+                          list="cf-type-ratio-presets"
+                          onChange={(event) => {
+                            const rawValue = Number(event.target.value);
+                            handleTypeRatioChange(rawValue);
+                            void logDesignSystemDebugEvent("Type ratio descriptor changed.", {
+                              descriptor: describePreset(rawValue, TYPE_RATIO_PRESETS),
+                            });
+                          }}
+                        />
+                      </label>
+                      <datalist id="cf-type-ratio-presets">
+                        {TYPE_RATIO_PRESETS.map((preset) => (
+                          <option key={preset.value} value={preset.value} label={preset.label} />
+                        ))}
+                      </datalist>
+                    </section>
+
+                    <section className="cf-ds-control-group" ref={setSectionRef("spacing-scale")}>
+                      <h4 className="cf-ds-section-title">Spacing Scale</h4>
                       <p className="settings-meta">Spacing ratio preset: {describePreset(prefs.spacingRatio, SPACING_PRESETS)}</p>
                       <label>
                         Spacing ratio: {prefs.spacingRatio.toFixed(3)}
@@ -895,6 +1312,26 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                         ))}
                       </datalist>
                     </section>
+
+                    <section className="cf-ds-control-group" ref={setSectionRef("gamma")}>
+                      <h4 className="cf-ds-section-title">Color Curve</h4>
+                      <label>
+                        Gamma: {prefs.gamma.toFixed(2)}
+                        <input
+                          type="range"
+                          min={2}
+                          max={2.4}
+                          step={0.05}
+                          value={prefs.gamma}
+                          onChange={(event) => {
+                            const gamma = Number(event.target.value);
+                            setPrefs({ gamma });
+                            void logDesignSystemDebugEvent("Gamma changed.", { gamma });
+                          }}
+                        />
+                      </label>
+                    </section>
+
                   </div>
                 </div>
               </div>
@@ -916,7 +1353,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                   className="btn-secondary"
                   onClick={() => {
                     resetPrefs();
-                    setCollapseRequested("reset");
+                    requestCollapse("reset");
                     void logDesignSystemDebugEvent("Design token reset to defaults. Collapsing.", { trigger: "reset" });
                   }}
                 >
@@ -927,7 +1364,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                   type="button"
                   className="btn-secondary"
                   onClick={() => {
-                    setCollapseRequested("cancel");
+                    requestCollapse("cancel");
                     void logDesignSystemDebugEvent("Design system controls cancelled. Collapsing.", { trigger: "cancel" });
                   }}
                 >
@@ -952,7 +1389,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                         setStatus("Changes reverted.");
                         void logDesignSystemDebugEvent("Design token changes reverted manually.");
                         if (collapseAfterDialogRef.current) {
-                          setCollapseRequested("save-reverted");
+                          requestCollapse("save-reverted");
                         }
                       }}
                     >

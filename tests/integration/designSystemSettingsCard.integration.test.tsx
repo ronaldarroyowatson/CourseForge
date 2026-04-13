@@ -27,11 +27,10 @@ describe("DesignSystemSettingsCard", () => {
     render(<DesignSystemSettingsCard userId={null} />);
     expandDesignSystemCard();
 
-    const sliders = screen.getAllByRole("slider");
-    expect(sliders.length).toBeGreaterThanOrEqual(4);
+    expect(screen.getAllByRole("slider").length).toBeGreaterThanOrEqual(4);
 
-    fireEvent.change(sliders[0], { target: { value: "2.35" } });
-    fireEvent.change(sliders[1], { target: { value: "1.333" } });
+    fireEvent.change(screen.getByLabelText(/Gamma:/), { target: { value: "2.35" } });
+    fireEvent.change(screen.getByLabelText(/Type ratio:/), { target: { value: "1.333" } });
 
     await waitFor(() => {
       const state = useUIStore.getState();
@@ -49,8 +48,7 @@ describe("DesignSystemSettingsCard", () => {
     render(<DesignSystemSettingsCard userId={null} />);
     expandDesignSystemCard();
 
-    const sliders = screen.getAllByRole("slider");
-    fireEvent.change(sliders[1], { target: { value: "1.5" } });
+    fireEvent.change(screen.getByLabelText(/Type ratio:/), { target: { value: "1.5" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(screen.getByText(/Keep Changes\?/)).toBeInTheDocument();
@@ -62,14 +60,98 @@ describe("DesignSystemSettingsCard", () => {
     });
   });
 
+  it("uses the updated card title without the new suffix", () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    expect(screen.getByText("Design System Controls")).toBeInTheDocument();
+    expect(screen.queryByText("Design System Controls (New)")).not.toBeInTheDocument();
+  });
+
+  it("collapses when clicking outside the expanded overlay", async () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
+
+    fireEvent.pointerDown(document.body);
+
+    await waitFor(() => {
+      expect(screen.getByText("Collapsed by default. Expand to edit live design controls.")).toBeInTheDocument();
+    });
+  });
+
+  it("keeps organizer and motion controls grouped before type controls for row alignment", () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
+
+    const organizerColorsHeading = screen.getByRole("heading", { name: "Organizer Colors" });
+    const motionControlsHeading = screen.getByRole("heading", { name: "Motion Controls" });
+    const typeRatioHeading = screen.getByRole("heading", { name: "Type Ratio" });
+
+    expect(organizerColorsHeading.compareDocumentPosition(typeRatioHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(motionControlsHeading.compareDocumentPosition(typeRatioHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("renders email input preview with submit action", () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
+
+    expect(screen.getByLabelText("Email")).toHaveAttribute("type", "email");
+    expect(screen.getByRole("button", { name: "Submit" })).toBeInTheDocument();
+  });
+
+  it("places spacing scale controls directly below type ratio controls", () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
+
+    const typeRatioHeading = screen.getByRole("heading", { name: "Type Ratio" });
+    const spacingScaleHeading = screen.getByRole("heading", { name: "Spacing Scale" });
+    const gammaHeading = screen.getByRole("heading", { name: "Color Curve" });
+
+    expect(typeRatioHeading.compareDocumentPosition(spacingScaleHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(spacingScaleHeading.compareDocumentPosition(gammaHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("renders motion preview in a right-aligned horizontal cluster", () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
+
+    const motionLayout = document.querySelector(".cf-motion-preview-layout");
+    const motionRow = document.querySelector(".cf-motion-row--right");
+
+    expect(motionLayout).toBeTruthy();
+    expect(motionRow).toBeTruthy();
+    expect(screen.getByText("Ease In")).toBeInTheDocument();
+    expect(screen.getByText("Ease In-Out")).toBeInTheDocument();
+    expect(screen.getByText("Ease Out")).toBeInTheDocument();
+  });
+
+  it("renders type scale preview as a 2x3 grid ordered from larger to smaller samples", () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
+
+    const typeGrid = document.querySelector(".cf-type-scale-grid");
+    expect(typeGrid).toBeTruthy();
+    expect(screen.getByLabelText("type scale preview")).toBeInTheDocument();
+    expect(screen.getByText("text-5xl")).toBeInTheDocument();
+    expect(screen.getByText("Body text (base)")).toBeInTheDocument();
+  });
+
+  it("renders spacing scale preview as a 2x2 grid", () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
+
+    const spacingGrid = document.querySelector(".cf-spacing-preview");
+    expect(spacingGrid).toBeTruthy();
+    expect(screen.getByLabelText("spacing scale preview")).toBeInTheDocument();
+    expect(screen.getByText("space-1")).toBeInTheDocument();
+    expect(screen.getByText("space-4")).toBeInTheDocument();
+  });
+
   it("auto-reverts after keep-changes timeout", async () => {
     vi.useFakeTimers();
     const before = useUIStore.getState().designTokenPreferences;
     render(<DesignSystemSettingsCard userId={null} />);
     expandDesignSystemCard();
 
-    const sliders = screen.getAllByRole("slider");
-    fireEvent.change(sliders[1], { target: { value: "1.5" } });
+    fireEvent.change(screen.getByLabelText(/Type ratio:/), { target: { value: "1.5" } });
     expect(useUIStore.getState().designTokenPreferences.typeRatio).toBe(1.5);
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));

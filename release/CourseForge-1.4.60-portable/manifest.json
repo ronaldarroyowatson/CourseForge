@@ -1,7 +1,7 @@
 {
     "name":  "CourseForge",
-    "version":  "1.4.59",
-    "generatedAtUtc":  "2026-04-12T21:55:17.4555017Z",
+    "version":  "1.4.60",
+    "generatedAtUtc":  "2026-04-13T03:21:59.8068235Z",
     "dependencyVersions":  {
                                "node":  "\u003e=20 \u003c25"
                            },
@@ -13,7 +13,7 @@
                   {
                       "path":  "webapp\\index.html",
                       "sizeBytes":  659,
-                      "sha256":  "541b86d9bfe518b0de88f0ec936eaafa5f0219e6ad6807e8ceb04dd78b205b08"
+                      "sha256":  "51fbd7d3832cedde06b3047fa7f47ebf3872b9c945d454fe4b1afa83223399bb"
                   },
                   {
                       "path":  "webapp\\CourseForge.ico",
@@ -21,9 +21,9 @@
                       "sha256":  "6874b78913251da0e05dc6f304835a6b0720e466fe77e276d977c8aaf2cc175d"
                   },
                   {
-                      "path":  "webapp\\assets\\AdminToolsPage-CJddadu6.js",
+                      "path":  "webapp\\assets\\AdminToolsPage-DxWtxsbY.js",
                       "sizeBytes":  51896,
-                      "sha256":  "057bcda53e17f044a2dcaaf7fad3462d6ed3260c2464b198605520a67bf8a087"
+                      "sha256":  "bbcd228b77f572992dbbec090396d2c347e230f2e926f4fda339fcabbfae1c51"
                   },
                   {
                       "path":  "webapp\\sw.js",
@@ -71,9 +71,9 @@
                       "sha256":  "82507b0bb9ac4affaeb17c40968d830cbd6d14a2ffa04d8994faf1a78e58e1b5"
                   },
                   {
-                      "path":  "webapp\\assets\\index-DX-vnidS.js",
-                      "sizeBytes":  448271,
-                      "sha256":  "24dc3d12241135f51a2a99e7bf15279366016c675927286eac22fcda4412e27e"
+                      "path":  "webapp\\assets\\index-B-KKp6wS.css",
+                      "sizeBytes":  60549,
+                      "sha256":  "3f99ff5121a8e823362b2c386be886c281b43817e1d5d95d0815c2fc76d29b2b"
                   },
                   {
                       "path":  "webapp\\assets\\CourseForge-kqQSdGZZ.ico",
@@ -86,14 +86,14 @@
                       "sha256":  "8746cb583d731511bc2f711dfed407bdc21aec7f17d98ac543c3e14caaac5c5c"
                   },
                   {
-                      "path":  "webapp\\assets\\index-jT5mj1x1.css",
-                      "sizeBytes":  56189,
-                      "sha256":  "15547e28219fd22c9314873a700158ee907d3550da86f9029b80b2170dafaa44"
+                      "path":  "webapp\\assets\\index-rFhe_z8R.js",
+                      "sizeBytes":  457909,
+                      "sha256":  "0c95ea05f5dc89831ccca76d80358c91c3b3237e321705fc54c4e8ca16389ec9"
                   },
                   {
                       "path":  "courseforge-serve.js",
-                      "sizeBytes":  44520,
-                      "sha256":  "2747e73e3099a2c13b0f6437409ceaf1202d153a747f4a95d98f8e8fb7a6e3ea"
+                      "sizeBytes":  44893,
+                      "sha256":  "e276c1b6823fea25165d80051515c179535f8fdb7ba3a71c6b94435cdf72b383"
                   },
                   {
                       "path":  "courseforge-serve.cjs",
@@ -123,7 +123,7 @@
                   {
                       "path":  "Check-For-CourseForge-Updates.cmd",
                       "sizeBytes":  595,
-                      "sha256":  "93ff07d1d7bf5c99953ca95f39ec0de96e64c322d8a4b877b8dde83d8a19365c"
+                      "sha256":  "4c71eb62b544d704a62be659c3c10958a3eb28c0e8cd3e7a9126a8da25510321"
                   },
                   {
                       "path":  "CHANGELOG.md",
@@ -153,7 +153,7 @@
                   {
                       "path":  "package-manifest.json",
                       "sizeBytes":  1315,
-                      "sha256":  "0d423f7f292b49fe84df381be0b762cbdb344217f24130314dfd67a3f77b1f08"
+                      "sha256":  "1e626b61bdbe8330db40797035d39468e0b0bf47e8259d847e808a0025bce2bc"
                   },
                   {
                       "path":  "LICENSE",

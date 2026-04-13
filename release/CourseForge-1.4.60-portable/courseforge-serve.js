@@ -242,6 +242,15 @@ function killPid(pid) {
   }
 }
 
+function endpointMatchesPort(endpoint, targetPort) {
+  if (typeof endpoint !== "string") {
+    return false;
+  }
+
+  const match = endpoint.trim().match(/:(\d+)$/);
+  return Number(match?.[1]) === targetPort;
+}
+
 function findPidByPort(portValue) {
   const numericPort = Number(portValue);
   if (!Number.isFinite(numericPort) || numericPort <= 0) {
@@ -250,11 +259,16 @@ function findPidByPort(portValue) {
 
   try {
     if (process.platform === "win32") {
-      const output = execSync(`netstat -ano -p tcp | findstr :${numericPort}`, { stdio: ["ignore", "pipe", "ignore"] }).toString("utf8");
+      const output = execSync("netstat -ano -p tcp", { stdio: ["ignore", "pipe", "ignore"] }).toString("utf8");
       const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
       for (const line of lines) {
         const parts = line.split(/\s+/);
-        const pid = Number(parts[parts.length - 1]);
+        const localAddress = parts[1];
+        const state = parts[3];
+        const pid = Number(parts[4]);
+        if (state !== "LISTENING" || !endpointMatchesPort(localAddress, numericPort)) {
+          continue;
+        }
         if (Number.isFinite(pid) && pid > 0) {
           return pid;
         }

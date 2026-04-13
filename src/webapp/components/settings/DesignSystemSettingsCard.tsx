@@ -59,6 +59,17 @@ const STROKE_PRESET_OPTIONS: Array<{ label: string; value: DesignTokenPreference
   { label: "Sweet Spot", value: "sweet-spot", descriptor: "1 -> 1.5 -> 2 -> 3" },
 ];
 
+const SHADE_OPTIONS = Array.from({ length: 9 }, (_, index) => index + 1);
+
+const CARD_PADDING_OPTIONS = [
+  { label: "Space 0", value: 0 },
+  { label: "Space 1", value: 1 },
+  { label: "Space 2", value: 2 },
+  { label: "Space 3", value: 3 },
+  { label: "Space 4", value: 4 },
+  { label: "Space 5", value: 5 },
+];
+
 function DemoButton({
   variant,
   size,
@@ -130,6 +141,10 @@ function contrastRatio(background: [number, number, number], foreground: [number
   const lighter = Math.max(backgroundLum, foregroundLum);
   const darker = Math.min(backgroundLum, foregroundLum);
   return (lighter + 0.05) / (darker + 0.05);
+}
+
+function shadeLabel(value: number): string {
+  return `Shade ${Math.max(1, Math.min(9, Math.round(value)))}`;
 }
 
 export function DesignSystemSettingsCard({ userId, placementClassName }: DesignSystemSettingsCardProps): React.JSX.Element {
@@ -209,6 +224,45 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
   }, [isCollapsing, isExpanded, prefs.directionalFlow]);
 
   React.useEffect(() => {
+    if (!isExpanded && !isCollapsing) {
+      return;
+    }
+
+    const updateBounds = (): void => {
+      const root = document.documentElement;
+      const cardNode = collapsedCardRef.current;
+      const settingsSurface = cardNode?.closest(".settings-page");
+      if (!(settingsSurface instanceof HTMLElement)) {
+        root.style.removeProperty("--cf-ds-overlay-top");
+        root.style.removeProperty("--cf-ds-overlay-left");
+        root.style.removeProperty("--cf-ds-overlay-width");
+        root.style.removeProperty("--cf-ds-overlay-height");
+        return;
+      }
+
+      const rect = settingsSurface.getBoundingClientRect();
+      root.style.setProperty("--cf-ds-overlay-top", `${Math.round(rect.top)}px`);
+      root.style.setProperty("--cf-ds-overlay-left", `${Math.round(rect.left)}px`);
+      root.style.setProperty("--cf-ds-overlay-width", `${Math.round(rect.width)}px`);
+      root.style.setProperty("--cf-ds-overlay-height", `${Math.round(rect.height)}px`);
+    };
+
+    updateBounds();
+    window.addEventListener("resize", updateBounds);
+    window.addEventListener("scroll", updateBounds, true);
+
+    return () => {
+      const root = document.documentElement;
+      root.style.removeProperty("--cf-ds-overlay-top");
+      root.style.removeProperty("--cf-ds-overlay-left");
+      root.style.removeProperty("--cf-ds-overlay-width");
+      root.style.removeProperty("--cf-ds-overlay-height");
+      window.removeEventListener("resize", updateBounds);
+      window.removeEventListener("scroll", updateBounds, true);
+    };
+  }, [isCollapsing, isExpanded]);
+
+  React.useEffect(() => {
     if (!isExpanded) {
       return;
     }
@@ -249,6 +303,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
   React.useLayoutEffect(() => {
     const alignmentPairs = [
       { control: "button-controls", preview: "buttons" },
+      { control: "card-styling", preview: "cards" },
       { control: "organizer-colors", preview: "organizers" },
       { control: "motion-controls", preview: "motion-preview" },
       { control: "type-ratio", preview: "type-scale" },
@@ -325,7 +380,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
     };
 
     void logDesignSystemDebugEvent("Control relocation map applied.", {
-      controlsByPreviewOrder: ["button-controls", "organizer-colors", "motion-controls", "type-ratio", "spacing-scale", "gamma"],
+      controlsByPreviewOrder: ["button-controls", "card-styling", "organizer-colors", "motion-controls", "type-ratio", "spacing-scale", "gamma"],
     });
 
     void logDesignSystemDebugEvent("Motion preview boxes repositioned to right-side cluster.", {
@@ -638,6 +693,15 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       strokePreset: prefs.strokePreset,
       motionTimingMs: prefs.motionTimingMs,
       motionEasing: prefs.motionEasing,
+      cardBaseShade: prefs.cardBaseShade,
+      cardShadowShade: prefs.cardShadowShade,
+      cardShadowShadeMode: prefs.cardShadowShadeMode,
+      cardGlowShade: prefs.cardGlowShade,
+      cardGlowShadeMode: prefs.cardGlowShadeMode,
+      cardGradientStrength: prefs.cardGradientStrength,
+      cardCornerRadius: prefs.cardCornerRadius,
+      cardPaddingIndex: prefs.cardPaddingIndex,
+      cardHeight: prefs.cardHeight,
     });
     void logDesignSystemDebugEvent("Email input example rendered with tokenized styles.", {
       component: "email-input-preview",
@@ -647,7 +711,23 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       colorTokens: ["--bg-panel", "--text-primary", "--cf-ds-primary-3"],
       motionTokens: ["--cf-ds-motion-ms", "--cf-ds-motion-easing"],
     });
-  }, [prefs.gamma, prefs.motionEasing, prefs.motionTimingMs, prefs.spacingRatio, prefs.strokePreset, prefs.typeRatio]);
+  }, [
+    prefs.cardBaseShade,
+    prefs.cardCornerRadius,
+    prefs.cardGlowShade,
+    prefs.cardGlowShadeMode,
+    prefs.cardGradientStrength,
+    prefs.cardHeight,
+    prefs.cardPaddingIndex,
+    prefs.cardShadowShade,
+    prefs.cardShadowShadeMode,
+    prefs.gamma,
+    prefs.motionEasing,
+    prefs.motionTimingMs,
+    prefs.spacingRatio,
+    prefs.strokePreset,
+    prefs.typeRatio,
+  ]);
 
   React.useEffect(() => {
     if (!showKeepDialog) {
@@ -967,7 +1047,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       {/* Collapsed trigger card — in Settings grid layout */}
       <article
         ref={collapsedCardRef}
-        className={`settings-card cf-ds-card settings-card--design-system ${isExpanded || isCollapsing ? "cf-ds-card--expanded" : ""} ${placementClassName ?? ""}`.trim()}
+        className={`settings-card settings-card--tokenized cf-ds-card settings-card--design-system ${isExpanded || isCollapsing ? "cf-ds-card--expanded settings-card--active" : ""} ${placementClassName ?? ""}`.trim()}
         aria-live="polite"
       >
         <div className="settings-card__head cf-ds-card__head">
@@ -1074,10 +1154,10 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                       </div>
                     </div>
 
-                    <div className="cf-example-card__row">
+                    <div className="cf-example-card__row" ref={setSectionRef("cards")}>
                       <h4 className="cf-ds-section-title">Cards</h4>
                       <div className="cf-example-card__cards">
-                        <article className="cf-sample-card" aria-label="Email input example">
+                        <article className="cf-sample-card cf-sample-card--style-preview" aria-label="Email input example">
                           <h5 className="cf-ds-card-subtitle">Email</h5>
                           <label className="cf-ds-email-field" htmlFor="cf-ds-email-input">
                             Email
@@ -1085,11 +1165,11 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                           </label>
                           <button type="button" className="cf-ds-btn cf-ds-btn--primary cf-ds-btn--sm">Submit</button>
                         </article>
-                        <article className="cf-sample-card cf-sample-card--disabled">
+                        <article className="cf-sample-card cf-sample-card--style-preview cf-sample-card--disabled">
                           <h5 className="cf-ds-card-subtitle">Disabled card</h5>
                           <p>This section is not available yet.</p>
                         </article>
-                        <article className="cf-sample-card cf-sample-card--default">
+                        <article className="cf-sample-card cf-sample-card--style-preview cf-sample-card--default">
                           <h5 className="cf-ds-card-subtitle">Default card</h5>
                           <p>Color, title, description, and action all follow tokens.</p>
                           <button type="button" className="cf-ds-btn cf-ds-btn--secondary cf-ds-btn--sm">Action</button>
@@ -1186,6 +1266,126 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                       <p className="settings-meta">Buttons inherit stroke, spacing, and color token scales.</p>
                     </section>
 
+                    <section className="cf-ds-control-group" ref={setSectionRef("card-styling")}>
+                      <h4 className="cf-ds-section-title">Card Styling</h4>
+                      <label>
+                        Card Base Shade
+                        <select
+                          value={prefs.cardBaseShade}
+                          onChange={(event) => {
+                            const cardBaseShade = Number(event.target.value);
+                            setPrefs({ cardBaseShade });
+                          }}
+                        >
+                          {SHADE_OPTIONS.map((shade) => (
+                            <option key={`card-base-${shade}`} value={shade}>{shadeLabel(shade)}</option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label>
+                        Card Shadow Shade
+                        <select
+                          value={prefs.cardShadowShadeMode === "auto" ? "auto" : String(prefs.cardShadowShade)}
+                          onChange={(event) => {
+                            if (event.target.value === "auto") {
+                              setPrefs({ cardShadowShadeMode: "auto" });
+                              return;
+                            }
+
+                            setPrefs({
+                              cardShadowShadeMode: "manual",
+                              cardShadowShade: Number(event.target.value),
+                            });
+                          }}
+                        >
+                          <option value="auto">Auto (base - 1)</option>
+                          {SHADE_OPTIONS.map((shade) => (
+                            <option key={`card-shadow-${shade}`} value={shade}>{shadeLabel(shade)}</option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label>
+                        Card Glow Shade
+                        <select
+                          value={prefs.cardGlowShadeMode === "auto" ? "auto" : String(prefs.cardGlowShade)}
+                          onChange={(event) => {
+                            if (event.target.value === "auto") {
+                              setPrefs({ cardGlowShadeMode: "auto" });
+                              return;
+                            }
+
+                            setPrefs({
+                              cardGlowShadeMode: "manual",
+                              cardGlowShade: Number(event.target.value),
+                            });
+                          }}
+                        >
+                          <option value="auto">Auto (base + 1)</option>
+                          {SHADE_OPTIONS.map((shade) => (
+                            <option key={`card-glow-${shade}`} value={shade}>{shadeLabel(shade)}</option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label>
+                        Card Gradient Strength: {prefs.cardGradientStrength.toFixed(1)}%
+                        <input
+                          type="range"
+                          min={0}
+                          max={10}
+                          step={0.5}
+                          value={prefs.cardGradientStrength}
+                          onChange={(event) => {
+                            setPrefs({ cardGradientStrength: Number(event.target.value) });
+                          }}
+                        />
+                      </label>
+
+                      <label>
+                        Card Corner Radius (px)
+                        <input
+                          type="number"
+                          min={4}
+                          max={40}
+                          step={1}
+                          value={prefs.cardCornerRadius}
+                          onChange={(event) => {
+                            setPrefs({ cardCornerRadius: Number(event.target.value) });
+                          }}
+                        />
+                      </label>
+
+                      <label>
+                        Card Padding
+                        <select
+                          value={prefs.cardPaddingIndex}
+                          onChange={(event) => {
+                            setPrefs({ cardPaddingIndex: Number(event.target.value) });
+                          }}
+                        >
+                          {CARD_PADDING_OPTIONS.map((option) => (
+                            <option key={`card-padding-${option.value}`} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label>
+                        Card Height (px)
+                        <input
+                          type="number"
+                          min={140}
+                          max={460}
+                          step={5}
+                          value={prefs.cardHeight}
+                          onChange={(event) => {
+                            setPrefs({ cardHeight: Number(event.target.value) });
+                          }}
+                        />
+                      </label>
+                    </section>
+
                     <section className="cf-ds-control-group" ref={setSectionRef("organizer-colors")}>
                       <h4 className="cf-ds-section-title">Organizer Colors</h4>
                       <p className="settings-meta">Organizer colors (aligned with preview order)</p>
@@ -1249,6 +1449,11 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                             directionalFlow: nextFlow,
                             exampleCardSide: nextFlow === "left-to-right" ? "left" : "right",
                             controlsCardSide: nextFlow === "left-to-right" ? "right" : "left",
+                            motionTimingMs: prefs.motionTimingMs,
+                            motionEasing: prefs.motionEasing,
+                            thumbAnimation: "fade-slide",
+                            swapInEasing: "ease-in",
+                            swapOutEasing: "ease-out",
                           });
                         }}
                         aria-label="Toggle directional flow"

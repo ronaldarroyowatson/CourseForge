@@ -9,6 +9,7 @@ import {
   requestCancelAutoTextbookUpload,
   resumePersistedAutoTextbookUpload,
 } from "../../../core/services/autoTextbookUploadService";
+import { logDesignSystemDebugEvent } from "../../../core/services/designSystemService";
 import { syncNow } from "../../../core/services/syncService";
 import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
@@ -22,6 +23,7 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
   const userId = useAuthStore((state) => state.userId);
   const isAdmin = useAuthStore((state) => state.isAdmin);
   const theme = useUIStore((state) => state.theme);
+  const designTokenPreferences = useUIStore((state) => state.designTokenPreferences);
   const toggleTheme = useUIStore((state) => state.toggleTheme);
   const isSyncing = useUIStore((state) => state.isSyncing);
   const syncStatus = useUIStore((state) => state.syncStatus);
@@ -120,6 +122,14 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
   }
 
   async function handleThemeToggle(): Promise<void> {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    void logDesignSystemDebugEvent("Theme toggle fade choreography started.", {
+      previousTheme: theme,
+      nextTheme,
+      timingMs: designTokenPreferences.motionTimingMs,
+      easing: designTokenPreferences.motionEasing,
+    });
+
     toggleTheme();
 
     if (!userId) {
@@ -127,7 +137,6 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
     }
 
     try {
-      const nextTheme = useUIStore.getState().theme;
       await setDoc(doc(firestoreDb, "users", userId), { theme: nextTheme }, { merge: true });
     } catch (error) {
       if (import.meta.env.DEV) {
@@ -199,7 +208,7 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
   }
 
   return (
-    <header className="app-header">
+    <header className={`app-header ${isSettingsView ? "app-header--settings-ds" : ""}`.trim()}>
       <div className="app-header__main">
         <div className="app-header__left">
           {isSettingsView ? (

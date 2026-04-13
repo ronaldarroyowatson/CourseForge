@@ -3,6 +3,7 @@ import { appendDebugLogEntry } from "./debugLogService";
 export type MotionEasing = "ease-in" | "ease-out" | "ease-in-out";
 export type DirectionalFlow = "left-to-right" | "right-to-left";
 export type StrokePreset = "common" | "doubling" | "soft" | "ultra-thin" | "sweet-spot";
+export type CardShadeMode = "auto" | "manual";
 
 export interface SemanticColors {
   error: string;
@@ -22,6 +23,15 @@ export interface DesignTokenPreferences {
   semanticColors: SemanticColors;
   useSystemDefaults: boolean;
   directionalFlow: DirectionalFlow;
+  cardBaseShade: number;
+  cardShadowShadeMode: CardShadeMode;
+  cardShadowShade: number;
+  cardGlowShadeMode: CardShadeMode;
+  cardGlowShade: number;
+  cardGradientStrength: number;
+  cardCornerRadius: number;
+  cardPaddingIndex: number;
+  cardHeight: number;
 }
 
 export interface DesignTokens {
@@ -62,6 +72,20 @@ export interface DesignTokens {
     activeOpacity: number;
     disabledOpacity: number;
     loadingOpacity: number;
+  };
+  card: {
+    baseShade: number;
+    shadowShade: number;
+    glowShade: number;
+    gradientStrength: number;
+    cornerRadius: number;
+    padding: number;
+    height: number;
+    colors: {
+      base: string;
+      shadow: string;
+      glow: string;
+    };
   };
 }
 
@@ -116,10 +140,27 @@ export const DEFAULT_DESIGN_TOKEN_PREFERENCES: DesignTokenPreferences = {
   },
   useSystemDefaults: false,
   directionalFlow: "left-to-right",
+  cardBaseShade: 3,
+  cardShadowShadeMode: "auto",
+  cardShadowShade: 2,
+  cardGlowShadeMode: "auto",
+  cardGlowShade: 4,
+  cardGradientStrength: 4,
+  cardCornerRadius: 12,
+  cardPaddingIndex: 4,
+  cardHeight: 220,
 };
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function clampShade(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.round(clamp(value, 1, 9));
 }
 
 function parseHexColor(value: string, fallback: string): string {
@@ -170,6 +211,13 @@ function hslToHex(h: number, s: number, l: number): string {
 export function sanitizeDesignTokenPreferences(input: Partial<DesignTokenPreferences> | null | undefined): DesignTokenPreferences {
   const next = input ?? {};
   const semantic = next.semanticColors ?? DEFAULT_DESIGN_TOKEN_PREFERENCES.semanticColors;
+  const cardBaseShade = clampShade(next.cardBaseShade ?? DEFAULT_DESIGN_TOKEN_PREFERENCES.cardBaseShade, DEFAULT_DESIGN_TOKEN_PREFERENCES.cardBaseShade);
+  const cardShadowShadeMode = next.cardShadowShadeMode === "manual" ? "manual" : "auto";
+  const cardGlowShadeMode = next.cardGlowShadeMode === "manual" ? "manual" : "auto";
+  const manualCardShadow = clampShade(next.cardShadowShade ?? DEFAULT_DESIGN_TOKEN_PREFERENCES.cardShadowShade, DEFAULT_DESIGN_TOKEN_PREFERENCES.cardShadowShade);
+  const manualCardGlow = clampShade(next.cardGlowShade ?? DEFAULT_DESIGN_TOKEN_PREFERENCES.cardGlowShade, DEFAULT_DESIGN_TOKEN_PREFERENCES.cardGlowShade);
+  const cardShadowShade = cardShadowShadeMode === "auto" ? clampShade(cardBaseShade - 1, 1) : manualCardShadow;
+  const cardGlowShade = cardGlowShadeMode === "auto" ? clampShade(cardBaseShade + 1, 9) : manualCardGlow;
 
   return {
     gamma: clamp(typeof next.gamma === "number" ? next.gamma : DEFAULT_DESIGN_TOKEN_PREFERENCES.gamma, 2, 2.4),
@@ -194,6 +242,15 @@ export function sanitizeDesignTokenPreferences(input: Partial<DesignTokenPrefere
       next.directionalFlow === "left-to-right" || next.directionalFlow === "right-to-left"
         ? next.directionalFlow
         : DEFAULT_DESIGN_TOKEN_PREFERENCES.directionalFlow,
+    cardBaseShade,
+    cardShadowShadeMode,
+    cardShadowShade,
+    cardGlowShadeMode,
+    cardGlowShade,
+    cardGradientStrength: clamp(typeof next.cardGradientStrength === "number" ? next.cardGradientStrength : DEFAULT_DESIGN_TOKEN_PREFERENCES.cardGradientStrength, 0, 10),
+    cardCornerRadius: clamp(typeof next.cardCornerRadius === "number" ? next.cardCornerRadius : DEFAULT_DESIGN_TOKEN_PREFERENCES.cardCornerRadius, 4, 40),
+    cardPaddingIndex: clamp(Math.round(typeof next.cardPaddingIndex === "number" ? next.cardPaddingIndex : DEFAULT_DESIGN_TOKEN_PREFERENCES.cardPaddingIndex), 0, 5),
+    cardHeight: clamp(typeof next.cardHeight === "number" ? next.cardHeight : DEFAULT_DESIGN_TOKEN_PREFERENCES.cardHeight, 140, 460),
   };
 }
 
@@ -234,6 +291,42 @@ export function validateDesignTokenPreferences(input: unknown): DesignTokenValid
 
   if (candidate.directionalFlow !== "left-to-right" && candidate.directionalFlow !== "right-to-left") {
     invalidFields.push("directionalFlow");
+  }
+
+  if (typeof candidate.cardBaseShade !== "number" || candidate.cardBaseShade < 1 || candidate.cardBaseShade > 9) {
+    invalidFields.push("cardBaseShade");
+  }
+
+  if (candidate.cardShadowShadeMode !== "auto" && candidate.cardShadowShadeMode !== "manual") {
+    invalidFields.push("cardShadowShadeMode");
+  }
+
+  if (typeof candidate.cardShadowShade !== "number" || candidate.cardShadowShade < 1 || candidate.cardShadowShade > 9) {
+    invalidFields.push("cardShadowShade");
+  }
+
+  if (candidate.cardGlowShadeMode !== "auto" && candidate.cardGlowShadeMode !== "manual") {
+    invalidFields.push("cardGlowShadeMode");
+  }
+
+  if (typeof candidate.cardGlowShade !== "number" || candidate.cardGlowShade < 1 || candidate.cardGlowShade > 9) {
+    invalidFields.push("cardGlowShade");
+  }
+
+  if (typeof candidate.cardGradientStrength !== "number" || candidate.cardGradientStrength < 0 || candidate.cardGradientStrength > 10) {
+    invalidFields.push("cardGradientStrength");
+  }
+
+  if (typeof candidate.cardCornerRadius !== "number" || candidate.cardCornerRadius < 4 || candidate.cardCornerRadius > 40) {
+    invalidFields.push("cardCornerRadius");
+  }
+
+  if (typeof candidate.cardPaddingIndex !== "number" || candidate.cardPaddingIndex < 0 || candidate.cardPaddingIndex > 5) {
+    invalidFields.push("cardPaddingIndex");
+  }
+
+  if (typeof candidate.cardHeight !== "number" || candidate.cardHeight < 140 || candidate.cardHeight > 460) {
+    invalidFields.push("cardHeight");
   }
 
   const semantic = candidate.semanticColors;
@@ -291,6 +384,10 @@ function buildSpacingScale(base: number, ratio: number): number[] {
 export function generateDesignTokens(preferences: DesignTokenPreferences): DesignTokens {
   const primary = buildPrimaryScale(preferences.primaryHue, preferences.gamma);
   const typeScale = buildTypeScale(12, preferences.typeRatio);
+  const baseShadeIndex = clampShade(preferences.cardBaseShade, 3) - 1;
+  const shadowShadeIndex = clampShade(preferences.cardShadowShade, 2) - 1;
+  const glowShadeIndex = clampShade(preferences.cardGlowShade, 4) - 1;
+  const spacingScale = buildSpacingScale(4, preferences.spacingRatio);
 
   return {
     color: {
@@ -320,7 +417,7 @@ export function generateDesignTokens(preferences: DesignTokenPreferences): Desig
     spacing: {
       base: 4,
       ratio: preferences.spacingRatio,
-      values: buildSpacingScale(4, preferences.spacingRatio),
+      values: spacingScale,
     },
     motion: {
       timingMs: preferences.motionTimingMs,
@@ -336,6 +433,20 @@ export function generateDesignTokens(preferences: DesignTokenPreferences): Desig
       activeOpacity: 0.84,
       disabledOpacity: 0.48,
       loadingOpacity: 0.64,
+    },
+    card: {
+      baseShade: baseShadeIndex + 1,
+      shadowShade: shadowShadeIndex + 1,
+      glowShade: glowShadeIndex + 1,
+      gradientStrength: preferences.cardGradientStrength,
+      cornerRadius: preferences.cardCornerRadius,
+      padding: spacingScale[preferences.cardPaddingIndex] ?? spacingScale[4],
+      height: preferences.cardHeight,
+      colors: {
+        base: primary[baseShadeIndex],
+        shadow: primary[shadowShadeIndex],
+        glow: primary[glowShadeIndex],
+      },
     },
   };
 }
@@ -374,6 +485,13 @@ export function applyDesignTokensToDocument(tokens: DesignTokens, docRef: Docume
   root.style.setProperty("--cf-ds-opacity-active", String(tokens.states.activeOpacity));
   root.style.setProperty("--cf-ds-opacity-disabled", String(tokens.states.disabledOpacity));
   root.style.setProperty("--cf-ds-opacity-loading", String(tokens.states.loadingOpacity));
+  root.style.setProperty("--cf-ds-card-bg", tokens.card.colors.base);
+  root.style.setProperty("--cf-ds-card-shadow-color", tokens.card.colors.shadow);
+  root.style.setProperty("--cf-ds-card-glow-color", tokens.card.colors.glow);
+  root.style.setProperty("--cf-ds-card-gradient-strength", `${tokens.card.gradientStrength}%`);
+  root.style.setProperty("--cf-ds-card-radius", `${tokens.card.cornerRadius}px`);
+  root.style.setProperty("--cf-ds-card-padding", `${tokens.card.padding}px`);
+  root.style.setProperty("--cf-ds-card-height", `${tokens.card.height}px`);
 }
 
 function readStorage(): Storage | null {

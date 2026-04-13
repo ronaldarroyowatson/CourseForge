@@ -29,6 +29,7 @@ import {
 import { readMetadataPipelineRuntimeStatus, type MetadataPipelineRuntimeStatus } from "../../../core/services/metadataExtractionPipelineService";
 import { readMetadataCorrectionSyncRuntimeState, type MetadataCorrectionSyncRuntimeState } from "../../../core/services/metadataCorrectionSyncService";
 import { logDesignSystemDebugEvent } from "../../../core/services/designSystemService";
+import { logFibonacciLayoutDecision, selectTwoCardLayout } from "../../../core/services/fibonacciLayoutService";
 import { getSupportedLanguages, t as translate } from "../../../core/services/i18nService";
 import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
@@ -38,6 +39,8 @@ import { DesignSystemSettingsCard } from "./DesignSystemSettingsCard";
 interface SettingsPageProps {
   onBack?: () => void;
 }
+
+type ExpandableCardId = "sync-preferences" | "language" | "accessibility" | "metadata-learning";
 
 function parseSemver(value: string): number[] | null {
   const match = value.match(/(\d+)\.(\d+)\.(\d+)/);
@@ -296,7 +299,10 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const pendingChangesCount = useUIStore((state) => state.pendingChangesCount);
   const syncStatus = useUIStore((state) => state.syncStatus);
   const activeAutoTextbookUpload = useUIStore((state) => state.activeAutoTextbookUpload);
-  const directionalFlow = useUIStore((state) => state.designTokenPreferences.directionalFlow);
+  const theme = useUIStore((state) => state.theme);
+  const designTokenPreferences = useUIStore((state) => state.designTokenPreferences);
+  const designTokens = useUIStore((state) => state.designTokens);
+  const directionalFlow = designTokenPreferences.directionalFlow;
   const [debugEnabled, setDebugEnabled] = React.useState<boolean>(() => isDebugLoggingEnabled());
   const [cacheResetStatus, setCacheResetStatus] = React.useState<string | null>(null);
   const [debugStats, setDebugStats] = React.useState({ entries: 0, totalBytes: 0, maxTotalBytes: 1_500_000, maxUploadBytes: 500 * 1024, lastUploadTimestamp: null as number | null });
@@ -325,10 +331,9 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const [updaterDiagnostics, setUpdaterDiagnostics] = React.useState<UpdaterDiagnostics | null>(null);
   const [showUpdaterDiagnostics, setShowUpdaterDiagnostics] = React.useState(false);
   const [isLoadingUpdaterDiagnostics, setIsLoadingUpdaterDiagnostics] = React.useState(false);
-  const [showSyncPreferences, setShowSyncPreferences] = React.useState(false);
-  const [showLanguageSettings, setShowLanguageSettings] = React.useState(false);
-  const [showAccessibilitySettings, setShowAccessibilitySettings] = React.useState(false);
-  const [showMetadataLearning, setShowMetadataLearning] = React.useState(false);
+  const [activeExpandableCard, setActiveExpandableCard] = React.useState<ExpandableCardId | null>(null);
+  const [isFlowSwapping, setIsFlowSwapping] = React.useState(false);
+  const [settingsGridMode, setSettingsGridMode] = React.useState<"three" | "two" | "one">("three");
   const [metadataTrainingStats, setMetadataTrainingStats] = React.useState<LocalMetadataTrainingStats>({
     totalCorrections: 0,
     pendingCorrections: 0,
@@ -373,6 +378,37 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
       localTrainingStatus,
     };
   }, [metadataPipelineRuntime, metadataTrainingStats]);
+
+  const showSyncPreferences = activeExpandableCard === "sync-preferences";
+  const showLanguageSettings = activeExpandableCard === "language";
+  const showAccessibilitySettings = activeExpandableCard === "accessibility";
+  const showMetadataLearning = activeExpandableCard === "metadata-learning";
+  const settingsPageRef = React.useRef<HTMLElement | null>(null);
+  const settingsGridRef = React.useRef<HTMLDivElement | null>(null);
+  const previousDirectionalFlowRef = React.useRef(directionalFlow);
+
+  React.useEffect(() => {
+    const node = settingsPageRef.current;
+    if (!node) {
+      return;
+    }
+
+    const primary = designTokens.color.primary;
+    node.style.setProperty("--cf-settings-layer-0-bg", primary[0]);
+    node.style.setProperty("--cf-settings-layer-1-bg", primary[2]);
+    node.style.setProperty("--cf-settings-layer-1-shadow", primary[1]);
+    node.style.setProperty("--cf-settings-layer-2-bg", primary[4]);
+    node.style.setProperty("--cf-settings-layer-2-shadow", primary[3]);
+    node.style.setProperty("--cf-settings-layer-3-bg", primary[6]);
+    node.style.setProperty("--cf-settings-layer-3-shadow", primary[5]);
+    node.style.setProperty("--cf-settings-layer-4-bg", primary[8]);
+    node.style.setProperty("--cf-settings-layer-4-shadow", primary[7]);
+    node.style.setProperty("--cf-settings-motion-ms", `${designTokenPreferences.motionTimingMs}ms`);
+    node.style.setProperty("--cf-settings-motion-easing", designTokenPreferences.motionEasing);
+    node.style.setProperty("--cf-settings-type-base", `${designTokens.type.base}px`);
+    node.style.setProperty("--cf-settings-space-2", `${designTokens.spacing.values[2] ?? 8}px`);
+    node.style.setProperty("--cf-settings-stroke-2", `${designTokens.stroke.values[1] ?? designTokens.stroke.values[0] ?? 1}px`);
+  }, [designTokenPreferences.motionEasing, designTokenPreferences.motionTimingMs, designTokens.color.primary, designTokens.spacing.values, designTokens.stroke.values, designTokens.type.base]);
 
   const isUploadStuck = React.useCallback((snapshot: typeof activeAutoTextbookUpload): boolean => {
     if (!snapshot) {
@@ -1037,6 +1073,182 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     return compareSemver(sb, sa) > 0 ? b : a;
   })();
 
+  const toggleExpandableCard = React.useCallback((cardId: ExpandableCardId): void => {
+    setActiveExpandableCard((previous) => {
+      const next = previous === cardId ? null : cardId;
+      const transitionRole = next ? "selection" : "deselection";
+      const easing = next ? "ease-in" : "ease-out";
+      const entrySide = directionalFlow === "right-to-left" ? "right" : "left";
+      const exitSide = directionalFlow === "right-to-left" ? "left" : "right";
+
+      void logDesignSystemDebugEvent("Settings card selection choreography applied.", {
+        cardId,
+        previous,
+        next,
+        transitionRole,
+        timingMs: designTokenPreferences.motionTimingMs,
+        easing,
+        directionalFlow,
+        entrySide,
+        exitSide,
+      });
+
+      return next;
+    });
+  }, [designTokenPreferences.motionTimingMs, directionalFlow]);
+
+  React.useEffect(() => {
+    if (!activeExpandableCard) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      const activeCard = document.querySelector<HTMLElement>(`[data-expandable-card="${activeExpandableCard}"]`);
+      if (activeCard?.contains(target)) {
+        return;
+      }
+
+      void logDesignSystemDebugEvent("Settings card click-off detected.", {
+        activeExpandableCard,
+        trigger: "pointerdown-outside-active-card",
+      });
+
+      setActiveExpandableCard(null);
+
+      void logDesignSystemDebugEvent("Settings card deselection via click-off applied.", {
+        activeExpandableCard,
+        easing: "ease-out",
+        timingMs: designTokenPreferences.motionTimingMs,
+      });
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+    };
+  }, [activeExpandableCard, designTokenPreferences.motionTimingMs]);
+
+  React.useLayoutEffect(() => {
+    const grid = settingsGridRef.current;
+    if (!grid) {
+      return;
+    }
+
+    const applyLayout = (width: number): void => {
+      if (width >= 1200) {
+        setSettingsGridMode("three");
+        void logDesignSystemDebugEvent("Settings Fibonacci layout ratio selected.", {
+          ratio: "5:3:2",
+          columns: 3,
+          availableWidthPx: Math.round(width),
+          directionalFlow,
+        });
+        return;
+      }
+
+      if (width >= 760) {
+        const decision = selectTwoCardLayout(width);
+        setSettingsGridMode("two");
+        void logFibonacciLayoutDecision(decision, {
+          scope: "settings-page",
+          directionalFlow,
+          availableWidthPx: Math.round(width),
+        });
+        return;
+      }
+
+      setSettingsGridMode("one");
+      void logDesignSystemDebugEvent("Settings Fibonacci layout ratio selected.", {
+        ratio: "1:1",
+        columns: 1,
+        availableWidthPx: Math.round(width),
+        directionalFlow,
+      });
+    };
+
+    applyLayout(grid.clientWidth);
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) {
+        return;
+      }
+      applyLayout(entry.contentRect.width);
+    }) : null;
+    observer?.observe(grid);
+
+    return () => {
+      observer?.disconnect();
+    };
+  }, [directionalFlow]);
+
+  React.useEffect(() => {
+    void logDesignSystemDebugEvent("Settings page z-height mapping applied.", {
+      layer0Background: designTokens.color.primary[0],
+      layer1Background: designTokens.color.primary[2],
+      layer1Shadow: designTokens.color.primary[1],
+      layer2Background: designTokens.color.primary[4],
+      layer2Shadow: designTokens.color.primary[3],
+      layer3Background: designTokens.color.primary[6],
+      layer3Shadow: designTokens.color.primary[5],
+      layer4Background: designTokens.color.primary[8],
+      layer4Shadow: designTokens.color.primary[7],
+    });
+  }, [designTokens.color.primary]);
+
+  React.useEffect(() => {
+    void logDesignSystemDebugEvent("Settings page design token propagation applied.", {
+      directionalFlow,
+      motionTimingMs: designTokenPreferences.motionTimingMs,
+      motionEasing: designTokenPreferences.motionEasing,
+      typeRatio: designTokenPreferences.typeRatio,
+      spacingRatio: designTokenPreferences.spacingRatio,
+      strokePreset: designTokenPreferences.strokePreset,
+      semanticColors: designTokenPreferences.semanticColors,
+    });
+  }, [designTokenPreferences, directionalFlow]);
+
+  React.useEffect(() => {
+    void logDesignSystemDebugEvent("Theme fade transition applied using motion settings.", {
+      theme,
+      timingMs: designTokenPreferences.motionTimingMs,
+      easing: designTokenPreferences.motionEasing,
+    });
+  }, [designTokenPreferences.motionEasing, designTokenPreferences.motionTimingMs, theme]);
+
+  React.useEffect(() => {
+    const previous = previousDirectionalFlowRef.current;
+    if (previous === directionalFlow) {
+      return;
+    }
+
+    setIsFlowSwapping(true);
+    void logDesignSystemDebugEvent("Settings directional-flow change detected.", {
+      previous,
+      next: directionalFlow,
+      timingMs: designTokenPreferences.motionTimingMs,
+      selectionEasing: "ease-in",
+      deselectionEasing: "ease-out",
+    });
+
+    const timeout = window.setTimeout(() => {
+      setIsFlowSwapping(false);
+      void logDesignSystemDebugEvent("Settings card swapping animation completed.", {
+        directionalFlow,
+        timingMs: designTokenPreferences.motionTimingMs,
+      });
+    }, designTokenPreferences.motionTimingMs + 24);
+
+    previousDirectionalFlowRef.current = directionalFlow;
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [designTokenPreferences.motionTimingMs, directionalFlow]);
+
   React.useEffect(() => {
     const orderedCards = [
       "sync-preferences",
@@ -1059,17 +1271,21 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   }, [directionalFlow]);
 
   return (
-    <section className="settings-page placeholder-panel">
+    <section ref={settingsPageRef} className="settings-page settings-page--ds-integrated" data-flow={directionalFlow}>
       <div className="settings-page__header">
         <h2>Settings</h2>
       </div>
 
-      <div className="settings-grid">
+      <div
+        ref={settingsGridRef}
+        className={`settings-grid settings-grid--${settingsGridMode} ${isFlowSwapping ? "settings-grid--flow-swapping" : ""}`.trim()}
+        data-flow={directionalFlow}
+      >
 
-        <article className={`settings-card settings-card--expandable ${showSyncPreferences ? "settings-card--expanded" : ""}`}>
+        <article data-expandable-card="sync-preferences" className={`settings-card settings-card--expandable settings-card--tokenized ${showSyncPreferences ? "settings-card--expanded settings-card--active" : "settings-card--inactive"}`}>
           <div className="settings-card__head">
             <h3>Sync Preferences</h3>
-            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowSyncPreferences((previous) => !previous)}>
+            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => toggleExpandableCard("sync-preferences")}>
               {showSyncPreferences ? "Hide" : "Show"}
             </button>
           </div>
@@ -1115,10 +1331,10 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           ) : null}
         </article>
 
-        <article className={`settings-card settings-card--expandable ${showLanguageSettings ? "settings-card--expanded" : ""}`}>
+        <article data-expandable-card="language" className={`settings-card settings-card--expandable settings-card--tokenized ${showLanguageSettings ? "settings-card--expanded settings-card--active" : "settings-card--inactive"}`}>
           <div className="settings-card__head">
             <h3>{translate(language, "settings", "title")}</h3>
-            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowLanguageSettings((previous) => !previous)}>
+            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => toggleExpandableCard("language")}>
               {showLanguageSettings ? "Hide" : "Show"}
             </button>
           </div>
@@ -1145,10 +1361,10 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           ) : null}
         </article>
 
-        <article className={`settings-card settings-card--expandable ${showAccessibilitySettings ? "settings-card--expanded" : ""}`} aria-live="polite">
+        <article data-expandable-card="accessibility" className={`settings-card settings-card--expandable settings-card--tokenized ${showAccessibilitySettings ? "settings-card--expanded settings-card--active" : "settings-card--inactive"}`} aria-live="polite">
           <div className="settings-card__head">
             <h3>{translate(language, "settings", "accessibilityTitle")}</h3>
-            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowAccessibilitySettings((previous) => !previous)}>
+            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => toggleExpandableCard("accessibility")}>
               {showAccessibilitySettings ? "Hide" : "Show"}
             </button>
           </div>
@@ -1222,7 +1438,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           ) : null}
         </article>
 
-        <article className="settings-card">
+        <article className="settings-card settings-card--tokenized">
           <h3>Sync Safety Status</h3>
           <p className="settings-meta">Sync status: {syncStatus}</p>
           {pendingChangesCount > 0 && (
@@ -1269,7 +1485,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           {cacheResetStatus ? <p className="settings-meta">{cacheResetStatus}</p> : null}
         </article>
 
-        <article className="settings-card">
+        <article className="settings-card settings-card--tokenized">
           <h3>AI Service Resilience</h3>
           <p>Set the priority order for OCR providers. Each is tried in order; the first that succeeds is used.</p>
           <div className="ocr-provider-choices">
@@ -1334,14 +1550,14 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           {ocrProviderStatus ? <p className="settings-meta">{ocrProviderStatus}</p> : null}
         </article>
 
-        <article className={`settings-card settings-card--expandable settings-card--compact ${showMetadataLearning ? "settings-card--expanded" : ""}`}>
+        <article data-expandable-card="metadata-learning" className={`settings-card settings-card--expandable settings-card--compact settings-card--tokenized ${showMetadataLearning ? "settings-card--expanded settings-card--active" : "settings-card--inactive"}`}>
           <div className="settings-card__head">
             <h3>Metadata Learning</h3>
             <button
               type="button"
               className="btn-secondary settings-card__toggle"
               onClick={() => {
-                setShowMetadataLearning((previous) => !previous);
+                toggleExpandableCard("metadata-learning");
                 refreshMetadataTrainingStats();
               }}
             >
@@ -1397,7 +1613,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           ) : null}
         </article>
 
-        <article className="settings-card">
+        <article className="settings-card settings-card--tokenized">
           <h3>Debug Log</h3>
           <p>Store local troubleshooting events for Auto Mode and sync behavior. You control whether logs are collected and when they are uploaded.</p>
           <label className="settings-toggle" title="When disabled, no new local debug events are stored.">
@@ -1424,7 +1640,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           {debugStatus ? <p className="settings-meta">{debugStatus}</p> : null}
         </article>
 
-        <article className="settings-card">
+        <article className="settings-card settings-card--tokenized">
           <h3>App Updates</h3>
           {currentAppVersion !== "unknown" ? (
             <p>Current version: <strong>{formatVersionLabel(currentAppVersion)}</strong></p>
@@ -1537,7 +1753,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
 
         <DesignSystemSettingsCard
           userId={userId}
-          placementClassName={directionalFlow === "right-to-left" ? "settings-card--design-system-last-rtl" : "settings-card--design-system-last-ltr"}
+          placementClassName="settings-card--design-system-pinned"
         />
 
       </div>

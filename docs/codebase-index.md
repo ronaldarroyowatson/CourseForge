@@ -664,6 +664,27 @@ Primary file(s):
 - [src/firebase/functions.ts](src/firebase/functions.ts)
 - [src/firebase/storage.ts](src/firebase/storage.ts)
 
+## Updates
+
+### Settings + Design System Controls UI Integration Refresh (2026-04-12)
+
+Primary file(s):
+
+- [src/core/services/designSystemService.ts](src/core/services/designSystemService.ts)
+- [src/webapp/components/layout/Header.tsx](src/webapp/components/layout/Header.tsx)
+- [src/webapp/components/settings/SettingsPage.tsx](src/webapp/components/settings/SettingsPage.tsx)
+- [src/webapp/components/settings/DesignSystemSettingsCard.tsx](src/webapp/components/settings/DesignSystemSettingsCard.tsx)
+- [src/webapp/styles/globals.css](src/webapp/styles/globals.css)
+
+Update summary:
+
+- Extended design token preferences with card styling controls (base/shadow/glow shades, gradient strength, radius, padding, and height), and wired those values into generated tokens + CSS variables for live preview rendering.
+- Applied design-system token styling to Settings top-bar controls (workspace navigation, debug-panel toggle, theme toggle, and sync action) with shade-based surfaces, stroke/spacing/type tokens, and tokenized hover/active states.
+- Reworked Settings page card layout behavior with adaptive grid modes, right-side expandable-card emphasis, left-side compact-card stacking, and bottom-left pinned Design System Controls placement.
+- Standardized Settings surface colors so the page wrapper uses shade 1 with no shadow, while cards and control surfaces use shade 3 with shade 2-derived shadows.
+- Updated Design System Controls expansion behavior so the overlay is constrained to Settings page bounds, preserves click-off collapse, and keeps the expanded two-card composition aligned as Example (left) and Controls (right).
+- Added a dedicated Card Styling control group and connected it to live Example Card updates in the Cards preview section.
+
 Responsibility summary:
 
 - Exposes singleton Firebase app and typed service clients for Firestore, callable Functions, and Storage.
@@ -836,6 +857,21 @@ Update summary:
 
 - Windows port ownership detection now filters `netstat` results down to exact local `LISTENING` sockets for the requested port instead of matching any line containing `:<port>`.
 - This prevents updater port-cleanup flows and preflight cleanup from selecting unrelated PIDs during high socket churn, which previously could terminate the wrong process and destabilize sequential updater integration runs.
+
+### Settings Page Global Design-System Integration Foundation (2026-04-13)
+
+Primary file(s):
+
+- [src/webapp/components/settings/SettingsPage.tsx](src/webapp/components/settings/SettingsPage.tsx)
+- [src/webapp/styles/globals.css](src/webapp/styles/globals.css)
+- [src/webapp/components/layout/Header.tsx](src/webapp/components/layout/Header.tsx)
+
+Update summary:
+
+- Settings page now applies a shared design-system integration layer with token-propagated z-height surfaces, motion timing/easing variables, and tokenized card styling intended to scale to additional pages.
+- Expandable settings cards now use a unified selection/deselection choreography model (ease-in on selection, ease-out on deselection), single-active-card behavior, and click-off collapse logging.
+- Directional-flow updates now trigger explicit card-swap animation diagnostics and flow-aware Fibonacci grid decisions for one-, two-, and three-column settings layouts.
+- Dark/Light toggles and Left/Right flow toggles now share motion-driven thumb fade/slide timing through design token motion variables, while flow toggling avoids any theme/lighting mutation.
 
 ## How to Update This Index
 

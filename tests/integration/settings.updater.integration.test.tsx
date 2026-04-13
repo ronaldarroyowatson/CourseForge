@@ -580,4 +580,44 @@ describe("Settings updater communication", () => {
       expect(screen.getByText("Already up to date (latest confirmed: v1.4.5). You're running v1.4.5.")).toBeInTheDocument();
     });
   });
+
+  it("allows one expandable settings card at a time and collapses on click-off", async () => {
+    const { container } = render(<SettingsPage onBack={() => undefined} />);
+
+    const syncCard = container.querySelector<HTMLElement>("[data-expandable-card='sync-preferences']");
+    const languageCard = container.querySelector<HTMLElement>("[data-expandable-card='language']");
+    expect(syncCard).toBeTruthy();
+    expect(languageCard).toBeTruthy();
+
+    fireEvent.click(within(syncCard as HTMLElement).getByRole("button", { name: "Show" }));
+    expect(screen.getByText(/Retries used:/)).toBeInTheDocument();
+
+    fireEvent.click(within(languageCard as HTMLElement).getByRole("button", { name: "Show" }));
+    expect(screen.getByRole("button", { name: "Check For New Languages" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText(/Retries used:/)).not.toBeInTheDocument();
+    });
+
+    fireEvent.pointerDown(document.body);
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Check For New Languages" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("applies directional-flow data attributes to the integrated settings surface", async () => {
+    const currentPrefs = useUIStore.getState().designTokenPreferences;
+    useUIStore.setState({
+      designTokenPreferences: {
+        ...currentPrefs,
+        directionalFlow: "right-to-left",
+      },
+    });
+
+    const { container } = render(<SettingsPage onBack={() => undefined} />);
+    const page = container.querySelector(".settings-page--ds-integrated");
+    const grid = container.querySelector(".settings-grid");
+
+    expect(page?.getAttribute("data-flow")).toBe("right-to-left");
+    expect(grid?.getAttribute("data-flow")).toBe("right-to-left");
+  });
 });

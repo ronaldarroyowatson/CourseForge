@@ -164,3 +164,125 @@ describe("DesignSystemSettingsCard", () => {
     expect(useUIStore.getState().designTokenPreferences.typeRatio).toBe(before.typeRatio);
   });
 });
+
+describe("DesignSystemSettingsCard — new DSC controls", () => {
+  beforeEach(() => {
+    window.localStorage.setItem("courseforge.debugLog.enabled", "false");
+    useUIStore.getState().resetDesignTokenPreferences();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders Card Depth — Dual Mode section with four sliders", () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+    expect(screen.getByRole("heading", { name: "Card Depth — Dual Mode" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Dark Mode Glow Intensity:/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Dark Mode Glow Radius/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Light Mode Shadow Intensity:/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Light Mode Shadow Radius/)).toBeInTheDocument();
+  });
+
+  it("updates darkModeGlowIntensity when slider changes", async () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+    fireEvent.change(screen.getByLabelText(/Dark Mode Glow Intensity:/), { target: { value: "8" } });
+
+    await waitFor(() => {
+      expect(useUIStore.getState().designTokenPreferences.darkModeGlowIntensity).toBe(8);
+    });
+  });
+
+  it("updates lightModeShadowRadius when slider changes", async () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+    fireEvent.change(screen.getByLabelText(/Light Mode Shadow Radius/), { target: { value: "24" } });
+
+    await waitFor(() => {
+      expect(useUIStore.getState().designTokenPreferences.lightModeShadowRadius).toBe(24);
+    });
+  });
+
+  it("renders Button Behaviors section with four checkboxes", () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+    expect(screen.getByRole("heading", { name: "Button Behaviors" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Hover Opacity Effect/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Squish on Press/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Press Depth/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Ripple Effect/)).toBeInTheDocument();
+  });
+
+  it("updates buttonHoverEnabled when toggled", async () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+    const checkbox = screen.getByLabelText(/Hover Opacity Effect/);
+    const before = useUIStore.getState().designTokenPreferences.buttonHoverEnabled;
+    fireEvent.click(checkbox);
+
+    await waitFor(() => {
+      expect(useUIStore.getState().designTokenPreferences.buttonHoverEnabled).toBe(!before);
+    });
+  });
+
+  it("renders Color Harmony section with mode selector and hue slider", () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+    expect(screen.getByRole("heading", { name: "Color Harmony" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Harmony Mode/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Base Hue:/)).toBeInTheDocument();
+  });
+
+  it("updates colorHarmonyMode when select changes", async () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+    fireEvent.change(screen.getByLabelText(/Harmony Mode/), { target: { value: "triadic" } });
+
+    await waitFor(() => {
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonyMode).toBe("triadic");
+    });
+  });
+
+  it("updates colorHarmonyBaseHue when slider changes", async () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+    fireEvent.change(screen.getByLabelText(/Base Hue:/), { target: { value: "120" } });
+
+    await waitFor(() => {
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonyBaseHue).toBe(120);
+    });
+  });
+
+  it("generated tokens include harmony and button sections", () => {
+    const tokens = useUIStore.getState().designTokens;
+    expect(tokens.harmony).toBeDefined();
+    expect(tokens.harmony.mode).toBeDefined();
+    expect(tokens.harmony.accentHue).toBeTypeOf("number");
+    expect(tokens.harmony.highlightHue).toBeTypeOf("number");
+    expect(tokens.button).toBeDefined();
+    expect(tokens.button.hoverEnabled).toBeTypeOf("boolean");
+    expect(tokens.button.squishEnabled).toBeTypeOf("boolean");
+  });
+
+  it("each motion preview box is independently hoverable", () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+    const motionItems = document.querySelectorAll(".cf-motion-box__item");
+    expect(motionItems.length).toBe(3);
+    // Each item wraps exactly one box
+    motionItems.forEach((item) => {
+      expect(item.querySelector(".cf-motion-box")).toBeTruthy();
+    });
+  });
+});

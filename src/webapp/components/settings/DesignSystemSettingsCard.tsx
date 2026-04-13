@@ -4,6 +4,8 @@ import { createPortal } from "react-dom";
 import {
   type CloudSettingsDecision,
   type DesignTokenPreferences,
+  type HarmonyMode,
+  HARMONY_MODES,
   deleteCloudDesignTokenPreferences,
   inspectCloudDesignTokenPreferences,
   loadDesignTokenPreferencesFromCloud,
@@ -164,6 +166,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
   const [corruptionStatus, setCorruptionStatus] = React.useState<string | null>(null);
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [isCollapsing, setIsCollapsing] = React.useState(false);
+  const [flowTransitioning, setFlowTransitioning] = React.useState(false);
   const [collapseRequested, setCollapseRequested] = React.useState<false | string>(false);
   const [localDiagnostics, setLocalDiagnostics] = React.useState(() => readLocalDesignTokenDiagnostics());
   const confirmedRef = React.useRef<DesignTokenPreferences>(prefs);
@@ -303,11 +306,14 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
   React.useLayoutEffect(() => {
     const alignmentPairs = [
       { control: "button-controls", preview: "buttons" },
+      { control: "button-behaviors", preview: "buttons" },
       { control: "card-styling", preview: "cards" },
+      { control: "dual-mode-card-rules", preview: "cards" },
       { control: "organizer-colors", preview: "organizers" },
       { control: "motion-controls", preview: "motion-preview" },
       { control: "type-ratio", preview: "type-scale" },
       { control: "spacing-scale", preview: "spacing-preview" },
+      { control: "color-system", preview: "color-scale" },
       { control: "gamma", preview: "color-scale" },
     ];
 
@@ -380,7 +386,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
     };
 
     void logDesignSystemDebugEvent("Control relocation map applied.", {
-      controlsByPreviewOrder: ["button-controls", "card-styling", "organizer-colors", "motion-controls", "type-ratio", "spacing-scale", "gamma"],
+      controlsByPreviewOrder: ["button-controls", "button-behaviors", "card-styling", "dual-mode-card-rules", "organizer-colors", "motion-controls", "type-ratio", "spacing-scale", "color-system", "gamma"],
     });
 
     void logDesignSystemDebugEvent("Motion preview boxes repositioned to right-side cluster.", {
@@ -426,7 +432,10 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       window.removeEventListener("resize", handleResize);
       observer?.disconnect();
     };
-  }, [isExpanded, prefs.directionalFlow, prefs.gamma, prefs.motionTimingMs, prefs.spacingRatio, prefs.typeRatio]);
+  }, [isExpanded, prefs.directionalFlow, prefs.gamma, prefs.motionTimingMs, prefs.spacingRatio, prefs.typeRatio,
+      prefs.darkModeGlowIntensity, prefs.darkModeGlowRadius, prefs.lightModeShadowIntensity, prefs.lightModeShadowRadius,
+      prefs.buttonHoverEnabled, prefs.buttonSquishEnabled, prefs.buttonPressEnabled, prefs.buttonRippleEnabled,
+      prefs.colorHarmonyMode, prefs.colorHarmonyBaseHue]);
 
   React.useEffect(() => {
     if (!isExpanded || !overlayContentRef.current) {
@@ -727,6 +736,16 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
     prefs.spacingRatio,
     prefs.strokePreset,
     prefs.typeRatio,
+    prefs.darkModeGlowIntensity,
+    prefs.darkModeGlowRadius,
+    prefs.lightModeShadowIntensity,
+    prefs.lightModeShadowRadius,
+    prefs.buttonHoverEnabled,
+    prefs.buttonSquishEnabled,
+    prefs.buttonPressEnabled,
+    prefs.buttonRippleEnabled,
+    prefs.colorHarmonyMode,
+    prefs.colorHarmonyBaseHue,
   ]);
 
   React.useEffect(() => {
@@ -1134,7 +1153,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
               {/* Two-card Fibonacci layout: Example (flex:3) | Controls (flex:2) */}
               <div
                 ref={fibonacciContainerRef}
-                className="cf-ds-fibonacci-layout"
+                className={`cf-ds-fibonacci-layout${flowTransitioning ? " cf-ds-fibonacci-layout--swapping" : ""}`}
                 data-flow={prefs.directionalFlow}
               >
                 {/* Example Card */}
@@ -1190,26 +1209,47 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                     <div className="cf-example-card__row" ref={setSectionRef("motion-preview")}>
                       <h4 className="cf-ds-section-title">Motion Preview</h4>
                       <div className="cf-motion-preview-layout">
-                        <p className="settings-meta">Hover to preview. Timing: {prefs.motionTimingMs}ms | Flow: {prefs.directionalFlow}</p>
-                        <div
-                          className="cf-motion-row cf-motion-row--right"
-                          onMouseEnter={() => {
-                            void logDesignSystemDebugEvent("Motion preview animation cycle started.", {
-                              motionTimingMs: prefs.motionTimingMs,
-                              motionEasing: prefs.motionEasing,
-                              directionalFlow: prefs.directionalFlow,
-                            });
-                          }}
-                        >
-                          <div className="cf-motion-box__item">
+                        <p className="settings-meta">Hover a box to preview. Timing: {prefs.motionTimingMs}ms | Flow: {prefs.directionalFlow}</p>
+                        <div className="cf-motion-row cf-motion-row--right">
+                          <div
+                            className="cf-motion-box__item"
+                            onMouseEnter={() => {
+                              void logDesignSystemDebugEvent("Motion preview: enter box hovered.", {
+                                role: "enter",
+                                motionTimingMs: prefs.motionTimingMs,
+                                motionEasing: prefs.motionEasing,
+                                directionalFlow: prefs.directionalFlow,
+                              });
+                            }}
+                          >
                             <span className="cf-motion-box cf-motion-box--enter" title="Enter - ease-in" />
                             <span className="cf-motion-box__label">Ease In</span>
                           </div>
-                          <div className="cf-motion-box__item">
+                          <div
+                            className="cf-motion-box__item"
+                            onMouseEnter={() => {
+                              void logDesignSystemDebugEvent("Motion preview: move box hovered.", {
+                                role: "move",
+                                motionTimingMs: prefs.motionTimingMs,
+                                motionEasing: prefs.motionEasing,
+                                directionalFlow: prefs.directionalFlow,
+                              });
+                            }}
+                          >
                             <span className="cf-motion-box cf-motion-box--move" title="Move - ease-in-out" />
                             <span className="cf-motion-box__label">Ease In-Out</span>
                           </div>
-                          <div className="cf-motion-box__item">
+                          <div
+                            className="cf-motion-box__item"
+                            onMouseEnter={() => {
+                              void logDesignSystemDebugEvent("Motion preview: exit box hovered.", {
+                                role: "exit",
+                                motionTimingMs: prefs.motionTimingMs,
+                                motionEasing: prefs.motionEasing,
+                                directionalFlow: prefs.directionalFlow,
+                              });
+                            }}
+                          >
                             <span className="cf-motion-box cf-motion-box--exit" title="Exit - ease-out" />
                             <span className="cf-motion-box__label">Ease Out</span>
                           </div>
@@ -1386,6 +1426,58 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                       </label>
                     </section>
 
+                    <section className="cf-ds-control-group" ref={setSectionRef("dual-mode-card-rules")}>
+                      <h4 className="cf-ds-section-title">Card Depth — Dual Mode</h4>
+                      <label>
+                        Dark Mode Glow Intensity: {prefs.darkModeGlowIntensity.toFixed(1)}
+                        <input
+                          type="range" min={0} max={10} step={0.5}
+                          value={prefs.darkModeGlowIntensity}
+                          onChange={(event) => {
+                            const darkModeGlowIntensity = Number(event.target.value);
+                            setPrefs({ darkModeGlowIntensity });
+                            void logDesignSystemDebugEvent("Dark mode glow intensity changed.", { darkModeGlowIntensity });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Dark Mode Glow Radius (px): {prefs.darkModeGlowRadius}
+                        <input
+                          type="range" min={4} max={48} step={1}
+                          value={prefs.darkModeGlowRadius}
+                          onChange={(event) => {
+                            const darkModeGlowRadius = Number(event.target.value);
+                            setPrefs({ darkModeGlowRadius });
+                            void logDesignSystemDebugEvent("Dark mode glow radius changed.", { darkModeGlowRadius });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Light Mode Shadow Intensity: {prefs.lightModeShadowIntensity.toFixed(1)}
+                        <input
+                          type="range" min={0} max={10} step={0.5}
+                          value={prefs.lightModeShadowIntensity}
+                          onChange={(event) => {
+                            const lightModeShadowIntensity = Number(event.target.value);
+                            setPrefs({ lightModeShadowIntensity });
+                            void logDesignSystemDebugEvent("Light mode shadow intensity changed.", { lightModeShadowIntensity });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Light Mode Shadow Radius (px): {prefs.lightModeShadowRadius}
+                        <input
+                          type="range" min={4} max={48} step={1}
+                          value={prefs.lightModeShadowRadius}
+                          onChange={(event) => {
+                            const lightModeShadowRadius = Number(event.target.value);
+                            setPrefs({ lightModeShadowRadius });
+                            void logDesignSystemDebugEvent("Light mode shadow radius changed.", { lightModeShadowRadius });
+                          }}
+                        />
+                      </label>
+                    </section>
+
                     <section className="cf-ds-control-group" ref={setSectionRef("organizer-colors")}>
                       <h4 className="cf-ds-section-title">Organizer Colors</h4>
                       <p className="settings-meta">Organizer colors (aligned with preview order)</p>
@@ -1403,6 +1495,58 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                           <input type="color" aria-label="error color" value={prefs.semanticColors.error} onChange={(event) => setSemanticColor("error", event.target.value)} />
                         </label>
                       </div>
+                    </section>
+
+                    <section className="cf-ds-control-group" ref={setSectionRef("button-behaviors")}>
+                      <h4 className="cf-ds-section-title">Button Behaviors</h4>
+                      <label className="cf-ds-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={prefs.buttonHoverEnabled}
+                          onChange={(event) => {
+                            const buttonHoverEnabled = event.target.checked;
+                            setPrefs({ buttonHoverEnabled });
+                            void logDesignSystemDebugEvent("Button hover effect toggled.", { buttonHoverEnabled });
+                          }}
+                        />
+                        Hover Opacity Effect
+                      </label>
+                      <label className="cf-ds-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={prefs.buttonSquishEnabled}
+                          onChange={(event) => {
+                            const buttonSquishEnabled = event.target.checked;
+                            setPrefs({ buttonSquishEnabled });
+                            void logDesignSystemDebugEvent("Button squish effect toggled.", { buttonSquishEnabled });
+                          }}
+                        />
+                        Squish on Press (scale)
+                      </label>
+                      <label className="cf-ds-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={prefs.buttonPressEnabled}
+                          onChange={(event) => {
+                            const buttonPressEnabled = event.target.checked;
+                            setPrefs({ buttonPressEnabled });
+                            void logDesignSystemDebugEvent("Button press depth toggled.", { buttonPressEnabled });
+                          }}
+                        />
+                        Press Depth (translateY)
+                      </label>
+                      <label className="cf-ds-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={prefs.buttonRippleEnabled}
+                          onChange={(event) => {
+                            const buttonRippleEnabled = event.target.checked;
+                            setPrefs({ buttonRippleEnabled });
+                            void logDesignSystemDebugEvent("Button ripple effect toggled.", { buttonRippleEnabled });
+                          }}
+                        />
+                        Ripple Effect (experimental)
+                      </label>
                     </section>
 
                     <section className="cf-ds-control-group" ref={setSectionRef("motion-controls")}>
@@ -1444,7 +1588,9 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                         className={`theme-toggle flow-toggle ${prefs.directionalFlow === "right-to-left" ? "flow-toggle--right" : "flow-toggle--left"}`}
                         onClick={() => {
                           const nextFlow = prefs.directionalFlow === "left-to-right" ? "right-to-left" : "left-to-right";
+                          setFlowTransitioning(true);
                           setPrefs({ directionalFlow: nextFlow });
+                          window.setTimeout(() => { setFlowTransitioning(false); }, prefs.motionTimingMs + 30);
                           void logDesignSystemDebugEvent("Directional flow changed.", {
                             directionalFlow: nextFlow,
                             exampleCardSide: nextFlow === "left-to-right" ? "left" : "right",
@@ -1516,6 +1662,44 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                           <option key={preset.value} value={preset.value} label={preset.label} />
                         ))}
                       </datalist>
+                    </section>
+
+                    <section className="cf-ds-control-group" ref={setSectionRef("color-system")}>
+                      <h4 className="cf-ds-section-title">Color Harmony</h4>
+                      <label>
+                        Harmony Mode
+                        <select
+                          value={prefs.colorHarmonyMode}
+                          onChange={(event) => {
+                            const colorHarmonyMode = event.target.value as HarmonyMode;
+                            setPrefs({ colorHarmonyMode });
+                            void logDesignSystemDebugEvent("Color harmony mode changed.", { colorHarmonyMode });
+                          }}
+                        >
+                          {HARMONY_MODES.map((mode) => (
+                            <option key={mode} value={mode}>
+                              {mode.charAt(0).toUpperCase() + mode.slice(1).replace(/-/g, " ")}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Base Hue: {prefs.colorHarmonyBaseHue}°
+                        <input
+                          type="range" min={0} max={360} step={1}
+                          value={prefs.colorHarmonyBaseHue}
+                          onChange={(event) => {
+                            const colorHarmonyBaseHue = Number(event.target.value);
+                            setPrefs({ colorHarmonyBaseHue });
+                            void logDesignSystemDebugEvent("Color harmony base hue changed.", { colorHarmonyBaseHue, mode: prefs.colorHarmonyMode });
+                          }}
+                        />
+                      </label>
+                      <p className="settings-meta">Accent and highlight hues derived from harmony mode and base hue.</p>
+                      <div className="cf-ds-harmony-swatches" aria-label="harmony color preview">
+                        <span className="cf-harmony-swatch cf-harmony-swatch--accent" title="Accent color" style={{ display: "inline-block", width: 24, height: 24, borderRadius: 4 }} />
+                        <span className="cf-harmony-swatch cf-harmony-swatch--highlight" title="Highlight color" style={{ display: "inline-block", width: 24, height: 24, borderRadius: 4 }} />
+                      </div>
                     </section>
 
                     <section className="cf-ds-control-group" ref={setSectionRef("gamma")}>

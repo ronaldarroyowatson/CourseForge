@@ -4,6 +4,9 @@ export type MotionEasing = "ease-in" | "ease-out" | "ease-in-out";
 export type DirectionalFlow = "left-to-right" | "right-to-left";
 export type StrokePreset = "common" | "doubling" | "soft" | "ultra-thin" | "sweet-spot";
 export type CardShadeMode = "auto" | "manual";
+export type HarmonyMode = "mono" | "analogous" | "complementary" | "split-complementary" | "triadic" | "tetradic" | "brand";
+
+export const HARMONY_MODES: HarmonyMode[] = ["mono", "analogous", "complementary", "split-complementary", "triadic", "tetradic", "brand"];
 
 export interface SemanticColors {
   error: string;
@@ -32,6 +35,19 @@ export interface DesignTokenPreferences {
   cardCornerRadius: number;
   cardPaddingIndex: number;
   cardHeight: number;
+  // Dual-mode card rules
+  darkModeGlowIntensity: number;
+  darkModeGlowRadius: number;
+  lightModeShadowIntensity: number;
+  lightModeShadowRadius: number;
+  // Color harmony system
+  colorHarmonyMode: HarmonyMode;
+  colorHarmonyBaseHue: number;
+  // Button behaviors
+  buttonHoverEnabled: boolean;
+  buttonSquishEnabled: boolean;
+  buttonPressEnabled: boolean;
+  buttonRippleEnabled: boolean;
 }
 
 export interface DesignTokens {
@@ -81,11 +97,31 @@ export interface DesignTokens {
     cornerRadius: number;
     padding: number;
     height: number;
+    darkModeGlowIntensity: number;
+    darkModeGlowRadius: number;
+    lightModeShadowIntensity: number;
+    lightModeShadowRadius: number;
     colors: {
       base: string;
       shadow: string;
       glow: string;
     };
+  };
+  harmony: {
+    mode: HarmonyMode;
+    baseHue: number;
+    accentHue: number;
+    highlightHue: number;
+    colors: {
+      accent: string;
+      highlight: string;
+    };
+  };
+  button: {
+    hoverEnabled: boolean;
+    squishEnabled: boolean;
+    pressEnabled: boolean;
+    rippleEnabled: boolean;
   };
 }
 
@@ -149,6 +185,16 @@ export const DEFAULT_DESIGN_TOKEN_PREFERENCES: DesignTokenPreferences = {
   cardCornerRadius: 12,
   cardPaddingIndex: 4,
   cardHeight: 220,
+  darkModeGlowIntensity: 6,
+  darkModeGlowRadius: 18,
+  lightModeShadowIntensity: 5,
+  lightModeShadowRadius: 14,
+  colorHarmonyMode: "complementary",
+  colorHarmonyBaseHue: 212,
+  buttonHoverEnabled: true,
+  buttonSquishEnabled: true,
+  buttonPressEnabled: true,
+  buttonRippleEnabled: false,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -208,6 +254,28 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${toHex((r + m) * 255)}${toHex((g + m) * 255)}${toHex((b + m) * 255)}`;
 }
 
+function generateHarmonyHues(baseHue: number, mode: HarmonyMode): { accentHue: number; highlightHue: number } {
+  const h = ((baseHue % 360) + 360) % 360;
+  switch (mode) {
+    case "mono":
+      return { accentHue: h, highlightHue: h };
+    case "analogous":
+      return { accentHue: (h + 30) % 360, highlightHue: (h + 330) % 360 };
+    case "complementary":
+      return { accentHue: (h + 180) % 360, highlightHue: (h + 210) % 360 };
+    case "split-complementary":
+      return { accentHue: (h + 150) % 360, highlightHue: (h + 210) % 360 };
+    case "triadic":
+      return { accentHue: (h + 120) % 360, highlightHue: (h + 240) % 360 };
+    case "tetradic":
+      return { accentHue: (h + 90) % 360, highlightHue: (h + 180) % 360 };
+    case "brand":
+      return { accentHue: (h + 60) % 360, highlightHue: (h + 30) % 360 };
+    default:
+      return { accentHue: (h + 180) % 360, highlightHue: (h + 210) % 360 };
+  }
+}
+
 export function sanitizeDesignTokenPreferences(input: Partial<DesignTokenPreferences> | null | undefined): DesignTokenPreferences {
   const next = input ?? {};
   const semantic = next.semanticColors ?? DEFAULT_DESIGN_TOKEN_PREFERENCES.semanticColors;
@@ -251,6 +319,18 @@ export function sanitizeDesignTokenPreferences(input: Partial<DesignTokenPrefere
     cardCornerRadius: clamp(typeof next.cardCornerRadius === "number" ? next.cardCornerRadius : DEFAULT_DESIGN_TOKEN_PREFERENCES.cardCornerRadius, 4, 40),
     cardPaddingIndex: clamp(Math.round(typeof next.cardPaddingIndex === "number" ? next.cardPaddingIndex : DEFAULT_DESIGN_TOKEN_PREFERENCES.cardPaddingIndex), 0, 5),
     cardHeight: clamp(typeof next.cardHeight === "number" ? next.cardHeight : DEFAULT_DESIGN_TOKEN_PREFERENCES.cardHeight, 140, 460),
+    darkModeGlowIntensity: clamp(typeof next.darkModeGlowIntensity === "number" ? next.darkModeGlowIntensity : DEFAULT_DESIGN_TOKEN_PREFERENCES.darkModeGlowIntensity, 0, 10),
+    darkModeGlowRadius: clamp(typeof next.darkModeGlowRadius === "number" ? next.darkModeGlowRadius : DEFAULT_DESIGN_TOKEN_PREFERENCES.darkModeGlowRadius, 4, 48),
+    lightModeShadowIntensity: clamp(typeof next.lightModeShadowIntensity === "number" ? next.lightModeShadowIntensity : DEFAULT_DESIGN_TOKEN_PREFERENCES.lightModeShadowIntensity, 0, 10),
+    lightModeShadowRadius: clamp(typeof next.lightModeShadowRadius === "number" ? next.lightModeShadowRadius : DEFAULT_DESIGN_TOKEN_PREFERENCES.lightModeShadowRadius, 4, 48),
+    colorHarmonyMode: HARMONY_MODES.includes(next.colorHarmonyMode as HarmonyMode)
+      ? (next.colorHarmonyMode as HarmonyMode)
+      : DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonyMode,
+    colorHarmonyBaseHue: clamp(typeof next.colorHarmonyBaseHue === "number" ? next.colorHarmonyBaseHue : DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonyBaseHue, 0, 360),
+    buttonHoverEnabled: typeof next.buttonHoverEnabled === "boolean" ? next.buttonHoverEnabled : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonHoverEnabled,
+    buttonSquishEnabled: typeof next.buttonSquishEnabled === "boolean" ? next.buttonSquishEnabled : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonSquishEnabled,
+    buttonPressEnabled: typeof next.buttonPressEnabled === "boolean" ? next.buttonPressEnabled : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonPressEnabled,
+    buttonRippleEnabled: typeof next.buttonRippleEnabled === "boolean" ? next.buttonRippleEnabled : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonRippleEnabled,
   };
 }
 
@@ -329,6 +409,46 @@ export function validateDesignTokenPreferences(input: unknown): DesignTokenValid
     invalidFields.push("cardHeight");
   }
 
+  if (typeof candidate.darkModeGlowIntensity !== "number" || candidate.darkModeGlowIntensity < 0 || candidate.darkModeGlowIntensity > 10) {
+    invalidFields.push("darkModeGlowIntensity");
+  }
+
+  if (typeof candidate.darkModeGlowRadius !== "number" || candidate.darkModeGlowRadius < 4 || candidate.darkModeGlowRadius > 48) {
+    invalidFields.push("darkModeGlowRadius");
+  }
+
+  if (typeof candidate.lightModeShadowIntensity !== "number" || candidate.lightModeShadowIntensity < 0 || candidate.lightModeShadowIntensity > 10) {
+    invalidFields.push("lightModeShadowIntensity");
+  }
+
+  if (typeof candidate.lightModeShadowRadius !== "number" || candidate.lightModeShadowRadius < 4 || candidate.lightModeShadowRadius > 48) {
+    invalidFields.push("lightModeShadowRadius");
+  }
+
+  if (!HARMONY_MODES.includes(candidate.colorHarmonyMode as HarmonyMode)) {
+    invalidFields.push("colorHarmonyMode");
+  }
+
+  if (typeof candidate.colorHarmonyBaseHue !== "number" || candidate.colorHarmonyBaseHue < 0 || candidate.colorHarmonyBaseHue > 360) {
+    invalidFields.push("colorHarmonyBaseHue");
+  }
+
+  if (typeof candidate.buttonHoverEnabled !== "boolean") {
+    invalidFields.push("buttonHoverEnabled");
+  }
+
+  if (typeof candidate.buttonSquishEnabled !== "boolean") {
+    invalidFields.push("buttonSquishEnabled");
+  }
+
+  if (typeof candidate.buttonPressEnabled !== "boolean") {
+    invalidFields.push("buttonPressEnabled");
+  }
+
+  if (typeof candidate.buttonRippleEnabled !== "boolean") {
+    invalidFields.push("buttonRippleEnabled");
+  }
+
   const semantic = candidate.semanticColors;
   if (!semantic || typeof semantic !== "object") {
     invalidFields.push("semanticColors");
@@ -389,6 +509,10 @@ export function generateDesignTokens(preferences: DesignTokenPreferences): Desig
   const glowShadeIndex = clampShade(preferences.cardGlowShade, 4) - 1;
   const spacingScale = buildSpacingScale(4, preferences.spacingRatio);
 
+  const harmonyHues = generateHarmonyHues(preferences.colorHarmonyBaseHue, preferences.colorHarmonyMode);
+  const accentPrimary = buildPrimaryScale(harmonyHues.accentHue, preferences.gamma);
+  const highlightPrimary = buildPrimaryScale(harmonyHues.highlightHue, preferences.gamma);
+
   return {
     color: {
       primary,
@@ -442,11 +566,31 @@ export function generateDesignTokens(preferences: DesignTokenPreferences): Desig
       cornerRadius: preferences.cardCornerRadius,
       padding: spacingScale[preferences.cardPaddingIndex] ?? spacingScale[4],
       height: preferences.cardHeight,
+      darkModeGlowIntensity: preferences.darkModeGlowIntensity,
+      darkModeGlowRadius: preferences.darkModeGlowRadius,
+      lightModeShadowIntensity: preferences.lightModeShadowIntensity,
+      lightModeShadowRadius: preferences.lightModeShadowRadius,
       colors: {
         base: primary[baseShadeIndex],
         shadow: primary[shadowShadeIndex],
         glow: primary[glowShadeIndex],
       },
+    },
+    harmony: {
+      mode: preferences.colorHarmonyMode,
+      baseHue: preferences.colorHarmonyBaseHue,
+      accentHue: harmonyHues.accentHue,
+      highlightHue: harmonyHues.highlightHue,
+      colors: {
+        accent: accentPrimary[3],
+        highlight: highlightPrimary[5],
+      },
+    },
+    button: {
+      hoverEnabled: preferences.buttonHoverEnabled,
+      squishEnabled: preferences.buttonSquishEnabled,
+      pressEnabled: preferences.buttonPressEnabled,
+      rippleEnabled: preferences.buttonRippleEnabled,
     },
   };
 }
@@ -492,6 +636,35 @@ export function applyDesignTokensToDocument(tokens: DesignTokens, docRef: Docume
   root.style.setProperty("--cf-ds-card-radius", `${tokens.card.cornerRadius}px`);
   root.style.setProperty("--cf-ds-card-padding", `${tokens.card.padding}px`);
   root.style.setProperty("--cf-ds-card-height", `${tokens.card.height}px`);
+  root.style.setProperty("--cf-ds-card-shadow-intensity", String(tokens.card.lightModeShadowIntensity));
+  root.style.setProperty("--cf-ds-card-shadow-radius", `${tokens.card.lightModeShadowRadius}px`);
+  root.style.setProperty("--cf-ds-card-glow-intensity", String(tokens.card.darkModeGlowIntensity));
+  root.style.setProperty("--cf-ds-card-glow-radius", `${tokens.card.darkModeGlowRadius}px`);
+  root.style.setProperty("--cf-ds-harmony-accent", tokens.harmony.colors.accent);
+  root.style.setProperty("--cf-ds-harmony-highlight", tokens.harmony.colors.highlight);
+  root.style.setProperty("--cf-ds-harmony-accent-hue", String(tokens.harmony.accentHue));
+  root.style.setProperty("--cf-ds-harmony-highlight-hue", String(tokens.harmony.highlightHue));
+  root.style.setProperty("--cf-ds-btn-hover-enabled", tokens.button.hoverEnabled ? "1" : "0");
+  root.style.setProperty("--cf-ds-btn-squish-enabled", tokens.button.squishEnabled ? "1" : "0");
+  root.style.setProperty("--cf-ds-btn-press-enabled", tokens.button.pressEnabled ? "1" : "0");
+  root.style.setProperty("--cf-ds-btn-ripple-enabled", tokens.button.rippleEnabled ? "1" : "0");
+
+  const theme = typeof docRef !== "undefined" ? docRef.documentElement.dataset.theme : "light";
+  void appendDebugLogEntry({
+    eventType: "info",
+    message: "Design tokens applied to document.",
+    context: {
+      theme: theme ?? "light",
+      glowOrShadow: theme === "dark" ? "glow" : "shadow",
+      darkModeGlowIntensity: tokens.card.darkModeGlowIntensity,
+      darkModeGlowRadius: tokens.card.darkModeGlowRadius,
+      lightModeShadowIntensity: tokens.card.lightModeShadowIntensity,
+      lightModeShadowRadius: tokens.card.lightModeShadowRadius,
+      harmonyMode: tokens.harmony.mode,
+      harmonyBaseHue: tokens.harmony.baseHue,
+      harmonyAccentHue: tokens.harmony.accentHue,
+    },
+  });
 }
 
 function readStorage(): Storage | null {

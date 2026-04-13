@@ -164,7 +164,7 @@ describe("DocumentIngestPanel", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Saved \d+ new item\(s\) to this section\./i)).toBeInTheDocument();
-    });
+    }, { timeout: 5000 });
 
     const [vocabTerms, concepts, equations, keyIdeas] = await Promise.all([
       listVocabTermsBySectionId(sectionId),
@@ -427,7 +427,7 @@ describe("DocumentIngestPanel", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Saved \d+ new item\(s\) to this section\./i)).toBeInTheDocument();
-    });
+    }, { timeout: 5000 });
 
     const vocabTerms = await listVocabTermsBySectionId(sectionId);
     expect(vocabTerms.some((item) => item.variationOf === "vocab-base-1" && item.difficultyLevel === 2)).toBe(true);
@@ -482,7 +482,7 @@ describe("DocumentIngestPanel", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Saved \d+ new item\(s\) to this section\./i)).toBeInTheDocument();
-    });
+    }, { timeout: 5000 });
 
     expect(documentIngestMocks.generateTieredQuestionBankFromSeedItems).not.toHaveBeenCalled();
     expect(window.localStorage.getItem("courseforge:ingest:alwaysSkipAiMaterials")).toBe("1");

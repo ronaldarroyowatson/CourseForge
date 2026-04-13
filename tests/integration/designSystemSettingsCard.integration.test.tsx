@@ -285,4 +285,25 @@ describe("DesignSystemSettingsCard — new DSC controls", () => {
       expect(item.querySelector(".cf-motion-box")).toBeTruthy();
     });
   });
+
+  it("swaps example and controls card order when directional flow toggles", async () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+    const exampleCard = document.querySelector(".cf-ds-fibonacci-layout__example") as HTMLDivElement | null;
+    const controlsCard = document.querySelector(".cf-ds-fibonacci-layout__controls") as HTMLDivElement | null;
+    expect(exampleCard).toBeTruthy();
+    expect(controlsCard).toBeTruthy();
+
+    expect(exampleCard?.style.order).toBe("1");
+    expect(controlsCard?.style.order).toBe("2");
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle directional flow" }));
+
+    await waitFor(() => {
+      expect(useUIStore.getState().designTokenPreferences.directionalFlow).toBe("right-to-left");
+      expect(exampleCard?.style.order).toBe("2");
+      expect(controlsCard?.style.order).toBe("1");
+    });
+  });
 });

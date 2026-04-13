@@ -1157,7 +1157,10 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                 data-flow={prefs.directionalFlow}
               >
                 {/* Example Card */}
-                <div className="cf-ds-fibonacci-layout__example">
+                <div
+                  className="cf-ds-fibonacci-layout__example"
+                  style={{ order: prefs.directionalFlow === "right-to-left" ? 2 : 1 }}
+                >
                   <div className="cf-example-card" aria-label="example card preview">
                     <div className="cf-example-card__row" ref={setSectionRef("buttons")}>
                       <h4 className="cf-ds-section-title">Buttons</h4>
@@ -1291,7 +1294,10 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                 </div>
 
                 {/* Controls Card — aligned with Example Card rows */}
-                <div className="cf-ds-fibonacci-layout__controls">
+                <div
+                  className="cf-ds-fibonacci-layout__controls"
+                  style={{ order: prefs.directionalFlow === "right-to-left" ? 1 : 2 }}
+                >
                   <div className="cf-ds-settings-grid">
                     <section className="cf-ds-control-group" ref={setSectionRef("button-controls")}>
                       <h4 className="cf-ds-section-title">Button Controls</h4>
@@ -1597,9 +1603,11 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                             controlsCardSide: nextFlow === "left-to-right" ? "right" : "left",
                             motionTimingMs: prefs.motionTimingMs,
                             motionEasing: prefs.motionEasing,
-                            thumbAnimation: "fade-slide",
-                            swapInEasing: "ease-in",
-                            swapOutEasing: "ease-out",
+                            thumbAnimation: "fade-slide-fade",
+                            swapAnimationEasing: "ease-in-out",
+                            swapFadeMinOpacity: 0.86,
+                            fibonacciRatioBig: 3,
+                            fibonacciRatioSmall: 2,
                           });
                         }}
                         aria-label="Toggle directional flow"

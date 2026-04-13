@@ -865,16 +865,64 @@ body {
 }
 
 /* ─── L/R directional-flow swap animation ─────────────────────────────── */
-@keyframes cf-ds-flow-fade {
-  0%   { opacity: 1; transform: translateX(0); }
-  40%  { opacity: 0; transform: translateX(-10px); }
-  60%  { opacity: 0; transform: translateX(10px); }
-  100% { opacity: 1; transform: translateX(0); }
+@keyframes cf-ds-flow-swap-from-left {
+  0% {
+    opacity: 1;
+    transform: translateX(-18px);
+  }
+  20% {
+    opacity: 0.86;
+  }
+  75% {
+    opacity: 0.94;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes cf-ds-flow-swap-from-right {
+  0% {
+    opacity: 1;
+    transform: translateX(18px);
+  }
+  20% {
+    opacity: 0.86;
+  }
+  75% {
+    opacity: 0.94;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .cf-ds-fibonacci-layout--swapping .cf-ds-fibonacci-layout__example,
 .cf-ds-fibonacci-layout--swapping .cf-ds-fibonacci-layout__controls {
-  animation: cf-ds-flow-fade var(--cf-ds-motion-ms, 300ms) ease-in-out both;
+  animation-duration: var(--cf-ds-motion-ms, 300ms);
+  animation-timing-function: ease-in-out;
+  animation-fill-mode: both;
+  will-change: transform, opacity;
+}
+
+.cf-ds-fibonacci-layout--swapping[data-flow="left-to-right"] .cf-ds-fibonacci-layout__example {
+  animation-name: cf-ds-flow-swap-from-right;
+}
+
+.cf-ds-fibonacci-layout--swapping[data-flow="left-to-right"] .cf-ds-fibonacci-layout__controls {
+  animation-name: cf-ds-flow-swap-from-left;
+}
+
+.cf-ds-fibonacci-layout--swapping[data-flow="right-to-left"] .cf-ds-fibonacci-layout__example {
+  animation-name: cf-ds-flow-swap-from-left;
+}
+
+.cf-ds-fibonacci-layout--swapping[data-flow="right-to-left"] .cf-ds-fibonacci-layout__controls {
+  animation-name: cf-ds-flow-swap-from-right;
 }
 
 /* ─── Button behavior CSS vars ─────────────────────────────────────────── */
@@ -965,6 +1013,7 @@ body {
   min-width: 0;
   display: flex;
   justify-content: center;
+  align-self: stretch;
 }
 
 .cf-ds-fibonacci-layout__controls {
@@ -972,6 +1021,7 @@ body {
   min-width: 0;
   display: grid;
   align-content: start;
+  align-self: stretch;
 }
 
 @media (max-width: 640px) {

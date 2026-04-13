@@ -1,8 +1,8 @@
 {
     "name":  "CourseForge",
-    "version":  "1.4.62",
+    "version":  "1.4.63",
     "packageType":  "portable",
-    "createdAtUtc":  "2026-04-13T16:31:34.7655379Z",
+    "createdAtUtc":  "2026-04-13T21:40:30.2056480Z",
     "includes":  [
                      "webapp/",
                      "extension/",

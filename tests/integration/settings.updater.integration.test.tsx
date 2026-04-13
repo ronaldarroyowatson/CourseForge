@@ -148,6 +148,20 @@ function resetStores(): void {
   });
 }
 
+async function expandAppUpdatesCard(): Promise<void> {
+  const appUpdatesCard = document.querySelector<HTMLElement>("[data-settings-card='app-updates']");
+  expect(appUpdatesCard).toBeTruthy();
+  const toggleButton = within(appUpdatesCard as HTMLElement).getByRole("button", { name: /Show|Hide/ });
+
+  if (toggleButton.textContent === "Show") {
+    fireEvent.click(toggleButton);
+  }
+
+  await waitFor(() => {
+    expect(within(appUpdatesCard as HTMLElement).getByRole("button", { name: "Check for Updates" })).toBeInTheDocument();
+  });
+}
+
 describe("Settings updater communication", () => {
   beforeEach(() => {
     resetStores();
@@ -303,6 +317,7 @@ describe("Settings updater communication", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<SettingsPage onBack={() => undefined} />);
+    await expandAppUpdatesCard();
 
     await waitFor(() => {
       expect(screen.getAllByText("v1.2.80").length).toBeGreaterThanOrEqual(1);
@@ -380,6 +395,7 @@ describe("Settings updater communication", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<SettingsPage onBack={() => undefined} />);
+    await expandAppUpdatesCard();
 
     await waitFor(() => {
       expect(screen.getByText("Current version:")).toBeInTheDocument();
@@ -439,6 +455,7 @@ describe("Settings updater communication", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<SettingsPage onBack={() => undefined} />);
+    await expandAppUpdatesCard();
 
     await waitFor(() => {
       expect(screen.getByText("Current version:")).toBeInTheDocument();
@@ -506,6 +523,7 @@ describe("Settings updater communication", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<SettingsPage onBack={() => undefined} />);
+    await expandAppUpdatesCard();
 
     await waitFor(() => {
       expect(screen.getByText("Current version:")).toBeInTheDocument();
@@ -569,6 +587,7 @@ describe("Settings updater communication", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<SettingsPage onBack={() => undefined} />);
+    await expandAppUpdatesCard();
 
     await waitFor(() => {
       expect(screen.getByText("Current version:")).toBeInTheDocument();
@@ -584,24 +603,48 @@ describe("Settings updater communication", () => {
   it("allows one expandable settings card at a time and collapses on click-off", async () => {
     const { container } = render(<SettingsPage onBack={() => undefined} />);
 
+    const syncSafetyCard = container.querySelector<HTMLElement>("[data-expandable-card='sync-safety-status']");
     const syncCard = container.querySelector<HTMLElement>("[data-expandable-card='sync-preferences']");
     const languageCard = container.querySelector<HTMLElement>("[data-expandable-card='language']");
+    expect(syncSafetyCard?.getAttribute("data-expanded")).toBe("true");
     expect(syncCard).toBeTruthy();
     expect(languageCard).toBeTruthy();
 
     fireEvent.click(within(syncCard as HTMLElement).getByRole("button", { name: "Show" }));
-    expect(screen.getByText(/Retries used:/)).toBeInTheDocument();
+    expect(within(syncCard as HTMLElement).getByLabelText(/Retries used 0 of 3/)).toBeInTheDocument();
+    expect(syncSafetyCard?.getAttribute("data-expanded")).toBe("false");
 
     fireEvent.click(within(languageCard as HTMLElement).getByRole("button", { name: "Show" }));
     expect(screen.getByRole("button", { name: "Check For New Languages" })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.queryByText(/Retries used:/)).not.toBeInTheDocument();
+      expect(within(syncCard as HTMLElement).queryByLabelText(/Retries used 0 of 3/)).not.toBeInTheDocument();
     });
 
     fireEvent.pointerDown(document.body);
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Check For New Languages" })).not.toBeInTheDocument();
     });
+  });
+
+  it("renders every settings section as a real card with z-height metadata", async () => {
+    const { container } = render(<SettingsPage onBack={() => undefined} />);
+
+    const cardIds = [
+      "sync-safety-status",
+      "sync-preferences",
+      "ai-service-resilience",
+      "language",
+      "accessibility",
+      "metadata-learning",
+      "debug-log",
+      "app-updates",
+    ];
+
+    for (const cardId of cardIds) {
+      const card = container.querySelector<HTMLElement>(`[data-settings-card='${cardId}']`);
+      expect(card).toBeTruthy();
+      expect(card?.getAttribute("data-z-height")).toBe(cardId === "sync-safety-status" ? "3" : "2");
+    }
   });
 
   it("applies directional-flow data attributes to the integrated settings surface", async () => {
@@ -614,10 +657,14 @@ describe("Settings updater communication", () => {
     });
 
     const { container } = render(<SettingsPage onBack={() => undefined} />);
-    const page = container.querySelector(".settings-page--ds-integrated");
-    const grid = container.querySelector(".settings-grid");
+    const page = container.querySelector<HTMLElement>(".settings-page--ds-integrated");
+    const grid = container.querySelector<HTMLElement>(".settings-grid");
 
     expect(page?.getAttribute("data-flow")).toBe("right-to-left");
     expect(grid?.getAttribute("data-flow")).toBe("right-to-left");
+    await waitFor(() => {
+      expect(page?.style.getPropertyValue("--cf-settings-surface-bg")).toBe("#FFFFFF");
+      expect(page?.style.getPropertyValue("--cf-settings-surface-border")).not.toBe("");
+    });
   });
 });

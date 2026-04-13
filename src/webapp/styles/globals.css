@@ -387,9 +387,9 @@ body {
   display: grid;
   align-content: start;
   gap: var(--cf-ds-space-3, 8px);
-  background: var(--cf-ds-primary-3);
-  border-color: var(--cf-ds-primary-2);
-  box-shadow: 0 10px 24px color-mix(in srgb, var(--cf-ds-primary-2) 34%, transparent);
+  background: #000000;
+  border-color: var(--cf-ds-primary-6);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--cf-ds-primary-6) 34%, transparent);
 }
 
 .settings-card--design-system:not(.cf-ds-card--expanded) {
@@ -1015,11 +1015,25 @@ body {
   justify-content: center;
   align-self: stretch;
 }
+.cf-ds-fibonacci-layout__example[data-slot="primary"],
+.cf-ds-fibonacci-layout__controls[data-slot="primary"] {
+  order: 1;
+}
+.cf-ds-fibonacci-layout__example[data-slot="secondary"],
+.cf-ds-fibonacci-layout__controls[data-slot="secondary"] {
+  order: 2;
+}
 
 .cf-ds-fibonacci-layout__controls {
   flex: 2;
   min-width: 0;
   display: grid;
+  .cf-harmony-swatch {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+  }
   align-content: start;
   align-self: stretch;
 }
@@ -1756,11 +1770,11 @@ body {
 }
 
 .settings-page--ds-integrated {
-  background: var(--cf-ds-primary-1);
-  border: var(--cf-ds-stroke-2) solid var(--cf-ds-primary-2);
-  border-radius: 12px;
-  box-shadow: none;
-  padding: var(--cf-ds-space-4);
+  background: var(--cf-settings-surface-bg, #ffffff);
+  border: var(--cf-settings-stroke-2, var(--cf-ds-stroke-2)) solid var(--cf-settings-surface-border, var(--cf-ds-primary-6));
+  border-radius: var(--cf-ds-card-radius, 12px);
+  box-shadow: var(--cf-settings-surface-shadow, none);
+  padding: var(--cf-ds-card-padding, var(--cf-ds-space-4));
 }
 
 .settings-page--ds-integrated,
@@ -1793,18 +1807,19 @@ body {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 5fr) minmax(0, 3fr) minmax(0, 2fr);
   gap: var(--cf-ds-space-4);
   align-items: start;
   grid-auto-flow: dense;
+  grid-auto-rows: minmax(min-content, max-content);
 }
 
 .settings-grid--three {
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 5fr) minmax(0, 3fr) minmax(0, 2fr);
 }
 
 .settings-grid--two {
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
 }
 
 .settings-grid--one {
@@ -1831,22 +1846,6 @@ body {
   animation: settings-flow-swap var(--cf-settings-motion-ms, var(--cf-ds-motion-ms, 260ms)) var(--cf-settings-motion-easing, var(--cf-ds-motion-easing, ease-in-out));
 }
 
-.settings-grid--three .settings-card--expandable {
-  grid-column: 2 / -1;
-}
-
-.settings-grid--three .settings-card:not(.settings-card--expandable):not(.settings-card--design-system) {
-  grid-column: 1;
-}
-
-.settings-grid--two .settings-card--expandable {
-  grid-column: 2;
-}
-
-.settings-grid--two .settings-card:not(.settings-card--expandable):not(.settings-card--design-system) {
-  grid-column: 1;
-}
-
 .settings-card--design-system-pinned {
   order: 99;
   align-self: end;
@@ -1858,25 +1857,55 @@ body {
 }
 
 .settings-card {
-  border: var(--cf-ds-stroke-2) solid var(--cf-ds-primary-2);
-  background: var(--cf-ds-primary-3);
-  border-radius: 8px;
-  padding: var(--cf-ds-space-4);
-  box-shadow: 0 10px 24px color-mix(in srgb, var(--cf-ds-primary-2) 34%, transparent);
+  border: var(--cf-settings-stroke-2, var(--cf-ds-stroke-2)) solid var(--cf-settings-card-border, var(--cf-ds-primary-6));
+  background: var(--cf-settings-card-bg, var(--cf-ds-card-bg));
+  border-radius: var(--cf-ds-card-radius, 12px);
+  padding: var(--cf-ds-card-padding, var(--cf-ds-space-4));
+  box-shadow: var(--cf-settings-card-effect, none);
 }
 
 .settings-card--tokenized {
-  background: var(--cf-ds-primary-3);
-  border-color: var(--cf-ds-primary-2);
-  box-shadow: 0 10px 24px color-mix(in srgb, var(--cf-ds-primary-2) 34%, transparent);
+  background: var(--cf-settings-card-bg, var(--cf-ds-card-bg));
+  border-color: var(--cf-settings-card-border, var(--cf-ds-primary-6));
+  box-shadow: var(--cf-settings-card-effect, none);
   font-size: var(--cf-settings-type-base, var(--cf-ds-type-base, 12px));
+  min-height: clamp(180px, 18vh, 280px);
+  display: grid;
+  align-content: start;
+  gap: var(--cf-ds-space-2, 12px);
 }
 
 .settings-card--tokenized.settings-card--expanded,
 .settings-card--tokenized.settings-card--active {
-  background: var(--cf-ds-primary-3);
-  border-color: var(--cf-ds-primary-2);
-  box-shadow: 0 12px 28px color-mix(in srgb, var(--cf-ds-primary-2) 36%, transparent);
+  background: var(--cf-settings-card-bg, var(--cf-ds-card-bg));
+  border-color: var(--cf-settings-card-border, var(--cf-ds-primary-6));
+  box-shadow: var(--cf-settings-card-effect, none);
+}
+
+.settings-card[data-z-height="2"] {
+  --cf-settings-card-bg: var(--cf-settings-z2-bg, var(--cf-ds-primary-3));
+  --cf-settings-card-border: var(--cf-settings-z2-border, var(--cf-ds-primary-6));
+}
+
+.settings-card[data-z-height="3"] {
+  --cf-settings-card-bg: var(--cf-settings-z3-bg, var(--cf-ds-primary-5));
+  --cf-settings-card-border: var(--cf-settings-z3-border, var(--cf-ds-primary-6));
+}
+
+.settings-page--ds-integrated[data-theme-mode="dark"] .settings-card[data-z-height="2"] {
+  --cf-settings-card-effect: 0 0 calc(var(--cf-ds-card-glow-radius, 18px) * 0.9) color-mix(in srgb, var(--cf-settings-z2-effect, var(--cf-ds-primary-4)) calc(var(--cf-ds-card-glow-intensity, 6) * 7%), transparent);
+}
+
+.settings-page--ds-integrated[data-theme-mode="dark"] .settings-card[data-z-height="3"] {
+  --cf-settings-card-effect: 0 0 calc(var(--cf-ds-card-glow-radius, 18px) * 1.1) color-mix(in srgb, var(--cf-settings-z3-effect, var(--cf-ds-primary-6)) calc(var(--cf-ds-card-glow-intensity, 6) * 8%), transparent);
+}
+
+.settings-page--ds-integrated[data-theme-mode="light"] .settings-card[data-z-height="2"] {
+  --cf-settings-card-effect: 0 10px calc(var(--cf-ds-card-shadow-radius, 14px) * 1.1) color-mix(in srgb, var(--cf-settings-z2-effect, var(--cf-ds-primary-2)) calc(var(--cf-ds-card-shadow-intensity, 5) * 8%), transparent);
+}
+
+.settings-page--ds-integrated[data-theme-mode="light"] .settings-card[data-z-height="3"] {
+  --cf-settings-card-effect: 0 14px calc(var(--cf-ds-card-shadow-radius, 14px) * 1.25) color-mix(in srgb, var(--cf-settings-z3-effect, var(--cf-ds-primary-4)) calc(var(--cf-ds-card-shadow-intensity, 5) * 9%), transparent);
 }
 
 .settings-card h3 {
@@ -1915,41 +1944,76 @@ body {
   gap: 0.8rem;
 }
 
+.settings-card--section .settings-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.settings-card__summary {
+  margin-bottom: 0;
+}
+
 .settings-card__toggle {
   min-width: 5.5rem;
 }
 
-.settings-card--expandable:not(.settings-card--expanded) {
-  padding-bottom: 1rem;
+.settings-card--collapsed {
+  min-height: 148px;
 }
 
-.settings-card--expandable.settings-card--inactive {
+.settings-card--inactive {
   opacity: 0.96;
 }
 
-.settings-grid[data-flow="left-to-right"] .settings-card--expandable.settings-card--active {
+.settings-grid[data-flow="left-to-right"] .settings-card--active {
   animation: settings-card-enter-right var(--cf-settings-motion-ms, var(--cf-ds-motion-ms, 260ms)) ease-in;
 }
 
-.settings-grid[data-flow="left-to-right"] .settings-card--expandable.settings-card--inactive {
+.settings-grid[data-flow="left-to-right"] .settings-card--inactive {
   animation: settings-card-exit-left var(--cf-settings-motion-ms, var(--cf-ds-motion-ms, 260ms)) ease-out;
 }
 
-.settings-grid[data-flow="right-to-left"] .settings-card--expandable.settings-card--active {
+.settings-grid[data-flow="right-to-left"] .settings-card--active {
   animation: settings-card-enter-left var(--cf-settings-motion-ms, var(--cf-ds-motion-ms, 260ms)) ease-in;
 }
 
-.settings-grid[data-flow="right-to-left"] .settings-card--expandable.settings-card--inactive {
+.settings-grid[data-flow="right-to-left"] .settings-card--inactive {
   animation: settings-card-exit-right var(--cf-settings-motion-ms, var(--cf-ds-motion-ms, 260ms)) ease-out;
 }
 
 .settings-card--expanded {
-  grid-column: 2 / -1;
+  grid-column: span 2;
   grid-row: 1;
 }
 
 .settings-card--compact.settings-card--expanded {
-  grid-column: 2 / -1;
+  grid-column: span 2;
+}
+
+.settings-card--priority {
+  grid-column: 1;
+}
+
+.settings-grid--three .settings-card--priority.settings-card--active {
+  grid-column: 1 / span 2;
+}
+
+.settings-grid--three .settings-card--active:not(.settings-card--priority):not(.settings-card--design-system-pinned) {
+  grid-column: 2 / span 2;
+}
+
+.settings-grid--two .settings-card--active:not(.settings-card--design-system-pinned) {
+  grid-column: 1 / -1;
+}
+
+.settings-grid--three .settings-card--collapsed:not(.settings-card--design-system-pinned) {
+  grid-column: span 1;
+}
+
+.settings-grid--two .settings-card--collapsed:not(.settings-card--design-system-pinned) {
+  grid-column: span 1;
 }
 
 @keyframes settings-card-enter-right {

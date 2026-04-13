@@ -1089,6 +1089,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       {/* Full-screen expanded overlay — portaled to document.body */}
       {(isExpanded || isCollapsing) ? createPortal(
         <>
+        data-z-height={isExpanded || isCollapsing ? 3 : 2}
           {/* Backdrop scrim — click-outside collapses */}
           <div
             className={`cf-ds-card-backdrop${isCollapsing ? " cf-ds-card-backdrop--collapsing" : ""}`}
@@ -1159,7 +1160,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                 {/* Example Card */}
                 <div
                   className="cf-ds-fibonacci-layout__example"
-                  style={{ order: prefs.directionalFlow === "right-to-left" ? 2 : 1 }}
+                  data-slot={prefs.directionalFlow === "right-to-left" ? "secondary" : "primary"}
                 >
                   <div className="cf-example-card" aria-label="example card preview">
                     <div className="cf-example-card__row" ref={setSectionRef("buttons")}>
@@ -1296,7 +1297,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                 {/* Controls Card — aligned with Example Card rows */}
                 <div
                   className="cf-ds-fibonacci-layout__controls"
-                  style={{ order: prefs.directionalFlow === "right-to-left" ? 1 : 2 }}
+                  data-slot={prefs.directionalFlow === "right-to-left" ? "primary" : "secondary"}
                 >
                   <div className="cf-ds-settings-grid">
                     <section className="cf-ds-control-group" ref={setSectionRef("button-controls")}>
@@ -1705,8 +1706,8 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                       </label>
                       <p className="settings-meta">Accent and highlight hues derived from harmony mode and base hue.</p>
                       <div className="cf-ds-harmony-swatches" aria-label="harmony color preview">
-                        <span className="cf-harmony-swatch cf-harmony-swatch--accent" title="Accent color" style={{ display: "inline-block", width: 24, height: 24, borderRadius: 4 }} />
-                        <span className="cf-harmony-swatch cf-harmony-swatch--highlight" title="Highlight color" style={{ display: "inline-block", width: 24, height: 24, borderRadius: 4 }} />
+                        <span className="cf-harmony-swatch cf-harmony-swatch--accent" title="Accent color" />
+                        <span className="cf-harmony-swatch cf-harmony-swatch--highlight" title="Highlight color" />
                       </div>
                     </section>
 

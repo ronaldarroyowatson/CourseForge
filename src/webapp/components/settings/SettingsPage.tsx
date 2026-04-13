@@ -40,7 +40,113 @@ interface SettingsPageProps {
   onBack?: () => void;
 }
 
-type ExpandableCardId = "sync-preferences" | "language" | "accessibility" | "metadata-learning";
+type SettingsCardId =
+  | "sync-safety-status"
+  | "sync-preferences"
+  | "ai-service-resilience"
+  | "language"
+  | "accessibility"
+  | "metadata-learning"
+  | "debug-log"
+  | "app-updates";
+
+const SETTINGS_CARD_ORDER: SettingsCardId[] = [
+  "sync-safety-status",
+  "sync-preferences",
+  "ai-service-resilience",
+  "language",
+  "accessibility",
+  "metadata-learning",
+  "debug-log",
+  "app-updates",
+];
+
+function resolveSettingsCardZHeight(_cardId: SettingsCardId, activeCard: SettingsCardId | null): 2 | 3 {
+  return activeCard === _cardId ? 3 : 2;
+}
+
+function resolveSettingsCardShades(zHeight: 2 | 3): { backgroundShade: 3 | 5; effectShade: 2 | 4 | 6 } {
+  if (zHeight === 3) {
+    return {
+      backgroundShade: 5,
+      effectShade: 6,
+    };
+  }
+
+  return {
+    backgroundShade: 3,
+    effectShade: 4,
+  };
+}
+
+function isInteractiveSettingsTarget(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && Boolean(target.closest("button, a, input, select, textarea, label, summary, details"));
+}
+
+function SettingsSectionCard({
+  cardId,
+  title,
+  summary,
+  expanded,
+  zHeight,
+  className,
+  onToggle,
+  onDragStateChange,
+  children,
+}: {
+  cardId: SettingsCardId;
+  title: string;
+  summary: string;
+  expanded: boolean;
+  zHeight: 2 | 3;
+  className?: string;
+  onToggle: (cardId: SettingsCardId) => void;
+  onDragStateChange: (cardId: SettingsCardId, phase: "start" | "end") => void;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const classes = [
+    "settings-card",
+    "settings-card--tokenized",
+    "settings-card--section",
+    expanded ? "settings-card--expanded settings-card--active" : "settings-card--collapsed settings-card--inactive",
+  ];
+
+  if (className) {
+    classes.push(className);
+  }
+
+  return (
+    <article
+      className={classes.join(" ")}
+      data-settings-card={cardId}
+      data-expandable-card={cardId}
+      data-expanded={expanded ? "true" : "false"}
+      data-z-height={zHeight}
+      draggable={!expanded}
+      onClick={(event) => {
+        if (expanded || isInteractiveSettingsTarget(event.target)) {
+          return;
+        }
+
+        onToggle(cardId);
+      }}
+      onDragStart={() => { onDragStateChange(cardId, "start"); }}
+      onDragEnd={() => { onDragStateChange(cardId, "end"); }}
+    >
+      <div className="settings-card__head">
+        <div>
+          <h3>{title}</h3>
+          <p className="settings-meta settings-card__summary">{summary}</p>
+        </div>
+        <button type="button" className="btn-secondary settings-card__toggle" onClick={() => onToggle(cardId)}>
+          {expanded ? "Hide" : "Show"}
+        </button>
+      </div>
+      {expanded ? children : null}
+    </article>
+  );
+}
 
 function parseSemver(value: string): number[] | null {
   const match = value.match(/(\d+)\.(\d+)\.(\d+)/);
@@ -331,7 +437,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const [updaterDiagnostics, setUpdaterDiagnostics] = React.useState<UpdaterDiagnostics | null>(null);
   const [showUpdaterDiagnostics, setShowUpdaterDiagnostics] = React.useState(false);
   const [isLoadingUpdaterDiagnostics, setIsLoadingUpdaterDiagnostics] = React.useState(false);
-  const [activeExpandableCard, setActiveExpandableCard] = React.useState<ExpandableCardId | null>(null);
+  const [activeSettingsCard, setActiveSettingsCard] = React.useState<SettingsCardId | null>("sync-safety-status");
   const [isFlowSwapping, setIsFlowSwapping] = React.useState(false);
   const [settingsGridMode, setSettingsGridMode] = React.useState<"three" | "two" | "one">("three");
   const [metadataTrainingStats, setMetadataTrainingStats] = React.useState<LocalMetadataTrainingStats>({
@@ -379,10 +485,14 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     };
   }, [metadataPipelineRuntime, metadataTrainingStats]);
 
-  const showSyncPreferences = activeExpandableCard === "sync-preferences";
-  const showLanguageSettings = activeExpandableCard === "language";
-  const showAccessibilitySettings = activeExpandableCard === "accessibility";
-  const showMetadataLearning = activeExpandableCard === "metadata-learning";
+  const showSyncSafetyStatus = activeSettingsCard === "sync-safety-status";
+  const showSyncPreferences = activeSettingsCard === "sync-preferences";
+  const showAiServiceResilience = activeSettingsCard === "ai-service-resilience";
+  const showLanguageSettings = activeSettingsCard === "language";
+  const showAccessibilitySettings = activeSettingsCard === "accessibility";
+  const showMetadataLearning = activeSettingsCard === "metadata-learning";
+  const showDebugLog = activeSettingsCard === "debug-log";
+  const showAppUpdates = activeSettingsCard === "app-updates";
   const settingsPageRef = React.useRef<HTMLElement | null>(null);
   const settingsGridRef = React.useRef<HTMLDivElement | null>(null);
   const previousDirectionalFlowRef = React.useRef(directionalFlow);
@@ -392,23 +502,33 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     if (!node) {
       return;
     }
-
+    const isDarkTheme = theme === "dark";
     const primary = designTokens.color.primary;
-    node.style.setProperty("--cf-settings-layer-0-bg", primary[0]);
-    node.style.setProperty("--cf-settings-layer-1-bg", primary[2]);
-    node.style.setProperty("--cf-settings-layer-1-shadow", primary[1]);
-    node.style.setProperty("--cf-settings-layer-2-bg", primary[4]);
-    node.style.setProperty("--cf-settings-layer-2-shadow", primary[3]);
-    node.style.setProperty("--cf-settings-layer-3-bg", primary[6]);
-    node.style.setProperty("--cf-settings-layer-3-shadow", primary[5]);
-    node.style.setProperty("--cf-settings-layer-4-bg", primary[8]);
-    node.style.setProperty("--cf-settings-layer-4-shadow", primary[7]);
+    const highlightColor = primary[5] ?? primary[4] ?? "#3b83c7";
+    const z2EffectColor = isDarkTheme ? (primary[3] ?? primary[2]) : (primary[1] ?? primary[2]);
+    const z3EffectColor = isDarkTheme ? (primary[5] ?? primary[4]) : (primary[3] ?? primary[4]);
+    const z4EffectColor = isDarkTheme ? (primary[7] ?? primary[6]) : (primary[5] ?? primary[6]);
+
+    node.dataset.themeMode = theme;
+    node.style.setProperty("--cf-settings-surface-bg", isDarkTheme ? "#000000" : "#FFFFFF");
+    node.style.setProperty("--cf-settings-surface-border", highlightColor);
+    node.style.setProperty("--cf-settings-surface-shadow", "none");
+    node.style.setProperty("--cf-settings-z2-bg", primary[2] ?? primary[0]);
+    node.style.setProperty("--cf-settings-z2-effect", z2EffectColor);
+    node.style.setProperty("--cf-settings-z2-border", highlightColor);
+    node.style.setProperty("--cf-settings-z3-bg", primary[4] ?? primary[2]);
+    node.style.setProperty("--cf-settings-z3-effect", z3EffectColor);
+    node.style.setProperty("--cf-settings-z3-border", highlightColor);
+    node.style.setProperty("--cf-settings-z4-bg", primary[6] ?? primary[4]);
+    node.style.setProperty("--cf-settings-z4-effect", z4EffectColor);
+    node.style.setProperty("--cf-settings-z4-border", highlightColor);
+    node.style.setProperty("--cf-settings-effect-mode", isDarkTheme ? "glow" : "shadow");
     node.style.setProperty("--cf-settings-motion-ms", `${designTokenPreferences.motionTimingMs}ms`);
     node.style.setProperty("--cf-settings-motion-easing", designTokenPreferences.motionEasing);
     node.style.setProperty("--cf-settings-type-base", `${designTokens.type.base}px`);
     node.style.setProperty("--cf-settings-space-2", `${designTokens.spacing.values[2] ?? 8}px`);
     node.style.setProperty("--cf-settings-stroke-2", `${designTokens.stroke.values[1] ?? designTokens.stroke.values[0] ?? 1}px`);
-  }, [designTokenPreferences.motionEasing, designTokenPreferences.motionTimingMs, designTokens.color.primary, designTokens.spacing.values, designTokens.stroke.values, designTokens.type.base]);
+  }, [designTokenPreferences.motionEasing, designTokenPreferences.motionTimingMs, designTokens.color.primary, designTokens.spacing.values, designTokens.stroke.values, designTokens.type.base, theme]);
 
   const isUploadStuck = React.useCallback((snapshot: typeof activeAutoTextbookUpload): boolean => {
     if (!snapshot) {
@@ -1073,8 +1193,8 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     return compareSemver(sb, sa) > 0 ? b : a;
   })();
 
-  const toggleExpandableCard = React.useCallback((cardId: ExpandableCardId): void => {
-    setActiveExpandableCard((previous) => {
+  const toggleSettingsCard = React.useCallback((cardId: SettingsCardId): void => {
+    setActiveSettingsCard((previous) => {
       const next = previous === cardId ? null : cardId;
       const transitionRole = next ? "selection" : "deselection";
       const easing = next ? "ease-in" : "ease-out";
@@ -1097,8 +1217,18 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     });
   }, [designTokenPreferences.motionTimingMs, directionalFlow]);
 
+  const handleCardDragStateChange = React.useCallback((cardId: SettingsCardId, phase: "start" | "end"): void => {
+    const zHeight = resolveSettingsCardZHeight(cardId, activeSettingsCard);
+    void logDesignSystemDebugEvent("Settings card drag state changed.", {
+      cardId,
+      phase,
+      zHeight,
+      draggable: phase === "start",
+    });
+  }, [activeSettingsCard]);
+
   React.useEffect(() => {
-    if (!activeExpandableCard) {
+    if (!activeSettingsCard) {
       return;
     }
 
@@ -1108,20 +1238,20 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
         return;
       }
 
-      const activeCard = document.querySelector<HTMLElement>(`[data-expandable-card="${activeExpandableCard}"]`);
+      const activeCard = document.querySelector<HTMLElement>(`[data-expandable-card="${activeSettingsCard}"]`);
       if (activeCard?.contains(target)) {
         return;
       }
 
       void logDesignSystemDebugEvent("Settings card click-off detected.", {
-        activeExpandableCard,
+        activeSettingsCard,
         trigger: "pointerdown-outside-active-card",
       });
 
-      setActiveExpandableCard(null);
+      setActiveSettingsCard(null);
 
       void logDesignSystemDebugEvent("Settings card deselection via click-off applied.", {
-        activeExpandableCard,
+        activeSettingsCard,
         easing: "ease-out",
         timingMs: designTokenPreferences.motionTimingMs,
       });
@@ -1131,7 +1261,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     return () => {
       window.removeEventListener("pointerdown", handlePointerDown, true);
     };
-  }, [activeExpandableCard, designTokenPreferences.motionTimingMs]);
+  }, [activeSettingsCard, designTokenPreferences.motionTimingMs]);
 
   React.useLayoutEffect(() => {
     const grid = settingsGridRef.current;
@@ -1140,6 +1270,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     }
 
     const applyLayout = (width: number): void => {
+      const gapPx = designTokens.spacing.values[4] ?? 16;
       if (width >= 1200) {
         setSettingsGridMode("three");
         void logDesignSystemDebugEvent("Settings Fibonacci layout ratio selected.", {
@@ -1147,6 +1278,13 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           columns: 3,
           availableWidthPx: Math.round(width),
           directionalFlow,
+          gapPx,
+          activeCard: activeSettingsCard,
+        });
+        void logDesignSystemDebugEvent("Settings grid gap correction applied.", {
+          gridMode: "three",
+          gapPx,
+          strategy: "dense-fibonacci-grid",
         });
         return;
       }
@@ -1158,6 +1296,12 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           scope: "settings-page",
           directionalFlow,
           availableWidthPx: Math.round(width),
+          gapPx,
+        });
+        void logDesignSystemDebugEvent("Settings grid gap correction applied.", {
+          gridMode: "two",
+          gapPx,
+          strategy: "3:2-fibonacci-grid",
         });
         return;
       }
@@ -1168,6 +1312,13 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
         columns: 1,
         availableWidthPx: Math.round(width),
         directionalFlow,
+        gapPx,
+        activeCard: activeSettingsCard,
+      });
+      void logDesignSystemDebugEvent("Settings grid gap correction applied.", {
+        gridMode: "one",
+        gapPx,
+        strategy: "stacked-fibonacci-order",
       });
     };
 
@@ -1184,21 +1335,48 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     return () => {
       observer?.disconnect();
     };
-  }, [directionalFlow]);
+  }, [activeSettingsCard, designTokens.spacing.values, directionalFlow]);
 
   React.useEffect(() => {
+    const isDarkTheme = theme === "dark";
     void logDesignSystemDebugEvent("Settings page z-height mapping applied.", {
-      layer0Background: designTokens.color.primary[0],
-      layer1Background: designTokens.color.primary[2],
-      layer1Shadow: designTokens.color.primary[1],
-      layer2Background: designTokens.color.primary[4],
-      layer2Shadow: designTokens.color.primary[3],
-      layer3Background: designTokens.color.primary[6],
-      layer3Shadow: designTokens.color.primary[5],
-      layer4Background: designTokens.color.primary[8],
-      layer4Shadow: designTokens.color.primary[7],
+      theme,
+      settingsSurfaceBackground: isDarkTheme ? "#000000" : "#FFFFFF",
+      settingsSurfaceBorder: designTokens.color.primary[5],
+      settingsSurfaceGlowOrShadow: "none",
+      z2Background: designTokens.color.primary[2],
+      z2Effect: isDarkTheme ? designTokens.color.primary[3] : designTokens.color.primary[1],
+      z3Background: designTokens.color.primary[4],
+      z3Effect: isDarkTheme ? designTokens.color.primary[5] : designTokens.color.primary[3],
+      z4Background: designTokens.color.primary[6],
+      z4Effect: isDarkTheme ? designTokens.color.primary[7] : designTokens.color.primary[5],
     });
-  }, [designTokens.color.primary]);
+  }, [designTokens.color.primary, theme]);
+
+  React.useEffect(() => {
+    void logDesignSystemDebugEvent("Settings surface mode detection applied.", {
+      theme,
+      settingsSurfaceColor: theme === "dark" ? "#000000" : "#FFFFFF",
+      borderColor: designTokens.color.primary[5],
+    });
+  }, [designTokens.color.primary, theme]);
+
+  React.useEffect(() => {
+    for (const cardId of SETTINGS_CARD_ORDER) {
+      const zHeight = resolveSettingsCardZHeight(cardId, activeSettingsCard);
+      const shades = resolveSettingsCardShades(zHeight);
+      const effectMode = theme === "dark" ? "glow" : "shadow";
+      void logDesignSystemDebugEvent("Settings section converted into real card.", {
+        cardId,
+        zHeight,
+        backgroundShade: shades.backgroundShade,
+        backgroundColor: designTokens.color.primary[shades.backgroundShade - 1],
+        effectMode,
+        effectShade: theme === "dark" ? shades.effectShade : Math.max(1, shades.backgroundShade - 1),
+        effectColor: designTokens.color.primary[(theme === "dark" ? shades.effectShade : Math.max(1, shades.backgroundShade - 1)) - 1],
+      });
+    }
+  }, [activeSettingsCard, designTokens.color.primary, theme]);
 
   React.useEffect(() => {
     void logDesignSystemDebugEvent("Settings page design token propagation applied.", {
@@ -1250,25 +1428,15 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   }, [designTokenPreferences.motionTimingMs, directionalFlow]);
 
   React.useEffect(() => {
-    const orderedCards = [
-      "sync-preferences",
-      "language",
-      "accessibility",
-      "sync-safety-status",
-      "ai-service-resilience",
-      "metadata-learning",
-      "debug-log",
-      "app-updates",
-      "design-system-controls",
-    ];
-
     void logDesignSystemDebugEvent("Settings card ordering resolved.", {
       directionalFlow,
-      orderedCards,
-      designSystemCardPosition: orderedCards.length,
+      orderedCards: [...SETTINGS_CARD_ORDER, "design-system-controls"],
+      syncSafetyStatusPinnedFirst: true,
+      activeCard: activeSettingsCard,
+      designSystemCardPosition: SETTINGS_CARD_ORDER.length + 1,
       fallbackBehavior: "design-system-card-forced-last",
     });
-  }, [directionalFlow]);
+  }, [activeSettingsCard, directionalFlow]);
 
   return (
     <section ref={settingsPageRef} className="settings-page settings-page--ds-integrated" data-flow={directionalFlow}>
@@ -1280,170 +1448,20 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
         ref={settingsGridRef}
         className={`settings-grid settings-grid--${settingsGridMode} ${isFlowSwapping ? "settings-grid--flow-swapping" : ""}`.trim()}
         data-flow={directionalFlow}
+        data-active-card={activeSettingsCard ?? "none"}
       >
 
-        <article data-expandable-card="sync-preferences" className={`settings-card settings-card--expandable settings-card--tokenized ${showSyncPreferences ? "settings-card--expanded settings-card--active" : "settings-card--inactive"}`}>
-          <div className="settings-card__head">
-            <h3>Sync Preferences</h3>
-            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => toggleExpandableCard("sync-preferences")}>
-              {showSyncPreferences ? "Hide" : "Show"}
-            </button>
-          </div>
-          <p>Automatic retries are off by default to avoid repeated failed writes and quota spikes.</p>
-          {showSyncPreferences ? (
-            <>
-              <div className="settings-sync-retry-row">
-                <label
-                  className="settings-toggle"
-                  title="If disabled, autosync still runs, but failed syncs are not retried automatically."
-                >
-                  <input
-                    type="checkbox"
-                    checked={automaticRetriesEnabled}
-                    onChange={(event) => {
-                      setAutomaticRetriesEnabled(event.target.checked);
-                      useUIStore.getState().setRetryCount(0);
-                    }}
-                  />
-                  Enable Automatic Retries
-                </label>
-                <div className="settings-retry-meter" aria-label={`Retries used ${retryVisualUsed} of ${retryVisualTotal}`}>
-                  {Array.from({ length: retryVisualTotal }).map((_, index) => {
-                    const isUsed = index < retryVisualUsed;
-                    return (
-                      <span
-                        key={`retry-${index}`}
-                        className={`settings-retry-meter__item ${isUsed ? "settings-retry-meter__item--used" : "settings-retry-meter__item--available"}`}
-                      >
-                        {isUsed ? "✗" : "✓"}
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-              {!automaticRetriesEnabled ? (
-                <p className="manual-entry-banner" title="Retries remain off until you re-enable this setting.">
-                  Automatic retries are currently disabled.
-                </p>
-              ) : null}
-              <p className="settings-meta">Retries used: {retryCount}/{retryLimit}</p>
-            </>
-          ) : null}
-        </article>
-
-        <article data-expandable-card="language" className={`settings-card settings-card--expandable settings-card--tokenized ${showLanguageSettings ? "settings-card--expanded settings-card--active" : "settings-card--inactive"}`}>
-          <div className="settings-card__head">
-            <h3>{translate(language, "settings", "title")}</h3>
-            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => toggleExpandableCard("language")}>
-              {showLanguageSettings ? "Hide" : "Show"}
-            </button>
-          </div>
-          <p className="settings-meta">Current language: {language.toUpperCase()}</p>
-          {showLanguageSettings ? (
-            <>
-              <label>
-                {translate(language, "settings", "languageLabel")}
-                <select value={language} onChange={(event) => { void handleLanguageChange(event.target.value); }}>
-                  {languageOptions.map((option) => (
-                    <option key={option} value={option}>{option.toUpperCase()}</option>
-                  ))}
-                </select>
-              </label>
-              <p className="settings-meta">{translate(language, "settings", "languageHint")}</p>
-              <button type="button" className="btn-secondary" onClick={() => { void handleCheckLanguageUpdates(); }}>
-                Check For New Languages
-              </button>
-              {languageRegistryStatus ? <p className="settings-meta">{languageRegistryStatus}</p> : null}
-              {languageRoadmapPreview.length > 0 ? (
-                <p className="settings-meta">Roadmap preview: {languageRoadmapPreview.join(", ")}</p>
-              ) : null}
-            </>
-          ) : null}
-        </article>
-
-        <article data-expandable-card="accessibility" className={`settings-card settings-card--expandable settings-card--tokenized ${showAccessibilitySettings ? "settings-card--expanded settings-card--active" : "settings-card--inactive"}`} aria-live="polite">
-          <div className="settings-card__head">
-            <h3>{translate(language, "settings", "accessibilityTitle")}</h3>
-            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => toggleExpandableCard("accessibility")}>
-              {showAccessibilitySettings ? "Hide" : "Show"}
-            </button>
-          </div>
-          <p className="settings-meta">Color mode: {accessibility.colorBlindMode ?? "none"} | Font scale: {(accessibility.fontScale ?? 1).toFixed(2)} | UI scale: {(accessibility.uiScale ?? 1).toFixed(2)}</p>
-          {showAccessibilitySettings ? (
-            <>
-              <label>
-                {translate(language, "settings", "colorBlindMode")}
-                <select
-                  value={accessibility.colorBlindMode ?? "none"}
-                  onChange={(event) => {
-                    void handleAccessibilityPatch({
-                      colorBlindMode: event.target.value as "protanopia" | "deuteranopia" | "tritanopia" | "none",
-                    });
-                  }}
-                >
-                  <option value="none">None</option>
-                  <option value="protanopia">Protanopia</option>
-                  <option value="deuteranopia">Deuteranopia</option>
-                  <option value="tritanopia">Tritanopia</option>
-                </select>
-              </label>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={Boolean(accessibility.dyslexiaMode)}
-                  onChange={(event) => { void handleAccessibilityPatch({ dyslexiaMode: event.target.checked }); }}
-                />
-                {translate(language, "settings", "dyslexiaMode")}
-              </label>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={Boolean(accessibility.dyscalculiaMode)}
-                  onChange={(event) => { void handleAccessibilityPatch({ dyscalculiaMode: event.target.checked }); }}
-                />
-                {translate(language, "settings", "dyscalculiaMode")}
-              </label>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={Boolean(accessibility.highContrastMode)}
-                  onChange={(event) => { void handleAccessibilityPatch({ highContrastMode: event.target.checked }); }}
-                />
-                {translate(language, "settings", "highContrastMode")}
-              </label>
-              <label>
-                {translate(language, "settings", "fontScale")}: {(accessibility.fontScale ?? 1).toFixed(2)}
-                <input
-                  type="range"
-                  min={0.8}
-                  max={1.8}
-                  step={0.05}
-                  value={accessibility.fontScale ?? 1}
-                  onChange={(event) => { void handleAccessibilityPatch({ fontScale: Number(event.target.value) }); }}
-                />
-              </label>
-              <label>
-                {translate(language, "settings", "uiScale")}: {(accessibility.uiScale ?? 1).toFixed(2)}
-                <input
-                  type="range"
-                  min={0.85}
-                  max={1.3}
-                  step={0.05}
-                  value={accessibility.uiScale ?? 1}
-                  onChange={(event) => { void handleAccessibilityPatch({ uiScale: Number(event.target.value) }); }}
-                />
-              </label>
-              {preferenceStatus ? <p className="settings-meta">{preferenceStatus}</p> : null}
-            </>
-          ) : null}
-        </article>
-
-        <article className="settings-card settings-card--tokenized">
-          <h3>Sync Safety Status</h3>
-          <p className="settings-meta">Sync status: {syncStatus}</p>
-          {pendingChangesCount > 0 && (
-            <p className="settings-meta">Pending changes: {pendingChangesCount}</p>
-          )}
+        <SettingsSectionCard
+          cardId="sync-safety-status"
+          title="Sync Safety Status"
+          summary={`Sync status: ${syncStatus}${pendingChangesCount > 0 ? ` | Pending changes: ${pendingChangesCount}` : ""}`}
+          expanded={showSyncSafetyStatus}
+          zHeight={resolveSettingsCardZHeight("sync-safety-status", activeSettingsCard)}
+          className="settings-card--priority"
+          onToggle={toggleSettingsCard}
+          onDragStateChange={handleCardDragStateChange}
+        >
+          {pendingChangesCount > 0 ? <p className="settings-meta">Pending changes: {pendingChangesCount}</p> : null}
           {activeAutoTextbookUpload ? (
             <div className="settings-upload-monitor" aria-live="polite">
               <p className="settings-meta">
@@ -1483,10 +1501,64 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
             </button>
           </div>
           {cacheResetStatus ? <p className="settings-meta">{cacheResetStatus}</p> : null}
-        </article>
+        </SettingsSectionCard>
 
-        <article className="settings-card settings-card--tokenized">
-          <h3>AI Service Resilience</h3>
+        <SettingsSectionCard
+          cardId="sync-preferences"
+          title="Sync Preferences"
+          summary={`Automatic retries: ${automaticRetriesEnabled ? "Enabled" : "Disabled"} | Retries used: ${retryCount}/${retryLimit}`}
+          expanded={showSyncPreferences}
+          zHeight={resolveSettingsCardZHeight("sync-preferences", activeSettingsCard)}
+          onToggle={toggleSettingsCard}
+          onDragStateChange={handleCardDragStateChange}
+        >
+          <p>Automatic retries are off by default to avoid repeated failed writes and quota spikes.</p>
+          <div className="settings-sync-retry-row">
+            <label
+              className="settings-toggle"
+              title="If disabled, autosync still runs, but failed syncs are not retried automatically."
+            >
+              <input
+                type="checkbox"
+                checked={automaticRetriesEnabled}
+                onChange={(event) => {
+                  setAutomaticRetriesEnabled(event.target.checked);
+                  useUIStore.getState().setRetryCount(0);
+                }}
+              />
+              Enable Automatic Retries
+            </label>
+            <div className="settings-retry-meter" aria-label={`Retries used ${retryVisualUsed} of ${retryVisualTotal}`}>
+              {Array.from({ length: retryVisualTotal }).map((_, index) => {
+                const isUsed = index < retryVisualUsed;
+                return (
+                  <span
+                    key={`retry-${index}`}
+                    className={`settings-retry-meter__item ${isUsed ? "settings-retry-meter__item--used" : "settings-retry-meter__item--available"}`}
+                  >
+                    {isUsed ? "✗" : "✓"}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+          {!automaticRetriesEnabled ? (
+            <p className="manual-entry-banner" title="Retries remain off until you re-enable this setting.">
+              Automatic retries are currently disabled.
+            </p>
+          ) : null}
+          <p className="settings-meta">Retries used: {retryCount}/{retryLimit}</p>
+        </SettingsSectionCard>
+
+        <SettingsSectionCard
+          cardId="ai-service-resilience"
+          title="AI Service Resilience"
+          summary={`Primary: ${getShortProviderLabel(ocrProviderOrder[0] ?? "cloud_openai_vision")} | Fallback: ${getShortProviderLabel(secondChoiceProviderId)}`}
+          expanded={showAiServiceResilience}
+          zHeight={resolveSettingsCardZHeight("ai-service-resilience", activeSettingsCard)}
+          onToggle={toggleSettingsCard}
+          onDragStateChange={handleCardDragStateChange}
+        >
           <p>Set the priority order for OCR providers. Each is tried in order; the first that succeeds is used.</p>
           <div className="ocr-provider-choices">
             <label className="ocr-provider-choice">
@@ -1548,73 +1620,175 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
             </div>
           ) : null}
           {ocrProviderStatus ? <p className="settings-meta">{ocrProviderStatus}</p> : null}
-        </article>
+        </SettingsSectionCard>
 
-        <article data-expandable-card="metadata-learning" className={`settings-card settings-card--expandable settings-card--compact settings-card--tokenized ${showMetadataLearning ? "settings-card--expanded settings-card--active" : "settings-card--inactive"}`}>
-          <div className="settings-card__head">
-            <h3>Metadata Learning</h3>
-            <button
-              type="button"
-              className="btn-secondary settings-card__toggle"
-              onClick={() => {
-                toggleExpandableCard("metadata-learning");
-                refreshMetadataTrainingStats();
+        <SettingsSectionCard
+          cardId="language"
+          title="Language Settings"
+          summary={`Current language: ${language.toUpperCase()}${languageRoadmapPreview.length > 0 ? ` | Roadmap: ${languageRoadmapPreview.length}` : ""}`}
+          expanded={showLanguageSettings}
+          zHeight={resolveSettingsCardZHeight("language", activeSettingsCard)}
+          onToggle={toggleSettingsCard}
+          onDragStateChange={handleCardDragStateChange}
+        >
+          <label>
+            {translate(language, "settings", "languageLabel")}
+            <select value={language} onChange={(event) => { void handleLanguageChange(event.target.value); }}>
+              {languageOptions.map((option) => (
+                <option key={option} value={option}>{option.toUpperCase()}</option>
+              ))}
+            </select>
+          </label>
+          <p className="settings-meta">{translate(language, "settings", "languageHint")}</p>
+          <button type="button" className="btn-secondary" onClick={() => { void handleCheckLanguageUpdates(); }}>
+            Check For New Languages
+          </button>
+          {languageRegistryStatus ? <p className="settings-meta">{languageRegistryStatus}</p> : null}
+          {languageRoadmapPreview.length > 0 ? (
+            <p className="settings-meta">Roadmap preview: {languageRoadmapPreview.join(", ")}</p>
+          ) : null}
+        </SettingsSectionCard>
+
+        <SettingsSectionCard
+          cardId="accessibility"
+          title="Accessibility"
+          summary={`Color mode: ${accessibility.colorBlindMode ?? "none"} | Font scale: ${(accessibility.fontScale ?? 1).toFixed(2)} | UI scale: ${(accessibility.uiScale ?? 1).toFixed(2)}`}
+          expanded={showAccessibilitySettings}
+          zHeight={resolveSettingsCardZHeight("accessibility", activeSettingsCard)}
+          onToggle={toggleSettingsCard}
+          onDragStateChange={handleCardDragStateChange}
+        >
+          <label>
+            {translate(language, "settings", "colorBlindMode")}
+            <select
+              value={accessibility.colorBlindMode ?? "none"}
+              onChange={(event) => {
+                void handleAccessibilityPatch({
+                  colorBlindMode: event.target.value as "protanopia" | "deuteranopia" | "tritanopia" | "none",
+                });
               }}
             >
-              {showMetadataLearning ? "Hide" : "Show"}
-            </button>
-          </div>
-          <p className="settings-meta">Sharing: {metadataSharingEnabled ? "Enabled" : "Disabled"}</p>
-          {showMetadataLearning ? (
-            <>
-              <p>Share corrections to improve extraction accuracy for everyone.</p>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={metadataSharingEnabled}
-                  onChange={(event) => {
-                    const enabled = event.target.checked;
-                    setMetadataCorrectionSharingEnabled(enabled);
-                    setMetadataSharingEnabled(enabled);
-                  }}
-                />
-                Share corrections to improve accuracy for everyone.
-              </label>
-              <p className="settings-meta">
-                {metadataSharingEnabled
-                  ? "Corrections can be synced to shared review queues with safeguards."
-                  : "Corrections stay local only and are never uploaded."}
-              </p>
-              <div className="metadata-training-grid">
-                <p className="settings-meta">Corrections logged: <strong>{metadataTrainingStats.totalCorrections}</strong></p>
-                <p className="settings-meta">Queued locally: <strong>{metadataTrainingStats.pendingCorrections}</strong></p>
-                <p className="settings-meta">Accepted by admin: <strong>{metadataTrainingStats.acceptedCorrections}</strong></p>
-                <p className="settings-meta">Flagged for review: <strong>{metadataTrainingStats.flaggedCorrections}</strong></p>
-                <p className="settings-meta">Avg confidence: <strong>{metadataTrainingStats.averageConfidencePct}%</strong></p>
-              </div>
-              <p className="settings-meta">Last correction: {metadataTrainingStats.lastCorrectionAt ? new Date(metadataTrainingStats.lastCorrectionAt).toLocaleString() : "None yet"}</p>
-              <p className="settings-meta">Cloud OCR health: {metadataPipelineHealth.cloudStatus}</p>
-              <p className="settings-meta">Secondary metadata agent: {metadataPipelineHealth.secondaryAgentStatus}</p>
-              <p className="settings-meta">Secondary agent connection: <strong>{metadataLearningStatus.connectionStatus}</strong></p>
-              <p className="settings-meta">Data received from OCR: <strong>{metadataLearningStatus.dataReceived ? "Yes" : "No"}</strong></p>
-              <p className="settings-meta">Data processed by pipeline: <strong>{metadataLearningStatus.dataProcessed ? "Yes" : "No"}</strong></p>
-              <p className="settings-meta">Training data passed to local OCR: <strong>{metadataLearningStatus.localTrainingStatus}</strong></p>
-              <p className="settings-meta">
-                Last pipeline path: <strong>{metadataPipelineRuntime.path ?? "none"}</strong>
-                {metadataPipelineRuntime.ocr.providerId ? ` | OCR provider: ${metadataPipelineRuntime.ocr.providerId}` : ""}
-                {metadataPipelineRuntime.ocr.rawTextLength > 0 ? ` | OCR chars: ${metadataPipelineRuntime.ocr.rawTextLength}` : ""}
-              </p>
-              <p className="settings-meta">Pipeline confidence score: <strong>{metadataTrainingStats.averageConfidencePct}%</strong></p>
-              <p className="settings-meta">Corrections logged: <strong>{metadataTrainingStats.totalCorrections}</strong> | Accepted: <strong>{metadataTrainingStats.acceptedCorrections}</strong> | Flagged: <strong>{metadataTrainingStats.flaggedCorrections}</strong></p>
-              <p className="settings-meta">Pipeline trace: {metadataPipelineRuntime.traceId ?? "none"}</p>
-              <p className="settings-meta">Local learning: {metadataPipelineHealth.learningStatus}</p>
-              <p className="settings-meta">Correction sync: {metadataPipelineHealth.syncStatus}</p>
-            </>
-          ) : null}
-        </article>
+              <option value="none">None</option>
+              <option value="protanopia">Protanopia</option>
+              <option value="deuteranopia">Deuteranopia</option>
+              <option value="tritanopia">Tritanopia</option>
+            </select>
+          </label>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(accessibility.dyslexiaMode)}
+              onChange={(event) => { void handleAccessibilityPatch({ dyslexiaMode: event.target.checked }); }}
+            />
+            {translate(language, "settings", "dyslexiaMode")}
+          </label>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(accessibility.dyscalculiaMode)}
+              onChange={(event) => { void handleAccessibilityPatch({ dyscalculiaMode: event.target.checked }); }}
+            />
+            {translate(language, "settings", "dyscalculiaMode")}
+          </label>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(accessibility.highContrastMode)}
+              onChange={(event) => { void handleAccessibilityPatch({ highContrastMode: event.target.checked }); }}
+            />
+            {translate(language, "settings", "highContrastMode")}
+          </label>
+          <label>
+            {translate(language, "settings", "fontScale")}: {(accessibility.fontScale ?? 1).toFixed(2)}
+            <input
+              type="range"
+              min={0.8}
+              max={1.8}
+              step={0.05}
+              value={accessibility.fontScale ?? 1}
+              onChange={(event) => { void handleAccessibilityPatch({ fontScale: Number(event.target.value) }); }}
+            />
+          </label>
+          <label>
+            {translate(language, "settings", "uiScale")}: {(accessibility.uiScale ?? 1).toFixed(2)}
+            <input
+              type="range"
+              min={0.85}
+              max={1.3}
+              step={0.05}
+              value={accessibility.uiScale ?? 1}
+              onChange={(event) => { void handleAccessibilityPatch({ uiScale: Number(event.target.value) }); }}
+            />
+          </label>
+          {preferenceStatus ? <p className="settings-meta">{preferenceStatus}</p> : null}
+        </SettingsSectionCard>
 
-        <article className="settings-card settings-card--tokenized">
-          <h3>Debug Log</h3>
+        <SettingsSectionCard
+          cardId="metadata-learning"
+          title="Metadata Learning"
+          summary={`Sharing: ${metadataSharingEnabled ? "Enabled" : "Disabled"} | Corrections logged: ${metadataTrainingStats.totalCorrections}`}
+          expanded={showMetadataLearning}
+          zHeight={resolveSettingsCardZHeight("metadata-learning", activeSettingsCard)}
+          className="settings-card--compact"
+          onToggle={(cardId) => {
+            toggleSettingsCard(cardId);
+            refreshMetadataTrainingStats();
+          }}
+          onDragStateChange={handleCardDragStateChange}
+        >
+          <p>Share corrections to improve extraction accuracy for everyone.</p>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={metadataSharingEnabled}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setMetadataCorrectionSharingEnabled(enabled);
+                setMetadataSharingEnabled(enabled);
+              }}
+            />
+            Share corrections to improve accuracy for everyone.
+          </label>
+          <p className="settings-meta">
+            {metadataSharingEnabled
+              ? "Corrections can be synced to shared review queues with safeguards."
+              : "Corrections stay local only and are never uploaded."}
+          </p>
+          <div className="metadata-training-grid">
+            <p className="settings-meta">Corrections logged: <strong>{metadataTrainingStats.totalCorrections}</strong></p>
+            <p className="settings-meta">Queued locally: <strong>{metadataTrainingStats.pendingCorrections}</strong></p>
+            <p className="settings-meta">Accepted by admin: <strong>{metadataTrainingStats.acceptedCorrections}</strong></p>
+            <p className="settings-meta">Flagged for review: <strong>{metadataTrainingStats.flaggedCorrections}</strong></p>
+            <p className="settings-meta">Avg confidence: <strong>{metadataTrainingStats.averageConfidencePct}%</strong></p>
+          </div>
+          <p className="settings-meta">Last correction: {metadataTrainingStats.lastCorrectionAt ? new Date(metadataTrainingStats.lastCorrectionAt).toLocaleString() : "None yet"}</p>
+          <p className="settings-meta">Cloud OCR health: {metadataPipelineHealth.cloudStatus}</p>
+          <p className="settings-meta">Secondary metadata agent: {metadataPipelineHealth.secondaryAgentStatus}</p>
+          <p className="settings-meta">Secondary agent connection: <strong>{metadataLearningStatus.connectionStatus}</strong></p>
+          <p className="settings-meta">Data received from OCR: <strong>{metadataLearningStatus.dataReceived ? "Yes" : "No"}</strong></p>
+          <p className="settings-meta">Data processed by pipeline: <strong>{metadataLearningStatus.dataProcessed ? "Yes" : "No"}</strong></p>
+          <p className="settings-meta">Training data passed to local OCR: <strong>{metadataLearningStatus.localTrainingStatus}</strong></p>
+          <p className="settings-meta">
+            Last pipeline path: <strong>{metadataPipelineRuntime.path ?? "none"}</strong>
+            {metadataPipelineRuntime.ocr.providerId ? ` | OCR provider: ${metadataPipelineRuntime.ocr.providerId}` : ""}
+            {metadataPipelineRuntime.ocr.rawTextLength > 0 ? ` | OCR chars: ${metadataPipelineRuntime.ocr.rawTextLength}` : ""}
+          </p>
+          <p className="settings-meta">Pipeline confidence score: <strong>{metadataTrainingStats.averageConfidencePct}%</strong></p>
+          <p className="settings-meta">Corrections logged: <strong>{metadataTrainingStats.totalCorrections}</strong> | Accepted: <strong>{metadataTrainingStats.acceptedCorrections}</strong> | Flagged: <strong>{metadataTrainingStats.flaggedCorrections}</strong></p>
+          <p className="settings-meta">Pipeline trace: {metadataPipelineRuntime.traceId ?? "none"}</p>
+          <p className="settings-meta">Local learning: {metadataPipelineHealth.learningStatus}</p>
+          <p className="settings-meta">Correction sync: {metadataPipelineHealth.syncStatus}</p>
+        </SettingsSectionCard>
+
+        <SettingsSectionCard
+          cardId="debug-log"
+          title="Debug Log"
+          summary={`Debug logging: ${debugEnabled ? "Enabled" : "Disabled"} | Entries: ${debugStats.entries}`}
+          expanded={showDebugLog}
+          zHeight={resolveSettingsCardZHeight("debug-log", activeSettingsCard)}
+          onToggle={toggleSettingsCard}
+          onDragStateChange={handleCardDragStateChange}
+        >
           <p>Store local troubleshooting events for Auto Mode and sync behavior. You control whether logs are collected and when they are uploaded.</p>
           <label className="settings-toggle" title="When disabled, no new local debug events are stored.">
             <input
@@ -1638,10 +1812,17 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
             </button>
           </div>
           {debugStatus ? <p className="settings-meta">{debugStatus}</p> : null}
-        </article>
+        </SettingsSectionCard>
 
-        <article className="settings-card settings-card--tokenized">
-          <h3>App Updates</h3>
+        <SettingsSectionCard
+          cardId="app-updates"
+          title="App Updates"
+          summary={`Current: ${formatVersionLabel(currentAppVersion)} | Latest: ${bestLatestVersion ? formatVersionLabel(bestLatestVersion) : "Not checked yet"}`}
+          expanded={showAppUpdates}
+          zHeight={resolveSettingsCardZHeight("app-updates", activeSettingsCard)}
+          onToggle={toggleSettingsCard}
+          onDragStateChange={handleCardDragStateChange}
+        >
           {currentAppVersion !== "unknown" ? (
             <p>Current version: <strong>{formatVersionLabel(currentAppVersion)}</strong></p>
           ) : null}
@@ -1749,7 +1930,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
               <a href={latestReleaseUrl} target="_blank" rel="noopener noreferrer">View release on GitHub</a>
             </p>
           ) : null}
-        </article>
+        </SettingsSectionCard>
 
         <DesignSystemSettingsCard
           userId={userId}

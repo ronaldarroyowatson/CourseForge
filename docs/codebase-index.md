@@ -873,6 +873,23 @@ Update summary:
 - Directional-flow updates now trigger explicit card-swap animation diagnostics and flow-aware Fibonacci grid decisions for one-, two-, and three-column settings layouts.
 - Dark/Light toggles and Left/Right flow toggles now share motion-driven thumb fade/slide timing through design token motion variables, while flow toggling avoids any theme/lighting mutation.
 
+### Settings Page Real Card Conversion And Special Surface Rules (2026-04-13)
+
+Primary file(s):
+
+- [src/webapp/components/settings/SettingsPage.tsx](src/webapp/components/settings/SettingsPage.tsx)
+- [src/webapp/components/settings/DesignSystemSettingsCard.tsx](src/webapp/components/settings/DesignSystemSettingsCard.tsx)
+- [src/webapp/styles/globals.css](src/webapp/styles/globals.css)
+- [tests/integration/settings.updater.integration.test.tsx](tests/integration/settings.updater.integration.test.tsx)
+- [tests/integration/designSystemSettingsCard.integration.test.tsx](tests/integration/designSystemSettingsCard.integration.test.tsx)
+
+Update summary:
+
+- Every Settings section now renders through a real shared card shell with its own z-height metadata, collapse/expand behavior, drag capability, and debug events instead of inheriting the outer Settings surface styling.
+- The outer Settings surface now follows special mode rules only for the wrapper card: pure black plus blue border in dark mode, pure white plus blue border in light mode, and no glow/shadow in either mode.
+- Interior settings cards now resolve their own DSC-driven background/effect colors by z-height, using shade-based glow in dark mode and shade-based shadow in light mode, while the Settings Fibonacci grid keeps Sync Safety Status pinned first.
+- Design System Controls preview cards now expose slot metadata for left/right swap choreography, and the swap remains tied to motion-token timing and ease-in-out flow transitions.
+
 ## How to Update This Index
 
 - Update triggers:

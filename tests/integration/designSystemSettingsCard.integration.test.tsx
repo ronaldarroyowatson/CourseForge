@@ -295,15 +295,15 @@ describe("DesignSystemSettingsCard — new DSC controls", () => {
     expect(exampleCard).toBeTruthy();
     expect(controlsCard).toBeTruthy();
 
-    expect(exampleCard?.style.order).toBe("1");
-    expect(controlsCard?.style.order).toBe("2");
+    expect(exampleCard?.getAttribute("data-slot")).toBe("primary");
+    expect(controlsCard?.getAttribute("data-slot")).toBe("secondary");
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle directional flow" }));
 
     await waitFor(() => {
       expect(useUIStore.getState().designTokenPreferences.directionalFlow).toBe("right-to-left");
-      expect(exampleCard?.style.order).toBe("2");
-      expect(controlsCard?.style.order).toBe("1");
+      expect(exampleCard?.getAttribute("data-slot")).toBe("secondary");
+      expect(controlsCard?.getAttribute("data-slot")).toBe("primary");
     });
   });
 });

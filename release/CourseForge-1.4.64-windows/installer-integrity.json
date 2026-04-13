@@ -1,6 +1,6 @@
 {
-    "generatedAtUtc":  "2026-04-13T21:40:31.2001915Z",
-    "version":  "1.4.63",
+    "generatedAtUtc":  "2026-04-13T23:19:00.8842172Z",
+    "version":  "1.4.64",
     "files":  [
                   {
                       "path":  "AutoUpdate-CourseForge.ps1",
@@ -8,7 +8,7 @@
                   },
                   {
                       "path":  "Check-For-CourseForge-Updates.cmd",
-                      "hash":  "03E3E71E34A8D822A6D141DB6E51EF9E8E774DF49EC06E2F550CA5A93D2C8469"
+                      "hash":  "AF31AC8B8C9E765553BF07A1170457D83263A03F4342FF233046111624E0516E"
                   },
                   {
                       "path":  "Start-CourseForge.cmd",
@@ -36,7 +36,7 @@
                   },
                   {
                       "path":  "Install-CourseForge-Windows.ps1",
-                      "hash":  "E07CBAABC48DE924FFC96A4AA3AB7F3AC31D1B5631C6DB14F4506400AC5E4227"
+                      "hash":  "38473BF1A50085855FC308759309A8A3A887E9ABC662F1E9324DDD57195F866B"
                   },
                   {
                       "path":  "Install-CourseForge-Windows.cmd",
@@ -60,11 +60,11 @@
                   },
                   {
                       "path":  "package-manifest.json",
-                      "hash":  "1B66C1D2BBF465BA510858C097F36DF0481588684A5D70A5849B36FEBE984DA1"
+                      "hash":  "5E03E7EC0D9EB7EDAEE0D01A92321FA4897661CACA011F1F4FB3DD51982C5978"
                   },
                   {
                       "path":  "webapp/index.html",
-                      "hash":  "3299802C07A77C76F2E6320EAB92AE91B029D9950B911ACEC69B1C2C157659AB"
+                      "hash":  "C701EBD5D94DEE7DF6A2B52ABDE87C1A8BC5D3EFD5553783C72C7E9F3B478939"
                   },
                   {
                       "path":  "extension/manifest.json",

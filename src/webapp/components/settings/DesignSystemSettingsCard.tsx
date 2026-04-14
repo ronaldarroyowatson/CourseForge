@@ -72,6 +72,87 @@ const CARD_PADDING_OPTIONS = [
   { label: "Space 5", value: 5 },
 ];
 
+const HARMONY_MODE_HELP_TEXT: Record<HarmonyMode, string> = {
+  mono: "Keeps major, minor, and accent close to one hue family with brand influence.",
+  analogous: "Builds neighboring hues around the base color for cohesive gradients.",
+  complementary: "Pushes contrast by balancing base direction against its opposite side.",
+  "split-complementary": "Uses two neighbors of the complement for softer contrast.",
+  triadic: "Spreads three balanced anchors around the wheel for vibrant variety.",
+  tetradic: "Creates a four-point framework for rich, structured contrast.",
+  brand: "Prioritizes your brand color while still blending in the selected base tone.",
+};
+
+function toHexChannel(value: number): string {
+  return Math.round(value).toString(16).padStart(2, "0");
+}
+
+function hueToHex(hue: number): string {
+  const normalizedHue = ((hue % 360) + 360) % 360;
+  const saturation = 0.68;
+  const lightness = 0.5;
+  const c = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const x = c * (1 - Math.abs(((normalizedHue / 60) % 2) - 1));
+  const m = lightness - c / 2;
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (normalizedHue < 60) {
+    r = c;
+    g = x;
+  } else if (normalizedHue < 120) {
+    r = x;
+    g = c;
+  } else if (normalizedHue < 180) {
+    g = c;
+    b = x;
+  } else if (normalizedHue < 240) {
+    g = x;
+    b = c;
+  } else if (normalizedHue < 300) {
+    r = x;
+    b = c;
+  } else {
+    r = c;
+    b = x;
+  }
+
+  return `#${toHexChannel((r + m) * 255)}${toHexChannel((g + m) * 255)}${toHexChannel((b + m) * 255)}`;
+}
+
+function hexToHue(value: string): number | null {
+  const normalized = value.trim();
+  const match = normalized.match(/^#?([0-9a-fA-F]{6})$/);
+  if (!match) {
+    return null;
+  }
+
+  const hex = match[1];
+  const red = Number.parseInt(hex.slice(0, 2), 16) / 255;
+  const green = Number.parseInt(hex.slice(2, 4), 16) / 255;
+  const blue = Number.parseInt(hex.slice(4, 6), 16) / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const delta = max - min;
+
+  if (delta === 0) {
+    return 0;
+  }
+
+  let hue = 0;
+  if (max === red) {
+    hue = ((green - blue) / delta) % 6;
+  } else if (max === green) {
+    hue = (blue - red) / delta + 2;
+  } else {
+    hue = (red - green) / delta + 4;
+  }
+
+  hue *= 60;
+  return (hue + 360) % 360;
+}
+
 function DemoButton({
   variant,
   size,
@@ -152,6 +233,7 @@ function shadeLabel(value: number): string {
 export function DesignSystemSettingsCard({ userId, placementClassName }: DesignSystemSettingsCardProps): React.JSX.Element {
   const prefs = useUIStore((state) => state.designTokenPreferences);
   const tokens = useUIStore((state) => state.designTokens);
+  const theme = useUIStore((state) => state.theme);
   const setPrefs = useUIStore((state) => state.setDesignTokenPreferences);
   const resetPrefs = useUIStore((state) => state.resetDesignTokenPreferences);
   const applySystemDefaults = useUIStore((state) => state.applySystemDesignTokenDefaults);
@@ -176,7 +258,10 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
   const fibonacciContainerRef = React.useRef<HTMLDivElement>(null);
   const collapsedCardRef = React.useRef<HTMLElement | null>(null);
   const overlayContentRef = React.useRef<HTMLDivElement | null>(null);
+  const harmonyWheelCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const sectionRefs = React.useRef<Record<string, HTMLElement | null>>({});
+  const [baseHexInput, setBaseHexInput] = React.useState(() => hueToHex(prefs.colorHarmonyBaseHue));
+  const [brandHexInput, setBrandHexInput] = React.useState(() => hueToHex(prefs.colorHarmonyBrandHue));
 
   React.useEffect(() => {
     setLocalDiagnostics(readLocalDesignTokenDiagnostics());
@@ -231,37 +316,27 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       return;
     }
 
-    const updateBounds = (): void => {
-      const root = document.documentElement;
-      const cardNode = collapsedCardRef.current;
-      const settingsSurface = cardNode?.closest(".settings-page");
-      if (!(settingsSurface instanceof HTMLElement)) {
-        root.style.removeProperty("--cf-ds-overlay-top");
-        root.style.removeProperty("--cf-ds-overlay-left");
-        root.style.removeProperty("--cf-ds-overlay-width");
-        root.style.removeProperty("--cf-ds-overlay-height");
-        return;
-      }
+    const overlayNode = document.querySelector<HTMLElement>(".cf-ds-card-overlay");
+    const innerNode = document.querySelector<HTMLElement>(".cf-ds-card-overlay__inner");
+    const pageNode = document.querySelector<HTMLElement>(".settings-page");
+    const rootStyle = window.getComputedStyle(document.documentElement);
+    const pageStyle = pageNode ? window.getComputedStyle(pageNode) : null;
+    const overlayStyle = overlayNode ? window.getComputedStyle(overlayNode) : null;
+    const innerStyle = innerNode ? window.getComputedStyle(innerNode) : null;
 
-      const rect = settingsSurface.getBoundingClientRect();
-      root.style.setProperty("--cf-ds-overlay-top", `${Math.round(rect.top)}px`);
-      root.style.setProperty("--cf-ds-overlay-left", `${Math.round(rect.left)}px`);
-      root.style.setProperty("--cf-ds-overlay-width", `${Math.round(rect.width)}px`);
-      root.style.setProperty("--cf-ds-overlay-height", `${Math.round(rect.height)}px`);
-    };
-
-    updateBounds();
-    window.addEventListener("resize", updateBounds);
-    window.addEventListener("scroll", updateBounds, true);
+    void logDesignSystemDebugEvent("DSC overlay stacking and overflow calibrated to viewport.", {
+      overlayMode: "viewport-fixed",
+      rootOverflowX: rootStyle.overflowX,
+      rootOverflowY: rootStyle.overflowY,
+      pageOverflowX: pageStyle?.overflowX ?? "unknown",
+      pageOverflowY: pageStyle?.overflowY ?? "unknown",
+      overlayZIndex: overlayStyle?.zIndex ?? "unknown",
+      overlayOverflowY: overlayStyle?.overflowY ?? "unknown",
+      innerOverflow: innerStyle?.overflow ?? "unknown",
+      clippingRiskMitigation: "bypass-settings-surface-bounds",
+    });
 
     return () => {
-      const root = document.documentElement;
-      root.style.removeProperty("--cf-ds-overlay-top");
-      root.style.removeProperty("--cf-ds-overlay-left");
-      root.style.removeProperty("--cf-ds-overlay-width");
-      root.style.removeProperty("--cf-ds-overlay-height");
-      window.removeEventListener("resize", updateBounds);
-      window.removeEventListener("scroll", updateBounds, true);
     };
   }, [isCollapsing, isExpanded]);
 
@@ -301,7 +376,123 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       organizerBorderToken: theme === "dark" ? "semantic + white mix" : "semantic base",
       organizerTextToken: theme === "dark" ? "--text-primary (light)" : "--text-primary (dark)",
     });
-  }, [isExpanded]);
+  }, [isExpanded, theme]);
+
+  React.useEffect(() => {
+    setBaseHexInput(hueToHex(prefs.colorHarmonyBaseHue));
+  }, [prefs.colorHarmonyBaseHue]);
+
+  React.useEffect(() => {
+    setBrandHexInput(hueToHex(prefs.colorHarmonyBrandHue));
+  }, [prefs.colorHarmonyBrandHue]);
+
+  React.useEffect(() => {
+    if (!isExpanded) {
+      return;
+    }
+
+    const buttonDepthTrace = {
+      mode: theme,
+      depthIntensity: prefs.buttonDepthIntensity,
+      depthRadius: prefs.buttonDepthRadius,
+      primaryBase: tokens.color.primary[5] ?? tokens.color.primary[4],
+      secondaryBase: tokens.color.primary[3] ?? tokens.color.primary[2],
+      ghostBase: tokens.color.primary[4] ?? tokens.color.primary[3],
+      destructiveBase: prefs.semanticColors.error,
+      organizerNew: prefs.semanticColors.new,
+      organizerActive: prefs.semanticColors.success,
+      organizerPending: prefs.semanticColors.pending,
+      organizerError: prefs.semanticColors.error,
+    };
+
+    void logDesignSystemDebugEvent("Button depth colors recalculated.", buttonDepthTrace);
+  }, [
+    isExpanded,
+    prefs.buttonDepthIntensity,
+    prefs.buttonDepthRadius,
+    prefs.semanticColors.error,
+    prefs.semanticColors.new,
+    prefs.semanticColors.pending,
+    prefs.semanticColors.success,
+    theme,
+    tokens.color.primary,
+  ]);
+
+  React.useEffect(() => {
+    const canvas = harmonyWheelCanvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const radius = Math.min(width, height) / 2 - 12;
+
+    context.clearRect(0, 0, width, height);
+
+    for (let hue = 0; hue < 360; hue += 1) {
+      context.beginPath();
+      context.moveTo(centerX, centerY);
+      context.arc(centerX, centerY, radius, ((hue - 1) * Math.PI) / 180, (hue * Math.PI) / 180);
+      context.closePath();
+      context.fillStyle = `hsl(${hue} 70% 52%)`;
+      context.fill();
+    }
+
+    context.beginPath();
+    context.arc(centerX, centerY, radius * 0.62, 0, Math.PI * 2);
+    context.fillStyle = theme === "dark" ? "rgba(9, 15, 29, 0.84)" : "rgba(255, 255, 255, 0.9)";
+    context.fill();
+
+    const markers = [
+      { hue: prefs.colorHarmonyBaseHue, color: tokens.harmony.colors.major, label: "Base" },
+      { hue: prefs.colorHarmonyBrandHue, color: tokens.harmony.colors.accent, label: "Brand" },
+      { hue: tokens.harmony.majorHue, color: tokens.harmony.colors.major, label: "Major" },
+      { hue: tokens.harmony.minorHue, color: tokens.harmony.colors.minor, label: "Minor" },
+      { hue: tokens.harmony.accentHue, color: tokens.harmony.colors.accent, label: "Accent" },
+    ];
+
+    for (const marker of markers) {
+      const radians = ((marker.hue - 90) * Math.PI) / 180;
+      const x = centerX + Math.cos(radians) * (radius - 8);
+      const y = centerY + Math.sin(radians) * (radius - 8);
+
+      context.beginPath();
+      context.arc(x, y, 5, 0, Math.PI * 2);
+      context.fillStyle = marker.color;
+      context.fill();
+      context.lineWidth = 2;
+      context.strokeStyle = theme === "dark" ? "#f8fbff" : "#0d1728";
+      context.stroke();
+    }
+
+    void logDesignSystemDebugEvent("Color harmony wheel rendered.", {
+      mode: prefs.colorHarmonyMode,
+      baseHue: prefs.colorHarmonyBaseHue,
+      brandHue: prefs.colorHarmonyBrandHue,
+      majorHue: tokens.harmony.majorHue,
+      minorHue: tokens.harmony.minorHue,
+      accentHue: tokens.harmony.accentHue,
+    });
+  }, [
+    prefs.colorHarmonyBaseHue,
+    prefs.colorHarmonyBrandHue,
+    prefs.colorHarmonyMode,
+    theme,
+    tokens.harmony.accentHue,
+    tokens.harmony.colors.accent,
+    tokens.harmony.colors.major,
+    tokens.harmony.colors.minor,
+    tokens.harmony.majorHue,
+    tokens.harmony.minorHue,
+  ]);
 
   React.useLayoutEffect(() => {
     const alignmentPairs = [
@@ -435,7 +626,8 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
   }, [isExpanded, prefs.directionalFlow, prefs.gamma, prefs.motionTimingMs, prefs.spacingRatio, prefs.typeRatio,
       prefs.darkModeGlowIntensity, prefs.darkModeGlowRadius, prefs.lightModeShadowIntensity, prefs.lightModeShadowRadius,
       prefs.buttonHoverEnabled, prefs.buttonSquishEnabled, prefs.buttonPressEnabled, prefs.buttonRippleEnabled,
-      prefs.colorHarmonyMode, prefs.colorHarmonyBaseHue]);
+      prefs.buttonDepthIntensity, prefs.buttonDepthRadius,
+      prefs.colorHarmonyMode, prefs.colorHarmonyBaseHue, prefs.colorHarmonyBrandHue]);
 
   React.useEffect(() => {
     if (!isExpanded || !overlayContentRef.current) {
@@ -988,6 +1180,66 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
     });
   }
 
+  function applyHarmonyToOrganizer(role: "major" | "minor" | "accent"): void {
+    const color = role === "major"
+      ? tokens.harmony.colors.major
+      : role === "minor"
+        ? tokens.harmony.colors.minor
+        : tokens.harmony.colors.accent;
+
+    const nextSemantic = {
+      ...prefs.semanticColors,
+      ...(role === "major" ? { new: color, success: color } : {}),
+      ...(role === "minor" ? { pending: color } : {}),
+      ...(role === "accent" ? { error: color } : {}),
+    };
+
+    setPrefs({ semanticColors: nextSemantic });
+    void logDesignSystemDebugEvent("Organizer quick-apply harmony color.", {
+      role,
+      color,
+      semanticColors: nextSemantic,
+    });
+  }
+
+  function handleHarmonyHexInput(kind: "base" | "brand", value: string): void {
+    if (kind === "base") {
+      setBaseHexInput(value);
+    } else {
+      setBrandHexInput(value);
+    }
+
+    const parsedHue = hexToHue(value);
+    if (parsedHue === null) {
+      return;
+    }
+
+    if (kind === "base") {
+      setPrefs({ colorHarmonyBaseHue: parsedHue });
+      void logDesignSystemDebugEvent("Color harmony base hex input applied.", {
+        colorHarmonyBaseHue: parsedHue,
+        value,
+      });
+      return;
+    }
+
+    setPrefs({ colorHarmonyBrandHue: parsedHue });
+    void logDesignSystemDebugEvent("Color harmony brand hex input applied.", {
+      colorHarmonyBrandHue: parsedHue,
+      value,
+    });
+  }
+
+  function handleApplySystemDefaults(): void {
+    const result = applySystemDefaults();
+    setStatus(result.message);
+    void logDesignSystemDebugEvent("Use system defaults action completed.", {
+      applied: result.applied,
+      detected: result.detected,
+      failed: result.failed,
+    });
+  }
+
   function handleExpandToggle(): void {
     if (isExpanded || isCollapsing) {
       requestCollapse("toggle-button");
@@ -1089,7 +1341,6 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       {/* Full-screen expanded overlay — portaled to document.body */}
       {(isExpanded || isCollapsing) ? createPortal(
         <>
-        data-z-height={isExpanded || isCollapsing ? 3 : 2}
           {/* Backdrop scrim — click-outside collapses */}
           <div
             className={`cf-ds-card-backdrop${isCollapsing ? " cf-ds-card-backdrop--collapsing" : ""}`}
@@ -1289,6 +1540,11 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                         {tokens.color.primary.map((_, index) => (
                           <span key={`shade-${index}`} className={`cf-ds-swatch cf-ds-swatch--${index + 1}`} title={`Shade ${index + 1}`} />
                         ))}
+                      </div>
+                      <div className="cf-ds-harmony-swatches" aria-label="major minor accent preview">
+                        <span className="cf-harmony-swatch cf-harmony-swatch--major" title="Major color" />
+                        <span className="cf-harmony-swatch cf-harmony-swatch--minor" title="Minor color" />
+                        <span className="cf-harmony-swatch cf-harmony-swatch--accent" title="Accent color" />
                       </div>
                     </div>
                   </div>
@@ -1502,6 +1758,11 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                           <input type="color" aria-label="error color" value={prefs.semanticColors.error} onChange={(event) => setSemanticColor("error", event.target.value)} />
                         </label>
                       </div>
+                      <div className="cf-harmony-quick-apply" role="group" aria-label="Organizer quick apply options">
+                        <button type="button" className="btn-secondary" onClick={() => applyHarmonyToOrganizer("major")}>Use Major for New and Active</button>
+                        <button type="button" className="btn-secondary" onClick={() => applyHarmonyToOrganizer("minor")}>Use Minor for Pending</button>
+                        <button type="button" className="btn-secondary" onClick={() => applyHarmonyToOrganizer("accent")}>Use Accent for Error</button>
+                      </div>
                     </section>
 
                     <section className="cf-ds-control-group" ref={setSectionRef("button-behaviors")}>
@@ -1553,6 +1814,36 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                           }}
                         />
                         Ripple Effect (experimental)
+                      </label>
+                      <label>
+                        Depth Intensity: {prefs.buttonDepthIntensity.toFixed(1)}
+                        <input
+                          type="range"
+                          min={0}
+                          max={10}
+                          step={0.5}
+                          value={prefs.buttonDepthIntensity}
+                          onChange={(event) => {
+                            const buttonDepthIntensity = Number(event.target.value);
+                            setPrefs({ buttonDepthIntensity });
+                            void logDesignSystemDebugEvent("Button depth intensity changed.", { buttonDepthIntensity });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Depth Radius (px): {prefs.buttonDepthRadius}
+                        <input
+                          type="range"
+                          min={4}
+                          max={32}
+                          step={1}
+                          value={prefs.buttonDepthRadius}
+                          onChange={(event) => {
+                            const buttonDepthRadius = Number(event.target.value);
+                            setPrefs({ buttonDepthRadius });
+                            void logDesignSystemDebugEvent("Button depth radius changed.", { buttonDepthRadius });
+                          }}
+                        />
                       </label>
                     </section>
 
@@ -1692,6 +1983,49 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                           ))}
                         </select>
                       </label>
+                      <p className="settings-meta">{HARMONY_MODE_HELP_TEXT[prefs.colorHarmonyMode]}</p>
+                      <label>
+                        Base Color
+                        <div className="cf-color-input-pair">
+                          <input
+                            type="color"
+                            aria-label="base harmony color"
+                            value={hueToHex(prefs.colorHarmonyBaseHue)}
+                            onChange={(event) => {
+                              const colorHarmonyBaseHue = hexToHue(event.target.value) ?? prefs.colorHarmonyBaseHue;
+                              setPrefs({ colorHarmonyBaseHue });
+                              void logDesignSystemDebugEvent("Color harmony base color picker changed.", { colorHarmonyBaseHue });
+                            }}
+                          />
+                          <input
+                            type="text"
+                            aria-label="base harmony hex"
+                            value={baseHexInput}
+                            onChange={(event) => { handleHarmonyHexInput("base", event.target.value); }}
+                          />
+                        </div>
+                      </label>
+                      <label>
+                        Brand Color
+                        <div className="cf-color-input-pair">
+                          <input
+                            type="color"
+                            aria-label="brand harmony color"
+                            value={hueToHex(prefs.colorHarmonyBrandHue)}
+                            onChange={(event) => {
+                              const colorHarmonyBrandHue = hexToHue(event.target.value) ?? prefs.colorHarmonyBrandHue;
+                              setPrefs({ colorHarmonyBrandHue });
+                              void logDesignSystemDebugEvent("Color harmony brand color picker changed.", { colorHarmonyBrandHue });
+                            }}
+                          />
+                          <input
+                            type="text"
+                            aria-label="brand harmony hex"
+                            value={brandHexInput}
+                            onChange={(event) => { handleHarmonyHexInput("brand", event.target.value); }}
+                          />
+                        </div>
+                      </label>
                       <label>
                         Base Hue: {prefs.colorHarmonyBaseHue}°
                         <input
@@ -1704,10 +2038,31 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                           }}
                         />
                       </label>
-                      <p className="settings-meta">Accent and highlight hues derived from harmony mode and base hue.</p>
+                      <label>
+                        Brand Hue: {prefs.colorHarmonyBrandHue}°
+                        <input
+                          type="range" min={0} max={360} step={1}
+                          value={prefs.colorHarmonyBrandHue}
+                          onChange={(event) => {
+                            const colorHarmonyBrandHue = Number(event.target.value);
+                            setPrefs({ colorHarmonyBrandHue });
+                            void logDesignSystemDebugEvent("Color harmony brand hue changed.", { colorHarmonyBrandHue, mode: prefs.colorHarmonyMode });
+                          }}
+                        />
+                      </label>
+                      <div className="cf-harmony-wheel" aria-label="harmony wheel preview">
+                        <canvas ref={harmonyWheelCanvasRef} className="cf-harmony-wheel__canvas" width={220} height={220} />
+                      </div>
+                      <p className="settings-meta">Major, minor, and accent are derived from base hue, brand hue, and harmony mode.</p>
                       <div className="cf-ds-harmony-swatches" aria-label="harmony color preview">
+                        <span className="cf-harmony-swatch cf-harmony-swatch--major" title="Major color" />
+                        <span className="cf-harmony-swatch cf-harmony-swatch--minor" title="Minor color" />
                         <span className="cf-harmony-swatch cf-harmony-swatch--accent" title="Accent color" />
-                        <span className="cf-harmony-swatch cf-harmony-swatch--highlight" title="Highlight color" />
+                      </div>
+                      <div className="cf-harmony-stat-grid" aria-label="harmony hue details">
+                        <span>Major: {Math.round(tokens.harmony.majorHue)}°</span>
+                        <span>Minor: {Math.round(tokens.harmony.minorHue)}°</span>
+                        <span>Accent: {Math.round(tokens.harmony.accentHue)}°</span>
                       </div>
                     </section>
 
@@ -1757,7 +2112,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                 >
                   Reset to defaults
                 </button>
-                <button type="button" className="btn-secondary" onClick={() => applySystemDefaults()}>Use System Defaults</button>
+                <button type="button" className="btn-secondary" onClick={handleApplySystemDefaults}>Use System Defaults</button>
                 <button
                   type="button"
                   className="btn-secondary"

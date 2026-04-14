@@ -1033,3 +1033,23 @@ Update summary:
 - First-run OS/browser preference detection, cloud settings choice handling, corrupted-settings recovery, and CLI recovery expectations are now encoded as permanent instruction-level behavior for future agents and refactors.
 - Development-mode cache flushing is now a canonical prototyping rule to reduce stale-state regressions for UI and design-system work.
 - Debug/trace expectations now explicitly include layout choices, Fibonacci ratio decisions, motion decisions, cache flush events, system detection attempts, cloud settings handling, corruption recovery actions, skeleton activation, preview updates, and fallback logic.
+
+## Updates (2026-04-14)
+
+### Design System Controls: Overlay Clipping, Button Depth, Harmony Workflow, and System Defaults Mapping
+
+Primary file(s):
+
+- [src/webapp/components/settings/DesignSystemSettingsCard.tsx](src/webapp/components/settings/DesignSystemSettingsCard.tsx)
+- [src/webapp/styles/globals.css](src/webapp/styles/globals.css)
+- [src/core/services/designSystemService.ts](src/core/services/designSystemService.ts)
+- [src/webapp/store/uiStore.ts](src/webapp/store/uiStore.ts)
+
+Update summary:
+
+- Expanded Design System Controls now render in a viewport-fixed overlay/backdrop path so the Example and Controls cards are no longer clipped by settings-surface bounds.
+- Button depth behavior now has tokenized controls (`buttonDepthIntensity`, `buttonDepthRadius`) and mode-aware shadow/glow rendering tied to each button's own semantic/base color.
+- Color Harmony controls now support base and brand color entry via color pickers and hex input, with generated major/minor/accent preview channels and an interactive wheel visualization.
+- Organizer color controls now include quick-apply actions that map harmony outputs directly to organizer role colors.
+- System defaults application now consumes detailed detection/mapping data, returns user-facing status, logs detected vs fallback values, and applies detected color-scheme mode to theme state.
+- Harmony/token exports now include major/minor/brand hue and color CSS variables for broader preview and debug trace visibility.

@@ -6,7 +6,7 @@ import {
   type DesignTokens,
   applyDesignTokensToDocument,
   DEFAULT_DESIGN_TOKEN_PREFERENCES,
-  detectSystemDesignDefaults,
+  detectSystemDesignDefaultsDetailed,
   generateDesignTokens,
   initializeDesignTokenPreferencesOnFirstRun,
   logDesignSystemDebugEvent,
@@ -231,7 +231,12 @@ interface UIStore {
   designTokens: DesignTokens;
   setDesignTokenPreferences: (next: Partial<DesignTokenPreferences>) => void;
   resetDesignTokenPreferences: () => void;
-  applySystemDesignTokenDefaults: () => void;
+  applySystemDesignTokenDefaults: () => {
+    applied: boolean;
+    message: string;
+    detected: Record<string, unknown>;
+    failed: Record<string, string>;
+  };
 
   // Selected textbook for editing
   selectedTextbookId: string | null;
@@ -420,24 +425,72 @@ export const useUIStore = create<UIStore>((set) => ({
         designTokens: generated,
       };
     }),
-  applySystemDesignTokenDefaults: () =>
+  applySystemDesignTokenDefaults: () => {
+    const details = detectSystemDesignDefaultsDetailed();
+    let result: {
+      applied: boolean;
+      message: string;
+      detected: Record<string, unknown>;
+      failed: Record<string, string>;
+    } = {
+      applied: false,
+      message: "System defaults could not be detected. Using existing values.",
+      detected: details.detected,
+      failed: details.failed,
+    };
+
     set((state) => {
-      const systemDefaults = detectSystemDesignDefaults();
+      const mappedValues = {
+        ...details.values,
+        useSystemDefaults: true,
+      };
+
+      const detectedTheme = details.detected.prefersDarkMode === true
+        ? "dark"
+        : details.detected.prefersDarkMode === false
+          ? "light"
+          : state.theme;
+
       const next = sanitizeDesignTokenPreferences({
         ...state.designTokenPreferences,
-        ...systemDefaults,
-        useSystemDefaults: true,
+        ...mappedValues,
       });
+
       const generated = generateDesignTokens(next);
+      applyTheme(detectedTheme);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(THEME_STORAGE_KEY, detectedTheme);
+      }
       applyDesignTokensToDocument(generated);
       saveLocalDesignTokenPreferences(next);
-      void logDesignSystemDebugEvent("System defaults applied to design tokens.", systemDefaults as Record<string, unknown>);
+
+      const detectedCount = Object.keys(details.detected).length;
+      const failedCount = Object.keys(details.failed).length;
+      result = {
+        applied: true,
+        message:
+          failedCount > 0
+            ? `Applied ${detectedCount} system defaults with ${failedCount} fallback(s).`
+            : `Applied ${detectedCount} system defaults successfully.`,
+        detected: details.detected,
+        failed: details.failed,
+      };
+
+      void logDesignSystemDebugEvent("System defaults applied to design tokens.", {
+        mapped: mappedValues,
+        detected: details.detected,
+        failed: details.failed,
+      });
 
       return {
+        theme: detectedTheme,
         designTokenPreferences: next,
         designTokens: generated,
       };
-    }),
+    });
+
+    return result;
+  },
 
   // Selected textbook defaults
   selectedTextbookId: null,

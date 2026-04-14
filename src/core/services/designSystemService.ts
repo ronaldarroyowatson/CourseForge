@@ -43,11 +43,14 @@ export interface DesignTokenPreferences {
   // Color harmony system
   colorHarmonyMode: HarmonyMode;
   colorHarmonyBaseHue: number;
+  colorHarmonyBrandHue: number;
   // Button behaviors
   buttonHoverEnabled: boolean;
   buttonSquishEnabled: boolean;
   buttonPressEnabled: boolean;
   buttonRippleEnabled: boolean;
+  buttonDepthIntensity: number;
+  buttonDepthRadius: number;
 }
 
 export interface DesignTokens {
@@ -110,9 +113,14 @@ export interface DesignTokens {
   harmony: {
     mode: HarmonyMode;
     baseHue: number;
+    brandHue: number;
+    majorHue: number;
+    minorHue: number;
     accentHue: number;
     highlightHue: number;
     colors: {
+      major: string;
+      minor: string;
       accent: string;
       highlight: string;
     };
@@ -122,6 +130,8 @@ export interface DesignTokens {
     squishEnabled: boolean;
     pressEnabled: boolean;
     rippleEnabled: boolean;
+    depthIntensity: number;
+    depthRadius: number;
   };
 }
 
@@ -191,10 +201,13 @@ export const DEFAULT_DESIGN_TOKEN_PREFERENCES: DesignTokenPreferences = {
   lightModeShadowRadius: 14,
   colorHarmonyMode: "complementary",
   colorHarmonyBaseHue: 212,
+  colorHarmonyBrandHue: 22,
   buttonHoverEnabled: true,
   buttonSquishEnabled: true,
   buttonPressEnabled: true,
   buttonRippleEnabled: false,
+  buttonDepthIntensity: 5,
+  buttonDepthRadius: 12,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -254,25 +267,56 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${toHex((r + m) * 255)}${toHex((g + m) * 255)}${toHex((b + m) * 255)}`;
 }
 
-function generateHarmonyHues(baseHue: number, mode: HarmonyMode): { accentHue: number; highlightHue: number } {
+function blendHue(fromHue: number, toHue: number, ratio: number): number {
+  const start = ((fromHue % 360) + 360) % 360;
+  const end = ((toHue % 360) + 360) % 360;
+  const delta = ((((end - start) % 360) + 540) % 360) - 180;
+  return ((start + delta * clamp(ratio, 0, 1)) % 360 + 360) % 360;
+}
+
+function generateHarmonyHues(baseHue: number, mode: HarmonyMode, brandHue: number): {
+  majorHue: number;
+  minorHue: number;
+  accentHue: number;
+  highlightHue: number;
+} {
   const h = ((baseHue % 360) + 360) % 360;
+  const b = ((brandHue % 360) + 360) % 360;
+
+  const withBrand = (minor: number, accent: number) => {
+    const majorHue = h;
+    const minorHue = blendHue(minor, b, 0.28);
+    const accentHue = blendHue(accent, b, 0.72);
+    return {
+      majorHue,
+      minorHue,
+      accentHue,
+      highlightHue: minorHue,
+    };
+  };
+
   switch (mode) {
     case "mono":
-      return { accentHue: h, highlightHue: h };
+      return withBrand(h, h);
     case "analogous":
-      return { accentHue: (h + 30) % 360, highlightHue: (h + 330) % 360 };
+      return withBrand((h + 30) % 360, (h + 330) % 360);
     case "complementary":
-      return { accentHue: (h + 180) % 360, highlightHue: (h + 210) % 360 };
+      return withBrand((h + 180) % 360, (h + 210) % 360);
     case "split-complementary":
-      return { accentHue: (h + 150) % 360, highlightHue: (h + 210) % 360 };
+      return withBrand((h + 150) % 360, (h + 210) % 360);
     case "triadic":
-      return { accentHue: (h + 120) % 360, highlightHue: (h + 240) % 360 };
+      return withBrand((h + 120) % 360, (h + 240) % 360);
     case "tetradic":
-      return { accentHue: (h + 90) % 360, highlightHue: (h + 180) % 360 };
+      return withBrand((h + 90) % 360, (h + 180) % 360);
     case "brand":
-      return { accentHue: (h + 60) % 360, highlightHue: (h + 30) % 360 };
+      return {
+        majorHue: h,
+        minorHue: blendHue(h, b, 0.6),
+        accentHue: b,
+        highlightHue: blendHue(h, b, 0.35),
+      };
     default:
-      return { accentHue: (h + 180) % 360, highlightHue: (h + 210) % 360 };
+      return withBrand((h + 180) % 360, (h + 210) % 360);
   }
 }
 
@@ -327,10 +371,13 @@ export function sanitizeDesignTokenPreferences(input: Partial<DesignTokenPrefere
       ? (next.colorHarmonyMode as HarmonyMode)
       : DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonyMode,
     colorHarmonyBaseHue: clamp(typeof next.colorHarmonyBaseHue === "number" ? next.colorHarmonyBaseHue : DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonyBaseHue, 0, 360),
+    colorHarmonyBrandHue: clamp(typeof next.colorHarmonyBrandHue === "number" ? next.colorHarmonyBrandHue : DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonyBrandHue, 0, 360),
     buttonHoverEnabled: typeof next.buttonHoverEnabled === "boolean" ? next.buttonHoverEnabled : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonHoverEnabled,
     buttonSquishEnabled: typeof next.buttonSquishEnabled === "boolean" ? next.buttonSquishEnabled : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonSquishEnabled,
     buttonPressEnabled: typeof next.buttonPressEnabled === "boolean" ? next.buttonPressEnabled : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonPressEnabled,
     buttonRippleEnabled: typeof next.buttonRippleEnabled === "boolean" ? next.buttonRippleEnabled : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonRippleEnabled,
+    buttonDepthIntensity: clamp(typeof next.buttonDepthIntensity === "number" ? next.buttonDepthIntensity : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonDepthIntensity, 0, 10),
+    buttonDepthRadius: clamp(typeof next.buttonDepthRadius === "number" ? next.buttonDepthRadius : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonDepthRadius, 4, 32),
   };
 }
 
@@ -433,6 +480,10 @@ export function validateDesignTokenPreferences(input: unknown): DesignTokenValid
     invalidFields.push("colorHarmonyBaseHue");
   }
 
+  if (typeof candidate.colorHarmonyBrandHue !== "number" || candidate.colorHarmonyBrandHue < 0 || candidate.colorHarmonyBrandHue > 360) {
+    invalidFields.push("colorHarmonyBrandHue");
+  }
+
   if (typeof candidate.buttonHoverEnabled !== "boolean") {
     invalidFields.push("buttonHoverEnabled");
   }
@@ -447,6 +498,14 @@ export function validateDesignTokenPreferences(input: unknown): DesignTokenValid
 
   if (typeof candidate.buttonRippleEnabled !== "boolean") {
     invalidFields.push("buttonRippleEnabled");
+  }
+
+  if (typeof candidate.buttonDepthIntensity !== "number" || candidate.buttonDepthIntensity < 0 || candidate.buttonDepthIntensity > 10) {
+    invalidFields.push("buttonDepthIntensity");
+  }
+
+  if (typeof candidate.buttonDepthRadius !== "number" || candidate.buttonDepthRadius < 4 || candidate.buttonDepthRadius > 32) {
+    invalidFields.push("buttonDepthRadius");
   }
 
   const semantic = candidate.semanticColors;
@@ -509,9 +568,10 @@ export function generateDesignTokens(preferences: DesignTokenPreferences): Desig
   const glowShadeIndex = clampShade(preferences.cardGlowShade, 4) - 1;
   const spacingScale = buildSpacingScale(4, preferences.spacingRatio);
 
-  const harmonyHues = generateHarmonyHues(preferences.colorHarmonyBaseHue, preferences.colorHarmonyMode);
+  const harmonyHues = generateHarmonyHues(preferences.colorHarmonyBaseHue, preferences.colorHarmonyMode, preferences.colorHarmonyBrandHue);
+  const majorPrimary = buildPrimaryScale(harmonyHues.majorHue, preferences.gamma);
+  const minorPrimary = buildPrimaryScale(harmonyHues.minorHue, preferences.gamma);
   const accentPrimary = buildPrimaryScale(harmonyHues.accentHue, preferences.gamma);
-  const highlightPrimary = buildPrimaryScale(harmonyHues.highlightHue, preferences.gamma);
 
   return {
     color: {
@@ -579,11 +639,16 @@ export function generateDesignTokens(preferences: DesignTokenPreferences): Desig
     harmony: {
       mode: preferences.colorHarmonyMode,
       baseHue: preferences.colorHarmonyBaseHue,
+      brandHue: preferences.colorHarmonyBrandHue,
+      majorHue: harmonyHues.majorHue,
+      minorHue: harmonyHues.minorHue,
       accentHue: harmonyHues.accentHue,
       highlightHue: harmonyHues.highlightHue,
       colors: {
+        major: majorPrimary[4],
+        minor: minorPrimary[4],
         accent: accentPrimary[3],
-        highlight: highlightPrimary[5],
+        highlight: minorPrimary[5],
       },
     },
     button: {
@@ -591,6 +656,8 @@ export function generateDesignTokens(preferences: DesignTokenPreferences): Desig
       squishEnabled: preferences.buttonSquishEnabled,
       pressEnabled: preferences.buttonPressEnabled,
       rippleEnabled: preferences.buttonRippleEnabled,
+      depthIntensity: preferences.buttonDepthIntensity,
+      depthRadius: preferences.buttonDepthRadius,
     },
   };
 }
@@ -640,14 +707,22 @@ export function applyDesignTokensToDocument(tokens: DesignTokens, docRef: Docume
   root.style.setProperty("--cf-ds-card-shadow-radius", `${tokens.card.lightModeShadowRadius}px`);
   root.style.setProperty("--cf-ds-card-glow-intensity", String(tokens.card.darkModeGlowIntensity));
   root.style.setProperty("--cf-ds-card-glow-radius", `${tokens.card.darkModeGlowRadius}px`);
+  root.style.setProperty("--cf-ds-harmony-major", tokens.harmony.colors.major);
+  root.style.setProperty("--cf-ds-harmony-minor", tokens.harmony.colors.minor);
   root.style.setProperty("--cf-ds-harmony-accent", tokens.harmony.colors.accent);
   root.style.setProperty("--cf-ds-harmony-highlight", tokens.harmony.colors.highlight);
+  root.style.setProperty("--cf-ds-harmony-base-hue", String(tokens.harmony.baseHue));
+  root.style.setProperty("--cf-ds-harmony-brand-hue", String(tokens.harmony.brandHue));
+  root.style.setProperty("--cf-ds-harmony-major-hue", String(tokens.harmony.majorHue));
+  root.style.setProperty("--cf-ds-harmony-minor-hue", String(tokens.harmony.minorHue));
   root.style.setProperty("--cf-ds-harmony-accent-hue", String(tokens.harmony.accentHue));
   root.style.setProperty("--cf-ds-harmony-highlight-hue", String(tokens.harmony.highlightHue));
   root.style.setProperty("--cf-ds-btn-hover-enabled", tokens.button.hoverEnabled ? "1" : "0");
   root.style.setProperty("--cf-ds-btn-squish-enabled", tokens.button.squishEnabled ? "1" : "0");
   root.style.setProperty("--cf-ds-btn-press-enabled", tokens.button.pressEnabled ? "1" : "0");
   root.style.setProperty("--cf-ds-btn-ripple-enabled", tokens.button.rippleEnabled ? "1" : "0");
+  root.style.setProperty("--cf-ds-btn-depth-intensity", String(tokens.button.depthIntensity));
+  root.style.setProperty("--cf-ds-btn-depth-radius", `${tokens.button.depthRadius}px`);
 
   const theme = typeof docRef !== "undefined" ? docRef.documentElement.dataset.theme : "light";
   void appendDebugLogEntry({
@@ -662,7 +737,12 @@ export function applyDesignTokensToDocument(tokens: DesignTokens, docRef: Docume
       lightModeShadowRadius: tokens.card.lightModeShadowRadius,
       harmonyMode: tokens.harmony.mode,
       harmonyBaseHue: tokens.harmony.baseHue,
+      harmonyBrandHue: tokens.harmony.brandHue,
+      harmonyMajorHue: tokens.harmony.majorHue,
+      harmonyMinorHue: tokens.harmony.minorHue,
       harmonyAccentHue: tokens.harmony.accentHue,
+      buttonDepthIntensity: tokens.button.depthIntensity,
+      buttonDepthRadius: tokens.button.depthRadius,
     },
   });
 }
@@ -780,10 +860,30 @@ export function detectSystemDesignDefaultsDetailed(): {
     failed.browserScaleHint = "devicePixelRatio_unavailable";
   }
 
+  const rootStyle = typeof window !== "undefined" && typeof document !== "undefined"
+    ? window.getComputedStyle(document.documentElement)
+    : null;
+
+  if (rootStyle) {
+    detected.systemFontFamily = rootStyle.fontFamily || "unknown";
+    detected.systemFontSize = rootStyle.fontSize || "unknown";
+    detected.systemFontWeight = rootStyle.fontWeight || "unknown";
+    detected.systemLineHeight = rootStyle.lineHeight || "unknown";
+  } else {
+    failed.systemTypography = "computed_style_unavailable";
+  }
+
   const values: Partial<DesignTokenPreferences> = {
     motionTimingMs: detected.prefersReducedMotion === true ? 100 : DEFAULT_DESIGN_TOKEN_PREFERENCES.motionTimingMs,
     gamma: detected.prefersHighContrast === true ? 2.35 : DEFAULT_DESIGN_TOKEN_PREFERENCES.gamma,
     primaryHue: detected.prefersDarkMode === true ? 220 : DEFAULT_DESIGN_TOKEN_PREFERENCES.primaryHue,
+    typeRatio: browserFontScale !== null
+      ? clamp(1.12 + (browserFontScale - 1) * 0.24, 1.067, 1.5)
+      : DEFAULT_DESIGN_TOKEN_PREFERENCES.typeRatio,
+    colorHarmonyBaseHue: detected.prefersDarkMode === true ? 220 : DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonyBaseHue,
+    colorHarmonyBrandHue: DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonyBrandHue,
+    buttonDepthIntensity: detected.prefersHighContrast === true ? 6.5 : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonDepthIntensity,
+    buttonDepthRadius: detected.prefersReducedMotion === true ? 8 : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonDepthRadius,
   };
 
   return { values, detected, failed };
@@ -955,19 +1055,7 @@ export function clearLocalDesignTokenPreferences(): void {
 }
 
 export function detectSystemDesignDefaults(): Partial<DesignTokenPreferences> {
-  if (typeof window === "undefined") {
-    return {};
-  }
-
-  const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  const prefersHighContrast = window.matchMedia?.("(prefers-contrast: more)").matches;
-  const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
-
-  return {
-    motionTimingMs: prefersReducedMotion ? 100 : DEFAULT_DESIGN_TOKEN_PREFERENCES.motionTimingMs,
-    gamma: prefersHighContrast ? 2.35 : DEFAULT_DESIGN_TOKEN_PREFERENCES.gamma,
-    primaryHue: prefersDark ? 220 : DEFAULT_DESIGN_TOKEN_PREFERENCES.primaryHue,
-  };
+  return detectSystemDesignDefaultsDetailed().values;
 }
 
 export async function saveDesignTokenPreferencesToCloud(userId: string, preferences: DesignTokenPreferences): Promise<void> {

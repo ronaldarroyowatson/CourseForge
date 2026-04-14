@@ -1014,13 +1014,20 @@ body {
 .cf-harmony-wheel {
   display: grid;
   justify-items: center;
+  gap: 8px;
+  position: relative;
+  z-index: 10;
 }
 
 .cf-harmony-wheel__canvas {
-  width: min(100%, 220px);
-  height: auto;
+  width: min(100%, 240px);
+  height: 240px;
   border-radius: 50%;
-  border: 1px solid var(--border-default);
+  border: 2px solid var(--cf-border-strong);
+  background: var(--cf-surface);
+  cursor: crosshair;
+  display: block;
+  touch-action: none;
 }
 
 .cf-color-input-pair {

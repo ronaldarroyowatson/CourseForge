@@ -5,6 +5,7 @@ import { getAll, save, STORE_NAMES } from "./db";
 import { normalizeISBN } from "./isbnService";
 import { syncNow } from "./syncService";
 import { appendDebugLogEntry } from "./debugLogService";
+import { logDesignSystemDebugEvent } from "./designSystemService";
 import { recordCacheDetection, recordCacheUsage } from "./cacheTelemetryService";
 import { getCurrentUser } from "../../firebase/auth";
 import { firestoreDb } from "../../firebase/firestore";
@@ -180,6 +181,140 @@ function getRequestedUploadAction(sessionId: string): UploadControlAction {
 
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+// Retroactive data sanitization: strip unknown fields from textbook data to prevent server rejection
+const VALID_TEXTBOOK_FIELDS = new Set([
+  "id", "sourceType", "userId", "originalLanguage", "translatedFields",
+  "title", "subtitle", "grade", "gradeBand", "subject", "edition",
+  "publicationYear", "copyrightYear", "isbnRaw", "isbnNormalized",
+  "additionalIsbns", "relatedIsbns", "seriesName", "publisher", "publisherLocation",
+  "mhid", "authors", "tocExtractionConfidence", "imageModerationState",
+  "imageModerationReason", "imageModerationConfidence", "cloudSyncBlockedReason",
+  "requiresAdminReview", "platformUrl", "coverImageUrl", "createdAt", "updatedAt",
+  "lastModified", "pendingSync", "source", "isFavorite", "isArchived", "status", "isDeleted",
+]);
+
+const VALID_CHAPTER_FIELDS = new Set([
+  "id", "sourceType", "userId", "textbookId", "index", "name", "description",
+  "lastModified", "pendingSync", "source", "status", "isDeleted",
+]);
+
+const VALID_SECTION_FIELDS = new Set([
+  "id", "sourceType", "userId", "textbookId", "chapterId", "index", "title",
+  "notes", "lastModified", "pendingSync", "source", "status", "isDeleted",
+]);
+
+function sanitizeTextbookData(input: Record<string, unknown>): { cleaned: Textbook; removedFields: string[] } {
+  const removedFields: string[] = [];
+  const cleaned: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(input)) {
+    if (VALID_TEXTBOOK_FIELDS.has(key)) {
+      cleaned[key] = value;
+    } else {
+      removedFields.push(key);
+    }
+  }
+
+  return { cleaned: cleaned as unknown as Textbook, removedFields };
+}
+
+function sanitizeChapterData(input: Record<string, unknown>): { cleaned: Chapter; removedFields: string[] } {
+  const removedFields: string[] = [];
+  const cleaned: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(input)) {
+    if (VALID_CHAPTER_FIELDS.has(key)) {
+      cleaned[key] = value;
+    } else {
+      removedFields.push(key);
+    }
+  }
+
+  return { cleaned: cleaned as unknown as Chapter, removedFields };
+}
+
+function sanitizeSectionData(input: Record<string, unknown>): { cleaned: Section; removedFields: string[] } {
+  const removedFields: string[] = [];
+  const cleaned: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(input)) {
+    if (VALID_SECTION_FIELDS.has(key)) {
+      cleaned[key] = value;
+    } else {
+      removedFields.push(key);
+    }
+  }
+
+  return { cleaned: cleaned as unknown as Section, removedFields };
+}
+
+async function applyRetroactiveDataCleanupToQueue(): Promise<{
+  textbooksProcessed: number;
+  chaptersProcessed: number;
+  sectionsProcessed: number;
+  fieldsRemoved: Record<string, number>;
+}> {
+  const result = {
+    textbooksProcessed: 0,
+    chaptersProcessed: 0,
+    sectionsProcessed: 0,
+    fieldsRemoved: {} as Record<string, number>,
+  };
+
+  try {
+    // Clean textbooks
+    const textbooks = (await getAll(STORE_NAMES.textbooks)) as Textbook[];
+    for (const textbook of textbooks) {
+      const { cleaned, removedFields } = sanitizeTextbookData(textbook as unknown as Record<string, unknown>);
+      if (removedFields.length > 0) {
+        await save(STORE_NAMES.textbooks, cleaned);
+        result.textbooksProcessed += 1;
+        for (const field of removedFields) {
+          result.fieldsRemoved[field] = (result.fieldsRemoved[field] ?? 0) + 1;
+        }
+        void logDesignSystemDebugEvent("Retroactive textbook data cleanup applied.", {
+          textbookId: textbook.id,
+          removedFields,
+        });
+      }
+    }
+
+    // Clean chapters
+    const chapters = (await getAll(STORE_NAMES.chapters)) as Chapter[];
+    for (const chapter of chapters) {
+      const { cleaned, removedFields } = sanitizeChapterData(chapter as unknown as Record<string, unknown>);
+      if (removedFields.length > 0) {
+        await save(STORE_NAMES.chapters, cleaned);
+        result.chaptersProcessed += 1;
+        for (const field of removedFields) {
+          result.fieldsRemoved[field] = (result.fieldsRemoved[field] ?? 0) + 1;
+        }
+      }
+    }
+
+    // Clean sections
+    const sections = (await getAll(STORE_NAMES.sections)) as Section[];
+    for (const section of sections) {
+      const { cleaned, removedFields } = sanitizeSectionData(section as unknown as Record<string, unknown>);
+      if (removedFields.length > 0) {
+        await save(STORE_NAMES.sections, cleaned);
+        result.sectionsProcessed += 1;
+        for (const field of removedFields) {
+          result.fieldsRemoved[field] = (result.fieldsRemoved[field] ?? 0) + 1;
+        }
+      }
+    }
+
+    void logDesignSystemDebugEvent("Retroactive data cleanup completed on all queued items.", result);
+  } catch (error) {
+    void logDesignSystemDebugEvent("Retroactive data cleanup failed.", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return result;
 }
 
 function buildSnapshot(input: {
@@ -750,6 +885,18 @@ export async function runTrackedAutoTextbookCloudUpload(input: {
   isbnRaw: string;
   trace?: UploadTraceCallback;
 }): Promise<Awaited<ReturnType<typeof syncNow>>> {
+  // Apply retroactive data cleanup before attempting upload
+  const cleanupResult = await applyRetroactiveDataCleanupToQueue();
+  if (Object.keys(cleanupResult.fieldsRemoved).length > 0) {
+    emitUploadTrace(input.trace, {
+      category: "communication",
+      action: "retroactive_cleanup_applied",
+      message: "Applied retroactive data cleanup to queued items to prevent schema rejection.",
+      severity: "info",
+      details: cleanupResult,
+    });
+  }
+
   emitUploadTrace(input.trace, {
     category: "communication",
     action: "cloud_upload_payload_prepared",

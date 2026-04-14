@@ -625,6 +625,14 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       }
 
       frameId = window.requestAnimationFrame(() => {
+        const alignmentDetails: Array<{
+          section: string;
+          controlHeight: number;
+          previewHeight: number;
+          appliedHeight: number;
+          aligned: boolean;
+        }> = [];
+
         for (const pair of SECTION_PAIRS) {
           const controlNode = sectionRefs.current[pair.control];
           const previewNode = sectionRefs.current[pair.preview];
@@ -647,33 +655,33 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
           controlNode.style.minHeight = `${adaptiveHeight}px`;
           previewNode.style.minHeight = `${adaptiveHeight}px`;
 
-          void logDesignSystemDebugEvent("DSC per-section adaptive height applied.", {
-            section: pair.key,
-            reason,
-            controlHeight: Math.round(controlRect.height),
-            previewHeight: Math.round(previewRect.height),
-            appliedHeight: adaptiveHeight,
-          });
-
           const controlTop = controlNode.getBoundingClientRect().top;
           const previewTop = previewNode.getBoundingClientRect().top;
           const topDelta = Math.round(previewTop - controlTop);
+          const aligned = Math.abs(topDelta) <= 2;
 
-          void logDesignSystemDebugEvent("DSC alignment check computed.", {
+          alignmentDetails.push({
             section: pair.key,
-            control: pair.control,
-            preview: pair.preview,
-            topDelta,
-            reason,
-            aligned: Math.abs(topDelta) <= 2,
+            controlHeight: Math.round(controlRect.height),
+            previewHeight: Math.round(previewRect.height),
+            appliedHeight: adaptiveHeight,
+            aligned,
           });
         }
+
+        void logDesignSystemDebugEvent("DSC per-pair adaptive height and alignment completed.", {
+          reason,
+          pairCount: SECTION_PAIRS.length,
+          alignmentDetails,
+          failedPairs: alignmentDetails.filter((d) => !d.aligned).length,
+        });
       });
     };
 
-    void logDesignSystemDebugEvent("Adaptive section pairing initialized.", {
+    void logDesignSystemDebugEvent("Adaptive section pairing initialized for expanded layout.", {
       pairCount: SECTION_PAIRS.length,
-      pairs: SECTION_PAIRS,
+      pairs: SECTION_PAIRS.map((p) => ({ key: p.key, preview: p.preview, control: p.control })),
+      mode: "per-pair-adaptive-height",
     });
 
     runAlignment("expanded-layout-initial");

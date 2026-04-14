@@ -477,6 +477,33 @@ function stripLegacyUserScopedKeys<T extends Record<string, unknown>>(value: T):
   return next as T;
 }
 
+function stripUndefinedDeep(value: unknown): unknown {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => stripUndefinedDeep(entry))
+      .filter((entry) => entry !== undefined);
+  }
+
+  if (value && typeof value === "object") {
+    const sanitized: Record<string, unknown> = {};
+
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      const cleaned = stripUndefinedDeep(nested);
+      if (cleaned !== undefined) {
+        sanitized[key] = cleaned;
+      }
+    }
+
+    return sanitized;
+  }
+
+  return value;
+}
+
 function mergeDocsByPath<T extends { ref: { path: string } }>(...docLists: T[][]): T[] {
   const byPath = new Map<string, T>();
   docLists.forEach((docList) => {
@@ -1098,24 +1125,25 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
     source: "cloud",
     lastModified: item.lastModified ?? toIsoNow(),
   };
+  const sanitizedCloudRecord = stripUndefinedDeep(cloudRecord) as Record<string, unknown>;
 
   if (shouldSkipWriteForLoop(path)) {
     return false;
   }
 
-  if (!hasWriteBudgetCapacity(path, cloudRecord)) {
+  if (!hasWriteBudgetCapacity(path, sanitizedCloudRecord)) {
     return false;
   }
 
-  logSyncEvent("write:start", path, cloudRecord);
+  logSyncEvent("write:start", path, sanitizedCloudRecord);
   try {
-    await setDoc(doc(firestoreDb, path), cloudRecord, { merge: true });
+    await setDoc(doc(firestoreDb, path), sanitizedCloudRecord, { merge: true });
     sessionWriteCount += 1;
     persistDailyWriteBudgetState();
     logSyncEvent("write:success", path, { id: item.id });
     return true;
   } catch (error) {
-    logSyncEvent("write:error", path, cloudRecord, error);
+    logSyncEvent("write:error", path, sanitizedCloudRecord, error);
     throw error;
   }
 }

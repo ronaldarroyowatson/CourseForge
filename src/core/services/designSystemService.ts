@@ -33,6 +33,7 @@ export interface DesignTokenPreferences {
   cardGlowShade: number;
   cardGradientStrength: number;
   cardCornerRadius: number;
+  boxCornerRadius: number;
   cardPaddingIndex: number;
   cardHeight: number;
   // Dual-mode card rules
@@ -51,6 +52,8 @@ export interface DesignTokenPreferences {
   buttonRippleEnabled: boolean;
   buttonDepthIntensity: number;
   buttonDepthRadius: number;
+  buttonCornerRadius: number;
+  useUnifiedCornerRadius: boolean;
 }
 
 export interface DesignTokens {
@@ -132,6 +135,7 @@ export interface DesignTokens {
     rippleEnabled: boolean;
     depthIntensity: number;
     depthRadius: number;
+    cornerRadius: number;
   };
 }
 
@@ -193,6 +197,7 @@ export const DEFAULT_DESIGN_TOKEN_PREFERENCES: DesignTokenPreferences = {
   cardGlowShade: 4,
   cardGradientStrength: 4,
   cardCornerRadius: 12,
+  boxCornerRadius: 10,
   cardPaddingIndex: 4,
   cardHeight: 220,
   darkModeGlowIntensity: 6,
@@ -208,6 +213,8 @@ export const DEFAULT_DESIGN_TOKEN_PREFERENCES: DesignTokenPreferences = {
   buttonRippleEnabled: false,
   buttonDepthIntensity: 5,
   buttonDepthRadius: 12,
+  buttonCornerRadius: 10,
+  useUnifiedCornerRadius: false,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -361,6 +368,7 @@ export function sanitizeDesignTokenPreferences(input: Partial<DesignTokenPrefere
     cardGlowShade,
     cardGradientStrength: clamp(typeof next.cardGradientStrength === "number" ? next.cardGradientStrength : DEFAULT_DESIGN_TOKEN_PREFERENCES.cardGradientStrength, 0, 10),
     cardCornerRadius: clamp(typeof next.cardCornerRadius === "number" ? next.cardCornerRadius : DEFAULT_DESIGN_TOKEN_PREFERENCES.cardCornerRadius, 4, 40),
+    boxCornerRadius: clamp(typeof next.boxCornerRadius === "number" ? next.boxCornerRadius : DEFAULT_DESIGN_TOKEN_PREFERENCES.boxCornerRadius, 4, 40),
     cardPaddingIndex: clamp(Math.round(typeof next.cardPaddingIndex === "number" ? next.cardPaddingIndex : DEFAULT_DESIGN_TOKEN_PREFERENCES.cardPaddingIndex), 0, 5),
     cardHeight: clamp(typeof next.cardHeight === "number" ? next.cardHeight : DEFAULT_DESIGN_TOKEN_PREFERENCES.cardHeight, 140, 460),
     darkModeGlowIntensity: clamp(typeof next.darkModeGlowIntensity === "number" ? next.darkModeGlowIntensity : DEFAULT_DESIGN_TOKEN_PREFERENCES.darkModeGlowIntensity, 0, 10),
@@ -378,6 +386,8 @@ export function sanitizeDesignTokenPreferences(input: Partial<DesignTokenPrefere
     buttonRippleEnabled: typeof next.buttonRippleEnabled === "boolean" ? next.buttonRippleEnabled : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonRippleEnabled,
     buttonDepthIntensity: clamp(typeof next.buttonDepthIntensity === "number" ? next.buttonDepthIntensity : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonDepthIntensity, 0, 10),
     buttonDepthRadius: clamp(typeof next.buttonDepthRadius === "number" ? next.buttonDepthRadius : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonDepthRadius, 4, 32),
+    buttonCornerRadius: clamp(typeof next.buttonCornerRadius === "number" ? next.buttonCornerRadius : DEFAULT_DESIGN_TOKEN_PREFERENCES.buttonCornerRadius, 4, 40),
+    useUnifiedCornerRadius: typeof next.useUnifiedCornerRadius === "boolean" ? next.useUnifiedCornerRadius : DEFAULT_DESIGN_TOKEN_PREFERENCES.useUnifiedCornerRadius,
   };
 }
 
@@ -448,6 +458,10 @@ export function validateDesignTokenPreferences(input: unknown): DesignTokenValid
     invalidFields.push("cardCornerRadius");
   }
 
+  if (typeof candidate.boxCornerRadius !== "number" || candidate.boxCornerRadius < 4 || candidate.boxCornerRadius > 40) {
+    invalidFields.push("boxCornerRadius");
+  }
+
   if (typeof candidate.cardPaddingIndex !== "number" || candidate.cardPaddingIndex < 0 || candidate.cardPaddingIndex > 5) {
     invalidFields.push("cardPaddingIndex");
   }
@@ -508,6 +522,14 @@ export function validateDesignTokenPreferences(input: unknown): DesignTokenValid
     invalidFields.push("buttonDepthRadius");
   }
 
+  if (typeof candidate.buttonCornerRadius !== "number" || candidate.buttonCornerRadius < 4 || candidate.buttonCornerRadius > 40) {
+    invalidFields.push("buttonCornerRadius");
+  }
+
+  if (typeof candidate.useUnifiedCornerRadius !== "boolean") {
+    invalidFields.push("useUnifiedCornerRadius");
+  }
+
   const semantic = candidate.semanticColors;
   if (!semantic || typeof semantic !== "object") {
     invalidFields.push("semanticColors");
@@ -561,6 +583,13 @@ function buildSpacingScale(base: number, ratio: number): number[] {
 }
 
 export function generateDesignTokens(preferences: DesignTokenPreferences): DesignTokens {
+  const effectiveBoxCornerRadius = preferences.useUnifiedCornerRadius
+    ? preferences.buttonCornerRadius
+    : preferences.boxCornerRadius;
+  const effectiveButtonCornerRadius = preferences.useUnifiedCornerRadius
+    ? preferences.boxCornerRadius
+    : preferences.buttonCornerRadius;
+
   const primary = buildPrimaryScale(preferences.primaryHue, preferences.gamma);
   const typeScale = buildTypeScale(12, preferences.typeRatio);
   const baseShadeIndex = clampShade(preferences.cardBaseShade, 3) - 1;
@@ -623,7 +652,7 @@ export function generateDesignTokens(preferences: DesignTokenPreferences): Desig
       shadowShade: shadowShadeIndex + 1,
       glowShade: glowShadeIndex + 1,
       gradientStrength: preferences.cardGradientStrength,
-      cornerRadius: preferences.cardCornerRadius,
+      cornerRadius: effectiveBoxCornerRadius,
       padding: spacingScale[preferences.cardPaddingIndex] ?? spacingScale[4],
       height: preferences.cardHeight,
       darkModeGlowIntensity: preferences.darkModeGlowIntensity,
@@ -658,6 +687,7 @@ export function generateDesignTokens(preferences: DesignTokenPreferences): Desig
       rippleEnabled: preferences.buttonRippleEnabled,
       depthIntensity: preferences.buttonDepthIntensity,
       depthRadius: preferences.buttonDepthRadius,
+      cornerRadius: effectiveButtonCornerRadius,
     },
   };
 }
@@ -701,6 +731,7 @@ export function applyDesignTokensToDocument(tokens: DesignTokens, docRef: Docume
   root.style.setProperty("--cf-ds-card-glow-color", tokens.card.colors.glow);
   root.style.setProperty("--cf-ds-card-gradient-strength", `${tokens.card.gradientStrength}%`);
   root.style.setProperty("--cf-ds-card-radius", `${tokens.card.cornerRadius}px`);
+  root.style.setProperty("--cf-ds-box-radius", `${tokens.card.cornerRadius}px`);
   root.style.setProperty("--cf-ds-card-padding", `${tokens.card.padding}px`);
   root.style.setProperty("--cf-ds-card-height", `${tokens.card.height}px`);
   root.style.setProperty("--cf-ds-card-shadow-intensity", String(tokens.card.lightModeShadowIntensity));
@@ -723,6 +754,7 @@ export function applyDesignTokensToDocument(tokens: DesignTokens, docRef: Docume
   root.style.setProperty("--cf-ds-btn-ripple-enabled", tokens.button.rippleEnabled ? "1" : "0");
   root.style.setProperty("--cf-ds-btn-depth-intensity", String(tokens.button.depthIntensity));
   root.style.setProperty("--cf-ds-btn-depth-radius", `${tokens.button.depthRadius}px`);
+  root.style.setProperty("--cf-ds-btn-radius", `${tokens.button.cornerRadius}px`);
 
   const theme = typeof docRef !== "undefined" ? docRef.documentElement.dataset.theme : "light";
   void appendDebugLogEntry({
@@ -743,6 +775,8 @@ export function applyDesignTokensToDocument(tokens: DesignTokens, docRef: Docume
       harmonyAccentHue: tokens.harmony.accentHue,
       buttonDepthIntensity: tokens.button.depthIntensity,
       buttonDepthRadius: tokens.button.depthRadius,
+      boxCornerRadius: tokens.card.cornerRadius,
+      buttonCornerRadius: tokens.button.cornerRadius,
     },
   });
 }

@@ -1053,3 +1053,22 @@ Update summary:
 - Organizer color controls now include quick-apply actions that map harmony outputs directly to organizer role colors.
 - System defaults application now consumes detailed detection/mapping data, returns user-facing status, logs detected vs fallback values, and applies detected color-scheme mode to theme state.
 - Harmony/token exports now include major/minor/brand hue and color CSS variables for broader preview and debug trace visibility.
+
+### Design System Controls Revision: Adaptive Pair Heights, Interactive Wheel, Preview Relocation, and Global Radius Controls
+
+Primary file(s):
+
+- [src/webapp/components/settings/DesignSystemSettingsCard.tsx](src/webapp/components/settings/DesignSystemSettingsCard.tsx)
+- [src/webapp/styles/globals.css](src/webapp/styles/globals.css)
+- [src/core/services/designSystemService.ts](src/core/services/designSystemService.ts)
+- [tests/integration/designSystemSettingsCard.integration.test.tsx](tests/integration/designSystemSettingsCard.integration.test.tsx)
+
+Update summary:
+
+- DSC alignment now uses adaptive per-pair section sizing (`min-height` set to the taller side) rather than cumulative control-margin repositioning, preventing progressive drift lower in the panel.
+- Per-section telemetry now logs adaptive height calculations and alignment deltas for each paired Example/Controls block.
+- Color wheel behavior is now interactive: click/drag selection updates base or brand hue based on active target, and marker position telemetry is logged for base/brand/major/minor/accent hues.
+- Major/minor/accent labeled preview (with hue degrees and 60/30/10 weighting labels) now lives in the Example Card Color Scale section, and duplicate control-side swatch preview was removed.
+- Base/brand color + hue controls were compacted into two paired rows with short hex inputs and explicit layout trace logging.
+- Organizer examples were upgraded from static badges to interactive buttons that obey button behavior settings (hover/squish/press/ripple preview) and emit interaction logs.
+- Global corner radius controls were added for box and button radii with an optional unified toggle, and exported token variables now drive shared box/button corner styling across DSC surfaces.

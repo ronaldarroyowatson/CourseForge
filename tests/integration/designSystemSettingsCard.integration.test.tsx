@@ -29,7 +29,7 @@ describe("DesignSystemSettingsCard", () => {
 
     expect(screen.getAllByRole("slider").length).toBeGreaterThanOrEqual(4);
 
-    fireEvent.change(screen.getByLabelText(/Gamma:/), { target: { value: "2.35" } });
+    fireEvent.change(screen.getByLabelText(/Color Curve \(Gamma\):/), { target: { value: "2.35" } });
     fireEvent.change(screen.getByLabelText(/Type ratio:/), { target: { value: "1.333" } });
 
     await waitFor(() => {
@@ -103,10 +103,10 @@ describe("DesignSystemSettingsCard", () => {
 
     const typeRatioHeading = screen.getByRole("heading", { name: "Type Ratio" });
     const spacingScaleHeading = screen.getByRole("heading", { name: "Spacing Scale" });
-    const gammaHeading = screen.getByRole("heading", { name: "Color Curve" });
+    const cornerRadiusHeading = screen.getByRole("heading", { name: "Corner Radius" });
 
     expect(typeRatioHeading.compareDocumentPosition(spacingScaleHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(spacingScaleHeading.compareDocumentPosition(gammaHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(spacingScaleHeading.compareDocumentPosition(cornerRadiusHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("renders motion preview in a right-aligned horizontal cluster", () => {
@@ -175,11 +175,11 @@ describe("DesignSystemSettingsCard — new DSC controls", () => {
     vi.useRealTimers();
   });
 
-  it("renders Card Depth — Dual Mode section with four sliders", () => {
+  it("renders card depth controls inside Card Styling section", () => {
     render(<DesignSystemSettingsCard userId={null} />);
     fireEvent.click(screen.getByRole("button", { name: "Expand" }));
 
-    expect(screen.getByRole("heading", { name: "Card Depth — Dual Mode" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Card Styling" })).toBeInTheDocument();
     expect(screen.getByLabelText(/Dark Mode Glow Intensity:/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Dark Mode Glow Radius/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Light Mode Shadow Intensity:/)).toBeInTheDocument();
@@ -208,22 +208,22 @@ describe("DesignSystemSettingsCard — new DSC controls", () => {
     });
   });
 
-  it("renders Button Behaviors section with four checkboxes", () => {
+  it("renders button behavior toggles in Button Controls section", () => {
     render(<DesignSystemSettingsCard userId={null} />);
     fireEvent.click(screen.getByRole("button", { name: "Expand" }));
 
-    expect(screen.getByRole("heading", { name: "Button Behaviors" })).toBeInTheDocument();
-    expect(screen.getByLabelText(/Hover Opacity Effect/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Squish on Press/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Press Depth/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Ripple Effect/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Button Controls" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Hover opacity/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Squish on press/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Press depth/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Ripple preview/)).toBeInTheDocument();
   });
 
   it("updates buttonHoverEnabled when toggled", async () => {
     render(<DesignSystemSettingsCard userId={null} />);
     fireEvent.click(screen.getByRole("button", { name: "Expand" }));
 
-    const checkbox = screen.getByLabelText(/Hover Opacity Effect/);
+    const checkbox = screen.getByLabelText(/Hover opacity/);
     const before = useUIStore.getState().designTokenPreferences.buttonHoverEnabled;
     fireEvent.click(checkbox);
 
@@ -239,6 +239,16 @@ describe("DesignSystemSettingsCard — new DSC controls", () => {
     expect(screen.getByRole("heading", { name: "Color Harmony" })).toBeInTheDocument();
     expect(screen.getByLabelText(/Harmony Mode/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Base Hue:/)).toBeInTheDocument();
+  });
+
+  it("renders corner radius section with unified toggle and radius sliders", () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+
+    expect(screen.getByRole("heading", { name: "Corner Radius" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Use unified radius for boxes and buttons/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Box Corner Radius/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Button Corner Radius/)).toBeInTheDocument();
   });
 
   it("updates colorHarmonyMode when select changes", async () => {

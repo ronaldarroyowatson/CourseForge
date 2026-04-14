@@ -252,6 +252,42 @@ describe("Firebase connection + sync integration flows", () => {
     expect(writtenPayload.lastModified).toBe("2026-03-12T00:00:00.000Z");
   });
 
+  it("Firestore write strips undefined fields from textbook payloads", async () => {
+    const { syncModule, mocks } = await importSyncServiceModule({
+      localByStore: {
+        textbooks: [
+          {
+            id: "tb-write-undefined-1",
+            title: "Undefined Guard",
+            grade: "8",
+            subject: "Science",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "3333333333333",
+            isbnNormalized: "3333333333333",
+            translatedFields: undefined,
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T00:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+            isFavorite: false,
+            isArchived: false,
+          },
+        ],
+      },
+      currentUid: "teacher-write-undefined",
+    });
+
+    await expect(syncModule.uploadLocalChanges("teacher-write-undefined")).resolves.toBeUndefined();
+
+    expect(mocks.setDoc).toHaveBeenCalled();
+    const writtenPayload = (mocks.setDoc.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    expect(Object.hasOwn(writtenPayload, "translatedFields")).toBe(false);
+    expect(writtenPayload.userId).toBe("teacher-write-undefined");
+    expect(writtenPayload.ownerId).toBe("teacher-write-undefined");
+  });
+
   it("local->cloud and cloud->local sync invocation succeeds for app-like usage", async () => {
     const { syncModule } = await importSyncServiceModule({
       localByStore: {

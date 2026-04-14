@@ -110,8 +110,32 @@ describe("useRepositories createTextbook cover upload resilience", () => {
       expect.objectContaining({
         title: "Network Resilience",
         coverImageUrl: null,
+        translatedFields: {},
       })
     );
     expect(useUIStore.getState().localChangeVersion).toBe(1);
+  });
+
+  it("defaults translatedFields to an empty object when omitted", async () => {
+    const { result } = renderHook(() => useRepositories());
+
+    await act(async () => {
+      await result.current.createTextbook({
+        sourceType: "manual",
+        title: "Default Translation Fields",
+        grade: "10",
+        subject: "Biology",
+        edition: "1",
+        publicationYear: 2026,
+        isbnRaw: "9781402891002",
+        isbnNormalized: "9781402891002",
+      });
+    });
+
+    expect(repositoryMocks.saveTextbook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        translatedFields: {},
+      })
+    );
   });
 });

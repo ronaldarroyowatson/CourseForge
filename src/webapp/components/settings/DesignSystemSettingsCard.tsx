@@ -35,6 +35,22 @@ type RatioPreset = {
   description: string;
 };
 
+type SectionPair = {
+  key: string;
+  preview: string;
+  control: string;
+};
+
+const SECTION_PAIRS: SectionPair[] = [
+  { key: "buttons", preview: "buttons", control: "button-controls" },
+  { key: "cards", preview: "cards", control: "card-styling" },
+  { key: "organizers", preview: "organizers", control: "organizer-colors" },
+  { key: "motion", preview: "motion-preview", control: "motion-controls" },
+  { key: "type", preview: "type-scale", control: "type-ratio" },
+  { key: "spacing", preview: "spacing-preview", control: "spacing-scale" },
+  { key: "color", preview: "color-scale", control: "color-system" },
+];
+
 const TYPE_RATIO_PRESETS: RatioPreset[] = [
   { label: "Minor Second", value: 1.067, description: "Very Subtle" },
   { label: "Major Second", value: 1.125, description: "Subtle" },
@@ -153,6 +169,25 @@ function hexToHue(value: string): number | null {
   return (hue + 360) % 360;
 }
 
+function pointerToHue(canvas: HTMLCanvasElement, clientX: number, clientY: number): number | null {
+  const rect = canvas.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const dx = clientX - centerX;
+  const dy = clientY - centerY;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  const outerRadius = Math.min(rect.width, rect.height) / 2 - 8;
+  const innerRadius = outerRadius * 0.62;
+
+  if (distance < innerRadius || distance > outerRadius + 10) {
+    return null;
+  }
+
+  const angle = Math.atan2(dy, dx);
+  const hue = ((angle * 180) / Math.PI + 90 + 360) % 360;
+  return hue;
+}
+
 function DemoButton({
   variant,
   size,
@@ -260,8 +295,10 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
   const overlayContentRef = React.useRef<HTMLDivElement | null>(null);
   const harmonyWheelCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const sectionRefs = React.useRef<Record<string, HTMLElement | null>>({});
+  const wheelDragActiveRef = React.useRef(false);
   const [baseHexInput, setBaseHexInput] = React.useState(() => hueToHex(prefs.colorHarmonyBaseHue));
   const [brandHexInput, setBrandHexInput] = React.useState(() => hueToHex(prefs.colorHarmonyBrandHue));
+  const [wheelTarget, setWheelTarget] = React.useState<"base" | "brand">("base");
 
   React.useEffect(() => {
     setLocalDiagnostics(readLocalDesignTokenDiagnostics());
@@ -459,13 +496,20 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       { hue: tokens.harmony.accentHue, color: tokens.harmony.colors.accent, label: "Accent" },
     ];
 
+    const markerPositions: Array<{ label: string; hue: number; x: number; y: number }> = [];
     for (const marker of markers) {
       const radians = ((marker.hue - 90) * Math.PI) / 180;
       const x = centerX + Math.cos(radians) * (radius - 8);
       const y = centerY + Math.sin(radians) * (radius - 8);
+      markerPositions.push({
+        label: marker.label,
+        hue: Math.round(marker.hue),
+        x: Math.round(x),
+        y: Math.round(y),
+      });
 
       context.beginPath();
-      context.arc(x, y, 5, 0, Math.PI * 2);
+      context.arc(x, y, marker.label === "Base" || marker.label === "Brand" ? 6 : 5, 0, Math.PI * 2);
       context.fillStyle = marker.color;
       context.fill();
       context.lineWidth = 2;
@@ -480,6 +524,7 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       majorHue: tokens.harmony.majorHue,
       minorHue: tokens.harmony.minorHue,
       accentHue: tokens.harmony.accentHue,
+      markerPositions,
     });
   }, [
     prefs.colorHarmonyBaseHue,
@@ -494,26 +539,80 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
     tokens.harmony.minorHue,
   ]);
 
-  React.useLayoutEffect(() => {
-    const alignmentPairs = [
-      { control: "button-controls", preview: "buttons" },
-      { control: "button-behaviors", preview: "buttons" },
-      { control: "card-styling", preview: "cards" },
-      { control: "dual-mode-card-rules", preview: "cards" },
-      { control: "organizer-colors", preview: "organizers" },
-      { control: "motion-controls", preview: "motion-preview" },
-      { control: "type-ratio", preview: "type-scale" },
-      { control: "spacing-scale", preview: "spacing-preview" },
-      { control: "color-system", preview: "color-scale" },
-      { control: "gamma", preview: "color-scale" },
-    ];
+  React.useEffect(() => {
+    const canvas = harmonyWheelCanvasRef.current;
+    if (!canvas) {
+      return;
+    }
 
+    const applyHueFromPointer = (clientX: number, clientY: number, reason: string): void => {
+      const selectedHue = pointerToHue(canvas, clientX, clientY);
+      if (selectedHue === null) {
+        return;
+      }
+
+      const roundedHue = Math.round(selectedHue);
+      if (wheelTarget === "base") {
+        setPrefs({ colorHarmonyBaseHue: roundedHue });
+      } else {
+        setPrefs({ colorHarmonyBrandHue: roundedHue });
+      }
+
+      void logDesignSystemDebugEvent("Color wheel interaction applied.", {
+        reason,
+        target: wheelTarget,
+        selectedHue: roundedHue,
+      });
+    };
+
+    const onPointerDown = (event: PointerEvent): void => {
+      wheelDragActiveRef.current = true;
+      canvas.setPointerCapture(event.pointerId);
+      applyHueFromPointer(event.clientX, event.clientY, "pointer-down");
+    };
+
+    const onPointerMove = (event: PointerEvent): void => {
+      if (!wheelDragActiveRef.current) {
+        return;
+      }
+
+      applyHueFromPointer(event.clientX, event.clientY, "pointer-drag");
+    };
+
+    const onPointerUp = (event: PointerEvent): void => {
+      wheelDragActiveRef.current = false;
+      if (canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId);
+      }
+      applyHueFromPointer(event.clientX, event.clientY, "pointer-up");
+    };
+
+    const onPointerLeave = (): void => {
+      wheelDragActiveRef.current = false;
+    };
+
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerUp);
+    canvas.addEventListener("pointerleave", onPointerLeave);
+
+    return () => {
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerUp);
+      canvas.removeEventListener("pointerleave", onPointerLeave);
+    };
+  }, [setPrefs, wheelTarget]);
+
+  React.useLayoutEffect(() => {
     if (!isExpanded) {
-      for (const pair of alignmentPairs) {
+      for (const pair of SECTION_PAIRS) {
         const controlNode = sectionRefs.current[pair.control];
-        if (controlNode) {
-          controlNode.style.removeProperty("margin-top");
-        }
+        const previewNode = sectionRefs.current[pair.preview];
+        controlNode?.style.removeProperty("min-height");
+        previewNode?.style.removeProperty("min-height");
       }
       return;
     }
@@ -526,11 +625,12 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       }
 
       frameId = window.requestAnimationFrame(() => {
-        for (const pair of alignmentPairs) {
+        for (const pair of SECTION_PAIRS) {
           const controlNode = sectionRefs.current[pair.control];
           const previewNode = sectionRefs.current[pair.preview];
           if (!controlNode || !previewNode) {
-            void logDesignSystemDebugEvent("Alignment check fallback: section ref missing.", {
+            void logDesignSystemDebugEvent("Adaptive pair-height fallback: section ref missing.", {
+              section: pair.key,
               control: pair.control,
               preview: pair.preview,
               reason,
@@ -538,65 +638,49 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
             continue;
           }
 
-          controlNode.style.removeProperty("margin-top");
+          controlNode.style.removeProperty("min-height");
+          previewNode.style.removeProperty("min-height");
+
+          const controlRect = controlNode.getBoundingClientRect();
+          const previewRect = previewNode.getBoundingClientRect();
+          const adaptiveHeight = Math.ceil(Math.max(controlRect.height, previewRect.height));
+          controlNode.style.minHeight = `${adaptiveHeight}px`;
+          previewNode.style.minHeight = `${adaptiveHeight}px`;
+
+          void logDesignSystemDebugEvent("DSC per-section adaptive height applied.", {
+            section: pair.key,
+            reason,
+            controlHeight: Math.round(controlRect.height),
+            previewHeight: Math.round(previewRect.height),
+            appliedHeight: adaptiveHeight,
+          });
+
           const controlTop = controlNode.getBoundingClientRect().top;
           const previewTop = previewNode.getBoundingClientRect().top;
           const topDelta = Math.round(previewTop - controlTop);
 
-          if (Math.abs(topDelta) <= 8) {
-            void logDesignSystemDebugEvent("Alignment check passed.", {
-              control: pair.control,
-              preview: pair.preview,
-              topDelta,
-              reason,
-            });
-            continue;
-          }
-
-          if (topDelta > 8) {
-            controlNode.style.marginTop = `${topDelta}px`;
-            void logDesignSystemDebugEvent("Dynamic control repositioning applied.", {
-              control: pair.control,
-              preview: pair.preview,
-              topDelta,
-              reason,
-              correction: "control-margin-top",
-            });
-            continue;
-          }
-
-          void logDesignSystemDebugEvent("Alignment drift detected with fallback applied.", {
+          void logDesignSystemDebugEvent("DSC alignment check computed.", {
+            section: pair.key,
             control: pair.control,
             preview: pair.preview,
             topDelta,
             reason,
-            correction: "layout-order-preserved-no-negative-margin",
+            aligned: Math.abs(topDelta) <= 2,
           });
         }
       });
     };
 
-    void logDesignSystemDebugEvent("Control relocation map applied.", {
-      controlsByPreviewOrder: ["button-controls", "button-behaviors", "card-styling", "dual-mode-card-rules", "organizer-colors", "motion-controls", "type-ratio", "spacing-scale", "color-system", "gamma"],
-    });
-
-    void logDesignSystemDebugEvent("Motion preview boxes repositioned to right-side cluster.", {
-      section: "motion-preview",
-      alignmentTarget: "motion-controls",
-      orientation: "horizontal",
-    });
-
-    void logDesignSystemDebugEvent("Spacing scale controls relocated below type ratio controls.", {
-      section: "spacing-scale",
-      relation: "follows-type-ratio",
-      alignmentTarget: "spacing-preview",
+    void logDesignSystemDebugEvent("Adaptive section pairing initialized.", {
+      pairCount: SECTION_PAIRS.length,
+      pairs: SECTION_PAIRS,
     });
 
     runAlignment("expanded-layout-initial");
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => runAlignment("resize-observer")) : null;
 
     if (observer) {
-      for (const pair of alignmentPairs) {
+      for (const pair of SECTION_PAIRS) {
         const controlNode = sectionRefs.current[pair.control];
         const previewNode = sectionRefs.current[pair.preview];
         if (controlNode) {
@@ -627,7 +711,8 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       prefs.darkModeGlowIntensity, prefs.darkModeGlowRadius, prefs.lightModeShadowIntensity, prefs.lightModeShadowRadius,
       prefs.buttonHoverEnabled, prefs.buttonSquishEnabled, prefs.buttonPressEnabled, prefs.buttonRippleEnabled,
       prefs.buttonDepthIntensity, prefs.buttonDepthRadius,
-      prefs.colorHarmonyMode, prefs.colorHarmonyBaseHue, prefs.colorHarmonyBrandHue]);
+      prefs.colorHarmonyMode, prefs.colorHarmonyBaseHue, prefs.colorHarmonyBrandHue,
+      prefs.boxCornerRadius, prefs.buttonCornerRadius, prefs.useUnifiedCornerRadius]);
 
   React.useEffect(() => {
     if (!isExpanded || !overlayContentRef.current) {
@@ -743,6 +828,18 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
       spacingRatio: prefs.spacingRatio,
       spacingTokens: tokens.spacing.values.slice(1, 5),
     });
+
+    void logDesignSystemDebugEvent("Harmony preview relocated to example color-scale section.", {
+      source: "controls-color-system",
+      destination: "example-color-scale",
+      includesLabels: ["Major", "Minor", "Accent"],
+      spacingToken: "--cf-ds-space-3",
+    });
+
+    void logDesignSystemDebugEvent("Color scale to harmony preview spacing applied.", {
+      section: "example-color-scale",
+      spacingToken: "--cf-ds-space-3",
+    });
   }, [isExpanded, prefs.spacingRatio, prefs.typeRatio, tokens.spacing.values, tokens.type.base, tokens.type.scale]);
 
   React.useEffect(() => {
@@ -811,6 +908,21 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
     prefs.semanticColors.pending,
     prefs.semanticColors.success,
   ]);
+
+  React.useEffect(() => {
+    if (!isExpanded) {
+      return;
+    }
+
+    void logDesignSystemDebugEvent("Compact base/brand color and hue rows applied.", {
+      layout: "two-rows-paired",
+      row1: ["base-color-hex", "base-hue"],
+      row2: ["brand-color-hex", "brand-hue"],
+      baseHue: prefs.colorHarmonyBaseHue,
+      brandHue: prefs.colorHarmonyBrandHue,
+      wheelTarget,
+    });
+  }, [isExpanded, prefs.colorHarmonyBaseHue, prefs.colorHarmonyBrandHue, wheelTarget]);
 
   React.useEffect(() => {
     if (!isExpanded || isCollapsing) {
@@ -1180,6 +1292,39 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
     });
   }
 
+  function triggerPreviewRipple(target: HTMLElement): void {
+    target.classList.remove("cf-ds-btn--ripple-active");
+    void target.getBoundingClientRect();
+    target.classList.add("cf-ds-btn--ripple-active");
+    window.setTimeout(() => {
+      target.classList.remove("cf-ds-btn--ripple-active");
+    }, Math.max(240, prefs.motionTimingMs));
+  }
+
+  function handleOrganizerButtonHover(role: string): void {
+    void logDesignSystemDebugEvent("Organizer behavior preview: hover.", {
+      role,
+      buttonHoverEnabled: prefs.buttonHoverEnabled,
+      buttonSquishEnabled: prefs.buttonSquishEnabled,
+      buttonPressEnabled: prefs.buttonPressEnabled,
+      buttonRippleEnabled: prefs.buttonRippleEnabled,
+    });
+  }
+
+  function handleOrganizerButtonPress(role: string, event: React.PointerEvent<HTMLButtonElement>): void {
+    if (prefs.buttonRippleEnabled) {
+      triggerPreviewRipple(event.currentTarget);
+    }
+
+    void logDesignSystemDebugEvent("Organizer behavior preview: press.", {
+      role,
+      buttonHoverEnabled: prefs.buttonHoverEnabled,
+      buttonSquishEnabled: prefs.buttonSquishEnabled,
+      buttonPressEnabled: prefs.buttonPressEnabled,
+      buttonRippleEnabled: prefs.buttonRippleEnabled,
+    });
+  }
+
   function applyHarmonyToOrganizer(role: "major" | "minor" | "accent"): void {
     const color = role === "major"
       ? tokens.harmony.colors.major
@@ -1454,10 +1599,38 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                     <div className="cf-example-card__row" ref={setSectionRef("organizers")}>
                       <h4 className="cf-ds-section-title">Organizer Buttons</h4>
                       <div className="cf-example-card__organizers">
-                        <span className="cf-organizer cf-organizer--new">New</span>
-                        <span className="cf-organizer cf-organizer--active">Active</span>
-                        <span className="cf-organizer cf-organizer--pending">Pending</span>
-                        <span className="cf-organizer cf-organizer--error">Error</span>
+                        <button
+                          type="button"
+                          className="cf-ds-btn cf-ds-btn--sm cf-ds-btn--organizer cf-organizer cf-organizer--new"
+                          onMouseEnter={() => { handleOrganizerButtonHover("new"); }}
+                          onPointerDown={(event) => { handleOrganizerButtonPress("new", event); }}
+                        >
+                          New
+                        </button>
+                        <button
+                          type="button"
+                          className="cf-ds-btn cf-ds-btn--sm cf-ds-btn--organizer cf-organizer cf-organizer--active"
+                          onMouseEnter={() => { handleOrganizerButtonHover("active"); }}
+                          onPointerDown={(event) => { handleOrganizerButtonPress("active", event); }}
+                        >
+                          Active
+                        </button>
+                        <button
+                          type="button"
+                          className="cf-ds-btn cf-ds-btn--sm cf-ds-btn--organizer cf-organizer cf-organizer--pending"
+                          onMouseEnter={() => { handleOrganizerButtonHover("pending"); }}
+                          onPointerDown={(event) => { handleOrganizerButtonPress("pending", event); }}
+                        >
+                          Pending
+                        </button>
+                        <button
+                          type="button"
+                          className="cf-ds-btn cf-ds-btn--sm cf-ds-btn--organizer cf-organizer cf-organizer--error"
+                          onMouseEnter={() => { handleOrganizerButtonHover("error"); }}
+                          onPointerDown={(event) => { handleOrganizerButtonPress("error", event); }}
+                        >
+                          Error
+                        </button>
                       </div>
                     </div>
 
@@ -1541,10 +1714,17 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                           <span key={`shade-${index}`} className={`cf-ds-swatch cf-ds-swatch--${index + 1}`} title={`Shade ${index + 1}`} />
                         ))}
                       </div>
-                      <div className="cf-ds-harmony-swatches" aria-label="major minor accent preview">
-                        <span className="cf-harmony-swatch cf-harmony-swatch--major" title="Major color" />
-                        <span className="cf-harmony-swatch cf-harmony-swatch--minor" title="Minor color" />
-                        <span className="cf-harmony-swatch cf-harmony-swatch--accent" title="Accent color" />
+                      <div className="cf-ds-harmony-preview-stack" aria-label="major minor accent preview">
+                        <div className="cf-ds-harmony-swatches">
+                          <span className="cf-harmony-swatch cf-harmony-swatch--major" title="Major color" />
+                          <span className="cf-harmony-swatch cf-harmony-swatch--minor" title="Minor color" />
+                          <span className="cf-harmony-swatch cf-harmony-swatch--accent" title="Accent color" />
+                        </div>
+                        <div className="cf-harmony-stat-grid" aria-label="harmony hue details">
+                          <span>Major (~60%): {Math.round(tokens.harmony.majorHue)}°</span>
+                          <span>Minor (~30%): {Math.round(tokens.harmony.minorHue)}°</span>
+                          <span>Accent (~10%): {Math.round(tokens.harmony.accentHue)}°</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1566,7 +1746,86 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                           ))}
                         </select>
                       </label>
-                      <p className="settings-meta">Buttons inherit stroke, spacing, and color token scales.</p>
+                      <div className="cf-ds-checkbox-grid">
+                        <label className="cf-ds-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={prefs.buttonHoverEnabled}
+                            onChange={(event) => {
+                              const buttonHoverEnabled = event.target.checked;
+                              setPrefs({ buttonHoverEnabled });
+                              void logDesignSystemDebugEvent("Button hover effect toggled.", { buttonHoverEnabled });
+                            }}
+                          />
+                          Hover opacity
+                        </label>
+                        <label className="cf-ds-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={prefs.buttonSquishEnabled}
+                            onChange={(event) => {
+                              const buttonSquishEnabled = event.target.checked;
+                              setPrefs({ buttonSquishEnabled });
+                              void logDesignSystemDebugEvent("Button squish effect toggled.", { buttonSquishEnabled });
+                            }}
+                          />
+                          Squish on press
+                        </label>
+                        <label className="cf-ds-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={prefs.buttonPressEnabled}
+                            onChange={(event) => {
+                              const buttonPressEnabled = event.target.checked;
+                              setPrefs({ buttonPressEnabled });
+                              void logDesignSystemDebugEvent("Button press depth toggled.", { buttonPressEnabled });
+                            }}
+                          />
+                          Press depth
+                        </label>
+                        <label className="cf-ds-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={prefs.buttonRippleEnabled}
+                            onChange={(event) => {
+                              const buttonRippleEnabled = event.target.checked;
+                              setPrefs({ buttonRippleEnabled });
+                              void logDesignSystemDebugEvent("Button ripple effect toggled.", { buttonRippleEnabled });
+                            }}
+                          />
+                          Ripple preview
+                        </label>
+                      </div>
+                      <label>
+                        Depth Intensity: {prefs.buttonDepthIntensity.toFixed(1)}
+                        <input
+                          type="range"
+                          min={0}
+                          max={10}
+                          step={0.5}
+                          value={prefs.buttonDepthIntensity}
+                          onChange={(event) => {
+                            const buttonDepthIntensity = Number(event.target.value);
+                            setPrefs({ buttonDepthIntensity });
+                            void logDesignSystemDebugEvent("Button depth intensity changed.", { buttonDepthIntensity });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Depth Radius (px): {prefs.buttonDepthRadius}
+                        <input
+                          type="range"
+                          min={4}
+                          max={32}
+                          step={1}
+                          value={prefs.buttonDepthRadius}
+                          onChange={(event) => {
+                            const buttonDepthRadius = Number(event.target.value);
+                            setPrefs({ buttonDepthRadius });
+                            void logDesignSystemDebugEvent("Button depth radius changed.", { buttonDepthRadius });
+                          }}
+                        />
+                      </label>
                     </section>
 
                     <section className="cf-ds-control-group" ref={setSectionRef("card-styling")}>
@@ -1647,20 +1906,6 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                       </label>
 
                       <label>
-                        Card Corner Radius (px)
-                        <input
-                          type="number"
-                          min={4}
-                          max={40}
-                          step={1}
-                          value={prefs.cardCornerRadius}
-                          onChange={(event) => {
-                            setPrefs({ cardCornerRadius: Number(event.target.value) });
-                          }}
-                        />
-                      </label>
-
-                      <label>
                         Card Padding
                         <select
                           value={prefs.cardPaddingIndex}
@@ -1687,10 +1932,6 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                           }}
                         />
                       </label>
-                    </section>
-
-                    <section className="cf-ds-control-group" ref={setSectionRef("dual-mode-card-rules")}>
-                      <h4 className="cf-ds-section-title">Card Depth — Dual Mode</h4>
                       <label>
                         Dark Mode Glow Intensity: {prefs.darkModeGlowIntensity.toFixed(1)}
                         <input
@@ -1763,88 +2004,6 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                         <button type="button" className="btn-secondary" onClick={() => applyHarmonyToOrganizer("minor")}>Use Minor for Pending</button>
                         <button type="button" className="btn-secondary" onClick={() => applyHarmonyToOrganizer("accent")}>Use Accent for Error</button>
                       </div>
-                    </section>
-
-                    <section className="cf-ds-control-group" ref={setSectionRef("button-behaviors")}>
-                      <h4 className="cf-ds-section-title">Button Behaviors</h4>
-                      <label className="cf-ds-checkbox-label">
-                        <input
-                          type="checkbox"
-                          checked={prefs.buttonHoverEnabled}
-                          onChange={(event) => {
-                            const buttonHoverEnabled = event.target.checked;
-                            setPrefs({ buttonHoverEnabled });
-                            void logDesignSystemDebugEvent("Button hover effect toggled.", { buttonHoverEnabled });
-                          }}
-                        />
-                        Hover Opacity Effect
-                      </label>
-                      <label className="cf-ds-checkbox-label">
-                        <input
-                          type="checkbox"
-                          checked={prefs.buttonSquishEnabled}
-                          onChange={(event) => {
-                            const buttonSquishEnabled = event.target.checked;
-                            setPrefs({ buttonSquishEnabled });
-                            void logDesignSystemDebugEvent("Button squish effect toggled.", { buttonSquishEnabled });
-                          }}
-                        />
-                        Squish on Press (scale)
-                      </label>
-                      <label className="cf-ds-checkbox-label">
-                        <input
-                          type="checkbox"
-                          checked={prefs.buttonPressEnabled}
-                          onChange={(event) => {
-                            const buttonPressEnabled = event.target.checked;
-                            setPrefs({ buttonPressEnabled });
-                            void logDesignSystemDebugEvent("Button press depth toggled.", { buttonPressEnabled });
-                          }}
-                        />
-                        Press Depth (translateY)
-                      </label>
-                      <label className="cf-ds-checkbox-label">
-                        <input
-                          type="checkbox"
-                          checked={prefs.buttonRippleEnabled}
-                          onChange={(event) => {
-                            const buttonRippleEnabled = event.target.checked;
-                            setPrefs({ buttonRippleEnabled });
-                            void logDesignSystemDebugEvent("Button ripple effect toggled.", { buttonRippleEnabled });
-                          }}
-                        />
-                        Ripple Effect (experimental)
-                      </label>
-                      <label>
-                        Depth Intensity: {prefs.buttonDepthIntensity.toFixed(1)}
-                        <input
-                          type="range"
-                          min={0}
-                          max={10}
-                          step={0.5}
-                          value={prefs.buttonDepthIntensity}
-                          onChange={(event) => {
-                            const buttonDepthIntensity = Number(event.target.value);
-                            setPrefs({ buttonDepthIntensity });
-                            void logDesignSystemDebugEvent("Button depth intensity changed.", { buttonDepthIntensity });
-                          }}
-                        />
-                      </label>
-                      <label>
-                        Depth Radius (px): {prefs.buttonDepthRadius}
-                        <input
-                          type="range"
-                          min={4}
-                          max={32}
-                          step={1}
-                          value={prefs.buttonDepthRadius}
-                          onChange={(event) => {
-                            const buttonDepthRadius = Number(event.target.value);
-                            setPrefs({ buttonDepthRadius });
-                            void logDesignSystemDebugEvent("Button depth radius changed.", { buttonDepthRadius });
-                          }}
-                        />
-                      </label>
                     </section>
 
                     <section className="cf-ds-control-group" ref={setSectionRef("motion-controls")}>
@@ -1964,6 +2123,65 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                       </datalist>
                     </section>
 
+                    <section className="cf-ds-control-group" ref={setSectionRef("corner-radius")}>
+                      <h4 className="cf-ds-section-title">Corner Radius</h4>
+                      <label className="cf-ds-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={prefs.useUnifiedCornerRadius}
+                          onChange={(event) => {
+                            const useUnifiedCornerRadius = event.target.checked;
+                            setPrefs({ useUnifiedCornerRadius });
+                            void logDesignSystemDebugEvent("Unified corner radius toggled.", {
+                              useUnifiedCornerRadius,
+                              boxCornerRadius: prefs.boxCornerRadius,
+                              buttonCornerRadius: prefs.buttonCornerRadius,
+                            });
+                          }}
+                        />
+                        Use unified radius for boxes and buttons
+                      </label>
+                      <label>
+                        Box Corner Radius (px): {prefs.boxCornerRadius}
+                        <input
+                          type="range"
+                          min={4}
+                          max={40}
+                          step={1}
+                          value={prefs.boxCornerRadius}
+                          onChange={(event) => {
+                            const boxCornerRadius = Number(event.target.value);
+                            setPrefs({
+                              boxCornerRadius,
+                              cardCornerRadius: boxCornerRadius,
+                            });
+                            void logDesignSystemDebugEvent("Box corner radius changed.", {
+                              boxCornerRadius,
+                              useUnifiedCornerRadius: prefs.useUnifiedCornerRadius,
+                            });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        Button Corner Radius (px): {prefs.buttonCornerRadius}
+                        <input
+                          type="range"
+                          min={4}
+                          max={40}
+                          step={1}
+                          value={prefs.buttonCornerRadius}
+                          onChange={(event) => {
+                            const buttonCornerRadius = Number(event.target.value);
+                            setPrefs({ buttonCornerRadius });
+                            void logDesignSystemDebugEvent("Button corner radius changed.", {
+                              buttonCornerRadius,
+                              useUnifiedCornerRadius: prefs.useUnifiedCornerRadius,
+                            });
+                          }}
+                        />
+                      </label>
+                    </section>
+
                     <section className="cf-ds-control-group" ref={setSectionRef("color-system")}>
                       <h4 className="cf-ds-section-title">Color Harmony</h4>
                       <label>
@@ -1984,92 +2202,106 @@ export function DesignSystemSettingsCard({ userId, placementClassName }: DesignS
                         </select>
                       </label>
                       <p className="settings-meta">{HARMONY_MODE_HELP_TEXT[prefs.colorHarmonyMode]}</p>
-                      <label>
-                        Base Color
-                        <div className="cf-color-input-pair">
+                      <div className="cf-color-harmony-row" role="group" aria-label="Base color and hue controls">
+                        <label>
+                          Base Color
+                          <div className="cf-color-input-pair">
+                            <input
+                              type="color"
+                              aria-label="base harmony color"
+                              value={hueToHex(prefs.colorHarmonyBaseHue)}
+                              onChange={(event) => {
+                                const colorHarmonyBaseHue = hexToHue(event.target.value) ?? prefs.colorHarmonyBaseHue;
+                                setPrefs({ colorHarmonyBaseHue });
+                                void logDesignSystemDebugEvent("Color harmony base color picker changed.", { colorHarmonyBaseHue });
+                              }}
+                            />
+                            <input
+                              type="text"
+                              aria-label="base harmony hex"
+                              value={baseHexInput}
+                              maxLength={7}
+                              onChange={(event) => { handleHarmonyHexInput("base", event.target.value); }}
+                            />
+                          </div>
+                        </label>
+                        <label>
+                          Base Hue: {prefs.colorHarmonyBaseHue}°
                           <input
-                            type="color"
-                            aria-label="base harmony color"
-                            value={hueToHex(prefs.colorHarmonyBaseHue)}
+                            type="range" min={0} max={360} step={1}
+                            value={prefs.colorHarmonyBaseHue}
                             onChange={(event) => {
-                              const colorHarmonyBaseHue = hexToHue(event.target.value) ?? prefs.colorHarmonyBaseHue;
+                              const colorHarmonyBaseHue = Number(event.target.value);
                               setPrefs({ colorHarmonyBaseHue });
-                              void logDesignSystemDebugEvent("Color harmony base color picker changed.", { colorHarmonyBaseHue });
+                              void logDesignSystemDebugEvent("Color harmony base hue changed.", { colorHarmonyBaseHue, mode: prefs.colorHarmonyMode });
                             }}
                           />
+                        </label>
+                      </div>
+                      <div className="cf-color-harmony-row" role="group" aria-label="Brand color and hue controls">
+                        <label>
+                          Brand Color
+                          <div className="cf-color-input-pair">
+                            <input
+                              type="color"
+                              aria-label="brand harmony color"
+                              value={hueToHex(prefs.colorHarmonyBrandHue)}
+                              onChange={(event) => {
+                                const colorHarmonyBrandHue = hexToHue(event.target.value) ?? prefs.colorHarmonyBrandHue;
+                                setPrefs({ colorHarmonyBrandHue });
+                                void logDesignSystemDebugEvent("Color harmony brand color picker changed.", { colorHarmonyBrandHue });
+                              }}
+                            />
+                            <input
+                              type="text"
+                              aria-label="brand harmony hex"
+                              value={brandHexInput}
+                              maxLength={7}
+                              onChange={(event) => { handleHarmonyHexInput("brand", event.target.value); }}
+                            />
+                          </div>
+                        </label>
+                        <label>
+                          Brand Hue: {prefs.colorHarmonyBrandHue}°
                           <input
-                            type="text"
-                            aria-label="base harmony hex"
-                            value={baseHexInput}
-                            onChange={(event) => { handleHarmonyHexInput("base", event.target.value); }}
-                          />
-                        </div>
-                      </label>
-                      <label>
-                        Brand Color
-                        <div className="cf-color-input-pair">
-                          <input
-                            type="color"
-                            aria-label="brand harmony color"
-                            value={hueToHex(prefs.colorHarmonyBrandHue)}
+                            type="range" min={0} max={360} step={1}
+                            value={prefs.colorHarmonyBrandHue}
                             onChange={(event) => {
-                              const colorHarmonyBrandHue = hexToHue(event.target.value) ?? prefs.colorHarmonyBrandHue;
+                              const colorHarmonyBrandHue = Number(event.target.value);
                               setPrefs({ colorHarmonyBrandHue });
-                              void logDesignSystemDebugEvent("Color harmony brand color picker changed.", { colorHarmonyBrandHue });
+                              void logDesignSystemDebugEvent("Color harmony brand hue changed.", { colorHarmonyBrandHue, mode: prefs.colorHarmonyMode });
                             }}
                           />
-                          <input
-                            type="text"
-                            aria-label="brand harmony hex"
-                            value={brandHexInput}
-                            onChange={(event) => { handleHarmonyHexInput("brand", event.target.value); }}
-                          />
-                        </div>
-                      </label>
-                      <label>
-                        Base Hue: {prefs.colorHarmonyBaseHue}°
-                        <input
-                          type="range" min={0} max={360} step={1}
-                          value={prefs.colorHarmonyBaseHue}
-                          onChange={(event) => {
-                            const colorHarmonyBaseHue = Number(event.target.value);
-                            setPrefs({ colorHarmonyBaseHue });
-                            void logDesignSystemDebugEvent("Color harmony base hue changed.", { colorHarmonyBaseHue, mode: prefs.colorHarmonyMode });
+                        </label>
+                      </div>
+                      <div className="cf-wheel-target-toggle" role="group" aria-label="Wheel target selector">
+                        <button
+                          type="button"
+                          className={`btn-secondary ${wheelTarget === "base" ? "cf-wheel-target-toggle__button--active" : ""}`}
+                          onClick={() => {
+                            setWheelTarget("base");
+                            void logDesignSystemDebugEvent("Color wheel target changed.", { target: "base" });
                           }}
-                        />
-                      </label>
-                      <label>
-                        Brand Hue: {prefs.colorHarmonyBrandHue}°
-                        <input
-                          type="range" min={0} max={360} step={1}
-                          value={prefs.colorHarmonyBrandHue}
-                          onChange={(event) => {
-                            const colorHarmonyBrandHue = Number(event.target.value);
-                            setPrefs({ colorHarmonyBrandHue });
-                            void logDesignSystemDebugEvent("Color harmony brand hue changed.", { colorHarmonyBrandHue, mode: prefs.colorHarmonyMode });
+                        >
+                          Wheel edits base hue
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn-secondary ${wheelTarget === "brand" ? "cf-wheel-target-toggle__button--active" : ""}`}
+                          onClick={() => {
+                            setWheelTarget("brand");
+                            void logDesignSystemDebugEvent("Color wheel target changed.", { target: "brand" });
                           }}
-                        />
-                      </label>
+                        >
+                          Wheel edits brand hue
+                        </button>
+                      </div>
                       <div className="cf-harmony-wheel" aria-label="harmony wheel preview">
                         <canvas ref={harmonyWheelCanvasRef} className="cf-harmony-wheel__canvas" width={220} height={220} />
                       </div>
-                      <p className="settings-meta">Major, minor, and accent are derived from base hue, brand hue, and harmony mode.</p>
-                      <div className="cf-ds-harmony-swatches" aria-label="harmony color preview">
-                        <span className="cf-harmony-swatch cf-harmony-swatch--major" title="Major color" />
-                        <span className="cf-harmony-swatch cf-harmony-swatch--minor" title="Minor color" />
-                        <span className="cf-harmony-swatch cf-harmony-swatch--accent" title="Accent color" />
-                      </div>
-                      <div className="cf-harmony-stat-grid" aria-label="harmony hue details">
-                        <span>Major: {Math.round(tokens.harmony.majorHue)}°</span>
-                        <span>Minor: {Math.round(tokens.harmony.minorHue)}°</span>
-                        <span>Accent: {Math.round(tokens.harmony.accentHue)}°</span>
-                      </div>
-                    </section>
-
-                    <section className="cf-ds-control-group" ref={setSectionRef("gamma")}>
-                      <h4 className="cf-ds-section-title">Color Curve</h4>
+                      <p className="settings-meta">Use wheel drag/click to set the active target hue and preview harmony marker positions.</p>
                       <label>
-                        Gamma: {prefs.gamma.toFixed(2)}
+                        Color Curve (Gamma): {prefs.gamma.toFixed(2)}
                         <input
                           type="range"
                           min={2}

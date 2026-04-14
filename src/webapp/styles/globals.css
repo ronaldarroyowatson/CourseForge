@@ -91,6 +91,8 @@
   --cf-ds-card-shadow-radius: 14px;
   --cf-ds-card-glow-intensity: 6;
   --cf-ds-card-glow-radius: 18px;
+  --cf-ds-box-radius: 10px;
+  --cf-ds-btn-radius: 10px;
   --cf-ds-harmony-major: #3f7dd3;
   --cf-ds-harmony-minor: #2aa57b;
   --cf-ds-harmony-accent: #b61f3a;
@@ -439,7 +441,7 @@ body {
   overflow: visible;
   background: var(--cf-ds-primary-3);
   border: var(--cf-ds-stroke-2) solid var(--cf-ds-primary-2);
-  border-radius: 12px;
+  border-radius: var(--cf-ds-box-radius, 10px);
   padding: 1.5rem;
   box-shadow: 0 14px 34px color-mix(in srgb, var(--cf-ds-primary-2) 36%, transparent);
 }
@@ -485,6 +487,10 @@ body {
 .cf-ds-control-group {
   display: grid;
   gap: 8px;
+  padding: var(--cf-ds-space-2, 6px);
+  border: var(--cf-ds-stroke-1) solid var(--border-default);
+  border-radius: var(--cf-ds-box-radius, 10px);
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
 }
 
 .cf-ds-chip-row {
@@ -501,7 +507,7 @@ body {
 
 .cf-ds-swatch {
   height: 20px;
-  border-radius: 6px;
+  border-radius: var(--cf-ds-box-radius, 10px);
   border: 1px solid var(--border-default);
 }
 
@@ -532,7 +538,7 @@ body {
   width: min(100%, 980px);
   margin-inline: auto;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--cf-ds-box-radius, 10px);
   border: var(--cf-ds-stroke-2) solid var(--cf-ds-primary-5);
   color: var(--text-primary);
   background: linear-gradient(
@@ -581,7 +587,7 @@ body {
   max-width: 100%;
   min-width: 0;
   border: var(--cf-ds-stroke-2) solid var(--border-default);
-  border-radius: 10px;
+  border-radius: var(--cf-ds-box-radius, 10px);
   background: var(--bg-panel);
   color: var(--text-primary);
   font-size: var(--cf-ds-type-base);
@@ -612,7 +618,7 @@ body {
 
 .cf-ds-btn {
   --cf-ds-btn-base: var(--cf-ds-primary-4);
-  border-radius: 10px;
+  border-radius: var(--cf-ds-btn-radius, 10px);
   border: var(--cf-ds-stroke-2) solid transparent;
   padding: 6px 10px;
   font-size: 12px;
@@ -670,7 +676,7 @@ body {
   min-width: 0;
   overflow: hidden;
   border: var(--cf-ds-stroke-1) solid var(--border-default);
-  border-radius: 10px;
+  border-radius: var(--cf-ds-box-radius, 10px);
   padding: 10px;
   background: var(--bg-panel);
   color: var(--text-primary);
@@ -735,7 +741,7 @@ body {
 .cf-organizer {
   --cf-ds-btn-base: var(--cf-ds-primary-4);
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--cf-ds-btn-radius, 10px);
   border: var(--cf-ds-stroke-1) solid transparent;
   font-size: 12px;
   font-weight: 600;
@@ -818,7 +824,7 @@ body {
   width: 100%;
   aspect-ratio: 1 / 1;
   max-width: 5.5rem;
-  border-radius: 6px;
+  border-radius: var(--cf-ds-box-radius, 10px);
   background: var(--cf-ds-primary-4);
 }
 
@@ -967,11 +973,17 @@ body {
   gap: 8px;
 }
 
+.cf-ds-harmony-preview-stack {
+  display: grid;
+  gap: var(--cf-ds-space-3, 8px);
+  margin-top: var(--cf-ds-space-3, 8px);
+}
+
 .cf-harmony-swatch {
   display: inline-block;
   width: 100%;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--cf-ds-box-radius, 10px);
   border: 1px solid var(--border-default);
 }
 
@@ -1018,14 +1030,67 @@ body {
   align-items: center;
 }
 
+.cf-color-harmony-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--cf-ds-space-2, 6px) var(--cf-ds-space-3, 8px);
+  align-items: end;
+}
+
 .cf-color-input-pair input[type="text"] {
+  width: 6.6rem;
   min-width: 0;
+  max-width: 7rem;
+}
+
+.cf-ds-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+
+.cf-wheel-target-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cf-wheel-target-toggle__button--active {
+  border-color: var(--cf-ds-primary-3);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cf-ds-primary-3) 35%, transparent);
 }
 
 .cf-harmony-quick-apply {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.cf-ds-btn--ripple-active {
+  position: relative;
+  overflow: hidden;
+}
+
+.cf-ds-btn--ripple-active::after {
+  content: "";
+  position: absolute;
+  inset: -35%;
+  border-radius: inherit;
+  background: radial-gradient(circle, color-mix(in srgb, #ffffff 40%, transparent) 0%, transparent 68%);
+  opacity: calc(var(--cf-ds-btn-ripple-enabled, 0) * 0.65);
+  transform: scale(0);
+  animation: cf-ds-btn-ripple calc(var(--cf-ds-motion-ms, 300ms) * 0.8) ease-out forwards;
+}
+
+@keyframes cf-ds-btn-ripple {
+  from {
+    transform: scale(0);
+    opacity: calc(var(--cf-ds-btn-ripple-enabled, 0) * 0.7);
+  }
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
 }
 
 .cf-type-scale-grid {
@@ -1056,7 +1121,7 @@ body {
   min-height: 1.9rem;
   width: 100%;
   box-sizing: border-box;
-  border-radius: 10px;
+  border-radius: var(--cf-ds-box-radius, 10px);
   border: var(--cf-ds-stroke-1) solid var(--border-default);
   background: color-mix(in srgb, var(--cf-ds-primary-9) 45%, var(--bg-panel));
   color: var(--text-primary);
@@ -1139,7 +1204,10 @@ body {
   }
 
   .cf-harmony-quick-apply,
-  .cf-harmony-stat-grid {
+  .cf-harmony-stat-grid,
+  .cf-color-harmony-row,
+  .cf-wheel-target-toggle,
+  .cf-ds-checkbox-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1166,7 +1234,7 @@ body {
 
 .cf-keep-dialog {
   border: var(--cf-ds-stroke-2) solid var(--cf-ds-primary-3);
-  border-radius: 12px;
+  border-radius: var(--cf-ds-box-radius, 10px);
   padding: 10px;
   background: color-mix(in srgb, var(--cf-ds-primary-9) 60%, white);
 }

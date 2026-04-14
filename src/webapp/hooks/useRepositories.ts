@@ -131,7 +131,7 @@ function buildTextbookFromInput(input: CreateTextbookInput, resolvedCoverUrl?: s
     id: crypto.randomUUID(),
     sourceType: input.sourceType,
     originalLanguage: input.originalLanguage ?? "en",
-    translatedFields: input.translatedFields,
+    translatedFields: input.translatedFields ?? {},
     title: input.title,
     subtitle: input.subtitle,
     grade: input.grade,

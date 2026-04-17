@@ -41,3 +41,5 @@ export * from "./translationWorkflowService";
 export * from "./translationReviewService";
 export * from "./glossaryService";
 export * from "./gameTextService";
+export * from "./semanticTokens";
+export * from "./tokenDebugService";

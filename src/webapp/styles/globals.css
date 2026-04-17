@@ -1,4 +1,17 @@
+/* ============================================================
+   DSC Authoritative Semantic Tokens
+   These values match SEMANTIC_PALETTE in semanticTokens.ts exactly.
+   Do NOT change these without updating the TypeScript source and tests.
+   ============================================================ */
 :root {
+  --dsc-major:   #2563EB;
+  --dsc-minor:   #73A2F5;
+  --dsc-accent:  #FFFFFF;
+  --dsc-success: #22C55E;
+  --dsc-warning: #FACC15;
+  --dsc-error:   #EF4444;
+  --dsc-info:    #06B6D4;
+
   color-scheme: light;
   --cf-font-scale: 1;
   --cf-ui-scale: 1;

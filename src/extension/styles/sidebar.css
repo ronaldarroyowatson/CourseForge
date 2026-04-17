@@ -9,7 +9,8 @@
   --cf-surface-muted: #e9f0f8;
   --cf-border: #cad8e6;
   --cf-border-strong: #9fb4c8;
-  --cf-accent: #1f6fb6;
+  --cf-accent: #2563eb;
+  --cf-accent-minor: #73a2f5;
   --cf-danger: #a32323;
   --cf-success: #1f6d2c;
 }

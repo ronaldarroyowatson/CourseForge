@@ -242,11 +242,53 @@ function setEnabled(enabled) {
   console.log(`Debug logging ${enabled ? "enabled" : "disabled"}.`);
 }
 
+function showColorTokens() {
+  const tokens = [
+    { token: "--cf-accent", label: "Accent (MAJOR)", value: "#2563eb" },
+    { token: "--cf-accent-strong", label: "Accent Strong", value: "#1d4ed8" },
+    { token: "--cf-accent-minor", label: "Accent Minor (MINOR)", value: "#73a2f5" },
+    { token: "--cf-success", label: "Success", value: "#16794c" },
+    { token: "--cf-text-strong", label: "Text Strong", value: "#11253a" },
+    { token: "--cf-text", label: "Text", value: "#1d3247" },
+    { token: "--cf-text-muted", label: "Text Muted", value: "#4b6178" },
+    { token: "--cf-surface", label: "Surface", value: "#ffffff" },
+    { token: "--cf-surface-strong", label: "Surface Strong", value: "#f3f7fc" },
+    { token: "--cf-surface-muted", label: "Surface Muted", value: "#e9f0f8" },
+    { token: "--cf-border", label: "Border", value: "#cad8e6" },
+    { token: "--cf-border-strong", label: "Border Strong", value: "#9fb4c8" },
+  ];
+
+  const outPath = parseFlag("output", "");
+  if (outPath) {
+    const resolvedOut = path.resolve(outPath);
+    fs.mkdirSync(path.dirname(resolvedOut), { recursive: true });
+    fs.writeFileSync(resolvedOut, JSON.stringify(tokens, null, 2), "utf8");
+    console.log(`Wrote ${tokens.length} color tokens to ${resolvedOut}`);
+  } else {
+    const { maxTokenLen, maxLabelLen } = tokens.reduce(
+      (acc, t) => ({
+        maxTokenLen: Math.max(acc.maxTokenLen, t.token.length),
+        maxLabelLen: Math.max(acc.maxLabelLen, t.label.length),
+      }),
+      { maxTokenLen: 0, maxLabelLen: 0 }
+    );
+    console.log(`\nDesign System Color Tokens (light theme defaults)\n`);
+    console.log(`${"Token".padEnd(maxTokenLen + 2)}${"Label".padEnd(maxLabelLen + 2)}Value`);
+    console.log(`${"-".repeat(maxTokenLen + 2)}${"-".repeat(maxLabelLen + 2)}-------`);
+    for (const { token, label, value } of tokens) {
+      console.log(`${token.padEnd(maxTokenLen + 2)}${label.padEnd(maxLabelLen + 2)}${value}`);
+    }
+    console.log("");
+  }
+}
+
+
 function showHelp() {
   console.log("Usage:");
   console.log("  program debug <feature> [--severity info|warn|error] [--sourceType automatic|manual] [--message text]");
   console.log("  program debug dump-log [--sourceType automatic|manual] [--output path] [--sync-cloud] [--approve-delete]");
   console.log("  program debug clear-log");
+  console.log("  program debug color-tokens [--output path]");
   console.log("  program debug enable");
   console.log("  program debug disable");
 }
@@ -268,6 +310,11 @@ if (subcommand === "dump-log") {
 
 if (subcommand === "clear-log") {
   clearLog();
+  process.exit(0);
+}
+
+if (subcommand === "color-tokens") {
+  showColorTokens();
   process.exit(0);
 }
 

@@ -41,6 +41,34 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
   const syncDebugEvents = useUIStore((state) => state.syncDebugEvents);
 
   const [showDebugPanel, setShowDebugPanel] = React.useState(false);
+  const [debugTab, setDebugTab] = React.useState<"sync" | "dsc" | "ui">("sync");
+  const language = useUIStore((state) => state.language);
+  const accessibility = useUIStore((state) => state.accessibility);
+
+  function readCssToken(token: string): string {
+    if (typeof document === "undefined") {
+      return "";
+    }
+
+    return getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+  }
+
+  const dscTokens: Array<{ token: string; label: string; isColor: boolean }> = [
+    { token: "--cf-accent", label: "Accent (MAJOR)", isColor: true },
+    { token: "--cf-accent-strong", label: "Accent Strong", isColor: true },
+    { token: "--cf-accent-minor", label: "Accent Minor (MINOR)", isColor: true },
+    { token: "--cf-text-strong", label: "Text Strong", isColor: true },
+    { token: "--cf-text", label: "Text", isColor: true },
+    { token: "--cf-text-muted", label: "Text Muted", isColor: true },
+    { token: "--cf-surface", label: "Surface", isColor: true },
+    { token: "--cf-surface-strong", label: "Surface Strong", isColor: true },
+    { token: "--cf-surface-muted", label: "Surface Muted", isColor: true },
+    { token: "--cf-border", label: "Border", isColor: true },
+    { token: "--cf-border-strong", label: "Border Strong", isColor: true },
+    { token: "--cf-success", label: "Success", isColor: true },
+    { token: "--cf-font-scale", label: "Font Scale", isColor: false },
+    { token: "--cf-ui-scale", label: "UI Scale", isColor: false },
+  ];
 
   async function handleSyncNow(): Promise<void> {
     setSyncStatus("syncing", "Manual sync in progress...");
@@ -228,27 +256,105 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
 
           {showDebugPanel ? (
             <div className="debug-panel__content">
-              <p><strong>User UID:</strong> {userId ?? "n/a"}</p>
-              <p><strong>Admin Claim:</strong> {isAdmin ? "true" : "false"}</p>
-              <p><strong>Sync Status:</strong> {syncStatus}</p>
-              <p><strong>Sync Message:</strong> {syncMessage ?? "none"}</p>
-              <p><strong>Pending Sync Items:</strong> {pendingChangesCount}</p>
-              <p><strong>Write Count:</strong> {writeCount}</p>
-              <p><strong>Write Budget:</strong> {writeBudgetLimit}</p>
-              <p><strong>Retry Count:</strong> {retryCount}</p>
-              <p><strong>Retry Limit:</strong> {retryLimit}</p>
-              <p><strong>Last Sync Error:</strong> {lastSyncError ?? "none"}</p>
-              <p><strong>Last Sync Error Code:</strong> {lastSyncErrorCode ?? "none"}</p>
-              <p><strong>Permission Denied Sync Blocked:</strong> {permissionDeniedSyncBlocked ? "true" : "false"}</p>
-              <p><strong>Last Sync Time:</strong> {lastSyncTime ?? "never"}</p>
-              <div>
-                <strong>Recent Sync Paths:</strong>
-                <ul className="debug-panel__events">
-                  {syncDebugEvents.slice(0, 10).map((event) => (
-                    <li key={event}>{event}</li>
-                  ))}
-                </ul>
+              <div className="debug-panel__tabs">
+                <button
+                  type="button"
+                  className={`debug-panel__tab${debugTab === "sync" ? " debug-panel__tab--active" : ""}`}
+                  onClick={() => setDebugTab("sync")}
+                >
+                  Sync
+                </button>
+                <button
+                  type="button"
+                  className={`debug-panel__tab${debugTab === "dsc" ? " debug-panel__tab--active" : ""}`}
+                  onClick={() => setDebugTab("dsc")}
+                >
+                  DSC Colors
+                </button>
+                <button
+                  type="button"
+                  className={`debug-panel__tab${debugTab === "ui" ? " debug-panel__tab--active" : ""}`}
+                  onClick={() => setDebugTab("ui")}
+                >
+                  UI State
+                </button>
               </div>
+
+              {debugTab === "sync" ? (
+                <div className="debug-panel__section">
+                  <p><strong>User UID:</strong> {userId ?? "n/a"}</p>
+                  <p><strong>Admin Claim:</strong> {isAdmin ? "true" : "false"}</p>
+                  <p><strong>Sync Status:</strong> {syncStatus}</p>
+                  <p><strong>Sync Message:</strong> {syncMessage ?? "none"}</p>
+                  <p><strong>Pending Sync Items:</strong> {pendingChangesCount}</p>
+                  <p><strong>Write Count:</strong> {writeCount}</p>
+                  <p><strong>Write Budget:</strong> {writeBudgetLimit}</p>
+                  <p><strong>Retry Count:</strong> {retryCount}</p>
+                  <p><strong>Retry Limit:</strong> {retryLimit}</p>
+                  <p><strong>Last Sync Error:</strong> {lastSyncError ?? "none"}</p>
+                  <p><strong>Last Sync Error Code:</strong> {lastSyncErrorCode ?? "none"}</p>
+                  <p><strong>Permission Denied Sync Blocked:</strong> {permissionDeniedSyncBlocked ? "true" : "false"}</p>
+                  <p><strong>Last Sync Time:</strong> {lastSyncTime ?? "never"}</p>
+                  <div>
+                    <strong>Recent Sync Paths:</strong>
+                    <ul className="debug-panel__events">
+                      {syncDebugEvents.slice(0, 10).map((event, idx) => (
+                        <li key={`${idx}-${event}`}>{event}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              ) : null}
+
+              {debugTab === "dsc" ? (
+                <div className="debug-panel__section">
+                  <p className="debug-panel__hint">Live CSS custom property values for the active theme.</p>
+                  <table className="debug-panel__dsc-table">
+                    <thead>
+                      <tr>
+                        <th>Token</th>
+                        <th>Label</th>
+                        <th>Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dscTokens.map(({ token, label, isColor }) => {
+                        const value = readCssToken(token);
+                        return (
+                          <tr key={token}>
+                            <td className="debug-panel__dsc-token">{token}</td>
+                            <td>{label}</td>
+                            <td className="debug-panel__dsc-value">
+                              {isColor && value ? (
+                                <span
+                                  className="debug-panel__dsc-swatch"
+                                  style={{ background: value }}
+                                  title={value}
+                                  aria-hidden="true"
+                                />
+                              ) : null}
+                              <code>{value || "—"}</code>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+
+              {debugTab === "ui" ? (
+                <div className="debug-panel__section">
+                  <p><strong>Theme:</strong> {theme}</p>
+                  <p><strong>Language:</strong> {language}</p>
+                  <p><strong>Color Blind Mode:</strong> {accessibility.colorBlindMode ?? "none"}</p>
+                  <p><strong>Dyslexia Mode:</strong> {accessibility.dyslexiaMode ? "enabled" : "disabled"}</p>
+                  <p><strong>Dyscalculia Mode:</strong> {accessibility.dyscalculiaMode ? "enabled" : "disabled"}</p>
+                  <p><strong>High Contrast Mode:</strong> {accessibility.highContrastMode ? "enabled" : "disabled"}</p>
+                  <p><strong>Font Scale:</strong> {accessibility.fontScale ?? 1}</p>
+                  <p><strong>UI Scale:</strong> {accessibility.uiScale ?? 1}</p>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </section>

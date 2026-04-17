@@ -265,8 +265,13 @@ function showColorTokens() {
     fs.writeFileSync(resolvedOut, JSON.stringify(tokens, null, 2), "utf8");
     console.log(`Wrote ${tokens.length} color tokens to ${resolvedOut}`);
   } else {
-    const maxTokenLen = Math.max(...tokens.map((t) => t.token.length));
-    const maxLabelLen = Math.max(...tokens.map((t) => t.label.length));
+    const { maxTokenLen, maxLabelLen } = tokens.reduce(
+      (acc, t) => ({
+        maxTokenLen: Math.max(acc.maxTokenLen, t.token.length),
+        maxLabelLen: Math.max(acc.maxLabelLen, t.label.length),
+      }),
+      { maxTokenLen: 0, maxLabelLen: 0 }
+    );
     console.log(`\nDesign System Color Tokens (light theme defaults)\n`);
     console.log(`${"Token".padEnd(maxTokenLen + 2)}${"Label".padEnd(maxLabelLen + 2)}Value`);
     console.log(`${"-".repeat(maxTokenLen + 2)}${"-".repeat(maxLabelLen + 2)}-------`);

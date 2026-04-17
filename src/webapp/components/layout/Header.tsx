@@ -298,8 +298,8 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
                   <div>
                     <strong>Recent Sync Paths:</strong>
                     <ul className="debug-panel__events">
-                      {syncDebugEvents.slice(0, 10).map((event) => (
-                        <li key={event}>{event}</li>
+                      {syncDebugEvents.slice(0, 10).map((event, idx) => (
+                        <li key={`${idx}-${event}`}>{event}</li>
                       ))}
                     </ul>
                   </div>

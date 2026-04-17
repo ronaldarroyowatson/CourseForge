@@ -3,6 +3,40 @@ import { describe, expect, it } from "vitest";
 import { inferTocPageRanges, type TocChapter } from "../../src/core/services/textbookAutoExtractionService";
 
 describe("TOC inference rules", () => {
+  it("false-positive guard: does not infer an end page when next boundary is stale or lower", () => {
+    const input: TocChapter[] = [
+      {
+        chapterNumber: "4",
+        title: "Waves",
+        pageStart: 80,
+        sections: [
+          { sectionNumber: "4.1", title: "Intro", pageStart: 85 },
+          { sectionNumber: "4.2", title: "Refraction", pageStart: 70 },
+        ],
+      },
+    ];
+
+    const inferred = inferTocPageRanges(input);
+    expect(inferred[0].sections[0].pageEnd).toBeUndefined();
+  });
+
+  it("false-negative guard: infers end page when a valid next section boundary exists", () => {
+    const input: TocChapter[] = [
+      {
+        chapterNumber: "5",
+        title: "Electricity",
+        pageStart: 100,
+        sections: [
+          { sectionNumber: "5.1", title: "Charge", pageStart: 101 },
+          { sectionNumber: "5.2", title: "Current", pageStart: 110 },
+        ],
+      },
+    ];
+
+    const inferred = inferTocPageRanges(input);
+    expect(inferred[0].sections[0].pageEnd).toBe(109);
+  });
+
   it("infers section end as next section start minus one", () => {
     const input: TocChapter[] = [
       {

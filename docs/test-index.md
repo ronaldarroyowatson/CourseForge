@@ -1,12 +1,12 @@
 # Test Index
 
-Generated: 2026-04-14T03:04:41.359Z
+Generated: 2026-04-17T22:42:02.128Z
 
 ## Summary
 
-- Total test files: 65
-- Unit test files: 43
-- Integration test files: 20
+- Total test files: 75
+- Unit test files: 51
+- Integration test files: 22
 - Rules test files: 2
 - Canonical sample files: 5
 
@@ -22,11 +22,13 @@ Generated: 2026-04-14T03:04:41.359Z
 - tests/core/autoTextbookUploadService.test.ts
 - tests/core/cacheControlService.test.ts
 - tests/core/cacheTelemetryService.test.ts
+- tests/core/coverImageService.test.ts
 - tests/core/debugLogService.test.ts
 - tests/core/designSystemRecovery.test.ts
 - tests/core/designSystemService.test.ts
 - tests/core/documentExtraction.guardrails.test.ts
 - tests/core/documentIngest.extraction.test.ts
+- tests/core/dscDebugReport.test.ts
 - tests/core/equationFormatService.test.ts
 - tests/core/fibonacciLayout.test.ts
 - tests/core/gameTextService.test.ts
@@ -34,12 +36,18 @@ Generated: 2026-04-14T03:04:41.359Z
 - tests/core/i18nService.test.ts
 - tests/core/installerLifecycle.matrix.test.ts
 - tests/core/installerLifecycle.test.ts
+- tests/core/isbnService.test.ts
 - tests/core/metadataCorrectionLearningService.test.ts
 - tests/core/metadataCorrectionSafeguards.test.ts
+- tests/core/metadataCorrectionSyncService.test.ts
 - tests/core/metadataExtractionPipelineService.test.ts
 - tests/core/motionChoreography.test.ts
+- tests/core/ocrCorrectionLearningService.test.ts
+- tests/core/pageRangeCalculator.test.ts
+- tests/core/predictiveText.test.ts
 - tests/core/premiumUsage.limits.test.ts
 - tests/core/presentationService.conversion.test.ts
+- tests/core/programCli.debugReport.test.ts
 - tests/core/programCli.designRecovery.test.ts
 - tests/core/syncNow.safety.test.ts
 - tests/core/syncService.moderationHold.test.ts
@@ -64,6 +72,7 @@ Generated: 2026-04-14T03:04:41.359Z
 - tests/integration/autoTextbookFlow.integration.test.tsx
 - tests/integration/chromeos.deployment.integration.test.ts
 - tests/integration/correctionReviewPanel.integration.test.tsx
+- tests/integration/designSystem.themeBootstrap.integration.test.tsx
 - tests/integration/designSystemSettingsCard.integration.test.tsx
 - tests/integration/documentIngest.panel.integration.test.tsx
 - tests/integration/extension.auth.communication.integration.test.ts
@@ -75,6 +84,7 @@ Generated: 2026-04-14T03:04:41.359Z
 - tests/integration/settings.updater.integration.test.tsx
 - tests/integration/skeleton.render.integration.test.tsx
 - tests/integration/startupSync.probe.test.tsx
+- tests/integration/tocNodeEditor.integration.test.tsx
 - tests/integration/update-status-server.integration.test.ts
 - tests/integration/useRepositories.coverUpload.integration.test.tsx
 - tests/integration/windows.installer.template.integration.test.ts

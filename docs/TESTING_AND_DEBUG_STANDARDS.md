@@ -136,6 +136,25 @@ All major debug workflows should remain available from the CLI through:
 
 When extending debug functionality in the live app, add or update a CLI-equivalent command path.
 
+Unified DSC debug command standard:
+
+- `npm run program -- debug`
+- `npm run program -- debug --enable`
+- `npm run program -- debug --disable`
+- `npm run program -- debug --clear`
+- `npm run program -- debug --report <path>`
+
+The unified debug command must emit a single JSON report that includes:
+
+- locked semantic palette snapshot
+- semantic token resolution map
+- component token maps for buttons, alerts, badges, and inputs
+- fallback chains and fallback reasons
+- contrast checks
+- theme generation summary
+
+The Settings page Debug Log card and the CLI report command must use the same report schema.
+
 ## 9. Source Type Standard
 
 For new capture and ingestion work, use the normalized source type vocabulary:

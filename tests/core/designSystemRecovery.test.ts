@@ -32,9 +32,42 @@ describe("design system recovery and first-run", () => {
 
     expect(result.source).toBe("system");
     expect(result.preferences.useSystemDefaults).toBe(true);
+    expect(result.preferences.colorHarmonyBaseHue).toBe(221.2);
+    expect(result.preferences.colorHarmonySaturation).toBe(83);
+    expect(result.preferences.semanticColors.error).toBe("#EF4444");
+    expect(result.preferences.semanticColors.success).toBe("#22C55E");
+    expect(result.preferences.semanticColors.pending).toBe("#FACC15");
+    expect(result.preferences.semanticColors.new).toBe("#06B6D4");
     expect(result.traces.some((entry) => entry.step === "first-run-detection")).toBe(true);
 
     window.matchMedia = originalMatchMedia;
+  });
+
+  it("migrates older saved design-token profiles to deterministic semantic defaults", () => {
+    window.localStorage.setItem(
+      "courseforge.designTokens.v1",
+      JSON.stringify({
+        ...DEFAULT_DESIGN_TOKEN_PREFERENCES,
+        colorHarmonyBaseHue: 12,
+        colorHarmonySaturation: 40,
+        semanticColors: {
+          ...DEFAULT_DESIGN_TOKEN_PREFERENCES.semanticColors,
+          pending: "#999999",
+          new: "#333333",
+        },
+      })
+    );
+    window.localStorage.setItem("courseforge.designTokens.profile.v1", "semantic-unified-v1");
+
+    const result = initializeDesignTokenPreferencesOnFirstRun();
+
+    expect(result.source).toBe("local");
+    expect(result.preferences.colorHarmonyBaseHue).toBe(221.2);
+    expect(result.preferences.colorHarmonySaturation).toBe(83);
+    expect(result.preferences.semanticColors.pending).toBe("#FACC15");
+    expect(result.preferences.semanticColors.new).toBe("#06B6D4");
+    expect(window.localStorage.getItem("courseforge.designTokens.profile.v1")).toBe("semantic-unified-v2");
+    expect(result.traces.some((entry) => entry.step === "profile-migration")).toBe(true);
   });
 
   it("falls back when system detection APIs are unavailable", () => {
@@ -67,23 +100,23 @@ describe("design system recovery and first-run", () => {
       typeRatio: 0,
       spacingRatio: 20,
       strokePreset: "invalid",
-      semanticColors: { error: "bad", success: "bad", pending: "#ffaa00", new: "#2277bb" },
+      semanticColors: { error: "bad", success: "bad", warning: "#ffaa00", info: "#2277bb", pending: "#ffaa00", new: "#2277bb" },
     });
 
     expect(validation.valid).toBe(false);
     expect(validation.invalidFields.length).toBeGreaterThan(0);
-    expect(validation.repaired.gamma).toBe(2.4);
+    expect(validation.repaired.gamma).toBe(2.6);
   });
 
   it("repairs from corrupted backup payload when possible", () => {
     window.localStorage.setItem(
       "courseforge.designTokens.corruptedBackup.v1",
-      JSON.stringify({ gamma: 3.1, typeRatio: 1.4, spacingRatio: 1.5, motionTimingMs: 300, motionEasing: "ease-in-out", primaryHue: 180, strokePreset: "soft", semanticColors: { error: "#ff0000", success: "#00ff00", pending: "#ffaa00", new: "#2266ff" } })
+      JSON.stringify({ gamma: 3.1, typeRatio: 1.4, spacingRatio: 1.5, motionTimingMs: 300, motionEasing: "ease-in-out", primaryHue: 180, strokePreset: "soft", semanticColors: { error: "#ff0000", success: "#00ff00", warning: "#ffaa00", info: "#2266ff", pending: "#ffaa00", new: "#2266ff" } })
     );
 
     const repaired = tryRepairCorruptedLocalDesignSettings();
     expect(repaired.success).toBe(true);
-    expect(repaired.repaired.gamma).toBe(2.4);
+    expect(repaired.repaired.gamma).toBe(2.6);
     expect(repaired.invalidFields).toContain("gamma");
   });
 
@@ -116,6 +149,8 @@ describe("design system recovery and first-run", () => {
       semanticColors: {
         error: "oops",
         success: "#00ff00",
+        warning: "#ffaa00",
+        info: "#3366ff",
         pending: "#ffaa00",
         new: "#3366ff",
       },

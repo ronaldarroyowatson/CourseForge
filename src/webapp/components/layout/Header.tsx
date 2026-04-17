@@ -15,6 +15,18 @@ import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 
+type UnifiedButtonType = "active" | "new" | "error" | "pending";
+
+function getUnifiedButtonClass(buttonType: UnifiedButtonType, extraClasses: Array<string | false | null | undefined> = []): string {
+  const classes = ["cf-unified-btn", `cf-unified-btn--${buttonType}`];
+  for (const className of extraClasses) {
+    if (className) {
+      classes.push(className);
+    }
+  }
+  return classes.join(" ");
+}
+
 /**
  * Header keeps product identity and a short phase status line.
  */
@@ -214,7 +226,8 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
           {isSettingsView ? (
             <button
               type="button"
-              className="app-nav-button app-nav-button--workspace"
+              data-button-type="new"
+              className={getUnifiedButtonClass("new", ["app-nav-button", "app-nav-button--workspace"])}
               onClick={() => {
                 navigate("/textbooks");
               }}
@@ -235,7 +248,8 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
             {!isSettingsView ? (
               <button
                 type="button"
-                className="app-gear-button"
+                data-button-type="pending"
+                className={getUnifiedButtonClass("pending", ["app-gear-button"])}
                 onClick={() => { navigate("/settings"); }}
                 aria-label="Open settings"
                 title="Settings"
@@ -253,7 +267,8 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
             ) : null}
             <button
               type="button"
-              className={`theme-toggle ${theme === "light" ? "theme-toggle--light" : "theme-toggle--dark"}`}
+              data-button-type="new"
+              className={getUnifiedButtonClass("new", [`theme-toggle ${theme === "light" ? "theme-toggle--light" : "theme-toggle--dark"}`])}
               onClick={() => {
                 void handleThemeToggle();
               }}
@@ -266,7 +281,8 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
             </button>
             <button
               type="button"
-              className="sync-now-button"
+              data-button-type={isSyncing ? "pending" : "active"}
+              className={getUnifiedButtonClass(isSyncing ? "pending" : "active", ["sync-now-button"])}
               onClick={() => {
                 void handleSyncNow();
               }}
@@ -295,19 +311,19 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
           </div>
           <div className="header-upload-monitor__actions">
             {(activeAutoTextbookUpload.status === "preparing" || activeAutoTextbookUpload.status === "uploading") ? (
-              <button type="button" className="btn-secondary" onClick={() => { void handleCancelUpload(); }}>
+              <button type="button" data-button-type="error" className={getUnifiedButtonClass("error")} onClick={() => { void handleCancelUpload(); }}>
                 Cancel Upload
               </button>
             ) : null}
 
             {activeAutoTextbookUpload.status !== "uploading" && activeAutoTextbookUpload.status !== "completed" ? (
-              <button type="button" className="btn-secondary" onClick={() => { void handleDeletePendingUpload(); }}>
+              <button type="button" data-button-type="error" className={getUnifiedButtonClass("error")} onClick={() => { void handleDeletePendingUpload(); }}>
                 Delete Pending Upload
               </button>
             ) : null}
 
             {(activeAutoTextbookUpload.status === "corrupt-restart" || isUploadStuck(activeAutoTextbookUpload)) ? (
-              <button type="button" className="btn-secondary" onClick={() => { void handleForceRemoveUpload(); }}>
+              <button type="button" data-button-type="error" className={getUnifiedButtonClass("error")} onClick={() => { void handleForceRemoveUpload(); }}>
                 Force Remove
               </button>
             ) : null}
@@ -316,12 +332,12 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
               && (activeAutoTextbookUpload.status === "paused"
                 || activeAutoTextbookUpload.status === "failed"
                 || activeAutoTextbookUpload.status === "corrupt-restart") ? (
-              <button type="button" className="btn-secondary" onClick={() => { void handleResumeUpload(); }}>
+              <button type="button" data-button-type="active" className={getUnifiedButtonClass("active")} onClick={() => { void handleResumeUpload(); }}>
                 Resume Upload
               </button>
             ) : null}
             {activeAutoTextbookUpload.status !== "uploading" ? (
-              <button type="button" className="btn-secondary" onClick={() => { clearPersistedAutoTextbookUpload(); }}>
+              <button type="button" data-button-type="new" className={getUnifiedButtonClass("new")} onClick={() => { clearPersistedAutoTextbookUpload(); }}>
                 Dismiss
               </button>
             ) : null}
@@ -336,7 +352,8 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
         <section className="debug-panel">
           <button
             type="button"
-            className="btn-secondary"
+            data-button-type="pending"
+            className={getUnifiedButtonClass("pending")}
             onClick={() => setShowDebugPanel((current) => !current)}
           >
             {showDebugPanel ? "Hide Debug Panel" : "Show Debug Panel"}

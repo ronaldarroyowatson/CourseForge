@@ -3,6 +3,61 @@ import { describe, expect, it } from "vitest";
 import { isTextbookCloudSyncBlocked } from "../../src/core/services/syncService";
 
 describe("syncService moderation cloud hold", () => {
+  it("false-positive guard: does not block when moderation is clear and no block reason exists", () => {
+    const blocked = isTextbookCloudSyncBlocked({
+      id: "tb-clean",
+      sourceType: "auto",
+      originalLanguage: "en",
+      title: "Physics",
+      grade: "8",
+      subject: "Science",
+      edition: "1",
+      publicationYear: 2026,
+      isbnRaw: "",
+      isbnNormalized: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+      pendingSync: true,
+      source: "local",
+      isFavorite: false,
+      isArchived: false,
+      requiresAdminReview: false,
+      imageModerationState: "clear",
+      status: "draft",
+    });
+
+    expect(blocked).toBe(false);
+  });
+
+  it("false-negative guard: blocks when cloudSyncBlockedReason is user_blocked even if status is approved", () => {
+    const blocked = isTextbookCloudSyncBlocked({
+      id: "tb-user-blocked",
+      sourceType: "auto",
+      originalLanguage: "en",
+      title: "Chemistry",
+      grade: "9",
+      subject: "Science",
+      edition: "1",
+      publicationYear: 2026,
+      isbnRaw: "",
+      isbnNormalized: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+      pendingSync: true,
+      source: "local",
+      isFavorite: false,
+      isArchived: false,
+      requiresAdminReview: false,
+      imageModerationState: "clear",
+      status: "approved",
+      cloudSyncBlockedReason: "user_blocked",
+    });
+
+    expect(blocked).toBe(true);
+  });
+
   it("blocks cloud sync while admin review is pending", () => {
     const blocked = isTextbookCloudSyncBlocked({
       id: "tb-1",

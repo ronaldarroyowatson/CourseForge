@@ -11,14 +11,18 @@ const path = require("path");
 const { spawn } = require("child_process");
 const { URL } = require("url");
 const { execSync } = require("child_process");
+const crypto = require("crypto");
 
 // Get webapp path from argument or default
 const webappPath = process.argv[2] || process.cwd();
 const portArg = process.argv[3];
 const defaultPort = 3000;
-const host = process.argv[4] || "localhost";
+const requestedHost = process.argv[4] || "127.0.0.1";
 const requestedInstanceAction = String(process.argv[5] || process.env.COURSEFORGE_INSTANCE_ACTION || "switch").toLowerCase();
 const allowMultipleInstances = String(process.env.COURSEFORGE_ALLOW_MULTI_INSTANCE || "0") === "1";
+const enforceLoopbackHost = String(process.env.COURSEFORGE_ENFORCE_LOOPBACK_HOST || "1") === "1";
+const enforceLoopbackClients = String(process.env.COURSEFORGE_ENFORCE_LOOPBACK_CLIENTS || "1") === "1";
+const allowAggressivePortCleanup = String(process.env.COURSEFORGE_ALLOW_AGGRESSIVE_PORT_CLEANUP || "1") === "1";
 const defaultLatestReleaseEndpoint = "https://api.github.com/repos/ronaldarroyowatson/CourseForge/releases/latest";
 const heartbeatTimeoutMs = Math.max(15000, Number(process.env.COURSEFORGE_HEARTBEAT_TIMEOUT_MS || 45000));
 const latestReleaseRequestTimeoutMs = Math.max(8000, Number(process.env.COURSEFORGE_UPDATE_CHECK_TIMEOUT_MS || 15000));
@@ -35,6 +39,13 @@ const updaterLogPath = path.join(packageRoot, "updater.log");
 const ocrDebugLogPath = path.join(packageRoot, "ocr-debug.log");
 const updaterCheckPath = path.join(packageRoot, "updater-check.json");
 const uploadControlPath = path.join(packageRoot, "upload-control.json");
+const textbookUploadRootPath = path.join(packageRoot, "textbook-upload-store");
+const textbookUploadStatePath = path.join(textbookUploadRootPath, "state.json");
+const textbookUploadActivePath = path.join(textbookUploadRootPath, "active");
+const textbookUploadCommittedPath = path.join(textbookUploadRootPath, "committed");
+const textbookUploadQuarantinePath = path.join(textbookUploadRootPath, "quarantine");
+const textbookUploadQuarantineRetentionMs = Math.max(60 * 1000, Number(process.env.COURSEFORGE_UPLOAD_QUARANTINE_RETENTION_MS || (6 * 60 * 60 * 1000)));
+const textbookUploadLoopBlockThreshold = Math.max(2, Number(process.env.COURSEFORGE_UPLOAD_LOOP_BLOCK_THRESHOLD || 3));
 const instanceLockPath = path.join(packageRoot, "courseforge-instance.lock");
 const instanceId = `instance-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 let manualStageProcess = null;
@@ -42,6 +53,48 @@ let hasActiveHeartbeat = false;
 let lastHeartbeatAt = 0;
 let latestPortHealth = null;
 let latestPortCleanup = null;
+
+function isLoopbackHostName(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
+}
+
+function resolveHostBinding(value) {
+  if (!enforceLoopbackHost) {
+    return value;
+  }
+
+  return isLoopbackHostName(value) ? value : "127.0.0.1";
+}
+
+const host = resolveHostBinding(requestedHost);
+
+function isLoopbackClientAddress(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "127.0.0.1"
+    || normalized === "::1"
+    || normalized === "::ffff:127.0.0.1"
+    || normalized === "localhost";
+}
+
+function applyResponseSecurityHeaders(req, res, finalPort) {
+  const originHeader = req.headers.origin;
+  const allowedOrigins = new Set([
+    `http://127.0.0.1:${finalPort}`,
+    `http://localhost:${finalPort}`,
+    `http://[::1]:${finalPort}`,
+  ]);
+
+  if (typeof originHeader === "string" && allowedOrigins.has(originHeader)) {
+    res.setHeader("Access-Control-Allow-Origin", originHeader);
+    res.setHeader("Vary", "Origin");
+  }
+
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -285,6 +338,10 @@ function findPidByPort(portValue) {
 }
 
 function killProcessOnPort(portValue) {
+  if (!allowAggressivePortCleanup) {
+    return false;
+  }
+
   const pid = findPidByPort(portValue);
   if (!pid || pid === process.pid) {
     return false;
@@ -459,14 +516,360 @@ function tailFileLines(filePath, maxLines) {
   }
 }
 
+function ensureDirectory(dirPath) {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+  } catch (error) {
+    console.error(`[CourseForge server] Failed to ensure directory ${dirPath}:`, error);
+  }
+}
+
+function safeRemovePath(targetPath) {
+  try {
+    fs.rmSync(targetPath, { recursive: true, force: true });
+  } catch (error) {
+    console.error(`[CourseForge server] Failed to remove path ${targetPath}:`, error);
+  }
+}
+
+function safeMovePath(sourcePath, destinationPath) {
+  try {
+    ensureDirectory(path.dirname(destinationPath));
+    fs.renameSync(sourcePath, destinationPath);
+    return true;
+  } catch {
+    try {
+      fs.cpSync(sourcePath, destinationPath, { recursive: true, force: true });
+      safeRemovePath(sourcePath);
+      return true;
+    } catch (error) {
+      console.error(`[CourseForge server] Failed to move ${sourcePath} to ${destinationPath}:`, error);
+      return false;
+    }
+  }
+}
+
+function ensureTextbookUploadStorage() {
+  ensureDirectory(textbookUploadRootPath);
+  ensureDirectory(textbookUploadActivePath);
+  ensureDirectory(textbookUploadCommittedPath);
+  ensureDirectory(textbookUploadQuarantinePath);
+}
+
+function createDefaultTextbookUploadState() {
+  return {
+    updatedAt: new Date(0).toISOString(),
+    corruptedTextbookIds: {},
+    quarantineIndex: [],
+    loopGuards: {},
+  };
+}
+
+function readTextbookUploadState() {
+  ensureTextbookUploadStorage();
+  const fallback = createDefaultTextbookUploadState();
+  const parsed = readJsonFile(textbookUploadStatePath);
+  if (!parsed || typeof parsed !== "object") {
+    return fallback;
+  }
+
+  return {
+    ...fallback,
+    ...parsed,
+    corruptedTextbookIds: typeof parsed.corruptedTextbookIds === "object" && parsed.corruptedTextbookIds !== null
+      ? parsed.corruptedTextbookIds
+      : {},
+    quarantineIndex: Array.isArray(parsed.quarantineIndex) ? parsed.quarantineIndex : [],
+    loopGuards: typeof parsed.loopGuards === "object" && parsed.loopGuards !== null
+      ? parsed.loopGuards
+      : {},
+  };
+}
+
+function writeTextbookUploadState(state) {
+  ensureTextbookUploadStorage();
+  writeJsonFile(textbookUploadStatePath, {
+    ...state,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function stableSortObject(value) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stableSortObject(entry));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const keys = Object.keys(value).sort();
+  const result = {};
+  for (const key of keys) {
+    result[key] = stableSortObject(value[key]);
+  }
+  return result;
+}
+
+function computePayloadHash(payload) {
+  try {
+    const normalized = JSON.stringify(stableSortObject(payload));
+    return crypto.createHash("sha256").update(normalized, "utf8").digest("hex");
+  } catch {
+    return null;
+  }
+}
+
+function makeStructuredUploadError(code, message, statusCode, details = {}) {
+  return {
+    code,
+    message,
+    statusCode,
+    details,
+  };
+}
+
+function isPositiveFiniteInteger(value) {
+  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value > 0;
+}
+
+function validateTextbookUploadPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return makeStructuredUploadError("INVALID_PAYLOAD", "Upload payload must be a JSON object.", 422);
+  }
+
+  const textbookId = typeof payload.textbookId === "string" ? payload.textbookId.trim() : "";
+  const uploadSessionId = typeof payload.uploadSessionId === "string" ? payload.uploadSessionId.trim() : "";
+  const clientId = typeof payload.clientId === "string" ? payload.clientId.trim() : "";
+
+  if (!textbookId || !/^[a-zA-Z0-9._:-]{3,120}$/.test(textbookId)) {
+    return makeStructuredUploadError("INVALID_PAYLOAD", "textbookId is required and must be a stable identifier.", 422, { field: "textbookId" });
+  }
+
+  if (!uploadSessionId || uploadSessionId.length < 6) {
+    return makeStructuredUploadError("INVALID_PAYLOAD", "uploadSessionId is required.", 422, { field: "uploadSessionId" });
+  }
+
+  if (!clientId || clientId.length < 3) {
+    return makeStructuredUploadError("INVALID_PAYLOAD", "clientId is required.", 422, { field: "clientId" });
+  }
+
+  if (!payload.metadata || typeof payload.metadata !== "object") {
+    return makeStructuredUploadError("INVALID_PAYLOAD", "metadata is required.", 422, { field: "metadata" });
+  }
+
+  if (typeof payload.metadata.title !== "string" || !payload.metadata.title.trim()) {
+    return makeStructuredUploadError("INVALID_PAYLOAD", "metadata.title is required.", 422, { field: "metadata.title" });
+  }
+
+  if (!Array.isArray(payload.chunks) || payload.chunks.length === 0) {
+    return makeStructuredUploadError("INVALID_PAYLOAD", "chunks must contain at least one item.", 422, { field: "chunks" });
+  }
+
+  for (let index = 0; index < payload.chunks.length; index += 1) {
+    const chunk = payload.chunks[index];
+    if (!chunk || typeof chunk !== "object") {
+      return makeStructuredUploadError("CORRUPTED_DATA", `chunks[${index}] is not a valid chunk object.`, 422, { field: `chunks[${index}]` });
+    }
+
+    if (typeof chunk.id !== "string" || !chunk.id.trim()) {
+      return makeStructuredUploadError("CORRUPTED_DATA", `chunks[${index}].id is required.`, 422, { field: `chunks[${index}].id` });
+    }
+
+    if (typeof chunk.data !== "string" || !chunk.data.trim()) {
+      return makeStructuredUploadError("CORRUPTED_DATA", `chunks[${index}].data is required.`, 422, { field: `chunks[${index}].data` });
+    }
+
+    if (typeof chunk.sizeBytes !== "undefined" && !isPositiveFiniteInteger(chunk.sizeBytes)) {
+      return makeStructuredUploadError("CORRUPTED_DATA", `chunks[${index}].sizeBytes must be a positive integer.`, 422, { field: `chunks[${index}].sizeBytes` });
+    }
+  }
+
+  if (typeof payload.toc !== "undefined" && !Array.isArray(payload.toc)) {
+    return makeStructuredUploadError("INVALID_PAYLOAD", "toc must be an array when provided.", 422, { field: "toc" });
+  }
+
+  if (typeof payload.ocrBlocks !== "undefined" && !Array.isArray(payload.ocrBlocks)) {
+    return makeStructuredUploadError("INVALID_PAYLOAD", "ocrBlocks must be an array when provided.", 422, { field: "ocrBlocks" });
+  }
+
+  return null;
+}
+
+function registerCorruptedUploadAttempt(state, options) {
+  const payloadHash = options.payloadHash;
+  if (!payloadHash) {
+    return { loopKey: null, blocked: false, attemptCount: 0 };
+  }
+
+  const loopKey = `${options.clientId}::${payloadHash}`;
+  const existing = state.loopGuards[loopKey] || {
+    attemptCount: 0,
+    blocked: false,
+  };
+
+  const attemptCount = Number(existing.attemptCount || 0) + 1;
+  const blocked = Boolean(existing.blocked) || attemptCount >= textbookUploadLoopBlockThreshold;
+  state.loopGuards[loopKey] = {
+    ...existing,
+    textbookId: options.textbookId,
+    payloadHash,
+    lastErrorCode: options.errorCode,
+    attemptCount,
+    blocked,
+    updatedAt: new Date().toISOString(),
+  };
+
+  return { loopKey, blocked, attemptCount };
+}
+
+function getCommittedTextbookRecordPath(textbookId) {
+  return path.join(textbookUploadCommittedPath, `${textbookId}.json`);
+}
+
+function getActiveTextbookPath(textbookId) {
+  return path.join(textbookUploadActivePath, textbookId);
+}
+
+function quarantineTextbookArtifacts(state, options) {
+  const textbookId = options.textbookId;
+  const activePath = getActiveTextbookPath(textbookId);
+  if (!fs.existsSync(activePath)) {
+    return null;
+  }
+
+  const quarantineId = `${textbookId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const quarantinePath = path.join(textbookUploadQuarantinePath, quarantineId);
+  const moved = safeMovePath(activePath, quarantinePath);
+
+  if (!moved) {
+    return null;
+  }
+
+  state.corruptedTextbookIds[textbookId] = {
+    textbookId,
+    reason: options.reason,
+    errorCode: options.errorCode,
+    quarantinedAt: new Date().toISOString(),
+    quarantineId,
+    sessionId: options.uploadSessionId || null,
+  };
+
+  const entry = {
+    quarantineId,
+    textbookId,
+    quarantinePath,
+    reason: options.reason,
+    errorCode: options.errorCode,
+    createdAt: new Date().toISOString(),
+  };
+  state.quarantineIndex.push(entry);
+  writeUpdaterLog(`Quarantined corrupted textbook artifacts. textbookId=${textbookId} quarantineId=${quarantineId} reason=${options.reason}`);
+  return entry;
+}
+
+function purgeQuarantinedUploads(state, options = {}) {
+  ensureTextbookUploadStorage();
+  const retentionMs = Number.isFinite(options.retentionMs)
+    ? Math.max(0, Number(options.retentionMs))
+    : textbookUploadQuarantineRetentionMs;
+  const nowMs = Date.now();
+
+  const kept = [];
+  const removed = [];
+
+  for (const entry of state.quarantineIndex) {
+    const createdAtMs = Date.parse(String(entry?.createdAt || ""));
+    const hasPath = entry && typeof entry.quarantinePath === "string" && fs.existsSync(entry.quarantinePath);
+    const isExpired = Number.isFinite(createdAtMs) ? (nowMs - createdAtMs) >= retentionMs : true;
+
+    if (hasPath && !isExpired) {
+      kept.push(entry);
+      continue;
+    }
+
+    if (hasPath) {
+      safeRemovePath(entry.quarantinePath);
+    }
+    removed.push(entry);
+  }
+
+  state.quarantineIndex = kept;
+
+  for (const textbookId of Object.keys(state.corruptedTextbookIds || {})) {
+    const hasActiveEntry = kept.some((entry) => entry.textbookId === textbookId);
+    if (!hasActiveEntry) {
+      delete state.corruptedTextbookIds[textbookId];
+    }
+  }
+
+  return {
+    removedCount: removed.length,
+    keptCount: kept.length,
+    removed,
+  };
+}
+
+function writeStructuredUploadError(res, error) {
+  res.writeHead(error.statusCode || 422);
+  res.end(JSON.stringify({
+    ok: false,
+    error: {
+      code: error.code,
+      message: error.message,
+      details: error.details || {},
+    },
+  }));
+}
+
+const STALE_UPDATER_PROGRESS_MS = 10 * 60 * 1000;
+
+function normalizeUpdaterProgress(payload, progressPath) {
+  if (!payload || typeof payload !== "object") {
+    return payload;
+  }
+
+  if (!isUpdaterActiveState(payload.state)) {
+    return payload;
+  }
+
+  const updatedAt = Date.parse(String(payload.updatedAt || ""));
+  if (!Number.isFinite(updatedAt)) {
+    return payload;
+  }
+
+  const ageMs = Date.now() - updatedAt;
+  if (ageMs < STALE_UPDATER_PROGRESS_MS) {
+    return payload;
+  }
+
+  const recovered = {
+    ...payload,
+    state: "idle",
+    progressPercent: null,
+    bytesDownloaded: null,
+    downloadSpeedBytesPerSecond: null,
+    message: `Recovered stale updater state (${String(payload.state || "unknown")}) from previous session.`,
+    lastError: payload.lastError || "stale-updater-state-recovered",
+    updatedAt: new Date().toISOString(),
+  };
+
+  writeJsonFile(progressPath, recovered);
+  writeUpdaterLog(`Recovered stale updater status on boot (previousState=${String(payload.state || "unknown")}, ageMs=${ageMs}).`);
+  return recovered;
+}
+
 function readUpdaterProgress() {
   const progressPath = path.join(packageRoot, "updater-status.json");
+  const manifestPath = path.join(packageRoot, "package-manifest.json");
+  const manifest = readJsonFile(manifestPath);
+  const manifestVersion = manifest?.version || null;
   const payload = readJsonFile(progressPath);
   if (!payload || typeof payload !== "object") {
     return {
       state: "idle",
       mode: null,
-      currentVersion: null,
+      currentVersion: manifestVersion,
       latestVersion: null,
       assetName: null,
       assetSizeBytes: null,
@@ -480,7 +883,11 @@ function readUpdaterProgress() {
     };
   }
 
-  return payload;
+  if (!payload.currentVersion && manifestVersion) {
+    payload.currentVersion = manifestVersion;
+  }
+
+  return normalizeUpdaterProgress(payload, progressPath);
 }
 
 function readBootStatus() {
@@ -1128,6 +1535,283 @@ async function handleApiRoute(pathname, url, method, req, res) {
     return;
   }
 
+  if (pathname === "/api/textbook-upload") {
+    if (method !== "POST") {
+      res.writeHead(405);
+      res.end(JSON.stringify({ error: "method not allowed" }));
+      return;
+    }
+
+    let body;
+    try {
+      body = await readJsonRequestBody(req, 1024 * 1024);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.writeHead(message === "request-body-too-large" ? 413 : 400);
+      res.end(JSON.stringify({
+        ok: false,
+        error: {
+          code: "INVALID_PAYLOAD",
+          message,
+        },
+      }));
+      return;
+    }
+
+    ensureTextbookUploadStorage();
+    const state = readTextbookUploadState();
+    purgeQuarantinedUploads(state);
+
+    const payloadHash = computePayloadHash(body);
+    const textbookId = typeof body?.textbookId === "string" ? body.textbookId.trim() : "";
+    const uploadSessionId = typeof body?.uploadSessionId === "string" ? body.uploadSessionId.trim() : "";
+    const clientId = typeof body?.clientId === "string" ? body.clientId.trim() : "unknown-client";
+    const loopKey = payloadHash ? `${clientId}::${payloadHash}` : null;
+    const existingLoop = loopKey ? state.loopGuards[loopKey] : null;
+    if (existingLoop?.blocked) {
+      writeTextbookUploadState(state);
+      writeStructuredUploadError(res, makeStructuredUploadError(
+        "CORRUPTED_UPLOAD_LOOP_BLOCKED",
+        "Repeated corrupted upload attempts detected. Sanitize payload before retrying.",
+        429,
+        { textbookId, uploadSessionId, loopKey }
+      ));
+      return;
+    }
+
+    const validationError = validateTextbookUploadPayload(body);
+    if (validationError) {
+      registerCorruptedUploadAttempt(state, {
+        payloadHash,
+        clientId,
+        textbookId,
+        errorCode: validationError.code,
+      });
+      writeUpdaterLog(`Rejected textbook upload before write. code=${validationError.code} textbookId=${textbookId || "n/a"} sessionId=${uploadSessionId || "n/a"}`);
+      writeTextbookUploadState(state);
+      writeStructuredUploadError(res, validationError);
+      return;
+    }
+
+    if (state.corruptedTextbookIds[textbookId]) {
+      registerCorruptedUploadAttempt(state, {
+        payloadHash,
+        clientId,
+        textbookId,
+        errorCode: "CORRUPTED_EXISTING_RECORD",
+      });
+      writeTextbookUploadState(state);
+      writeStructuredUploadError(res, makeStructuredUploadError(
+        "CORRUPTED_EXISTING_RECORD",
+        "Existing textbook UUID is marked corrupted. Re-upload with a new textbookId and uploadSessionId.",
+        409,
+        { textbookId }
+      ));
+      return;
+    }
+
+    const committedRecordPath = getCommittedTextbookRecordPath(textbookId);
+    if (fs.existsSync(committedRecordPath)) {
+      writeStructuredUploadError(res, makeStructuredUploadError(
+        "DUPLICATE_TEXTBOOK_ID",
+        "A textbook with this UUID already exists. Use a new textbookId.",
+        409,
+        { textbookId }
+      ));
+      return;
+    }
+
+    const activeTextbookPath = getActiveTextbookPath(textbookId);
+    if (fs.existsSync(activeTextbookPath)) {
+      quarantineTextbookArtifacts(state, {
+        textbookId,
+        uploadSessionId,
+        reason: "Detected legacy partial upload artifacts before accepting new upload.",
+        errorCode: "CORRUPTED_EXISTING_RECORD",
+      });
+      registerCorruptedUploadAttempt(state, {
+        payloadHash,
+        clientId,
+        textbookId,
+        errorCode: "CORRUPTED_EXISTING_RECORD",
+      });
+      writeTextbookUploadState(state);
+      writeStructuredUploadError(res, makeStructuredUploadError(
+        "CORRUPTED_EXISTING_RECORD",
+        "Legacy partial upload artifacts were quarantined. Retry with a new textbookId and session.",
+        409,
+        { textbookId }
+      ));
+      return;
+    }
+
+    try {
+      ensureDirectory(activeTextbookPath);
+      writeJsonFile(path.join(activeTextbookPath, "metadata.json"), body.metadata || {});
+      writeJsonFile(path.join(activeTextbookPath, "chunks.json"), body.chunks || []);
+      writeJsonFile(path.join(activeTextbookPath, "toc.json"), body.toc || []);
+      writeJsonFile(path.join(activeTextbookPath, "ocr-blocks.json"), body.ocrBlocks || []);
+      writeJsonFile(path.join(activeTextbookPath, "upload.json"), {
+        textbookId,
+        uploadSessionId,
+        clientId,
+        payloadHash,
+        uploadedAt: new Date().toISOString(),
+      });
+
+      if (body.simulateFailureAfterPartialWrite === true) {
+        throw new Error("simulated-partial-write-failure");
+      }
+
+      const committedPayload = {
+        textbookId,
+        uploadSessionId,
+        clientId,
+        payloadHash,
+        metadata: body.metadata,
+        chunkCount: Array.isArray(body.chunks) ? body.chunks.length : 0,
+        tocCount: Array.isArray(body.toc) ? body.toc.length : 0,
+        ocrBlockCount: Array.isArray(body.ocrBlocks) ? body.ocrBlocks.length : 0,
+        committedAt: new Date().toISOString(),
+      };
+      writeJsonFile(committedRecordPath, committedPayload);
+      safeRemovePath(activeTextbookPath);
+
+      if (loopKey && state.loopGuards[loopKey]) {
+        delete state.loopGuards[loopKey];
+      }
+
+      writeTextbookUploadState(state);
+      writeUpdaterLog(`Accepted textbook upload. textbookId=${textbookId} sessionId=${uploadSessionId} chunks=${committedPayload.chunkCount}`);
+
+      res.writeHead(201);
+      res.end(JSON.stringify({
+        ok: true,
+        textbookId,
+        uploadSessionId,
+        committedAt: committedPayload.committedAt,
+      }));
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      quarantineTextbookArtifacts(state, {
+        textbookId,
+        uploadSessionId,
+        reason: `Upload write failed after partial persistence: ${message}`,
+        errorCode: "CORRUPTED_DATA",
+      });
+      registerCorruptedUploadAttempt(state, {
+        payloadHash,
+        clientId,
+        textbookId,
+        errorCode: "CORRUPTED_DATA",
+      });
+      writeTextbookUploadState(state);
+      writeStructuredUploadError(res, makeStructuredUploadError(
+        "CORRUPTED_DATA",
+        "Partial upload was quarantined after write failure.",
+        500,
+        { textbookId, uploadSessionId }
+      ));
+      return;
+    }
+  }
+
+  if (pathname === "/api/textbook-upload/resume") {
+    if (method !== "POST") {
+      res.writeHead(405);
+      res.end(JSON.stringify({ error: "method not allowed" }));
+      return;
+    }
+
+    let body;
+    try {
+      body = await readJsonRequestBody(req, 64 * 1024);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.writeHead(message === "request-body-too-large" ? 413 : 400);
+      res.end(JSON.stringify({ error: message }));
+      return;
+    }
+
+    const textbookId = typeof body?.textbookId === "string" ? body.textbookId.trim() : "";
+    const uploadSessionId = typeof body?.uploadSessionId === "string" ? body.uploadSessionId.trim() : "";
+    const state = readTextbookUploadState();
+    purgeQuarantinedUploads(state);
+
+    if (!textbookId || !uploadSessionId) {
+      writeStructuredUploadError(res, makeStructuredUploadError(
+        "INVALID_PAYLOAD",
+        "textbookId and uploadSessionId are required to resume uploads.",
+        422
+      ));
+      return;
+    }
+
+    if (state.corruptedTextbookIds[textbookId]) {
+      writeTextbookUploadState(state);
+      writeStructuredUploadError(res, makeStructuredUploadError(
+        "RESUME_BLOCKED_CORRUPTED",
+        "Resume is blocked for corrupted textbook uploads. Start a sanitized upload with new identifiers.",
+        409,
+        { textbookId, uploadSessionId }
+      ));
+      return;
+    }
+
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, textbookId, uploadSessionId }));
+    return;
+  }
+
+  if (pathname === "/api/textbook-upload/purge") {
+    if (method !== "POST") {
+      res.writeHead(405);
+      res.end(JSON.stringify({ error: "method not allowed" }));
+      return;
+    }
+
+    let body;
+    try {
+      body = await readJsonRequestBody(req, 64 * 1024);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.writeHead(message === "request-body-too-large" ? 413 : 400);
+      res.end(JSON.stringify({ error: message }));
+      return;
+    }
+
+    const retentionMs = Number(body?.retentionMs);
+    const state = readTextbookUploadState();
+    const purgeResult = purgeQuarantinedUploads(state, {
+      retentionMs: Number.isFinite(retentionMs) ? retentionMs : textbookUploadQuarantineRetentionMs,
+    });
+    writeTextbookUploadState(state);
+
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      ok: true,
+      ...purgeResult,
+      remainingCorruptedTextbookIds: Object.keys(state.corruptedTextbookIds || {}),
+    }));
+    return;
+  }
+
+  if (pathname === "/api/textbook-upload-state") {
+    const state = readTextbookUploadState();
+    const purgeResult = purgeQuarantinedUploads(state);
+    writeTextbookUploadState(state);
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      ok: true,
+      purge: purgeResult,
+      corruptedTextbookIds: state.corruptedTextbookIds,
+      quarantineCount: state.quarantineIndex.length,
+      loopGuardCount: Object.keys(state.loopGuards || {}).length,
+    }));
+    return;
+  }
+
   if (pathname === "/api/port-health") {
     const requestedPort = Number(url.searchParams.get("port") || port || defaultPort);
     const reason = `api-port-health:${method.toLowerCase()}`;
@@ -1245,6 +1929,14 @@ function startServer(finalPort) {
 
   const server = http.createServer((req, res) => {
     try {
+      if (enforceLoopbackClients && !isLoopbackClientAddress(req.socket?.remoteAddress)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "loopback-only" }));
+        return;
+      }
+
+      applyResponseSecurityHeaders(req, res, finalPort);
+
       const url = new URL(req.url, `http://localhost:${finalPort}`);
       let pathname = url.pathname;
 
@@ -1308,7 +2000,6 @@ function startServer(finalPort) {
         const content = fs.readFileSync(filePath);
         res.writeHead(200, {
           "Content-Type": contentType,
-          "Access-Control-Allow-Origin": "*",
         });
         res.end(content);
       } else {
@@ -1318,7 +2009,6 @@ function startServer(finalPort) {
           const content = fs.readFileSync(indexPath);
           res.writeHead(200, {
             "Content-Type": mimeTypes[".html"],
-            "Access-Control-Allow-Origin": "*",
             "Cache-Control": "no-cache, no-store, must-revalidate",
           });
           res.end(content);
@@ -1343,7 +2033,13 @@ function startServer(finalPort) {
   server.on("error", (err) => {
     if (err && err.code === "EADDRINUSE") {
       console.error(`Port ${finalPort} is already in use.`);
-      writeUpdaterLog(`Port ${finalPort} reported EADDRINUSE. Attempting cleanup and retry.`);
+      writeUpdaterLog(`Port ${finalPort} reported EADDRINUSE. aggressiveCleanup=${allowAggressivePortCleanup}.`);
+      if (!allowAggressivePortCleanup) {
+        clearInterval(idleWatchdog);
+        removeInstanceLockIfOwned(lockData);
+        process.exit(1);
+      }
+
       if (!retryAfterCleanup) {
         retryAfterCleanup = true;
         void cleanupManagedPorts({

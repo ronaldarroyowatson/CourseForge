@@ -194,6 +194,34 @@ describe("autoTextbookUploadService – stuck/pending controls", () => {
     expect(isAutoTextbookUploadStuck(snapshot, Date.now())).toBe(true);
   });
 
+  it("false-positive guard: does not mark a fresh preparing snapshot as stuck", () => {
+    const now = Date.now();
+    const snapshot = makeSnapshot({
+      status: "preparing",
+      updatedAt: new Date(now - 20_000).toISOString(),
+    });
+
+    expect(isAutoTextbookUploadStuck(snapshot, now)).toBe(false);
+  });
+
+  it("false-negative guard: marks preparing snapshot as stuck at threshold boundary", () => {
+    const now = Date.now();
+    const snapshot = makeSnapshot({
+      status: "preparing",
+      updatedAt: new Date(now - 45_000).toISOString(),
+    });
+
+    expect(isAutoTextbookUploadStuck(snapshot, now)).toBe(true);
+  });
+
+  it("false-positive guard: refuses pending-delete while upload is active", async () => {
+    initAutoTextbookUploadTracking(makeSnapshot({ status: "uploading", phase: "uploading" }));
+
+    const deleted = await deletePendingAutoTextbookUpload("should not delete active upload");
+    expect(deleted).toBe(false);
+    expect(readPersistedAutoTextbookUpload()).not.toBeNull();
+  });
+
   it("supports canceling an active upload", async () => {
     initAutoTextbookUploadTracking(makeSnapshot({ status: "uploading", phase: "uploading" }));
     const canceled = await requestCancelAutoTextbookUpload("test cancel");
@@ -221,5 +249,13 @@ describe("autoTextbookUploadService – stuck/pending controls", () => {
     expect(removed).toBe(true);
     expect(readPersistedAutoTextbookUpload()).toBeNull();
     expect(useUIStore.getState().activeAutoTextbookUpload).toBeNull();
+  });
+
+  it("false-negative guard: detects corrupt-restart state and allows force removal", async () => {
+    initAutoTextbookUploadTracking(makeSnapshot({ status: "corrupt-restart", canResume: false }));
+
+    const removed = await forceRemoveAutoTextbookUpload("recover from corrupt restart");
+    expect(removed).toBe(true);
+    expect(readPersistedAutoTextbookUpload()).toBeNull();
   });
 });

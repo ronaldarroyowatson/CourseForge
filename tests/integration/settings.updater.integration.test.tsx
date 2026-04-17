@@ -663,8 +663,11 @@ describe("Settings updater communication", () => {
     expect(page?.getAttribute("data-flow")).toBe("right-to-left");
     expect(grid?.getAttribute("data-flow")).toBe("right-to-left");
     await waitFor(() => {
-      expect(page?.style.getPropertyValue("--cf-settings-surface-bg")).toBe("#FFFFFF");
-      expect(page?.style.getPropertyValue("--cf-settings-surface-border")).not.toBe("");
+      const state = useUIStore.getState();
+      const surfaceBackground = page?.style.getPropertyValue("--cf-settings-surface-bg") ?? "";
+      expect(surfaceBackground).toMatch(/^#[0-9a-fA-F]{6}$/);
+      expect(surfaceBackground).not.toBe(state.designTokens.color.resolved.background);
+      expect(page?.style.getPropertyValue("--cf-settings-surface-border")).toBe(state.designTokens.color.resolved.border);
     });
   });
 });

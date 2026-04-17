@@ -199,6 +199,32 @@ function readLauncherLog(root: string) {
   );
 }
 
+function formatLauncherFailure(root: string, result: ReturnType<typeof spawnSync>) {
+  let logDetails = "<launcher log unavailable>";
+  try {
+    const log = readLauncherLog(root);
+    logDetails = [
+      `used=${log.used}`,
+      `primaryExists=${log.primaryExists}`,
+      `fallbackExists=${log.fallbackExists}`,
+      log.content,
+    ].join("\n");
+  } catch (error) {
+    logDetails = String(error);
+  }
+
+  return [
+    `status=${result.status}`,
+    `signal=${result.signal}`,
+    "stdout:",
+    result.stdout || "<empty>",
+    "stderr:",
+    result.stderr || "<empty>",
+    "log:",
+    logDetails,
+  ].join("\n");
+}
+
 async function waitForCondition(check: () => boolean, timeoutMs = 5000, pollMs = 50) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -336,13 +362,13 @@ describe("portable launcher staged-update flow", () => {
 
     try {
       const result = runLauncher(root, binDir, { robocopyMode: "success" });
+      expect(result.status, formatLauncherFailure(root, result)).toBe(0);
       await waitForFile(join(root, "background-updater.json"), 8000);
       await waitForLogEntry(() => readLauncherLog(root).content, "Active version after apply: 1.2.7", 8000);
       const logDetails = readLauncherLog(root);
       const manifest = JSON.parse(readFileSync(join(root, "package-manifest.json"), "utf8"));
       const updaterMarker = JSON.parse(readFileSync(join(root, "background-updater.json"), "utf8"));
 
-      expect(result.status).toBe(0);
       expectLogPathDiagnostics(logDetails);
       expect(readFileSync(join(root, "webapp", "index.html"), "utf8")).toContain("new version");
       expect(manifest.version).toBe("1.2.7");
@@ -363,11 +389,11 @@ describe("portable launcher staged-update flow", () => {
 
     try {
       const result = runLauncher(root, binDir, { robocopyMode: "fail" });
+      expect(result.status, formatLauncherFailure(root, result)).toBe(0);
       const logDetails = readLauncherLog(root);
       expectLogPathDiagnostics(logDetails);
       const manifest = JSON.parse(readFileSync(join(root, "package-manifest.json"), "utf8"));
 
-      expect(result.status).toBe(0);
       expect(manifest.version).toBe("1.2.6");
       expect(existsSync(pendingDir)).toBe(true);
       expect(existsSync(join(root, "pending-update.json"))).toBe(true);
@@ -386,9 +412,9 @@ describe("portable launcher staged-update flow", () => {
         robocopyMode: "success",
         localAppDataOverride: "",
       });
+      expect(result.status, formatLauncherFailure(root, result)).toBe(0);
       const logDetails = readLauncherLog(root);
 
-      expect(result.status).toBe(0);
       expect(logDetails.used).toBe("fallback");
       expect(logDetails.primaryExists).toBe(false);
       expect(logDetails.fallbackExists).toBe(true);
@@ -406,9 +432,9 @@ describe("portable launcher staged-update flow", () => {
     try {
       existingServer = await startExistingCourseForgeServer(port);
       const result = runLauncher(root, binDir, { robocopyMode: "success" });
+      expect(result.status, formatLauncherFailure(root, result)).toBe(0);
       const logDetails = readLauncherLog(root);
 
-      expect(result.status).toBe(0);
       expect(logDetails.content).toContain(`Existing CourseForge server detected at http://localhost:${port}`);
       expect(logDetails.content).toContain("Reusing running server.");
     } finally {
@@ -425,12 +451,12 @@ describe("portable launcher staged-update flow", () => {
     try {
       blocker = await startBlockingServer(preferredPort);
       const result = runLauncher(root, binDir, { robocopyMode: "success" });
+      expect(result.status, formatLauncherFailure(root, result)).toBe(0);
       const logDetails = readLauncherLog(root);
       await waitForFile(join(root, "server-started.json"), 20000);
       const started = JSON.parse(readFileSync(join(root, "server-started.json"), "utf8")) as { args: string[] };
       const actualPort = Number(started.args[1]);
 
-      expect(result.status).toBe(0);
       expect(actualPort).not.toBe(preferredPort);
       expect(logDetails.content).toContain(`Preferred port ${preferredPort} is busy. Falling back to available local port`);
     } finally {

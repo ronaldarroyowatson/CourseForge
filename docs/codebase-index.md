@@ -877,6 +877,25 @@ Update summary:
 
 Primary file(s):
 
+### Color Harmony Engine And Semantic Token Matrix Upgrade (2026-04-14)
+
+Primary file(s):
+
+- [src/core/services/designSystemService.ts](src/core/services/designSystemService.ts)
+- [src/webapp/components/settings/DesignSystemSettingsCard.tsx](src/webapp/components/settings/DesignSystemSettingsCard.tsx)
+- [src/webapp/components/settings/SettingsPage.tsx](src/webapp/components/settings/SettingsPage.tsx)
+- [src/webapp/styles/globals.css](src/webapp/styles/globals.css)
+- [tests/core/designSystemService.test.ts](tests/core/designSystemService.test.ts)
+- [tests/integration/designSystemSettingsCard.integration.test.tsx](tests/integration/designSystemSettingsCard.integration.test.tsx)
+
+Update summary:
+
+- Expanded the color harmony engine from hue-only anchors to full hue-plus-saturation selection with a radial wheel, locked/free saturation modes, and derived-versus-independent brand color behavior.
+- Reworked design token generation so harmony role ramps, semantic assignment mappings, and component recipe tokens are generated in one pipeline and propagated to CSS custom properties.
+- Rebuilt the Design System Controls overlay around five paired sections: Color Harmony, Color Curve (Gamma), Token Assignment, Card Styling, and Component Previews.
+- Added a semantic token assignment matrix and a broader component preview suite so background, surface, border, text, buttons, cards, inputs, tabs, focus states, and organizer states all render from semantic tokens instead of direct ramp picks.
+- Updated settings-page surfaces and top-bar styling to consume the new semantic/card tokens while preserving the existing two-card DSC expansion model and adaptive settings layout behavior.
+
 - [src/webapp/components/settings/SettingsPage.tsx](src/webapp/components/settings/SettingsPage.tsx)
 - [src/webapp/components/settings/DesignSystemSettingsCard.tsx](src/webapp/components/settings/DesignSystemSettingsCard.tsx)
 - [src/webapp/styles/globals.css](src/webapp/styles/globals.css)
@@ -889,6 +908,23 @@ Update summary:
 - The outer Settings surface now follows special mode rules only for the wrapper card: pure black plus blue border in dark mode, pure white plus blue border in light mode, and no glow/shadow in either mode.
 - Interior settings cards now resolve their own DSC-driven background/effect colors by z-height, using shade-based glow in dark mode and shade-based shadow in light mode, while the Settings Fibonacci grid keeps Sync Safety Status pinned first.
 - Design System Controls preview cards now expose slot metadata for left/right swap choreography, and the swap remains tied to motion-token timing and ease-in-out flow transitions.
+
+### Locked Semantic Palette and Cascading-Failure Debug Pipeline (2026-04-16)
+
+Primary file(s):
+
+- [src/core/services/designSystemService.ts](src/core/services/designSystemService.ts)
+- [src/webapp/components/settings/SettingsPage.tsx](src/webapp/components/settings/SettingsPage.tsx)
+- [scripts/program-cli.mjs](scripts/program-cli.mjs)
+- [tests/core/dscDebugReport.test.ts](tests/core/dscDebugReport.test.ts)
+- [tests/core/programCli.debugReport.test.ts](tests/core/programCli.debugReport.test.ts)
+
+Update summary:
+
+- Locked semantic palette propagation is now treated as authoritative across the DSC pipeline, with explicit debug evidence for requested token, resolved token, computed color, fallback chain, and WCAG contrast.
+- `generateDscDebugReport` now emits deterministic token-resolution records and a `cascadingFailureSummary` block that reports invalid hex values, unexpected fallback usage, token drift, harmony override attempts, cross-mode inconsistencies, and low-contrast text risks.
+- Unified debug controls in settings and CLI now share the same report contract, enabling parity between UI debug generation and `courseforge debug --report` output.
+- New tests enforce the debug schema contract and ensure intentional low-contrast setups are flagged as cascading-failure risks.
 
 ## How to Update This Index
 
@@ -989,6 +1025,21 @@ Update summary:
 - Upload progress is persisted to local storage and mirrored into global UI state through [src/webapp/store/uiStore.ts](src/webapp/store/uiStore.ts), enabling visibility across page navigation.
 - The Auto TOC editor now provides top and bottom save action bars in [src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx](src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx) so long TOC captures no longer force scrolling to the bottom to start upload.
 - Upload telemetry is rendered outside the Auto flow in [src/webapp/components/layout/Header.tsx](src/webapp/components/layout/Header.tsx) and [src/webapp/components/settings/SettingsPage.tsx](src/webapp/components/settings/SettingsPage.tsx), so users can monitor progress while viewing settings/write-rate indicators.
+
+## Updates (2026-04-15)
+
+### Design Token Theme Bootstrap Parity Fix
+
+Primary file(s):
+
+- [src/webapp/store/uiStore.ts](src/webapp/store/uiStore.ts)
+- [tests/integration/designSystem.themeBootstrap.integration.test.tsx](tests/integration/designSystem.themeBootstrap.integration.test.tsx)
+
+Update summary:
+
+- Theme-aware token generation now applies the resolved startup theme before initial design token generation, preventing light-mode token ramps from being applied under dark-mode startup.
+- Theme toggles now regenerate and re-apply design tokens immediately so workspace surfaces, settings surfaces, and DSC controls remain in parity after theme transitions.
+- Added an integration regression test that validates startup defaults, workspace/settings surface parity, DSC base/brand hex controls, and reset-to-defaults color restoration.
 - Resume flow performs a cloud integrity check and local/cloud diff before upload continues, then uploads only missing hierarchy records (textbook/chapter/section) and restarts from a clean cloud hierarchy if corruption/mismatch is detected.
 - Duplicate-resolution behavior now supports preserving both records when Auto metadata collides with an existing manual textbook; the new `keep_both` mode is represented in [src/core/services/autoTextbookConflictService.ts](src/core/services/autoTextbookConflictService.ts) and used by [src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx](src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx).
 - User duplicate-preference memory (for ISBN-scoped keep-both behavior) is handled by the tracked upload service and applied during Auto save decisions.
@@ -1072,3 +1123,50 @@ Update summary:
 - Base/brand color + hue controls were compacted into two paired rows with short hex inputs and explicit layout trace logging.
 - Organizer examples were upgraded from static badges to interactive buttons that obey button behavior settings (hover/squish/press/ripple preview) and emit interaction logs.
 - Global corner radius controls were added for box and button radii with an optional unified toggle, and exported token variables now drive shared box/button corner styling across DSC surfaces.
+
+## Updates (2026-04-15)
+
+### Deterministic Harmony Defaults And Profile Consistency Hotfix
+
+Primary file(s):
+
+- [src/core/services/designSystemService.ts](src/core/services/designSystemService.ts)
+- [src/webapp/components/settings/DesignSystemSettingsCard.tsx](src/webapp/components/settings/DesignSystemSettingsCard.tsx)
+- [src/webapp/store/uiStore.ts](src/webapp/store/uiStore.ts)
+
+Update summary:
+
+- Adjusted deterministic color-harmony defaults so the startup baseline aligns with the specified blue profile (`221.2°` hue with higher default saturation) rather than loading the muted fallback appearance.
+- Updated harmony hex conversion preview to use the intended perceptual lightness baseline so default base-color display matches expected startup values.
+- Aligned deterministic-default metadata and debug profile labeling to `semantic-unified-v2` to prevent version mismatch confusion during manual default application.
+
+### Packaged Updater Stuck-State Recovery Hotfix
+
+Primary file(s):
+
+- [scripts/installer/courseforge-serve.js](scripts/installer/courseforge-serve.js)
+- [scripts/installer/courseforge-serve.cjs](scripts/installer/courseforge-serve.cjs)
+- [docs/updater-maintainer-guide.md](docs/updater-maintainer-guide.md)
+
+Update summary:
+
+- Added stale updater-progress recovery during API bootstrap: active updater states older than the threshold are normalized back to `idle` and persisted.
+- Ensures App Updates no longer remains stuck on inherited in-progress states from prior sessions in packaged installs.
+- Kept `.js` and `.cjs` server implementations behaviorally aligned and documented the recovery rule for future maintainer work.
+
+### Server Upload Corruption Quarantine, Purge, and Loop-Guard Hardening
+
+Primary file(s):
+
+- [scripts/installer/courseforge-serve.js](scripts/installer/courseforge-serve.js)
+- [scripts/installer/courseforge-serve.cjs](scripts/installer/courseforge-serve.cjs)
+- [tests/integration/update-status-server.integration.test.ts](tests/integration/update-status-server.integration.test.ts)
+- [docs/test-index.md](docs/test-index.md)
+
+Update summary:
+
+- Added server-side full-packet validation for textbook upload payloads before persistent write operations begin.
+- Added corrupted-upload quarantine handling with explicit corrupted textbook ID tracking and resume-block behavior.
+- Added purge lifecycle support for quarantined upload artifacts while preserving valid committed records.
+- Added corruption-aware dedupe and upload loop prevention using client-scoped payload hash tracking with structured error codes.
+- Added integration coverage for invalid payload rejection, quarantine/resume blocking, purge outcomes, and repeated corrupted upload loop blocking.

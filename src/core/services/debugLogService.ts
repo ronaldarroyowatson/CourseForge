@@ -79,6 +79,12 @@ const DEBUG_LOG_STATE_KEY = "courseforge.debugLog.entries";
 const DEBUG_LOG_ENABLED_KEY = "courseforge.debugLog.enabled";
 const DEBUG_LAST_UPLOAD_KEY = "courseforge.debugLog.lastUploadTimestamp";
 const DEBUG_POLICY_CACHE_KEY = "courseforge.debugLog.cachedPolicy";
+const DEBUG_LOG_MAX_AGE_DAYS_KEY = "courseforge.debugLog.maxAgeDays";
+
+const RUNAWAY_WINDOW_MS = 1000;
+const RUNAWAY_MAX_APPENDS = 120;
+let runawayWindowStartedAt = 0;
+let runawayWindowCount = 0;
 
 const DEBUG_LOG_IDB_NAME = "courseforge-debug";
 const DEBUG_LOG_IDB_VERSION = 1;
@@ -109,13 +115,20 @@ function estimateEntrySize(entryWithoutSize: Omit<DebugLogEntry, "sizeBytes">): 
 }
 
 function normalizeEntries(entries: DebugLogEntry[], maxTotalBytes: number): DebugLogEntry[] {
+  const storage = safeGetStorage();
+  const maxAgeDaysRaw = storage?.getItem(DEBUG_LOG_MAX_AGE_DAYS_KEY) ?? "";
+  const maxAgeDays = Number(maxAgeDaysRaw);
+  const minTimestamp = Number.isFinite(maxAgeDays) && maxAgeDays > 0
+    ? Date.now() - (Math.round(maxAgeDays) * 24 * 60 * 60 * 1000)
+    : Number.NEGATIVE_INFINITY;
   const sorted = [...entries].sort((left, right) => left.timestamp - right.timestamp);
+  const ageFiltered = sorted.filter((entry) => entry.timestamp >= minTimestamp);
 
   const kept: DebugLogEntry[] = [];
   let total = 0;
 
-  for (let index = sorted.length - 1; index >= 0; index -= 1) {
-    const entry = sorted[index];
+  for (let index = ageFiltered.length - 1; index >= 0; index -= 1) {
+    const entry = ageFiltered[index];
     if (entry.sizeBytes > maxTotalBytes) {
       continue;
     }
@@ -239,6 +252,20 @@ export function setDebugLoggingEnabled(enabled: boolean): void {
   storage.setItem(DEBUG_LOG_ENABLED_KEY, String(enabled));
 }
 
+export function setDebugLogMaxAgeDays(days: number): void {
+  const storage = safeGetStorage();
+  if (!storage) {
+    return;
+  }
+
+  if (!Number.isFinite(days) || days <= 0) {
+    storage.removeItem(DEBUG_LOG_MAX_AGE_DAYS_KEY);
+    return;
+  }
+
+  storage.setItem(DEBUG_LOG_MAX_AGE_DAYS_KEY, String(Math.round(days)));
+}
+
 function readCachedPolicy(): DebugLoggingPolicy {
   const storage = safeGetStorage();
   if (!storage) {
@@ -318,6 +345,17 @@ export async function appendDebugLogEntry(
   input: Omit<DebugLogEntry, "id" | "timestamp" | "sizeBytes"> & { id?: string; timestamp?: number },
   userId?: string | null
 ): Promise<DebugLogEntry | null> {
+  const now = Date.now();
+  if ((now - runawayWindowStartedAt) > RUNAWAY_WINDOW_MS) {
+    runawayWindowStartedAt = now;
+    runawayWindowCount = 0;
+  }
+
+  runawayWindowCount += 1;
+  if (runawayWindowCount > RUNAWAY_MAX_APPENDS) {
+    return null;
+  }
+
   if (!isDebugLoggingEnabled()) {
     return null;
   }

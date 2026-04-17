@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -36,6 +36,26 @@ const uploadServiceMocks = vi.hoisted(() => ({
   resumePersistedAutoTextbookUpload: vi.fn<() => Promise<null>>(async () => null),
 }));
 
+const syncServiceMocks = vi.hoisted(() => ({
+  syncNow: vi.fn(async () => ({
+    success: true,
+    message: "",
+    retryable: false,
+    permissionDenied: false,
+    throttled: false,
+    writeLoopTriggered: false,
+    writeBudgetExceeded: false,
+    writeCount: 0,
+    writeBudgetLimit: 500,
+    readCount: 0,
+    readBudgetLimit: 5000,
+    readBudgetExceeded: false,
+    retryLimit: 3,
+    errorCode: null,
+    pendingCount: 0,
+  })),
+}));
+
 vi.mock("../../src/core/services/autoTextbookUploadService", () => ({
   clearPersistedAutoTextbookUpload: () => uploadServiceMocks.clearPersistedAutoTextbookUpload(),
   hydratePersistedAutoTextbookUpload: () => uploadServiceMocks.hydratePersistedAutoTextbookUpload(),
@@ -44,11 +64,7 @@ vi.mock("../../src/core/services/autoTextbookUploadService", () => ({
 }));
 
 vi.mock("../../src/core/services/syncService", () => ({
-  syncNow: vi.fn(async () => ({
-    success: true, message: "", retryable: false, permissionDenied: false, throttled: false,
-    writeLoopTriggered: false, writeBudgetExceeded: false, writeCount: 0, writeBudgetLimit: 500,
-    readCount: 0, readBudgetLimit: 5000, readBudgetExceeded: false, retryLimit: 3, errorCode: null, pendingCount: 0,
-  })),
+  syncNow: syncServiceMocks.syncNow,
   syncUserData: vi.fn(async () => undefined),
   getPendingSyncDiagnostics: vi.fn(async () => ({ pendingCount: 0, byStore: {} })),
 }));
@@ -87,6 +103,7 @@ function renderHeader(): void {
 
 describe("Header – upload telemetry card Dismiss button (v1.4.51 regression suite)", () => {
   beforeEach(() => {
+    syncServiceMocks.syncNow.mockClear();
     uploadServiceMocks.clearPersistedAutoTextbookUpload.mockClear();
     uploadServiceMocks.hydratePersistedAutoTextbookUpload.mockClear();
     uploadServiceMocks.resumePersistedAutoTextbookUpload.mockClear();
@@ -181,5 +198,35 @@ describe("Header – upload telemetry card Dismiss button (v1.4.51 regression su
     renderHeader();
 
     expect(screen.queryByRole("button", { name: "Resume Upload" })).not.toBeInTheDocument();
+  });
+
+  it("disables Sync Now button while syncing and shows loading label", () => {
+    useUIStore.setState({ isSyncing: true, syncStatus: "syncing" });
+    renderHeader();
+
+    expect(screen.getByRole("button", { name: "Syncing..." })).toBeDisabled();
+  });
+
+  it("runs manual sync when Sync Now is clicked", async () => {
+    useUIStore.setState({ isSyncing: false, syncStatus: "idle" });
+    renderHeader();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Sync Now" }));
+    });
+
+    await waitFor(() => {
+      expect(syncServiceMocks.syncNow).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("renders theme toggle with accessible label", () => {
+    renderHeader();
+
+    const themeToggle = screen.getByRole("button", { name: "Toggle theme" });
+    themeToggle.focus();
+
+    expect(themeToggle).toBeInTheDocument();
+    expect(themeToggle).toHaveFocus();
   });
 });

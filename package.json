@@ -3,6 +3,9 @@
   "version": "1.4.67",
   "private": true,
   "type": "module",
+  "bin": {
+    "courseforge": "./scripts/program-cli.mjs"
+  },
   "engines": {
     "node": ">=20 <25"
   },
@@ -27,6 +30,7 @@
     "test:index": "node scripts/generate-test-index.mjs",
     "test:samples:validate": "node scripts/validate-test-samples.mjs",
     "program": "node scripts/program-cli.mjs",
+    "courseforge": "node scripts/program-cli.mjs",
     "pretest": "node scripts/preflight-port-cleanup.mjs --context pretest",
     "pretest:core": "node scripts/preflight-port-cleanup.mjs --context test:core",
     "pretest:unit": "node scripts/preflight-port-cleanup.mjs --context test:unit",
@@ -93,15 +97,16 @@
     "@modelcontextprotocol/server-filesystem": "^2026.1.14",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
+    "@types/node": "^24.0.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^5.1.4",
     "fake-indexeddb": "^6.0.0",
     "firebase-tools": "^15.10.0",
     "jsdom": "^28.1.0",
+    "playwright-core": "^1.59.1",
     "tsx": "^4.20.0",
     "typescript": "^5.8.2",
-    "@types/node": "^24.0.0",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"
   }

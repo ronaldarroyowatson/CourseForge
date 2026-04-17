@@ -1,6 +1,6 @@
 {
-  "context": "test:rules",
-  "at": "2026-04-14T03:18:10.095Z",
+  "context": "test:integration",
+  "at": "2026-04-17T23:14:30.715Z",
   "strictMode": false,
   "ports": [
     3000,

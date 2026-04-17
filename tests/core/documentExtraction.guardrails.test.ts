@@ -7,6 +7,43 @@ import {
 } from "../../functions/src/documentExtraction";
 
 describe("document extraction guardrails", () => {
+  it("false-positive guard: accepts valid subject-aligned worksheet content", () => {
+    const quality = analyzeDocumentQuality({
+      fileName: "science-worksheet.txt",
+      mimeType: "text/plain",
+      text: "Chapter 1 The Scientific Method\nQuestion 1: What is a hypothesis?\nAnswer: A testable prediction.",
+      context: {
+        textbookSubject: "Science",
+        textbookTitle: "Physical Science",
+        chapterTitle: "The Scientific Method",
+      },
+    });
+
+    expect(quality.accepted).toBe(true);
+    expect(quality.issues.some((issue) => issue.code === "subject_mismatch")).toBe(false);
+    expect(quality.issues.some((issue) => issue.code === "code_like_content")).toBe(false);
+  });
+
+  it("false-negative guard: blocks strongly code-like content even with textbook context", () => {
+    const quality = analyzeDocumentQuality({
+      fileName: "science-notes.txt",
+      mimeType: "text/plain",
+      text: [
+        "function calculateForce(mass, acceleration) {",
+        "  return mass * acceleration;",
+        "}",
+        "const result = calculateForce(2, 3);",
+      ].join("\n"),
+      context: {
+        textbookSubject: "Science",
+        chapterTitle: "Forces",
+      },
+    });
+
+    expect(quality.accepted).toBe(false);
+    expect(quality.issues.some((issue) => issue.code === "code_like_content")).toBe(true);
+  });
+
   it("detects question pages followed by answer pages", () => {
     const text = `Questions\n1. What is erosion?\n2. What causes weathering?\n\nAnswers\n1. Erosion is the movement of sediment.\n2. Weathering breaks rock into smaller pieces.`;
 

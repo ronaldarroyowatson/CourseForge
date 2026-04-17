@@ -50,6 +50,12 @@ describe("metadataExtractionPipelineService", () => {
     expect(result.result.source).toBe("vision");
     expect(result.result.title).toBe("Algebra 1");
     expect(ocrMock).not.toHaveBeenCalled();
+
+    const runtime = readMetadataPipelineRuntimeStatus();
+    expect(runtime.path).toBe("vision_only");
+    expect(runtime.stage).toBe("completed");
+    expect(runtime.ocr.attemptCount).toBe(0);
+    expect(runtime.secondaryAgent.lastError).toBeNull();
   });
 
   it("cross-validates a high-confidence vision subject against screenshot raw text", async () => {
@@ -328,6 +334,65 @@ describe("metadataExtractionPipelineService", () => {
     expect(result.result.source).toBe("ocr");
     expect(result.originalOcrOutput?.providerId).toBe("local_tesseract");
     expect(result.result.title).toBeTruthy();
+
+    const runtime = readMetadataPipelineRuntimeStatus();
+    expect(runtime.path).toBe("ocr_only");
+    expect(runtime.stage).toBe("completed");
+    expect(runtime.ocr.attemptCount).toBe(3);
+    expect(runtime.ocr.providerId).toBe("local_tesseract");
+  });
+
+  it("false-positive guard: does not trigger OCR fallback for valid high-confidence vision metadata", async () => {
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "Biology Foundations",
+            publisher: "CourseForge Press",
+            confidence: 0.89,
+            rawText: "Biology Foundations",
+          },
+        },
+      },
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "cover", publisherHint: null }
+    );
+
+    expect(result.result.source).toBe("vision");
+    expect(ocrMock).not.toHaveBeenCalled();
+  });
+
+  it("false-negative guard: detects invalid vision payload and activates OCR fallback", async () => {
+    callableMock.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          metadata: {
+            title: "",
+            publisher: "",
+            confidence: 0.95,
+            rawText: "",
+          },
+        },
+      },
+    });
+
+    ocrMock.mockResolvedValue({
+      text: "Chemistry Student Edition",
+      providerId: "local_tesseract",
+    });
+
+    const result = await extractMetadataWithOcrFallbackFromDataUrl(
+      "data:image/png;base64,AAA",
+      { pageType: "title", publisherHint: null }
+    );
+
+    expect(result.result.source).toBe("ocr");
+    expect(ocrMock).toHaveBeenCalledTimes(3);
   });
 
   it("falls back to OCR when vision misses required metadata fields", async () => {

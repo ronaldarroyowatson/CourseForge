@@ -30,6 +30,7 @@ export {
   getDebugLogStorageStats,
   getDebugLogTotalBytes,
   isDebugLoggingEnabled,
+  setDebugLogMaxAgeDays,
   setDebugLoggingEnabled,
   uploadAndClearDebugLogs,
 } from "./debugLogService";

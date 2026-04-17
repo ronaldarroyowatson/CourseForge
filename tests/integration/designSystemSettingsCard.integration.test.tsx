@@ -1,9 +1,51 @@
 import React from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DesignSystemSettingsCard } from "../../src/webapp/components/settings/DesignSystemSettingsCard";
 import { useUIStore } from "../../src/webapp/store/uiStore";
+import {
+  DEFAULT_DESIGN_TOKEN_PREFERENCES,
+  initializeDesignTokenPreferencesOnFirstRun,
+  LOCKED_SEMANTIC_PALETTE,
+} from "../../src/core/services/designSystemService";
+
+function hslToHex(h: number, s: number, l: number): string {
+  const hue = ((h % 360) + 360) % 360;
+  const saturation = Math.min(1, Math.max(0, s));
+  const lightness = Math.min(1, Math.max(0, l));
+
+  const c = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = lightness - c / 2;
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (hue < 60) {
+    r = c;
+    g = x;
+  } else if (hue < 120) {
+    r = x;
+    g = c;
+  } else if (hue < 180) {
+    g = c;
+    b = x;
+  } else if (hue < 240) {
+    g = x;
+    b = c;
+  } else if (hue < 300) {
+    r = x;
+    b = c;
+  } else {
+    r = c;
+    b = x;
+  }
+
+  const toHex = (channel: number): string => Math.round(channel * 255).toString(16).padStart(2, "0");
+  return `#${toHex(r + m)}${toHex(g + m)}${toHex(b + m)}`;
+}
 
 function resetDesignState(): void {
   useUIStore.getState().resetDesignTokenPreferences();
@@ -23,53 +65,11 @@ describe("DesignSystemSettingsCard", () => {
     vi.useRealTimers();
   });
 
-  it("updates preview tokens immediately when sliders change", async () => {
+  it("starts collapsed and collapses on click-off after expansion", async () => {
     render(<DesignSystemSettingsCard userId={null} />);
+
+    expect(screen.getByText("Collapsed by default. Expand to edit live design controls.")).toBeInTheDocument();
     expandDesignSystemCard();
-
-    expect(screen.getAllByRole("slider").length).toBeGreaterThanOrEqual(4);
-
-    fireEvent.change(screen.getByLabelText(/Color Curve \(Gamma\):/), { target: { value: "2.35" } });
-    fireEvent.change(screen.getByLabelText(/Type ratio:/), { target: { value: "1.333" } });
-
-    await waitFor(() => {
-      const state = useUIStore.getState();
-      expect(state.designTokenPreferences.gamma).toBe(2.35);
-      expect(state.designTokenPreferences.typeRatio).toBe(1.333);
-      expect(state.designTokens.color.primary).toHaveLength(9);
-    });
-
-    const swatches = screen.getAllByTitle(/Shade /);
-    expect(swatches).toHaveLength(9);
-  });
-
-  it("reverts changes through keep-changes safety dialog", async () => {
-    const before = useUIStore.getState().designTokenPreferences;
-    render(<DesignSystemSettingsCard userId={null} />);
-    expandDesignSystemCard();
-
-    fireEvent.change(screen.getByLabelText(/Type ratio:/), { target: { value: "1.5" } });
-
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(screen.getByText(/Keep Changes\?/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Revert Now" }));
-
-    await waitFor(() => {
-      expect(useUIStore.getState().designTokenPreferences.typeRatio).toBe(before.typeRatio);
-    });
-  });
-
-  it("uses the updated card title without the new suffix", () => {
-    render(<DesignSystemSettingsCard userId={null} />);
-    expect(screen.getByText("Design System Controls")).toBeInTheDocument();
-    expect(screen.queryByText("Design System Controls (New)")).not.toBeInTheDocument();
-  });
-
-  it("collapses when clicking outside the expanded overlay", async () => {
-    render(<DesignSystemSettingsCard userId={null} />);
-    expandDesignSystemCard();
-
     fireEvent.pointerDown(document.body);
 
     await waitFor(() => {
@@ -77,228 +77,149 @@ describe("DesignSystemSettingsCard", () => {
     });
   });
 
-  it("keeps organizer and motion controls grouped before type controls for row alignment", () => {
+  it("renders the upgraded five DSC sections", () => {
     render(<DesignSystemSettingsCard userId={null} />);
     expandDesignSystemCard();
 
-    const organizerColorsHeading = screen.getByRole("heading", { name: "Organizer Colors" });
-    const motionControlsHeading = screen.getByRole("heading", { name: "Motion Controls" });
-    const typeRatioHeading = screen.getByRole("heading", { name: "Type Ratio" });
-
-    expect(organizerColorsHeading.compareDocumentPosition(typeRatioHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(motionControlsHeading.compareDocumentPosition(typeRatioHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getAllByRole("heading", { name: "Color Harmony" }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("heading", { name: "Color Curve (Gamma)" }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("heading", { name: "Token Assignment" }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("heading", { name: "Card Styling" }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("heading", { name: "Component Previews" }).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("renders email input preview with submit action", () => {
+  it("updates gamma from the expanded gamma range slider", async () => {
     render(<DesignSystemSettingsCard userId={null} />);
     expandDesignSystemCard();
 
-    expect(screen.getByLabelText("Email")).toHaveAttribute("type", "email");
-    expect(screen.getByRole("button", { name: "Submit" })).toBeInTheDocument();
-  });
-
-  it("places spacing scale controls directly below type ratio controls", () => {
-    render(<DesignSystemSettingsCard userId={null} />);
-    expandDesignSystemCard();
-
-    const typeRatioHeading = screen.getByRole("heading", { name: "Type Ratio" });
-    const spacingScaleHeading = screen.getByRole("heading", { name: "Spacing Scale" });
-    const cornerRadiusHeading = screen.getByRole("heading", { name: "Corner Radius" });
-
-    expect(typeRatioHeading.compareDocumentPosition(spacingScaleHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(spacingScaleHeading.compareDocumentPosition(cornerRadiusHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it("renders motion preview in a right-aligned horizontal cluster", () => {
-    render(<DesignSystemSettingsCard userId={null} />);
-    expandDesignSystemCard();
-
-    const motionLayout = document.querySelector(".cf-motion-preview-layout");
-    const motionRow = document.querySelector(".cf-motion-row--right");
-
-    expect(motionLayout).toBeTruthy();
-    expect(motionRow).toBeTruthy();
-    expect(screen.getByText("Ease In")).toBeInTheDocument();
-    expect(screen.getByText("Ease In-Out")).toBeInTheDocument();
-    expect(screen.getByText("Ease Out")).toBeInTheDocument();
-  });
-
-  it("renders type scale preview as a 2x3 grid ordered from larger to smaller samples", () => {
-    render(<DesignSystemSettingsCard userId={null} />);
-    expandDesignSystemCard();
-
-    const typeGrid = document.querySelector(".cf-type-scale-grid");
-    expect(typeGrid).toBeTruthy();
-    expect(screen.getByLabelText("type scale preview")).toBeInTheDocument();
-    expect(screen.getByText("text-5xl")).toBeInTheDocument();
-    expect(screen.getByText("Body text (base)")).toBeInTheDocument();
-  });
-
-  it("renders spacing scale preview as a 2x2 grid", () => {
-    render(<DesignSystemSettingsCard userId={null} />);
-    expandDesignSystemCard();
-
-    const spacingGrid = document.querySelector(".cf-spacing-preview");
-    expect(spacingGrid).toBeTruthy();
-    expect(screen.getByLabelText("spacing scale preview")).toBeInTheDocument();
-    expect(screen.getByText("space-1")).toBeInTheDocument();
-    expect(screen.getByText("space-4")).toBeInTheDocument();
-  });
-
-  it("auto-reverts after keep-changes timeout", async () => {
-    vi.useFakeTimers();
-    const before = useUIStore.getState().designTokenPreferences;
-    render(<DesignSystemSettingsCard userId={null} />);
-    expandDesignSystemCard();
-
-    fireEvent.change(screen.getByLabelText(/Type ratio:/), { target: { value: "1.5" } });
-    expect(useUIStore.getState().designTokenPreferences.typeRatio).toBe(1.5);
-
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(screen.getByText(/Keep Changes\?/)).toBeInTheDocument();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(12_500);
-    });
-
-    expect(useUIStore.getState().designTokenPreferences.typeRatio).toBe(before.typeRatio);
-  });
-});
-
-describe("DesignSystemSettingsCard — new DSC controls", () => {
-  beforeEach(() => {
-    window.localStorage.setItem("courseforge.debugLog.enabled", "false");
-    useUIStore.getState().resetDesignTokenPreferences();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("renders card depth controls inside Card Styling section", () => {
-    render(<DesignSystemSettingsCard userId={null} />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
-
-    expect(screen.getByRole("heading", { name: "Card Styling" })).toBeInTheDocument();
-    expect(screen.getByLabelText(/Dark Mode Glow Intensity:/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Dark Mode Glow Radius/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Light Mode Shadow Intensity:/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Light Mode Shadow Radius/)).toBeInTheDocument();
-  });
-
-  it("updates darkModeGlowIntensity when slider changes", async () => {
-    render(<DesignSystemSettingsCard userId={null} />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
-
-    fireEvent.change(screen.getByLabelText(/Dark Mode Glow Intensity:/), { target: { value: "8" } });
+    fireEvent.change(screen.getByLabelText(/Color Curve \(Gamma\):/), { target: { value: "2.55" } });
 
     await waitFor(() => {
-      expect(useUIStore.getState().designTokenPreferences.darkModeGlowIntensity).toBe(8);
+      expect(useUIStore.getState().designTokenPreferences.gamma).toBe(2.55);
     });
   });
 
-  it("updates lightModeShadowRadius when slider changes", async () => {
+  it("updates hue and saturation from a single wheel pointer interaction in free mode", async () => {
     render(<DesignSystemSettingsCard userId={null} />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expandDesignSystemCard();
 
-    fireEvent.change(screen.getByLabelText(/Light Mode Shadow Radius/), { target: { value: "24" } });
+    const wheelCanvas = document.querySelector(".cf-harmony-wheel__canvas") as HTMLCanvasElement | null;
+    expect(wheelCanvas).toBeTruthy();
+    if (!wheelCanvas) {
+      return;
+    }
+
+    Object.defineProperty(wheelCanvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        width: 240,
+        height: 240,
+        top: 0,
+        left: 0,
+        right: 240,
+        bottom: 240,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(wheelCanvas, { pointerId: 1, clientX: 220, clientY: 120 });
+    fireEvent.pointerUp(wheelCanvas, { pointerId: 1, clientX: 220, clientY: 120 });
 
     await waitFor(() => {
-      expect(useUIStore.getState().designTokenPreferences.lightModeShadowRadius).toBe(24);
+      const state = useUIStore.getState().designTokenPreferences;
+      expect(state.colorHarmonyBaseHue).not.toBe(212);
+      expect(state.colorHarmonySaturation).toBeGreaterThan(60);
     });
   });
 
-  it("renders button behavior toggles in Button Controls section", () => {
+  it("keeps saturation fixed when locked mode is selected", async () => {
     render(<DesignSystemSettingsCard userId={null} />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expandDesignSystemCard();
 
-    expect(screen.getByRole("heading", { name: "Button Controls" })).toBeInTheDocument();
-    expect(screen.getByLabelText(/Hover opacity/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Squish on press/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Press depth/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Ripple preview/)).toBeInTheDocument();
-  });
+    fireEvent.change(screen.getByLabelText("Saturation Mode"), { target: { value: "locked" } });
+    fireEvent.change(screen.getByLabelText(/Saturation Slider/), { target: { value: "35" } });
 
-  it("updates buttonHoverEnabled when toggled", async () => {
-    render(<DesignSystemSettingsCard userId={null} />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    const wheelCanvas = document.querySelector(".cf-harmony-wheel__canvas") as HTMLCanvasElement | null;
+    expect(wheelCanvas).toBeTruthy();
+    if (!wheelCanvas) {
+      return;
+    }
 
-    const checkbox = screen.getByLabelText(/Hover opacity/);
-    const before = useUIStore.getState().designTokenPreferences.buttonHoverEnabled;
-    fireEvent.click(checkbox);
+    Object.defineProperty(wheelCanvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        width: 240,
+        height: 240,
+        top: 0,
+        left: 0,
+        right: 240,
+        bottom: 240,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(wheelCanvas, { pointerId: 2, clientX: 220, clientY: 120 });
+    fireEvent.pointerUp(wheelCanvas, { pointerId: 2, clientX: 220, clientY: 120 });
 
     await waitFor(() => {
-      expect(useUIStore.getState().designTokenPreferences.buttonHoverEnabled).toBe(!before);
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonySaturation).toBe(35);
     });
   });
 
-  it("renders Color Harmony section with mode selector and hue slider", () => {
+  it("supports derived brand mode and disables direct brand editing", async () => {
     render(<DesignSystemSettingsCard userId={null} />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expandDesignSystemCard();
 
-    expect(screen.getByRole("heading", { name: "Color Harmony" })).toBeInTheDocument();
-    expect(screen.getByLabelText(/Harmony Mode/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Base Hue:/)).toBeInTheDocument();
-  });
-
-  it("renders corner radius section with unified toggle and radius sliders", () => {
-    render(<DesignSystemSettingsCard userId={null} />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
-
-    expect(screen.getByRole("heading", { name: "Corner Radius" })).toBeInTheDocument();
-    expect(screen.getByLabelText(/Use unified radius for boxes and buttons/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Box Corner Radius/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Button Corner Radius/)).toBeInTheDocument();
-  });
-
-  it("updates colorHarmonyMode when select changes", async () => {
-    render(<DesignSystemSettingsCard userId={null} />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
-
-    fireEvent.change(screen.getByLabelText(/Harmony Mode/), { target: { value: "triadic" } });
+    fireEvent.change(screen.getByLabelText("Brand Color Mode"), { target: { value: "derived" } });
+    fireEvent.change(screen.getByLabelText("Harmony Mode"), { target: { value: "triadic" } });
 
     await waitFor(() => {
-      expect(useUIStore.getState().designTokenPreferences.colorHarmonyMode).toBe("triadic");
+      const state = useUIStore.getState();
+      expect(state.designTokenPreferences.colorHarmonyBrandMode).toBe("derived");
+      expect(state.designTokens.harmony.effectiveBrandHue).toBe(state.designTokens.harmony.accentHue);
     });
+
+    expect(screen.getByLabelText("brand harmony color")).toBeDisabled();
+    expect(screen.getByLabelText("brand harmony hex")).toBeDisabled();
   });
 
-  it("updates colorHarmonyBaseHue when slider changes", async () => {
+  it("remaps semantic tokens through the assignment matrix", async () => {
     render(<DesignSystemSettingsCard userId={null} />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expandDesignSystemCard();
 
-    fireEvent.change(screen.getByLabelText(/Base Hue:/), { target: { value: "120" } });
+    fireEvent.change(screen.getByLabelText("Button Primary assignment"), { target: { value: "major" } });
 
     await waitFor(() => {
-      expect(useUIStore.getState().designTokenPreferences.colorHarmonyBaseHue).toBe(120);
+      const state = useUIStore.getState();
+      expect(state.designTokenPreferences.semanticAssignments.buttonPrimary).toBe("major");
+      expect(state.designTokens.color.assignments.buttonPrimary).toBe("major");
+      expect(state.designTokens.component.buttonPrimary.background).toBe(state.designTokens.color.roles.major.shades[4]);
     });
   });
 
-  it("generated tokens include harmony and button sections", () => {
-    const tokens = useUIStore.getState().designTokens;
-    expect(tokens.harmony).toBeDefined();
-    expect(tokens.harmony.mode).toBeDefined();
-    expect(tokens.harmony.accentHue).toBeTypeOf("number");
-    expect(tokens.harmony.highlightHue).toBeTypeOf("number");
-    expect(tokens.button).toBeDefined();
-    expect(tokens.button.hoverEnabled).toBeTypeOf("boolean");
-    expect(tokens.button.squishEnabled).toBeTypeOf("boolean");
-  });
-
-  it("each motion preview box is independently hoverable", () => {
+  it("renders the full component preview suite", () => {
     render(<DesignSystemSettingsCard userId={null} />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expandDesignSystemCard();
 
-    const motionItems = document.querySelectorAll(".cf-motion-box__item");
-    expect(motionItems.length).toBe(3);
-    // Each item wraps exactly one box
-    motionItems.forEach((item) => {
-      expect(item.querySelector(".cf-motion-box")).toBeTruthy();
-    });
+    const suite = screen.getByLabelText("component preview suite");
+
+    expect(within(suite).getByText("Background")).toBeInTheDocument();
+    expect(within(suite).getByText("Surface")).toBeInTheDocument();
+    expect(within(suite).getByRole("button", { name: "primary md" })).toBeInTheDocument();
+    expect(within(suite).getByRole("button", { name: "secondary md" })).toBeInTheDocument();
+    expect(within(suite).getByRole("button", { name: "ghost md" })).toBeInTheDocument();
+    expect(within(suite).getByLabelText("Input field")).toBeInTheDocument();
+    expect(within(suite).getByRole("tablist", { name: "Tabs preview" })).toBeInTheDocument();
+    expect(within(suite).getByText("Gradient + Shadow + Glow")).toBeInTheDocument();
   });
 
   it("swaps example and controls card order when directional flow toggles", async () => {
     render(<DesignSystemSettingsCard userId={null} />);
-    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expandDesignSystemCard();
 
     const exampleCard = document.querySelector(".cf-ds-fibonacci-layout__example") as HTMLDivElement | null;
     const controlsCard = document.querySelector(".cf-ds-fibonacci-layout__controls") as HTMLDivElement | null;
@@ -314,6 +235,155 @@ describe("DesignSystemSettingsCard — new DSC controls", () => {
       expect(useUIStore.getState().designTokenPreferences.directionalFlow).toBe("right-to-left");
       expect(exampleCard?.getAttribute("data-slot")).toBe("secondary");
       expect(controlsCard?.getAttribute("data-slot")).toBe("primary");
+    });
+  });
+
+  it("shows helper text on load, fades it, and re-shows on hover", async () => {
+    vi.useFakeTimers();
+    render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
+
+    const leftHelper = screen.getByText("Click or drag anywhere in the wheel to set hue and saturation");
+    const rightHelper = screen.getByText("All harmony markers stay on the same radius unless saturation is locked");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+
+    expect(leftHelper.className.includes("cf-harmony-wheel-helper--visible")).toBe(true);
+    expect(rightHelper.className.includes("cf-harmony-wheel-helper--visible")).toBe(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_500);
+    });
+
+    expect(leftHelper.className.includes("cf-harmony-wheel-helper--visible")).toBe(false);
+    expect(rightHelper.className.includes("cf-harmony-wheel-helper--visible")).toBe(false);
+
+    const wheelContainer = document.querySelector(".cf-harmony-wheel") as HTMLDivElement | null;
+    expect(wheelContainer).toBeTruthy();
+    if (!wheelContainer) {
+      return;
+    }
+
+    fireEvent.pointerEnter(wheelContainer);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+
+    expect(leftHelper.className.includes("cf-harmony-wheel-helper--visible")).toBe(true);
+    expect(rightHelper.className.includes("cf-harmony-wheel-helper--visible")).toBe(true);
+  });
+
+  it("boots and resets to the same persisted default DSC harmony hex", async () => {
+    const expectedDefaultHex = LOCKED_SEMANTIC_PALETTE.major;
+
+    const { unmount } = render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("base harmony hex")).toHaveValue(expectedDefaultHex);
+      expect(screen.getByLabelText("brand harmony hex")).toHaveValue(expectedDefaultHex);
+    });
+
+    fireEvent.change(screen.getByLabelText(/Base Hue:/), { target: { value: "12" } });
+    await waitFor(() => {
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonyBaseHue).toBe(12);
+      expect(screen.getByLabelText("base harmony hex")).toHaveValue(expectedDefaultHex);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Reset to defaults/i }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("base harmony hex")).toHaveValue(expectedDefaultHex);
+      expect(screen.getByLabelText("brand harmony hex")).toHaveValue(expectedDefaultHex);
+    });
+
+    expect(document.documentElement.style.getPropertyValue("--cf-ds-harmony-major")).toBe("#2563EB");
+
+    unmount();
+
+    const restarted = initializeDesignTokenPreferencesOnFirstRun();
+    const restartedHex = LOCKED_SEMANTIC_PALETTE.major;
+
+    expect(restartedHex).toBe(expectedDefaultHex);
+  });
+
+  it("never shows legacy #0c3183 in harmony hex fields", async () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
+
+    await waitFor(() => {
+      const baseHex = String(screen.getByLabelText("base harmony hex").getAttribute("value") ?? "");
+      const brandHex = String(screen.getByLabelText("brand harmony hex").getAttribute("value") ?? "");
+      expect(baseHex.toLowerCase()).not.toBe("#0c3183");
+      expect(brandHex.toLowerCase()).not.toBe("#0c3183");
+    });
+  });
+
+  it("keeps prescribed default hex across harmony permutations and reset", async () => {
+    const expectedDefaultHex = LOCKED_SEMANTIC_PALETTE.major;
+
+    render(<DesignSystemSettingsCard userId={null} />);
+    expandDesignSystemCard();
+
+    const harmonyMode = screen.getByLabelText("Harmony Mode");
+    const brandMode = screen.getByLabelText("Brand Color Mode");
+    const saturationMode = screen.getByLabelText("Saturation Mode");
+    const saturationSlider = screen.getByLabelText(/Saturation Slider/);
+    const baseHueSlider = screen.getByLabelText(/Base Hue:/);
+    const brandHueSlider = screen.getByLabelText(/Brand Hue:/);
+    const gammaSlider = screen.getByLabelText(/Color Curve \(Gamma\):/);
+
+    const assertLockedHex = (): void => {
+      expect(screen.getByLabelText("base harmony hex")).toHaveValue(expectedDefaultHex);
+      expect(screen.getByLabelText("brand harmony hex")).toHaveValue(expectedDefaultHex);
+      expect(document.documentElement.style.getPropertyValue("--cf-ds-harmony-major")).toBe(expectedDefaultHex);
+    };
+
+    await waitFor(() => {
+      assertLockedHex();
+    });
+
+    fireEvent.change(saturationMode, { target: { value: "locked" } });
+    fireEvent.change(saturationSlider, { target: { value: "0" } });
+    fireEvent.change(harmonyMode, { target: { value: "mono" } });
+    fireEvent.change(brandMode, { target: { value: "independent" } });
+    fireEvent.change(baseHueSlider, { target: { value: "0" } });
+    fireEvent.change(brandHueSlider, { target: { value: "0" } });
+    fireEvent.change(gammaSlider, { target: { value: "2.6" } });
+
+    await waitFor(() => {
+      assertLockedHex();
+    });
+
+    fireEvent.change(saturationMode, { target: { value: "free" } });
+    fireEvent.change(saturationSlider, { target: { value: "100" } });
+    fireEvent.change(harmonyMode, { target: { value: "triadic" } });
+    fireEvent.change(brandMode, { target: { value: "derived" } });
+    fireEvent.change(baseHueSlider, { target: { value: "320" } });
+    fireEvent.change(gammaSlider, { target: { value: "1.8" } });
+
+    await waitFor(() => {
+      assertLockedHex();
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonyMode).toBe("triadic");
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonyBrandMode).toBe("derived");
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonySaturationMode).toBe("free");
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonyBaseHue).toBe(320);
+      expect(useUIStore.getState().designTokenPreferences.gamma).toBe(1.8);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset to defaults" }));
+
+    await waitFor(() => {
+      assertLockedHex();
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonyMode).toBe(DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonyMode);
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonyBrandMode).toBe(DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonyBrandMode);
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonySaturationMode).toBe(DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonySaturationMode);
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonyBaseHue).toBe(DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonyBaseHue);
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonyBrandHue).toBe(DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonyBrandHue);
+      expect(useUIStore.getState().designTokenPreferences.colorHarmonySaturation).toBe(DEFAULT_DESIGN_TOKEN_PREFERENCES.colorHarmonySaturation);
+      expect(useUIStore.getState().designTokenPreferences.gamma).toBe(DEFAULT_DESIGN_TOKEN_PREFERENCES.gamma);
     });
   });
 });

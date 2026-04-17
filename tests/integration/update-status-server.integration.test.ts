@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -241,6 +241,28 @@ async function fetchUpdateStatusWithRetry(url: string, timeoutMs = 10000) {
   }
 
   throw lastError ?? new Error("Timed out waiting for update-status endpoint");
+}
+
+function createTextbookUploadPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    textbookId: "tb-upload-1",
+    uploadSessionId: "session-upload-1",
+    clientId: "client-alpha",
+    metadata: {
+      title: "Foundations of Algebra",
+      publisher: "CourseForge Press",
+    },
+    chunks: [
+      {
+        id: "chunk-1",
+        data: "base64-part-1",
+        sizeBytes: 128,
+      },
+    ],
+    toc: [{ chapter: "1", title: "Integers" }],
+    ocrBlocks: [{ page: 1, text: "Chapter 1" }],
+    ...overrides,
+  };
 }
 
 describe("local update status endpoint", () => {
@@ -700,7 +722,7 @@ describe("local update status endpoint", () => {
         downloadSpeedBytesPerSecond: 256,
         progressPercent: 50,
         message: "Downloading update package",
-        updatedAt: "2026-03-20T00:00:00.000Z",
+        updatedAt: new Date().toISOString(),
       }, null, 2),
       "utf8"
     );
@@ -725,6 +747,62 @@ describe("local update status endpoint", () => {
       const bootStatusPayload = await bootStatusResponse.json();
       expect(bootStatusResponse.status).toBe(200);
       expect(bootStatusPayload).toMatchObject({ ready: true });
+    } finally {
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers stale updater progress to idle so startup UI cannot remain stuck", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+    writeFileSync(join(root, "package-manifest.json"), JSON.stringify({ version: "1.2.72" }, null, 2), "utf8");
+    writeFileSync(
+      join(root, "updater-status.json"),
+      JSON.stringify({
+        state: "downloading",
+        currentVersion: "1.2.72",
+        latestVersion: "1.2.73",
+        assetName: "CourseForge-1.2.73-portable.zip",
+        assetSizeBytes: 1024,
+        bytesDownloaded: 512,
+        downloadSpeedBytesPerSecond: 256,
+        progressPercent: 50,
+        message: "Downloading update package",
+        updatedAt: "2026-03-20T00:00:00.000Z",
+      }, null, 2),
+      "utf8"
+    );
+
+    try {
+      const port = await getAvailablePort();
+      child = await startStatusServer(root, port);
+
+      const response = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/updater-progress`);
+      const payload = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(payload).toMatchObject({
+        state: "idle",
+        currentVersion: "1.2.72",
+        latestVersion: "1.2.73",
+        progressPercent: null,
+        downloadSpeedBytesPerSecond: null,
+      });
+      expect(String(payload.message || "")).toContain("Recovered stale updater state");
+      expect(payload.lastError).toBeTruthy();
+
+      const persisted = JSON.parse(readFileSync(join(root, "updater-status.json"), "utf8"));
+      expect(persisted.state).toBe("idle");
+      expect(persisted.progressPercent).toBeNull();
+      expect(persisted.downloadSpeedBytesPerSecond).toBeNull();
     } finally {
       if (child) {
         await stopServer(child);
@@ -760,6 +838,228 @@ describe("local update status endpoint", () => {
         body: JSON.stringify({ action: "not-valid" }),
       });
       expect(invalidResponse.status).toBe(422);
+    } finally {
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects invalid textbook payloads before any server-side write", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+    writeFileSync(join(root, "package-manifest.json"), JSON.stringify({ version: "1.2.72" }, null, 2), "utf8");
+
+    try {
+      const port = await getAvailablePort();
+      child = await startStatusServer(root, port);
+
+      // Ensure the HTTP listener is ready to accept requests before this test POSTs payload data.
+      await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/update-status`);
+
+      const invalidPayload = createTextbookUploadPayload({ metadata: { title: "" } });
+      const response = await fetch(`http://127.0.0.1:${port}/api/textbook-upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(invalidPayload),
+      });
+      const payload = await response.json();
+
+      expect(response.status).toBe(422);
+      expect(payload.error.code).toBe("INVALID_PAYLOAD");
+
+      const committedPath = join(root, "textbook-upload-store", "committed", "tb-upload-1.json");
+      const activePath = join(root, "textbook-upload-store", "active", "tb-upload-1");
+      expect(existsSync(committedPath)).toBe(false);
+      expect(existsSync(activePath)).toBe(false);
+    } finally {
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("quarantines partial failed uploads, blocks resume, and requires a new textbook UUID", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+    writeFileSync(join(root, "package-manifest.json"), JSON.stringify({ version: "1.2.72" }, null, 2), "utf8");
+
+    try {
+      const port = await getAvailablePort();
+      child = await startStatusServer(root, port);
+
+      const failedPayload = createTextbookUploadPayload({
+        textbookId: "tb-corrupt-1",
+        uploadSessionId: "session-corrupt-1",
+        simulateFailureAfterPartialWrite: true,
+      });
+
+      const failedResponse = await fetch(`http://127.0.0.1:${port}/api/textbook-upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(failedPayload),
+      });
+      const failedResult = await failedResponse.json();
+      expect(failedResponse.status).toBe(500);
+      expect(failedResult.error.code).toBe("CORRUPTED_DATA");
+
+      const stateResponse = await fetchUpdateStatusWithRetry(`http://127.0.0.1:${port}/api/textbook-upload-state`);
+      const statePayload = await stateResponse.json();
+      expect(statePayload.corruptedTextbookIds["tb-corrupt-1"]).toBeTruthy();
+      expect(statePayload.quarantineCount).toBeGreaterThanOrEqual(1);
+
+      const resumeResponse = await fetch(`http://127.0.0.1:${port}/api/textbook-upload/resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ textbookId: "tb-corrupt-1", uploadSessionId: "session-corrupt-1" }),
+      });
+      const resumePayload = await resumeResponse.json();
+      expect(resumeResponse.status).toBe(409);
+      expect(resumePayload.error.code).toBe("RESUME_BLOCKED_CORRUPTED");
+
+      const sameIdRetry = await fetch(`http://127.0.0.1:${port}/api/textbook-upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(createTextbookUploadPayload({
+          textbookId: "tb-corrupt-1",
+          uploadSessionId: "session-clean-retry",
+        })),
+      });
+      const sameIdRetryPayload = await sameIdRetry.json();
+      expect(sameIdRetry.status).toBe(409);
+      expect(sameIdRetryPayload.error.code).toBe("CORRUPTED_EXISTING_RECORD");
+
+      const newIdUpload = await fetch(`http://127.0.0.1:${port}/api/textbook-upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(createTextbookUploadPayload({
+          textbookId: "tb-sanitized-new",
+          uploadSessionId: "session-sanitized-new",
+        })),
+      });
+      expect(newIdUpload.status).toBe(201);
+      const committedPath = join(root, "textbook-upload-store", "committed", "tb-sanitized-new.json");
+      expect(existsSync(committedPath)).toBe(true);
+    } finally {
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("purges quarantined textbook artifacts and leaves valid committed records untouched", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+    writeFileSync(join(root, "package-manifest.json"), JSON.stringify({ version: "1.2.72" }, null, 2), "utf8");
+
+    try {
+      const port = await getAvailablePort();
+      child = await startStatusServer(root, port);
+
+      await fetch(`http://127.0.0.1:${port}/api/textbook-upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(createTextbookUploadPayload({
+          textbookId: "tb-purge-corrupt",
+          uploadSessionId: "session-purge-corrupt",
+          simulateFailureAfterPartialWrite: true,
+        })),
+      });
+
+      const validResponse = await fetch(`http://127.0.0.1:${port}/api/textbook-upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(createTextbookUploadPayload({
+          textbookId: "tb-purge-valid",
+          uploadSessionId: "session-purge-valid",
+        })),
+      });
+      expect(validResponse.status).toBe(201);
+
+      const purgeResponse = await fetch(`http://127.0.0.1:${port}/api/textbook-upload/purge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ retentionMs: 0 }),
+      });
+      const purgePayload = await purgeResponse.json();
+
+      expect(purgeResponse.status).toBe(200);
+      expect(purgePayload.removedCount).toBeGreaterThanOrEqual(1);
+      expect(Array.isArray(purgePayload.remainingCorruptedTextbookIds)).toBe(true);
+      expect(purgePayload.remainingCorruptedTextbookIds).not.toContain("tb-purge-corrupt");
+
+      const quarantineDir = join(root, "textbook-upload-store", "quarantine");
+      const quarantineEntries = existsSync(quarantineDir) ? readdirSync(quarantineDir) : [];
+      expect(quarantineEntries).toHaveLength(0);
+
+      const committedValidPath = join(root, "textbook-upload-store", "committed", "tb-purge-valid.json");
+      expect(existsSync(committedValidPath)).toBe(true);
+    } finally {
+      if (child) {
+        await stopServer(child);
+        child = null;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks repeated corrupted payload attempts to prevent server-side upload loops", async () => {
+    const root = mkdtempSync(join(tmpdir(), "courseforge-status-"));
+    const webappDir = join(root, "webapp");
+
+    mkdirSync(webappDir, { recursive: true });
+    writeFileSync(join(root, "courseforge-serve.js"), serverScriptSource, "utf8");
+    writeFileSync(join(webappDir, "index.html"), "<html><body>CourseForge</body></html>", "utf8");
+    writeFileSync(join(root, "package-manifest.json"), JSON.stringify({ version: "1.2.72" }, null, 2), "utf8");
+
+    try {
+      const port = await getAvailablePort();
+      child = await startStatusServer(root, port);
+
+      const badPayload = createTextbookUploadPayload({
+        textbookId: "tb-loop-1",
+        uploadSessionId: "session-loop-1",
+        metadata: { title: "" },
+      });
+
+      for (let index = 0; index < 3; index += 1) {
+        const response = await fetch(`http://127.0.0.1:${port}/api/textbook-upload`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(badPayload),
+        });
+        expect(response.status).toBe(422);
+      }
+
+      const blockedResponse = await fetch(`http://127.0.0.1:${port}/api/textbook-upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(badPayload),
+      });
+      const blockedPayload = await blockedResponse.json();
+      expect(blockedResponse.status).toBe(429);
+      expect(blockedPayload.error.code).toBe("CORRUPTED_UPLOAD_LOOP_BLOCKED");
+
+      const committedPath = join(root, "textbook-upload-store", "committed", "tb-loop-1.json");
+      expect(existsSync(committedPath)).toBe(false);
     } finally {
       if (child) {
         await stopServer(child);

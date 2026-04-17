@@ -719,7 +719,22 @@ try {
     }
   }
 
-  $serverProcess = Start-Process -FilePath $nodePath -ArgumentList @("`"$serverScript`"", "`"$webappDir`"", $activePort, "`"$hostName`"") -PassThru -WindowStyle Hidden -RedirectStandardOutput $serverStdoutLog -RedirectStandardError $serverStderrLog
+  $previousLoopbackHostSetting = $env:COURSEFORGE_ENFORCE_LOOPBACK_HOST
+  $previousLoopbackClientSetting = $env:COURSEFORGE_ENFORCE_LOOPBACK_CLIENTS
+  $previousAggressiveCleanupSetting = $env:COURSEFORGE_ALLOW_AGGRESSIVE_PORT_CLEANUP
+  try {
+    # Harden launcher defaults so packaged runtime binds to loopback only and avoids aggressive port/process cleanup behavior.
+    $env:COURSEFORGE_ENFORCE_LOOPBACK_HOST = "1"
+    $env:COURSEFORGE_ENFORCE_LOOPBACK_CLIENTS = "1"
+    $env:COURSEFORGE_ALLOW_AGGRESSIVE_PORT_CLEANUP = "0"
+
+    $serverProcess = Start-Process -FilePath $nodePath -ArgumentList @("`"$serverScript`"", "`"$webappDir`"", $activePort, "`"$hostName`"") -PassThru -WindowStyle Hidden -RedirectStandardOutput $serverStdoutLog -RedirectStandardError $serverStderrLog
+  }
+  finally {
+    $env:COURSEFORGE_ENFORCE_LOOPBACK_HOST = $previousLoopbackHostSetting
+    $env:COURSEFORGE_ENFORCE_LOOPBACK_CLIENTS = $previousLoopbackClientSetting
+    $env:COURSEFORGE_ALLOW_AGGRESSIVE_PORT_CLEANUP = $previousAggressiveCleanupSetting
+  }
 
   # Check if process started successfully
   if ($serverProcess.HasExited) {

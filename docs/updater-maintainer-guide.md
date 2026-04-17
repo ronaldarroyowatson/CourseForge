@@ -103,3 +103,41 @@ Critical scenarios to keep covered:
 4. Re-run manual check from App Updates and inspect `/api/updater-diagnostics` payload.
 5. If packaging appears incomplete, run `npm run check:installer` and compare release artifacts.
 6. If App Updates shows "No updater detection yet" unexpectedly, compare `updaterProgress.latestVersion` with `updaterDiagnostics.lastCheck.latestVersion` and prefer the confirmed diagnostics version for operator triage.
+
+## 10. Antivirus false-positive hardening
+
+CourseForge updater/launcher flows can resemble malware heuristics because they combine local servers, update checks, and process lifecycle controls. Keep these guardrails in place for safer behavior:
+
+1. Prefer loopback-only binding and local-only request handling.
+   - `courseforge-serve.cjs` and `courseforge-serve.js` enforce loopback host binding by default.
+   - `Start-CourseForge.ps1` launches with loopback enforcement environment flags.
+2. Keep browser-access APIs local and deterministic.
+   - Return restrictive security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Cross-Origin-Resource-Policy`).
+   - Avoid permissive wildcard CORS by default.
+3. Use conservative cleanup defaults in packaged runtime.
+   - Launcher sets `COURSEFORGE_ALLOW_AGGRESSIVE_PORT_CLEANUP=0` for end-user startup to reduce process-kill style behavior.
+   - Keep aggressive cleanup only as an explicit override for diagnostic scenarios.
+4. Preserve strong package integrity validation before staging/apply.
+   - Keep SHA-256 and manifest/version contract checks mandatory.
+   - Never apply updates without passing integrity validation.
+5. Prefer explicit telemetry over aggressive remediation.
+   - Emit diagnostics and fail safely rather than force-killing unknown listeners in user environments.
+
+### Operational release guidance
+
+1. Keep binaries signed consistently (same publisher identity and timestamping) to improve AV/SmartScreen reputation.
+2. Submit false-positive reports with signer details and SHA-256 when detections occur.
+3. Run updater integration suites before release:
+   - `tests/integration/auto-update-launcher.integration.test.ts`
+   - `tests/integration/update-status-server.integration.test.ts`
+
+## 11. Stale updater-state recovery on boot
+
+To prevent startup UX from getting stuck on an old in-progress status, the launcher API now normalizes stale updater progress from prior sessions.
+
+1. `courseforge-serve.js` and `courseforge-serve.cjs` treat updater states as stale when:
+   - state is active (`checking`, `update-available`, `downloading`, `extracting`, `staging`), and
+   - `updatedAt` is older than the stale threshold (10 minutes).
+2. On stale detection, the API rewrites `updater-status.json` to a safe idle snapshot and logs recovery details.
+3. Manual check/stage calls now proceed normally after recovery instead of being blocked by stale active-state detection.
+4. Keep this behavior aligned across both runtime files (`.js` and `.cjs`) to avoid environment-specific drift.

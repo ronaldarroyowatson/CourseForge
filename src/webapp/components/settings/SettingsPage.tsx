@@ -23,12 +23,19 @@ import {
   readLocalCorrectionRecords,
   requestCancelAutoTextbookUpload,
   setMetadataCorrectionSharingEnabled,
+  setDebugLogMaxAgeDays,
   setDebugLoggingEnabled,
   uploadAndClearDebugLogs,
 } from "../../../core/services";
 import { readMetadataPipelineRuntimeStatus, type MetadataPipelineRuntimeStatus } from "../../../core/services/metadataExtractionPipelineService";
 import { readMetadataCorrectionSyncRuntimeState, type MetadataCorrectionSyncRuntimeState } from "../../../core/services/metadataCorrectionSyncService";
-import { logDesignSystemDebugEvent } from "../../../core/services/designSystemService";
+import {
+  clearDscDebugRecords,
+  generateDscDebugReport,
+  isDscDebugModeEnabled,
+  logDesignSystemDebugEvent,
+  setDscDebugModeEnabled,
+} from "../../../core/services/designSystemService";
 import { logFibonacciLayoutDecision, selectTwoCardLayout } from "../../../core/services/fibonacciLayoutService";
 import { getSupportedLanguages, t as translate } from "../../../core/services/i18nService";
 import { firestoreDb } from "../../../firebase/firestore";
@@ -84,6 +91,28 @@ function isInteractiveSettingsTarget(target: EventTarget | null): boolean {
     && Boolean(target.closest("button, a, input, select, textarea, label, summary, details"));
 }
 
+type UnifiedButtonType = "active" | "new" | "error" | "pending";
+type UnifiedButtonSize = "standard" | "large";
+
+function getUnifiedButtonClass(
+  buttonType: UnifiedButtonType,
+  size: UnifiedButtonSize = "standard",
+  extraClasses: Array<string | false | null | undefined> = [],
+): string {
+  const classes = ["cf-unified-btn", `cf-unified-btn--${buttonType}`];
+  if (size === "large") {
+    classes.push("cf-unified-btn--large");
+  }
+
+  for (const className of extraClasses) {
+    if (className) {
+      classes.push(className);
+    }
+  }
+
+  return classes.join(" ");
+}
+
 function SettingsSectionCard({
   cardId,
   title,
@@ -93,6 +122,7 @@ function SettingsSectionCard({
   className,
   onToggle,
   onDragStateChange,
+  showButtonType,
   children,
 }: {
   cardId: SettingsCardId;
@@ -104,6 +134,7 @@ function SettingsSectionCard({
   onToggle: (cardId: SettingsCardId) => void;
   onDragStateChange: (cardId: SettingsCardId, phase: "start" | "end") => void;
   children: React.ReactNode;
+  showButtonType?: UnifiedButtonType;
 }): React.JSX.Element {
   const classes = [
     "settings-card",
@@ -139,7 +170,12 @@ function SettingsSectionCard({
           <h3>{title}</h3>
           <p className="settings-meta settings-card__summary">{summary}</p>
         </div>
-        <button type="button" className="btn-secondary settings-card__toggle" onClick={() => onToggle(cardId)}>
+        <button
+          type="button"
+          data-button-type={expanded ? "new" : (showButtonType ?? "active")}
+          className={getUnifiedButtonClass(expanded ? "new" : (showButtonType ?? "active"), "standard", ["settings-card__toggle"])}
+          onClick={() => onToggle(cardId)}
+        >
           {expanded ? "Hide" : "Show"}
         </button>
       </div>
@@ -171,6 +207,50 @@ function compareSemver(left: number[], right: number[]): number {
   }
 
   return 0;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function toHex(channel: number): string {
+  return Math.round(channel).toString(16).padStart(2, "0");
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const hue = ((h % 360) + 360) % 360;
+  const saturation = clamp(s, 0, 1);
+  const lightness = clamp(l, 0, 1);
+
+  const c = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = lightness - c / 2;
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (hue < 60) {
+    r = c;
+    g = x;
+  } else if (hue < 120) {
+    r = x;
+    g = c;
+  } else if (hue < 180) {
+    g = c;
+    b = x;
+  } else if (hue < 240) {
+    g = x;
+    b = c;
+  } else if (hue < 300) {
+    r = x;
+    b = c;
+  } else {
+    r = c;
+    b = x;
+  }
+
+  return `#${toHex((r + m) * 255)}${toHex((g + m) * 255)}${toHex((b + m) * 255)}`;
 }
 
 function getShortProviderLabel(id: AutoOcrProviderId): string {
@@ -343,22 +423,22 @@ function SyncDonutChart({
       >
         {/* Background grey track */}
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border-default)" strokeWidth={12} />
-        {/* Full green ring for available portion base */}
+        {/* Full available ring uses semantic success so it follows the current token set. */}
         <circle
           cx={cx}
           cy={cy}
           r={r}
           fill="none"
-          stroke="#22c55e"
+          stroke="var(--cf-semantic-success)"
           strokeWidth={12}
           transform="rotate(-90 50 50)"
         />
-        {/* Red: used */}
+        {/* Used portion uses semantic error for consistent status signaling. */}
         {usedFraction > 0 && (
           <circle
             cx={cx} cy={cy} r={r}
             fill="none"
-            stroke="#ef4444"
+            stroke="var(--cf-semantic-error)"
             strokeWidth={12}
             strokeDasharray={`${usedDash} ${circumference}`}
             strokeDashoffset={0}
@@ -409,11 +489,16 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const designTokenPreferences = useUIStore((state) => state.designTokenPreferences);
   const designTokens = useUIStore((state) => state.designTokens);
   const directionalFlow = designTokenPreferences.directionalFlow;
-  const [debugEnabled, setDebugEnabled] = React.useState<boolean>(() => isDebugLoggingEnabled());
+  const [debugEnabled, setDebugEnabled] = React.useState<boolean>(() => isDebugLoggingEnabled() || isDscDebugModeEnabled());
   const [cacheResetStatus, setCacheResetStatus] = React.useState<string | null>(null);
   const [debugStats, setDebugStats] = React.useState({ entries: 0, totalBytes: 0, maxTotalBytes: 1_500_000, maxUploadBytes: 500 * 1024, lastUploadTimestamp: null as number | null });
   const [debugStatus, setDebugStatus] = React.useState<string | null>(null);
   const [isUploadingDebugLog, setIsUploadingDebugLog] = React.useState(false);
+  const [isGeneratingDebugReport, setIsGeneratingDebugReport] = React.useState(false);
+  const [debugReportText, setDebugReportText] = React.useState<string>("");
+  const [debugReportCopied, setDebugReportCopied] = React.useState(false);
+  const [debugReportCopyHover, setDebugReportCopyHover] = React.useState(false);
+  const [debugMaxAgeDays, setDebugMaxAgeDays] = React.useState(7);
   const [debugPolicyStatus, setDebugPolicyStatus] = React.useState<string | null>(null);
   const [ocrProviderOrder, setOcrProviderOrderState] = React.useState<AutoOcrProviderId[]>([
     "cloud_openai_vision",
@@ -503,24 +588,29 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
       return;
     }
     const isDarkTheme = theme === "dark";
-    const primary = designTokens.color.primary;
-    const highlightColor = primary[5] ?? primary[4] ?? "#3b83c7";
-    const z2EffectColor = isDarkTheme ? (primary[3] ?? primary[2]) : (primary[1] ?? primary[2]);
-    const z3EffectColor = isDarkTheme ? (primary[5] ?? primary[4]) : (primary[3] ?? primary[4]);
-    const z4EffectColor = isDarkTheme ? (primary[7] ?? primary[6]) : (primary[5] ?? primary[6]);
+    const resolved = designTokens.color.resolved;
+    const highlightColor = resolved.border;
+    const surfaceLuminance = isDarkTheme
+      ? designTokenPreferences.settingsBaseDarkLuminance
+      : designTokenPreferences.settingsBaseLightLuminance;
+    const surfaceColor = hslToHex(0, 0, surfaceLuminance / 100);
+    const z2Background = designTokens.color.primary[2] ?? resolved.surface;
+    const z3Background = resolved.cardBackground;
+    const z2EffectColor = resolved.cardShadow;
+    const z3EffectColor = resolved.cardGlow;
 
     node.dataset.themeMode = theme;
-    node.style.setProperty("--cf-settings-surface-bg", isDarkTheme ? "#000000" : "#FFFFFF");
+    node.style.setProperty("--cf-settings-surface-bg", surfaceColor);
     node.style.setProperty("--cf-settings-surface-border", highlightColor);
     node.style.setProperty("--cf-settings-surface-shadow", "none");
-    node.style.setProperty("--cf-settings-z2-bg", primary[2] ?? primary[0]);
+    node.style.setProperty("--cf-settings-z2-bg", z2Background);
     node.style.setProperty("--cf-settings-z2-effect", z2EffectColor);
     node.style.setProperty("--cf-settings-z2-border", highlightColor);
-    node.style.setProperty("--cf-settings-z3-bg", primary[4] ?? primary[2]);
+    node.style.setProperty("--cf-settings-z3-bg", z3Background);
     node.style.setProperty("--cf-settings-z3-effect", z3EffectColor);
     node.style.setProperty("--cf-settings-z3-border", highlightColor);
-    node.style.setProperty("--cf-settings-z4-bg", primary[6] ?? primary[4]);
-    node.style.setProperty("--cf-settings-z4-effect", z4EffectColor);
+    node.style.setProperty("--cf-settings-z4-bg", z3Background);
+    node.style.setProperty("--cf-settings-z4-effect", z3EffectColor);
     node.style.setProperty("--cf-settings-z4-border", highlightColor);
     node.style.setProperty("--cf-settings-effect-mode", isDarkTheme ? "glow" : "shadow");
     node.style.setProperty("--cf-settings-motion-ms", `${designTokenPreferences.motionTimingMs}ms`);
@@ -528,7 +618,18 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     node.style.setProperty("--cf-settings-type-base", `${designTokens.type.base}px`);
     node.style.setProperty("--cf-settings-space-2", `${designTokens.spacing.values[2] ?? 8}px`);
     node.style.setProperty("--cf-settings-stroke-2", `${designTokens.stroke.values[1] ?? designTokens.stroke.values[0] ?? 1}px`);
-  }, [designTokenPreferences.motionEasing, designTokenPreferences.motionTimingMs, designTokens.color.primary, designTokens.spacing.values, designTokens.stroke.values, designTokens.type.base, theme]);
+  }, [
+    designTokenPreferences.motionEasing,
+    designTokenPreferences.motionTimingMs,
+    designTokenPreferences.settingsBaseDarkLuminance,
+    designTokenPreferences.settingsBaseLightLuminance,
+    designTokens.color.primary,
+    designTokens.color.resolved,
+    designTokens.spacing.values,
+    designTokens.stroke.values,
+    designTokens.type.base,
+    theme,
+  ]);
 
   const isUploadStuck = React.useCallback((snapshot: typeof activeAutoTextbookUpload): boolean => {
     if (!snapshot) {
@@ -668,17 +769,51 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
 
   function handleDebugToggle(enabled: boolean): void {
     setDebugLoggingEnabled(enabled);
+    setDscDebugModeEnabled(enabled);
     setDebugEnabled(enabled);
     void refreshDebugStats();
-    setDebugStatus(enabled ? "Debug logging enabled." : "Debug logging disabled.");
+    setDebugStatus(enabled ? "Unified debug mode enabled (DSC + component + runtime logs)." : "Unified debug mode disabled.");
   }
 
   function handleClearDebugLog(): void {
     void (async () => {
       await clearDebugLogEntries();
+      clearDscDebugRecords();
       await refreshDebugStats();
-      setDebugStatus("Local debug log cleared.");
+      setDebugReportText("");
+      setDebugStatus("All local debug logs cleared (runtime + DSC records).");
     })();
+  }
+
+  async function handleGenerateDebugReport(): Promise<void> {
+    try {
+      setIsGeneratingDebugReport(true);
+      setDebugStatus(null);
+      const report = generateDscDebugReport(designTokenPreferences);
+      const text = JSON.stringify(report, null, 2);
+      setDebugReportText(text);
+      setDebugStatus(`Unified debug report generated with ${report.fallbackRecords.length} records.`);
+      await refreshDebugStats();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown debug report error.";
+      setDebugStatus(`Failed to generate debug report: ${message}`);
+    } finally {
+      setIsGeneratingDebugReport(false);
+    }
+  }
+
+  async function handleCopyDebugReport(): Promise<void> {
+    if (!debugReportText) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(debugReportText);
+      setDebugReportCopied(true);
+      window.setTimeout(() => setDebugReportCopied(false), 1400);
+    } catch {
+      setDebugStatus("Copy failed. Clipboard permission may be unavailable.");
+    }
   }
 
   async function refreshOcrProviderHealth(forceRefresh = false): Promise<void> {
@@ -720,6 +855,9 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
       setOcrProviderOrderState(effectiveOrder);
       await refreshOcrProviderHealth(false);
       await refreshDebugStats();
+      setDebugEnabled(isDebugLoggingEnabled() || isDscDebugModeEnabled());
+      const storedMaxAge = Number(window.localStorage.getItem("courseforge.debugLog.maxAgeDays") ?? "7");
+      setDebugMaxAgeDays(Number.isFinite(storedMaxAge) && storedMaxAge > 0 ? Math.round(storedMaxAge) : 7);
       refreshMetadataTrainingStats();
       const policy = await getDebugLoggingPolicy();
       setDebugPolicyStatus(policy.enabledGlobally
@@ -913,6 +1051,13 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     } finally {
       setIsUploadingDebugLog(false);
     }
+  }
+
+  function handleDebugMaxAgeDaysChange(value: number): void {
+    const normalized = Math.max(1, Math.min(30, Math.round(value)));
+    setDebugMaxAgeDays(normalized);
+    setDebugLogMaxAgeDays(normalized);
+    setDebugStatus(`Debug log retention set to ${normalized} day${normalized === 1 ? "" : "s"}.`);
   }
 
   async function handleCheckLanguageUpdates(): Promise<void> {
@@ -1341,25 +1486,25 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     const isDarkTheme = theme === "dark";
     void logDesignSystemDebugEvent("Settings page z-height mapping applied.", {
       theme,
-      settingsSurfaceBackground: isDarkTheme ? "#000000" : "#FFFFFF",
-      settingsSurfaceBorder: designTokens.color.primary[5],
+      settingsSurfaceBackground: designTokens.color.primary[0] ?? designTokens.color.resolved.background,
+      settingsSurfaceBorder: designTokens.color.resolved.border,
       settingsSurfaceGlowOrShadow: "none",
-      z2Background: designTokens.color.primary[2],
-      z2Effect: isDarkTheme ? designTokens.color.primary[3] : designTokens.color.primary[1],
-      z3Background: designTokens.color.primary[4],
-      z3Effect: isDarkTheme ? designTokens.color.primary[5] : designTokens.color.primary[3],
-      z4Background: designTokens.color.primary[6],
-      z4Effect: isDarkTheme ? designTokens.color.primary[7] : designTokens.color.primary[5],
+      z2Background: designTokens.color.primary[2] ?? designTokens.color.resolved.surface,
+      z2Effect: designTokens.color.resolved.cardShadow,
+      z3Background: designTokens.color.resolved.cardBackground,
+      z3Effect: isDarkTheme ? designTokens.color.resolved.cardGlow : designTokens.color.resolved.cardShadow,
+      z4Background: designTokens.color.resolved.cardBackground,
+      z4Effect: isDarkTheme ? designTokens.color.resolved.cardGlow : designTokens.color.resolved.cardShadow,
     });
-  }, [designTokens.color.primary, theme]);
+  }, [designTokens.color.primary, designTokens.color.resolved, theme]);
 
   React.useEffect(() => {
     void logDesignSystemDebugEvent("Settings surface mode detection applied.", {
       theme,
-      settingsSurfaceColor: theme === "dark" ? "#000000" : "#FFFFFF",
-      borderColor: designTokens.color.primary[5],
+      settingsSurfaceColor: designTokens.color.primary[0] ?? designTokens.color.resolved.background,
+      borderColor: designTokens.color.resolved.border,
     });
-  }, [designTokens.color.primary, theme]);
+  }, [designTokens.color.primary, designTokens.color.resolved, theme]);
 
   React.useEffect(() => {
     for (const cardId of SETTINGS_CARD_ORDER) {
@@ -1370,13 +1515,13 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
         cardId,
         zHeight,
         backgroundShade: shades.backgroundShade,
-        backgroundColor: designTokens.color.primary[shades.backgroundShade - 1],
+        backgroundColor: zHeight === 3 ? designTokens.color.resolved.cardBackground : (designTokens.color.primary[2] ?? designTokens.color.resolved.surface),
         effectMode,
         effectShade: theme === "dark" ? shades.effectShade : Math.max(1, shades.backgroundShade - 1),
-        effectColor: designTokens.color.primary[(theme === "dark" ? shades.effectShade : Math.max(1, shades.backgroundShade - 1)) - 1],
+        effectColor: theme === "dark" ? designTokens.color.resolved.cardGlow : designTokens.color.resolved.cardShadow,
       });
     }
-  }, [activeSettingsCard, designTokens.color.primary, theme]);
+  }, [activeSettingsCard, designTokens.color.primary, designTokens.color.resolved, theme]);
 
   React.useEffect(() => {
     void logDesignSystemDebugEvent("Settings page design token propagation applied.", {
@@ -1474,17 +1619,17 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
               </p>
               <div className="form-actions">
                 {(activeAutoTextbookUpload.status === "preparing" || activeAutoTextbookUpload.status === "uploading") ? (
-                  <button type="button" className="btn-secondary" onClick={() => { void handleCancelUploadFromSettings(); }}>
+                  <button type="button" data-button-type="error" className={getUnifiedButtonClass("error")} onClick={() => { void handleCancelUploadFromSettings(); }}>
                     Cancel Upload
                   </button>
                 ) : null}
                 {activeAutoTextbookUpload.status !== "uploading" && activeAutoTextbookUpload.status !== "completed" ? (
-                  <button type="button" className="btn-secondary" onClick={() => { void handleDeletePendingUploadFromSettings(); }}>
+                  <button type="button" data-button-type="error" className={getUnifiedButtonClass("error")} onClick={() => { void handleDeletePendingUploadFromSettings(); }}>
                     Delete Pending Upload
                   </button>
                 ) : null}
                 {(activeAutoTextbookUpload.status === "corrupt-restart" || isUploadStuck(activeAutoTextbookUpload)) ? (
-                  <button type="button" className="btn-secondary" onClick={() => { void handleForceRemoveFromSettings(); }}>
+                  <button type="button" data-button-type="error" className={getUnifiedButtonClass("error")} onClick={() => { void handleForceRemoveFromSettings(); }}>
                     Force Remove
                   </button>
                 ) : null}
@@ -1496,7 +1641,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
             <SyncDonutChart label="Reads" used={readCount} limit={readBudgetLimit} exceeded={readBudgetExceeded} />
           </div>
           <div className="form-actions">
-            <button type="button" className="btn-secondary" onClick={() => { void handleClearAllCaches(); }}>
+            <button type="button" data-button-type="error" className={getUnifiedButtonClass("error")} onClick={() => { void handleClearAllCaches(); }}>
               Clear All Cached Data
             </button>
           </div>
@@ -1595,13 +1740,13 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
             </div>
           </div>
           <div className="form-actions ocr-provider-actions">
-            <button type="button" className="btn-secondary" onClick={() => { void refreshOcrProviderHealth(true); }}>
+            <button type="button" data-button-type="new" className={getUnifiedButtonClass("new")} onClick={() => { void refreshOcrProviderHealth(true); }}>
               Refresh Provider Health
             </button>
-            <button type="button" className="btn-secondary" onClick={() => { void handleReloadCloudPolicy(); }} disabled={isUpdatingOcrPolicy}>
+            <button type="button" data-button-type="new" className={getUnifiedButtonClass("new")} onClick={() => { void handleReloadCloudPolicy(); }} disabled={isUpdatingOcrPolicy}>
               {isUpdatingOcrPolicy ? "Working..." : "Load Shared Policy"}
             </button>
-            <button type="button" onClick={() => { void handleApplyCloudPolicy(); }} disabled={isUpdatingOcrPolicy}>
+            <button type="button" data-button-type={isUpdatingOcrPolicy ? "pending" : "active"} className={getUnifiedButtonClass(isUpdatingOcrPolicy ? "pending" : "active")} onClick={() => { void handleApplyCloudPolicy(); }} disabled={isUpdatingOcrPolicy}>
               {isUpdatingOcrPolicy ? "Working..." : "Save As Shared Policy"}
             </button>
           </div>
@@ -1640,7 +1785,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
             </select>
           </label>
           <p className="settings-meta">{translate(language, "settings", "languageHint")}</p>
-          <button type="button" className="btn-secondary" onClick={() => { void handleCheckLanguageUpdates(); }}>
+          <button type="button" data-button-type="new" className={getUnifiedButtonClass("new")} onClick={() => { void handleCheckLanguageUpdates(); }}>
             Check For New Languages
           </button>
           {languageRegistryStatus ? <p className="settings-meta">{languageRegistryStatus}</p> : null}
@@ -1788,29 +1933,73 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           zHeight={resolveSettingsCardZHeight("debug-log", activeSettingsCard)}
           onToggle={toggleSettingsCard}
           onDragStateChange={handleCardDragStateChange}
+          showButtonType="pending"
         >
-          <p>Store local troubleshooting events for Auto Mode and sync behavior. You control whether logs are collected and when they are uploaded.</p>
+          <p>Unified debug control for DSC token resolution, component interaction traces, fallback chains, and runtime debug logs.</p>
           <label className="settings-toggle" title="When disabled, no new local debug events are stored.">
             <input
               type="checkbox"
               checked={debugEnabled}
               onChange={(event) => handleDebugToggle(event.target.checked)}
             />
-            Enable Debug Logging
+            Enable Unified Debug Mode
           </label>
           <p className="settings-meta">Stored entries: {debugStats.entries}</p>
           <p className="settings-meta">Local log size: {Math.round(debugStats.totalBytes / 1024)} KB / {Math.round(debugStats.maxTotalBytes / 1024)} KB</p>
-          <p className="settings-meta">Upload limit: {Math.round(debugStats.maxUploadBytes / 1024)} KB</p>
+          <p className="settings-meta">Upload limit: {Math.round(debugStats.maxUploadBytes / 1024)} KB | Retention: {debugMaxAgeDays} day(s)</p>
           <p className="settings-meta">Last upload: {debugStats.lastUploadTimestamp ? new Date(debugStats.lastUploadTimestamp).toLocaleString() : "Never"}</p>
           {debugPolicyStatus ? <p className="settings-meta">{debugPolicyStatus}</p> : null}
+          <label>
+            Max Log Age (days)
+            <input
+              type="number"
+              min={1}
+              max={30}
+              value={debugMaxAgeDays}
+              onChange={(event) => handleDebugMaxAgeDaysChange(Number(event.target.value))}
+            />
+          </label>
           <div className="form-actions">
-            <button type="button" className="btn-secondary" onClick={handleClearDebugLog}>
-              Clear Debug Log
+            <button
+              type="button"
+              data-button-type="pending"
+              className={getUnifiedButtonClass("pending")}
+              onClick={() => { void handleGenerateDebugReport(); }}
+              disabled={isGeneratingDebugReport}
+            >
+              {isGeneratingDebugReport ? "Generating..." : "Generate Debug Report"}
             </button>
-            <button type="button" onClick={() => { void handleSendDebugLogToCloud(); }} disabled={isUploadingDebugLog}>
-              {isUploadingDebugLog ? "Sending..." : "Send Debug Log to Cloud"}
+            <button type="button" data-button-type="error" className={getUnifiedButtonClass("error")} onClick={handleClearDebugLog}>
+              Clear Debug Logs
+            </button>
+            <button
+              type="button"
+              data-button-type="new"
+              className={getUnifiedButtonClass("new", "standard", [
+                debugReportCopyHover ? "auto-debug-trace__copy-btn--hover" : "",
+                debugReportCopied ? "auto-debug-trace__copy-btn--copied" : "",
+              ])}
+              onMouseEnter={() => setDebugReportCopyHover(true)}
+              onMouseLeave={() => setDebugReportCopyHover(false)}
+              onClick={() => { void handleCopyDebugReport(); }}
+              disabled={!debugReportText}
+            >
+              {debugReportCopied ? "Copied!" : "Copy Debug Report"}
+            </button>
+            <button type="button" data-button-type="pending" className={getUnifiedButtonClass("pending")} onClick={() => { void handleSendDebugLogToCloud(); }} disabled={isUploadingDebugLog}>
+              {isUploadingDebugLog ? "Sending..." : "Send Runtime Log to Cloud"}
             </button>
           </div>
+          <label>
+            Unified Debug Report JSON
+            <textarea
+              className="settings-debug-report-box"
+              rows={12}
+              readOnly
+              value={debugReportText}
+              placeholder="Generate Debug Report to view DSC + component + fallback + contrast diagnostics."
+            />
+          </label>
           {debugStatus ? <p className="settings-meta">{debugStatus}</p> : null}
         </SettingsSectionCard>
 
@@ -1872,7 +2061,8 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           ) : null}
           <button
             type="button"
-            className="btn-secondary"
+            data-button-type="new"
+            className={getUnifiedButtonClass("new")}
             onClick={() => { void handleCheckForUpdates(); }}
             disabled={isCheckingUpdate}
           >
@@ -1880,7 +2070,8 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           </button>
           <button
             type="button"
-            className="btn-secondary"
+            data-button-type="pending"
+            className={getUnifiedButtonClass("pending")}
             onClick={() => {
               setShowUpdaterDiagnostics((previous) => !previous);
               if (!showUpdaterDiagnostics) {

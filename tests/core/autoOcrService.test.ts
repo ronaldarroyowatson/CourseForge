@@ -131,6 +131,61 @@ describe("autoOcrService", () => {
     expect(result.attempts[1].success).toBe(true);
   });
 
+  it("false-positive guard: does not attempt providers marked unavailable", async () => {
+    const unavailableExtract = vi.fn(async () => "should-not-run");
+    const cloudExtract = vi.fn(async () => "Valid OCR text");
+
+    const providers: AutoOcrProvider[] = [
+      {
+        id: "local_tesseract",
+        label: "Local",
+        isAvailable: async () => false,
+        extractText: unavailableExtract,
+      },
+      {
+        id: "cloud_openai_vision",
+        label: "Cloud",
+        isAvailable: async () => true,
+        extractText: cloudExtract,
+      },
+    ];
+
+    const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+      providerOrder: ["local_tesseract", "cloud_openai_vision"],
+      providersOverride: providers,
+    });
+
+    expect(result.providerId).toBe("cloud_openai_vision");
+    expect(unavailableExtract).not.toHaveBeenCalled();
+    expect(cloudExtract).toHaveBeenCalledTimes(1);
+  });
+
+  it("false-negative guard: throws when all providers fail or are unavailable", async () => {
+    const providers: AutoOcrProvider[] = [
+      {
+        id: "local_tesseract",
+        label: "Local",
+        isAvailable: async () => true,
+        extractText: async () => {
+          throw new Error("Local failed");
+        },
+      },
+      {
+        id: "cloud_openai_vision",
+        label: "Cloud",
+        isAvailable: async () => false,
+        extractText: async () => "unused",
+      },
+    ];
+
+    await expect(
+      extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["local_tesseract", "cloud_openai_vision"],
+        providersOverride: providers,
+      })
+    ).rejects.toThrow();
+  });
+
   it("uses backend provider status for cloud OCR health and execution", async () => {
     callableMocks.getAiProviderStatus.mockResolvedValue({
       data: {

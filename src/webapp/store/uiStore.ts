@@ -6,7 +6,6 @@ import {
   type DesignTokens,
   applyDesignTokensToDocument,
   DEFAULT_DESIGN_TOKEN_PREFERENCES,
-  detectSystemDesignDefaultsDetailed,
   generateDesignTokens,
   initializeDesignTokenPreferencesOnFirstRun,
   logDesignSystemDebugEvent,
@@ -34,6 +33,8 @@ const ACCESSIBILITY_STORAGE_KEY = "courseforge.accessibility";
 
 const initialDesignResolution = initializeDesignTokenPreferencesOnFirstRun();
 const initialDesignPreferences = sanitizeDesignTokenPreferences(initialDesignResolution.preferences);
+const initialTheme = getInitialTheme();
+applyTheme(initialTheme);
 const initialDesignTokens = generateDesignTokens(initialDesignPreferences);
 for (const trace of initialDesignResolution.traces) {
   void logDesignSystemDebugEvent(`design-first-run:${trace.step}:${trace.status}`, {
@@ -333,13 +334,22 @@ export const useUIStore = create<UIStore>((set) => ({
   clearAutoTextbookUpload: () => set({ activeAutoTextbookUpload: null }),
 
   // Theme defaults and actions
-  theme: getInitialTheme(),
+  theme: initialTheme,
   setTheme: (theme: ThemeMode) => {
-    applyTheme(theme);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-    }
-    set({ theme });
+    set((state) => {
+      applyTheme(theme);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+      }
+
+      const generated = generateDesignTokens(state.designTokenPreferences);
+      applyDesignTokensToDocument(generated);
+
+      return {
+        theme,
+        designTokens: generated,
+      };
+    });
   },
   toggleTheme: () =>
     set((state) => {
@@ -348,7 +358,14 @@ export const useUIStore = create<UIStore>((set) => ({
       if (typeof window !== "undefined") {
         window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
       }
-      return { theme: nextTheme };
+
+      const generated = generateDesignTokens(state.designTokenPreferences);
+      applyDesignTokensToDocument(generated);
+
+      return {
+        theme: nextTheme,
+        designTokens: generated,
+      };
     }),
   language: detectInitialLanguage(),
   setLanguage: (language: SupportedLanguage) => {
@@ -426,7 +443,6 @@ export const useUIStore = create<UIStore>((set) => ({
       };
     }),
   applySystemDesignTokenDefaults: () => {
-    const details = detectSystemDesignDefaultsDetailed();
     let result: {
       applied: boolean;
       message: string;
@@ -434,56 +450,34 @@ export const useUIStore = create<UIStore>((set) => ({
       failed: Record<string, string>;
     } = {
       applied: false,
-      message: "System defaults could not be detected. Using existing values.",
-      detected: details.detected,
-      failed: details.failed,
+      message: "Deterministic defaults could not be applied. Using existing values.",
+      detected: {},
+      failed: {},
     };
 
     set((state) => {
-      const mappedValues = {
-        ...details.values,
-        useSystemDefaults: true,
-      };
-
-      const detectedTheme = details.detected.prefersDarkMode === true
-        ? "dark"
-        : details.detected.prefersDarkMode === false
-          ? "light"
-          : state.theme;
-
       const next = sanitizeDesignTokenPreferences({
-        ...state.designTokenPreferences,
-        ...mappedValues,
+        ...DEFAULT_DESIGN_TOKEN_PREFERENCES,
+        useSystemDefaults: false,
       });
 
       const generated = generateDesignTokens(next);
-      applyTheme(detectedTheme);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(THEME_STORAGE_KEY, detectedTheme);
-      }
       applyDesignTokensToDocument(generated);
       saveLocalDesignTokenPreferences(next);
 
-      const detectedCount = Object.keys(details.detected).length;
-      const failedCount = Object.keys(details.failed).length;
       result = {
         applied: true,
-        message:
-          failedCount > 0
-            ? `Applied ${detectedCount} system defaults with ${failedCount} fallback(s).`
-            : `Applied ${detectedCount} system defaults successfully.`,
-        detected: details.detected,
-        failed: details.failed,
+        message: "Applied deterministic design defaults successfully.",
+        detected: { profile: "semantic-unified-v2" },
+        failed: {},
       };
 
-      void logDesignSystemDebugEvent("System defaults applied to design tokens.", {
-        mapped: mappedValues,
-        detected: details.detected,
-        failed: details.failed,
+      void logDesignSystemDebugEvent("Deterministic defaults applied to design tokens.", {
+        previousTheme: state.theme,
+        profile: "semantic-unified-v2",
       });
 
       return {
-        theme: detectedTheme,
         designTokenPreferences: next,
         designTokens: generated,
       };
@@ -518,8 +512,8 @@ export const useUIStore = create<UIStore>((set) => ({
     }),
 }));
 
-// Ensure startup render uses the stored theme even before any user interaction.
-applyTheme(getInitialTheme());
+// Ensure startup render uses the resolved theme and tokenized preferences before interaction.
+applyTheme(initialTheme);
 applyLanguage(detectInitialLanguage());
 applyAccessibilityPreferences(getInitialAccessibilityPreferences());
 applyDesignTokensToDocument(initialDesignTokens);

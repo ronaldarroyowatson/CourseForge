@@ -75,4 +75,24 @@ describe("metadataCorrectionLearningService", () => {
     expect(corrected).toContain("McGraw Hill");
     expect(corrected).toContain("Teacher's Edition");
   });
+
+  it("false-positive guard: does not mutate already-correct text", () => {
+    const rules = createEmptyCorrectionRules("test");
+    rules.globalReplacements.push({ from: "Mc Graw Hill", to: "McGraw Hill" });
+
+    const original = "McGraw Hill\nTeacher's Edition";
+    const corrected = applyCorrectionRulesToText(original, rules, { publisher: "McGraw Hill" });
+
+    expect(corrected).toBe(original);
+  });
+
+  it("false-negative guard: applies correction when noisy token is present", () => {
+    const rules = createEmptyCorrectionRules("test");
+    rules.globalReplacements.push({ from: "Mc Graw Hill", to: "McGraw Hill" });
+
+    const corrected = applyCorrectionRulesToText("Mc Graw Hill\nStudent Edition", rules, { publisher: "McGraw Hill" });
+
+    expect(corrected).toContain("McGraw Hill");
+    expect(corrected).not.toContain("Mc Graw Hill");
+  });
 });

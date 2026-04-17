@@ -158,4 +158,29 @@ describe("debugLogService", () => {
     expect(entry).toBeNull();
     expect(await getDebugLogEntries()).toEqual([]);
   });
+
+  it("prunes entries older than configured max age days", async () => {
+    setDebugLoggingEnabled(true);
+    window.localStorage.setItem("courseforge.debugLog.maxAgeDays", "1");
+
+    const twoDaysAgo = Date.now() - (2 * 24 * 60 * 60 * 1000);
+    await appendDebugLogEntry({ eventType: "info", message: "old-entry", timestamp: twoDaysAgo }, "teacher-1");
+    await appendDebugLogEntry({ eventType: "info", message: "new-entry" }, "teacher-1");
+
+    const entries = await getDebugLogEntries();
+    expect(entries.map((entry) => entry.message)).toEqual(["new-entry"]);
+  });
+
+  it("drops entries when runaway append loop protection is triggered", async () => {
+    setDebugLoggingEnabled(true);
+
+    const writes = await Promise.all(
+      Array.from({ length: 140 }, (_, index) =>
+        appendDebugLogEntry({ eventType: "info", message: `entry-${index}` }, "teacher-1")
+      )
+    );
+
+    const dropped = writes.filter((entry) => entry === null).length;
+    expect(dropped).toBeGreaterThan(0);
+  });
 });

@@ -21,6 +21,33 @@ function withUsage(overrides: Partial<PremiumUsageState>): PremiumUsageState {
 }
 
 describe("premium usage limits", () => {
+  it("false-positive guard: does not block exactly at configured daily/weekly/monthly thresholds", () => {
+    const decision = evaluatePremiumGate(
+      withUsage({
+        premiumRequestsUsedToday: getDefaultDailyLimitPercent(),
+        premiumRequestsUsedThisWeek: getDefaultWeeklyLimitPercent(),
+        premiumRequestsUsedThisMonth: 100,
+      }),
+      new Date("2026-03-13T10:00:00Z")
+    );
+
+    expect(decision.allowPremium).toBe(true);
+    expect(decision.reason).toBe("within-limits");
+  });
+
+  it("false-negative guard: blocks when usage exceeds daily threshold by one", () => {
+    const decision = evaluatePremiumGate(
+      withUsage({
+        premiumRequestsUsedToday: getDefaultDailyLimitPercent() + 1,
+      }),
+      new Date("2026-03-13T10:00:00Z")
+    );
+
+    expect(decision.allowPremium).toBe(false);
+    expect(decision.reason).toBe("daily-limit");
+    expect(decision.requiresUserApproval).toBe(true);
+  });
+
   it("derives default daily and weekly caps from the 8.6% baseline", () => {
     const usage = createDefaultPremiumUsage(new Date(2026, 2, 13, 10, 0, 0));
 

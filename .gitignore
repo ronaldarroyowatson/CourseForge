@@ -20,4 +20,4 @@ tmp-smoke/*.json
 tmp-smoke/*.txt
 tmp-smoke/*.png
 tmp-smoke/debug/*.jsonl
-tmp-smoke/debug/*.json
+tmp-smoke/debug/*.jsontmp-prune-list.txt

@@ -22,6 +22,14 @@ import {
   setDebugLoggingEnabled,
   uploadAndClearDebugLogs,
 } from "../../../core/services";
+import {
+  generateDscDebugReport,
+  serializeDscDebugReport,
+  isDscDebugEnabled,
+  setDscDebugEnabled,
+  clearTokenResolutionLog,
+  clearCardTokenReports,
+} from "../../../core/services/tokenDebugService";
 import { readMetadataPipelineRuntimeStatus, type MetadataPipelineRuntimeStatus } from "../../../core/services/metadataExtractionPipelineService";
 import { readMetadataCorrectionSyncRuntimeState, type MetadataCorrectionSyncRuntimeState } from "../../../core/services/metadataCorrectionSyncService";
 import { getSupportedLanguages, t as translate } from "../../../core/services/i18nService";
@@ -294,6 +302,9 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const [debugStatus, setDebugStatus] = React.useState<string | null>(null);
   const [isUploadingDebugLog, setIsUploadingDebugLog] = React.useState(false);
   const [debugPolicyStatus, setDebugPolicyStatus] = React.useState<string | null>(null);
+  const [dscDebugEnabled, setDscDebugEnabledState] = React.useState<boolean>(() => isDscDebugEnabled());
+  const [dscDebugReport, setDscDebugReport] = React.useState<string | null>(null);
+  const [isGeneratingDscReport, setIsGeneratingDscReport] = React.useState(false);
   const [ocrProviderOrder, setOcrProviderOrderState] = React.useState<AutoOcrProviderId[]>([
     "cloud_openai_vision",
     "cloud_github_models_vision",
@@ -450,6 +461,46 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
       await refreshDebugStats();
       setDebugStatus("Local debug log cleared.");
     })();
+  }
+
+  function handleDscDebugToggle(enabled: boolean): void {
+    setDscDebugEnabled(enabled);
+    setDscDebugEnabledState(enabled);
+    setDebugStatus(enabled ? "DSC debug mode enabled." : "DSC debug mode disabled.");
+  }
+
+  function handleClearDscDebugReport(): void {
+    clearTokenResolutionLog();
+    clearCardTokenReports();
+    setDscDebugReport(null);
+    setDebugStatus("DSC debug logs cleared.");
+  }
+
+  function handleGenerateDscReport(): void {
+    setIsGeneratingDscReport(true);
+    try {
+      const report = generateDscDebugReport({ appVersion: currentAppVersion });
+      setDscDebugReport(serializeDscDebugReport(report));
+      setDebugStatus(
+        `DSC report generated: ${report.summary.totalResolutions} resolution(s), ` +
+        `${report.summary.mismatches} mismatch(es), ` +
+        `${report.summary.errors} error(s).`
+      );
+    } finally {
+      setIsGeneratingDscReport(false);
+    }
+  }
+
+  function handleCopyDscReport(): void {
+    if (!dscDebugReport) {
+      return;
+    }
+
+    void navigator.clipboard.writeText(dscDebugReport).then(() => {
+      setDebugStatus("DSC report copied to clipboard.");
+    }).catch(() => {
+      setDebugStatus("Clipboard write failed — select and copy the text manually.");
+    });
   }
 
   async function refreshOcrProviderHealth(forceRefresh = false): Promise<void> {
@@ -1285,6 +1336,52 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
               {isUploadingDebugLog ? "Sending..." : "Send Debug Log to Cloud"}
             </button>
           </div>
+
+          <hr className="settings-divider" />
+
+          <h4 style={{ margin: "0.5rem 0 0.25rem" }}>DSC Token Debug</h4>
+          <p className="settings-meta">Inspect semantic color token resolution, card-level token mappings, and detect legacy color usage across the UI.</p>
+          <label className="settings-toggle" title="When enabled, every token resolution is recorded with full diagnostic context.">
+            <input
+              type="checkbox"
+              checked={dscDebugEnabled}
+              onChange={(event) => handleDscDebugToggle(event.target.checked)}
+            />
+            Enable DSC Debug Mode
+          </label>
+          <div className="form-actions">
+            <button
+              type="button"
+              onClick={handleGenerateDscReport}
+              disabled={isGeneratingDscReport}
+            >
+              {isGeneratingDscReport ? "Generating…" : "Generate Full Debug Report"}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={handleClearDscDebugReport}
+            >
+              Clear DSC Debug Logs
+            </button>
+          </div>
+          {dscDebugReport ? (
+            <div style={{ marginTop: "0.5rem" }}>
+              <div className="form-actions" style={{ marginBottom: "0.25rem" }}>
+                <button type="button" className="btn-secondary" onClick={handleCopyDscReport}>
+                  Copy Report
+                </button>
+              </div>
+              <textarea
+                readOnly
+                rows={12}
+                style={{ width: "100%", fontFamily: "monospace", fontSize: "0.75rem", resize: "vertical" }}
+                value={dscDebugReport}
+                aria-label="DSC debug report"
+              />
+            </div>
+          ) : null}
+
           {debugStatus ? <p className="settings-meta">{debugStatus}</p> : null}
         </article>
 

@@ -68,6 +68,42 @@ Before marking any bug fix complete, confirm:
 
 ---
 
+## Test-First Bugfix Workflow — MANDATORY
+
+**Agents MUST follow this workflow for every bug fix. Refusing to follow it is not acceptable.**
+
+### Steps
+
+1. **Write a failing test first.**
+   - Reproduce the exact bug in a test assertion before touching any source code.
+   - Confirm the test fails for the right reason (not a test setup error).
+
+2. **Confirm the failure reason.**
+   - Read the test output carefully.
+   - The failure must describe the actual bug, not a missing fixture or import error.
+
+3. **Fix the code.**
+   - Make the minimal change that causes the failing test to pass.
+   - Do not refactor unrelated code in the same commit.
+
+4. **Expand coverage.**
+   - Add light/dark/hover/active/disabled/focus state variants where applicable.
+   - Add regression assertions for any related edge cases discovered during investigation.
+
+5. **Add to regression suite.**
+   - Ensure the new tests are included in the test index (`npm run test:index`).
+   - Ensure `npm run test:e2e:comprehensive` passes end-to-end.
+
+### Color and Token Bug Specific Rules
+
+- **NEVER** accept a fix that does not include a failing test demonstrating the wrong color.
+- **NEVER** accept a fix for `#0c3183` (legacy brand blue) without confirming the authoritative replacement token is `--dsc-major` (#2563EB) or another correct DSC token.
+- All semantic token tests live in `tests/core/semanticTokens.test.ts`.
+- All token resolutions are validated in `src/core/services/semanticTokens.ts` — the authoritative source of truth.
+- Use `npm run program -- debug dsc report` to generate a CLI token debug report at any time.
+
+---
+
 ## Project Conventions
 
 ### Testing And Fixture Standards
@@ -83,7 +119,14 @@ Before marking any bug fix complete, confirm:
 - Any new debug behavior in the app should keep a CLI-equivalent path via `npm run program -- debug ...`.
 - Debug metadata should include timestamp, subsystem, severity, source type, and error context whenever available.
 - Use normalized source type vocabulary (`automatic`, `manual`) for new debug and CLI flows; preserve compatibility with older app entity values only where needed.
+- DSC token debug pipeline is accessible via `npm run program -- debug dsc report`.
 
+### Color System Standards
+
+- Authoritative semantic tokens live in `src/core/services/semanticTokens.ts`.
+- CSS custom properties for DSC tokens are prefixed `--dsc-*` and defined at the top of `src/webapp/styles/globals.css`.
+- Any appearance of `#0c3183` in active themes, cards, or components is a bug unless explicitly referenced via `LEGACY_COLOR_WHITELIST["LEGACY_BRAND_BLUE"]`.
+- Tests for semantic tokens and token debug module: `tests/core/semanticTokens.test.ts`.
 
 ---
 

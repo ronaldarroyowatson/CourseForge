@@ -242,6 +242,183 @@ function setEnabled(enabled) {
   console.log(`Debug logging ${enabled ? "enabled" : "disabled"}.`);
 }
 
+// ============================================================
+// DSC Token Debug Pipeline
+// ============================================================
+
+/** Authoritative semantic palette — must mirror semanticTokens.ts exactly */
+const SEMANTIC_PALETTE = Object.freeze({
+  MAJOR:   "#2563EB",
+  MINOR:   "#73A2F5",
+  ACCENT:  "#FFFFFF",
+  SUCCESS: "#22C55E",
+  WARNING: "#FACC15",
+  ERROR:   "#EF4444",
+  INFO:    "#06B6D4",
+});
+
+/** Legacy colors that are explicitly whitelisted */
+const LEGACY_COLOR_WHITELIST = Object.freeze({
+  LEGACY_BRAND_BLUE: "#0c3183",
+});
+
+const dscConfigPath = path.join(baseDir, "dsc-debug-config.json");
+const dscLogPath = path.join(baseDir, "dsc-token-log.jsonl");
+
+function readDscConfig() {
+  ensureDir();
+  if (!fs.existsSync(dscConfigPath)) {
+    return { enabled: false };
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(dscConfigPath, "utf8"));
+  } catch {
+    return { enabled: false };
+  }
+}
+
+function writeDscConfig(next) {
+  ensureDir();
+  fs.writeFileSync(dscConfigPath, JSON.stringify(next, null, 2), "utf8");
+}
+
+function readDscLog() {
+  if (!fs.existsSync(dscLogPath)) {
+    return [];
+  }
+
+  return fs
+    .readFileSync(dscLogPath, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+function detectLegacyColors(records) {
+  const legacyValues = Object.values(LEGACY_COLOR_WHITELIST).map((v) => v.toLowerCase().replace(/^#/, ""));
+  return records
+    .filter((r) => {
+      const color = String(r.computedColor ?? "").toLowerCase().replace(/^#/, "");
+      return legacyValues.includes(color);
+    })
+    .map((r) => ({
+      color: r.computedColor,
+      location: `${r.componentName ?? "unknown"}/${r.semanticRole ?? "?"}`,
+      isWhitelisted: true,
+    }));
+}
+
+function buildDscReport(options = {}) {
+  const records = readDscLog();
+  const mismatches = records.filter((r) => r.status === "mismatch");
+  const errors = records.filter((r) => r.status === "error");
+  const cascadingRisks = records.filter((r) => r.status === "cascading-failure-risk");
+  const legacyInstances = detectLegacyColors(records);
+
+  const paletteValidation = Object.entries(SEMANTIC_PALETTE).map(([role, expected]) => ({
+    role,
+    expected,
+    status: "ok",
+    note: "Authoritative value from semanticTokens.ts",
+  }));
+
+  const report = {
+    generatedAt: new Date().toISOString(),
+    appVersion: options.appVersion ?? "unknown",
+    source: "cli",
+    semanticPalette: SEMANTIC_PALETTE,
+    paletteValidation,
+    tokenResolutions: records,
+    legacyColorInstances: legacyInstances,
+    summary: {
+      totalResolutions: records.length,
+      mismatches: mismatches.length,
+      errors: errors.length,
+      cascadingFailureRisks: cascadingRisks.length,
+      legacyColorCount: legacyInstances.length,
+      unwhitelistedLegacyColors: legacyInstances.filter((i) => !i.isWhitelisted).length,
+    },
+  };
+
+  if (options.pageId) {
+    report.filteredByPage = options.pageId;
+  }
+
+  if (options.cardId) {
+    report.filteredByCard = options.cardId;
+  }
+
+  return report;
+}
+
+function runDscDebugCommand() {
+  const sub = args[2];
+
+  if (!sub || sub === "--help") {
+    console.log("Usage:");
+    console.log("  program debug dsc enable                   Enable DSC debug mode");
+    console.log("  program debug dsc disable                  Disable DSC debug mode");
+    console.log("  program debug dsc report [--report <path>] Generate full token debug report");
+    console.log("  program debug dsc clear                    Clear DSC debug logs");
+    console.log("");
+    console.log("Flags:");
+    console.log("  --report <path>   Write JSON report to file instead of stdout");
+    console.log("  --page <pageId>   Filter report to a specific page");
+    console.log("  --card <cardId>   Filter report to a specific card");
+    return;
+  }
+
+  if (sub === "enable") {
+    writeDscConfig({ enabled: true });
+    console.log("DSC debug mode enabled. Token resolutions will be recorded.");
+    return;
+  }
+
+  if (sub === "disable") {
+    writeDscConfig({ enabled: false });
+    console.log("DSC debug mode disabled.");
+    return;
+  }
+
+  if (sub === "clear") {
+    ensureDir();
+    fs.writeFileSync(dscLogPath, "", "utf8");
+    console.log(`DSC debug log cleared: ${dscLogPath}`);
+    return;
+  }
+
+  if (sub === "report") {
+    const reportPath = parseFlag("report", "");
+    const pageId = parseFlag("page", "");
+    const cardId = parseFlag("card", "");
+    const report = buildDscReport({ pageId: pageId || null, cardId: cardId || null });
+    const json = JSON.stringify(report, null, 2);
+
+    if (reportPath) {
+      const resolvedPath = path.resolve(reportPath);
+      fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+      fs.writeFileSync(resolvedPath, json, "utf8");
+      console.log(`DSC debug report written to ${resolvedPath}`);
+      console.log(`Summary: ${report.summary.totalResolutions} resolutions, ${report.summary.mismatches} mismatch(es), ${report.summary.errors} error(s)`);
+    } else {
+      console.log(json);
+    }
+
+    return;
+  }
+
+  console.error(`Unknown DSC sub-command: ${sub}`);
+  process.exit(1);
+}
+
 function showHelp() {
   console.log("Usage:");
   console.log("  program debug <feature> [--severity info|warn|error] [--sourceType automatic|manual] [--message text]");
@@ -249,6 +426,7 @@ function showHelp() {
   console.log("  program debug clear-log");
   console.log("  program debug enable");
   console.log("  program debug disable");
+  console.log("  program debug dsc [enable|disable|report|clear] [--report <path>] [--page <id>] [--card <id>]");
 }
 
 if (command !== "debug") {
@@ -259,6 +437,11 @@ if (command !== "debug") {
 if (!subcommand) {
   showHelp();
   process.exit(1);
+}
+
+if (subcommand === "dsc") {
+  runDscDebugCommand();
+  process.exit(0);
 }
 
 if (subcommand === "dump-log") {

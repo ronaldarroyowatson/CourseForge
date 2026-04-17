@@ -26,6 +26,9 @@
   --bg-panel: var(--cf-surface);
   --button-bg: var(--cf-surface-strong);
   --button-bg-hover: var(--cf-surface-muted);
+  --bg-hover: var(--cf-surface-muted);
+  --bg-panel-alt: var(--cf-surface-strong);
+  --border-subtle: var(--cf-border);
   --success-color: var(--cf-success);
   --on-accent: var(--cf-text-on-accent);
   --primary-bg: var(--cf-accent);

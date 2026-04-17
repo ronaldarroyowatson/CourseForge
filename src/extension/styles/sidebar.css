@@ -430,7 +430,7 @@ body,
 }
 
 .sidebar-textbook-setup .cover-drop-zone {
-  border: 2px dashed var(--border-strong);
+  border: 2px dashed var(--cf-border-strong);
   border-radius: 6px;
   padding: 1rem 0.75rem;
   text-align: center;
@@ -438,12 +438,12 @@ body,
 }
 
 .sidebar-textbook-setup .cover-drop-zone--active {
-  background: var(--bg-hover);
+  background: var(--cf-surface-muted);
   border-color: var(--cf-accent);
 }
 
 .sidebar-textbook-setup .cover-drop-zone__hint {
-  color: var(--text-secondary);
+  color: var(--cf-text-muted);
   font-size: 0.8rem;
   margin: 0;
 }

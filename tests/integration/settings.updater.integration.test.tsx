@@ -12,6 +12,13 @@ const firestoreMocks = vi.hoisted(() => ({
 }));
 
 const coreServiceMocks = vi.hoisted(() => ({
+  buildFullDebugReport: vi.fn(() => ({
+    generatedAt: "2026-04-17T00:00:00.000Z",
+    debugEnabled: true,
+    tokenResolution: [],
+    uiIntrospection: { pageId: "settings", cardId: "debug-log" },
+    cascadingFailureDetector: { hasRisk: false, reasons: [] },
+  })),
   getDesignTokenDebugReport: vi.fn(() => ({
     enabled: true,
     page: { id: "settings", label: "Settings" },
@@ -77,6 +84,7 @@ vi.mock("../../src/firebase/firestore", () => ({
 }));
 
 vi.mock("../../src/core/services", () => ({
+  buildFullDebugReport: coreServiceMocks.buildFullDebugReport,
   getDesignTokenDebugReport: coreServiceMocks.getDesignTokenDebugReport,
   clearDebugLogEntries: coreServiceMocks.clearDebugLogEntries,
   getDebugLoggingPolicy: coreServiceMocks.getDebugLoggingPolicy,
@@ -617,5 +625,19 @@ describe("Settings updater communication", () => {
     expect(within(debugCard as HTMLElement).getByText("Components: Enable Debug Logging, Clear Debug Log, Send Debug Log to Cloud, Token Introspection")).toBeInTheDocument();
     expect(within(debugCard as HTMLElement).getByText("MAJOR: #2563EB")).toBeInTheDocument();
     expect(within(debugCard as HTMLElement).getByText("Risk: No cascading token failures detected.")).toBeInTheDocument();
+  });
+
+  it("renders the DSC card controls in settings", async () => {
+    render(<SettingsPage onBack={() => undefined} />);
+
+    expect(await screen.findByText("Design System Controls")).toBeInTheDocument();
+    expect(screen.getByText("Engine: Masonry")).toBeInTheDocument();
+    expect(screen.getByText(/Gamma:/)).toBeInTheDocument();
+    expect(screen.getByText("Stroke preset")).toBeInTheDocument();
+    expect(screen.getByText("Directional flow")).toBeInTheDocument();
+    expect(screen.getByText("Buttons")).toBeInTheDocument();
+    expect(screen.getByText("Save mode")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use System Defaults" })).toBeInTheDocument();
   });
 });

@@ -9,6 +9,7 @@ Use this sequence for every bug fix and regression patch.
 5. Run `npm run bugfix:test` before considering the bug fix complete.
 6. If behavior changed, update the relevant docs under `docs/`.
 7. Use `npm run bugfix:release -- -Description "<short bugfix summary>"` for the patch release workflow after the quality gate passes.
+8. Agents must refuse to implement a bug fix when steps 1-4 are skipped or cannot be demonstrated in logs/test output.
 
 ## DSC And Debug Requirements
 

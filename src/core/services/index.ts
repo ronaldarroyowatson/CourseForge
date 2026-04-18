@@ -18,6 +18,10 @@ export * from "./metadataExtractionPipelineService";
 export * from "./coverImageService";
 export * from "./debugLogService";
 export * from "./designTokenDebugService";
+export * from "./designSystemService";
+export * from "./masonryLayoutService";
+export * from "./semanticTokens";
+export * from "./tokenDebugService";
 export {
   appendDebugLogEntry,
   clearDebugLogEntries,

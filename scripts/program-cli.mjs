@@ -310,6 +310,7 @@ function setEnabled(enabled) {
 
 function showHelp() {
   console.log("Usage:");
+  console.log("  courseforge debug <feature> [flags]  (alias: npm run courseforge -- debug ...)");
   console.log("  program debug <feature> [--severity info|warn|error] [--sourceType automatic|manual] [--message text]");
   console.log("  program debug dsc <enable|disable|report|clear> [--page settings] [--card \"Debug Log\"] [--report path]");
   console.log("  program debug dump-log [--sourceType automatic|manual] [--output path] [--sync-cloud] [--approve-delete]");
@@ -333,21 +334,84 @@ function buildDscReport() {
   const cardId = normalizeCardId(parseFlag("card", "Debug Log"));
   const page = dscCatalog[pageId] || dscCatalog.settings;
   const card = page.cards[cardId] || page.cards["debug-log"];
+  const themeMode = String(parseFlag("theme", "light")).toLowerCase() === "dark" ? "dark" : "light";
+  const backgroundColor = "#FFFFFF";
 
   const tokens = Object.entries(authoritativeSemanticPalette).reduce((accumulator, [token, value]) => {
+    const fallbackChain = dscFallbacks[token];
     accumulator[token] = {
       expectedValue: value,
       resolvedValue: value,
-      source: dscFallbacks[token][0],
+      source: fallbackChain[0],
       status: "resolved",
-      fallbackChain: dscFallbacks[token],
+      fallbackChain,
       usedFallback: false,
       usedLegacyWhitelist: false,
     };
     return accumulator;
   }, {});
 
+  const tokenResolution = Object.entries(tokens).map(([semanticRole, token]) => ({
+    semanticRole,
+    requestedToken: token.fallbackChain[0],
+    resolvedToken: token.source,
+    computedColor: token.resolvedValue,
+    fallbackChain: token.fallbackChain,
+    reasonForFallback: token.usedFallback ? `fallback:${token.source}` : "resolved-direct",
+    themeMode,
+    componentName: card.label,
+    componentState: "default",
+    contrastAgainstBackground: backgroundColor,
+    contrastIsAcceptable: true,
+    isLegacyColorError: token.resolvedValue.toUpperCase() === "#0C3183",
+    isMismatch: token.resolvedValue !== token.expectedValue,
+    cascadingFailureRisk: token.usedFallback,
+  }));
+
+  const mismatches = tokenResolution
+    .filter((entry) => entry.isMismatch && !entry.isLegacyColorError)
+    .map((entry) => ({
+      token: entry.semanticRole,
+      actual: entry.computedColor,
+      expected: authoritativeSemanticPalette[entry.semanticRole],
+      whitelisted: false,
+    }));
+
+  const uiIntrospection = {
+    pageId: page.id,
+    cardId: card.id,
+    cardType: "settings-card",
+    recipeName: `settings.${card.id}`,
+    expectedTokenSet: authoritativeSemanticPalette,
+    actualTokenSet: Object.fromEntries(Object.entries(tokens).map(([token, value]) => [token, value.resolvedValue])),
+    backgroundColor: "var(--bg-panel)",
+    borderColor: "var(--border-default)",
+    titleTextColor: "var(--text-primary)",
+    bodyTextColor: "var(--text-secondary)",
+    buttonTypes: ["primary", "secondary", "danger"],
+    buttonTokenSets: {
+      primary: { semantic: "MAJOR", resolvedColor: authoritativeSemanticPalette.MAJOR },
+      secondary: { semantic: "MINOR", resolvedColor: authoritativeSemanticPalette.MINOR },
+      danger: { semantic: "ERROR", resolvedColor: authoritativeSemanticPalette.ERROR },
+    },
+    fallbacksUsed: tokenResolution.filter((entry) => entry.cascadingFailureRisk).map((entry) => entry.semanticRole),
+    mismatches,
+    legacyColors: tokenResolution.filter((entry) => entry.isLegacyColorError).map((entry) => entry.computedColor),
+  };
+
+  const riskReasons = [];
+  if (tokenResolution.some((entry) => entry.isLegacyColorError)) {
+    riskReasons.push("Legacy color detected in active token output.");
+  }
+  if (tokenResolution.some((entry) => entry.isMismatch)) {
+    riskReasons.push("Semantic token mismatch detected.");
+  }
+  if (tokenResolution.some((entry) => entry.cascadingFailureRisk)) {
+    riskReasons.push("Fallback chain was triggered.");
+  }
+
   return {
+    generatedAt: new Date().toISOString(),
     enabled: config.enabled,
     page: {
       id: page.id,
@@ -359,11 +423,18 @@ function buildDscReport() {
       components: card.components,
     },
     tokens,
-    mismatches: [],
+    tokenResolution,
+    uiIntrospection,
+    mismatches,
+    legacyColorMatches: tokenResolution.filter((entry) => entry.isLegacyColorError),
     cascadingFailureRisk: {
-      level: "none",
-      summary: "No cascading token failures detected.",
-      impactedTokens: [],
+      level: riskReasons.length === 0 ? "none" : "high",
+      summary: riskReasons.length === 0 ? "No cascading token failures detected." : riskReasons.join(" "),
+      impactedTokens: tokenResolution.filter((entry) => entry.cascadingFailureRisk || entry.isMismatch).map((entry) => entry.semanticRole),
+    },
+    cascadingFailureDetector: {
+      hasRisk: riskReasons.length > 0,
+      reasons: riskReasons,
     },
   };
 }

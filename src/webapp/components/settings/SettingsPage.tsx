@@ -12,6 +12,7 @@ import {
 } from "../../../core/services/autoOcrService";
 import { fetchLanguageRegistryFromUrl } from "../../../core/services/translationWorkflowService";
 import {
+  buildFullDebugReport,
   clearDebugLogEntries,
   getDesignTokenDebugReport,
   getDebugLoggingPolicy,
@@ -29,6 +30,7 @@ import { getSupportedLanguages, t as translate } from "../../../core/services/i1
 import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
+import { DesignSystemSettingsCard } from "./DesignSystemSettingsCard";
 
 interface SettingsPageProps {
   onBack?: () => void;
@@ -321,6 +323,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const [showLanguageSettings, setShowLanguageSettings] = React.useState(false);
   const [showAccessibilitySettings, setShowAccessibilitySettings] = React.useState(false);
   const [showMetadataLearning, setShowMetadataLearning] = React.useState(false);
+  const [debugReportOutput, setDebugReportOutput] = React.useState<string>("");
   const [metadataTrainingStats, setMetadataTrainingStats] = React.useState<LocalMetadataTrainingStats>({
     totalCorrections: 0,
     pendingCorrections: 0,
@@ -456,6 +459,32 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
       await refreshDebugStats();
       setDebugStatus("Local debug log cleared.");
     })();
+  }
+
+  function handleGenerateFullDebugReport(): void {
+    const fullReport = buildFullDebugReport({
+      enabled: debugEnabled,
+      pageId: "settings",
+      cardId: "debug-log",
+      themeMode: document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light",
+      whitelist: ["#0C3183"],
+    });
+    setDebugReportOutput(JSON.stringify(fullReport, null, 2));
+    setDebugStatus("Generated full DSC + UI debug report.");
+  }
+
+  async function handleCopyDebugReport(): Promise<void> {
+    if (!debugReportOutput.trim()) {
+      setDebugStatus("Generate a debug report first.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(debugReportOutput);
+      setDebugStatus("Debug report copied.");
+    } catch {
+      setDebugStatus("Unable to copy debug report right now.");
+    }
   }
 
   async function refreshOcrProviderHealth(forceRefresh = false): Promise<void> {
@@ -1267,6 +1296,8 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           ) : null}
         </article>
 
+        <DesignSystemSettingsCard userId={userId} />
+
         <article className="settings-card settings-card--debug-log">
           <h3>Debug Log</h3>
           <p>Store local troubleshooting events for Auto Mode and sync behavior. You control whether logs are collected and when they are uploaded.</p>
@@ -1282,6 +1313,9 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
             <div className="form-actions">
             <button type="button" className="btn-secondary" onClick={handleClearDebugLog}>
               Clear Debug Log
+            </button>
+            <button type="button" className="btn-secondary" onClick={handleGenerateFullDebugReport}>
+              Generate Full Debug Report
             </button>
             <button type="button" onClick={() => { void handleSendDebugLogToCloud(); }} disabled={isUploadingDebugLog}>
               {isUploadingDebugLog ? "Sending..." : "Send Debug Log to Cloud"}
@@ -1304,6 +1338,20 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
             {designTokenDebugReport.mismatches.length > 0 ? (
               <p className="error-text">Mismatches: {designTokenDebugReport.mismatches.map((entry) => `${entry.token} ${entry.actual} -> ${entry.expected}`).join(" | ")}</p>
             ) : null}
+            <label className="settings-meta" htmlFor="settings-debug-report-output">Debug Report JSON</label>
+            <textarea
+              id="settings-debug-report-output"
+              className="settings-debug-log__report-output"
+              value={debugReportOutput}
+              onChange={(event) => setDebugReportOutput(event.target.value)}
+              placeholder="Generate Full Debug Report to populate this output."
+              rows={10}
+            />
+            <div className="form-actions">
+              <button type="button" className="btn-secondary" onClick={() => { void handleCopyDebugReport(); }}>
+                Copy Debug Report
+              </button>
+            </div>
           </div>
           {debugStatus ? <p className="settings-meta">{debugStatus}</p> : null}
         </article>

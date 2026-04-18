@@ -6,7 +6,7 @@ This file is maintained to help AI agents quickly locate code, services, tests, 
 
 ## Repository Layout
 
-```
+```text
 /
 ├── src/
 │   ├── core/
@@ -40,7 +40,9 @@ This file is maintained to help AI agents quickly locate code, services, tests, 
 ## Key Services (`src/core/services/`)
 
 | File | Purpose |
-|------|---------|
+| ---- | ------- |
+| `designSystemService.ts` | Restored DSC design-token engine: type scale, stroke, spacing, motion, semantic colors, local/cloud persistence, corruption recovery. |
+| `masonryLayoutService.ts` | Masonry layout engine spec for DSC: adaptive columns, Fibonacci spacing tokens, card-type heuristics, auto-arrange and drag/drop readiness metadata. |
 | `semanticTokens.ts` | **Authoritative DSC semantic palette** — MAJOR, MINOR, ACCENT, SUCCESS, WARNING, ERROR, INFO. Single source of truth for all color tokens. |
 | `tokenDebugService.ts` | Token resolution debug module — records every token resolution, generates full DSC debug reports, detects legacy colors and cascading failures. |
 | `debugLogService.ts` | General-purpose local debug log (auto-mode, sync events). Separate from DSC token debugging. |
@@ -57,7 +59,7 @@ This file is maintained to help AI agents quickly locate code, services, tests, 
 Defined in `src/core/services/semanticTokens.ts`. These values are **immutable**.
 
 | Token | Hex | CSS Variable |
-|-------|-----|-------------|
+| ----- | --- | ------------ |
 | MAJOR | `#2563EB` | `--dsc-major` |
 | MINOR | `#73A2F5` | `--dsc-minor` |
 | ACCENT | `#FFFFFF` | `--dsc-accent` |
@@ -94,7 +96,8 @@ npm run program -- debug clear-log           # Clear general debug log
 ## Tests
 
 | File | What it covers |
-|------|---------------|
+| ---- | -------------- |
+| `tests/core/masonryLayoutService.test.ts` | Masonry DSC layout engine decisions: adaptive columns, panel spans, Fibonacci spacing tokens, feature-set flags |
 | `tests/core/semanticTokens.test.ts` | Authoritative palette values, token matching, CSS generation, legacy color detection, token resolution recording, debug report generation |
 | `tests/core/uiStore.preferences.test.ts` | Language + accessibility preference store |
 | `tests/core/debugLogService.test.ts` | General debug log service |
@@ -110,9 +113,12 @@ Run a specific test: `npx vitest run tests/core/semanticTokens.test.ts`
 Location: `src/webapp/components/settings/SettingsPage.tsx`
 
 The Debug Log card (`article.settings-card > h3:Debug Log`) is the unified control surface for:
+
 - Enabling/disabling general debug logging
 - Uploading/clearing the general debug log
 - **DSC Token Debug section**: Enable/disable DSC debug mode, generate/copy full DSC report, clear DSC logs
+
+The restored DSC card now uses a masonry layout engine with preview-first placement, adaptive reflow, Fibonacci spacing tokens, and mirrored preview/control surfaces.
 
 ---
 

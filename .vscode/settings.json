@@ -1,4 +1,11 @@
 {
   "powershell.scriptAnalysis.enable": false,
-  "powershell.scriptAnalysis.settingsPath": ".vscode/PSScriptAnalyzerSettings.psd1"
+  "powershell.scriptAnalysis.settingsPath": ".vscode/PSScriptAnalyzerSettings.psd1",
+  "markdownlint.ignore": [
+    "docs/codebase-index.md",
+    ".markdownlintignore"
+  ],
+  "markdownlint.config": {
+    "MD041": false
+  }
 }

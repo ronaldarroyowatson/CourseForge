@@ -1,12 +1,12 @@
 # Test Index
 
-Generated: 2026-04-18T00:04:19.927Z
+Generated: 2026-04-18T03:30:34.990Z
 
 ## Summary
 
-- Total test files: 51
-- Unit test files: 33
-- Integration test files: 16
+- Total test files: 56
+- Unit test files: 37
+- Integration test files: 17
 - Rules test files: 2
 - Canonical sample files: 5
 
@@ -20,6 +20,7 @@ Generated: 2026-04-18T00:04:19.927Z
 - tests/core/copilot.auditLogger.test.ts
 - tests/core/copilot.premiumUsageTracker.test.ts
 - tests/core/debugLogService.test.ts
+- tests/core/designSystemService.test.ts
 - tests/core/designTokenDebugService.test.ts
 - tests/core/documentExtraction.guardrails.test.ts
 - tests/core/documentIngest.extraction.test.ts
@@ -29,16 +30,19 @@ Generated: 2026-04-18T00:04:19.927Z
 - tests/core/i18nService.test.ts
 - tests/core/installerLifecycle.matrix.test.ts
 - tests/core/installerLifecycle.test.ts
+- tests/core/masonryLayoutService.test.ts
 - tests/core/metadataCorrectionLearningService.test.ts
 - tests/core/metadataCorrectionSafeguards.test.ts
 - tests/core/metadataExtractionPipelineService.test.ts
 - tests/core/premiumUsage.limits.test.ts
 - tests/core/presentationService.conversion.test.ts
 - tests/core/programCli.dsc.test.ts
+- tests/core/semanticTokens.test.ts
 - tests/core/syncNow.safety.test.ts
 - tests/core/syncService.moderationHold.test.ts
 - tests/core/textbookAutoExtractionService.test.ts
 - tests/core/tocPreviewPipeline.test.ts
+- tests/core/tokenDebugService.test.ts
 - tests/core/translationReviewService.test.ts
 - tests/core/translationWorkflowService.test.ts
 - tests/core/uiStore.preferences.test.ts
@@ -54,6 +58,7 @@ Generated: 2026-04-18T00:04:19.927Z
 - tests/integration/autoTextbookFlow.integration.test.tsx
 - tests/integration/chromeos.deployment.integration.test.ts
 - tests/integration/correctionReviewPanel.integration.test.tsx
+- tests/integration/designSystemSettingsCard.integration.test.tsx
 - tests/integration/documentIngest.panel.integration.test.tsx
 - tests/integration/extension.auth.communication.integration.test.ts
 - tests/integration/extension.repositories.integration.test.ts

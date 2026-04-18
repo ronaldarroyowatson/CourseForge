@@ -1,12 +1,6 @@
-export const AUTHORITATIVE_SEMANTIC_PALETTE = {
-  MAJOR: "#2563EB",
-  MINOR: "#73A2F5",
-  ACCENT: "#FFFFFF",
-  SUCCESS: "#22C55E",
-  WARNING: "#FACC15",
-  ERROR: "#EF4444",
-  INFO: "#06B6D4",
-} as const;
+import { AUTHORITATIVE_SEMANTIC_PALETTE } from "./semanticTokens";
+
+export { AUTHORITATIVE_SEMANTIC_PALETTE };
 
 export type SemanticTokenName = keyof typeof AUTHORITATIVE_SEMANTIC_PALETTE;
 

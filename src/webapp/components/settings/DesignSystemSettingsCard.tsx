@@ -1,0 +1,675 @@
+import React from "react";
+
+import {
+  type CloudSettingsDecision,
+  type DesignTokenPreferences,
+  deleteCloudDesignTokenPreferences,
+  inspectCloudDesignTokenPreferences,
+  loadDesignTokenPreferencesFromCloud,
+  logDesignSystemDebugEvent,
+  readLocalDesignTokenDiagnostics,
+  resolveCloudSettingsDecision,
+  saveDesignTokenPreferencesToCloud,
+  sanitizeDesignTokenPreferences,
+  tryRepairCorruptedLocalDesignSettings,
+} from "../../../core/services/designSystemService";
+import {
+  logDscMasonryLayoutDecision,
+  selectDscMasonryLayout,
+} from "../../../core/services/masonryLayoutService";
+import { useUIStore } from "../../store/uiStore";
+
+interface DesignSystemSettingsCardProps {
+  userId: string | null;
+}
+
+type PersistenceMode = "local" | "cloud" | "merge";
+
+type RatioPreset = {
+  label: string;
+  value: number;
+  description: string;
+};
+
+const TYPE_RATIO_PRESETS: RatioPreset[] = [
+  { label: "Minor Second", value: 1.067, description: "Very Subtle" },
+  { label: "Major Second", value: 1.125, description: "Subtle" },
+  { label: "Minor Third", value: 1.2, description: "Noticeable" },
+  { label: "Major Third", value: 1.25, description: "Clear" },
+  { label: "Perfect Fourth", value: 1.333, description: "Strong" },
+  { label: "Perfect Fifth", value: 1.5, description: "Bold" },
+];
+
+const SPACING_PRESETS: RatioPreset[] = [
+  { label: "Balanced", value: 1.25, description: "Default" },
+  { label: "Premium", value: 1.333, description: "Comfortable" },
+  { label: "Authoritative", value: 1.5, description: "Strong rhythm" },
+  { label: "Clean", value: 2.0, description: "Very open" },
+];
+
+const STROKE_PRESET_OPTIONS: Array<{ label: string; value: DesignTokenPreferences["strokePreset"]; descriptor: string }> = [
+  { label: "Common", value: "common", descriptor: "1 -> 1.5 -> 2" },
+  { label: "Doubling", value: "doubling", descriptor: "1 -> 2 -> 4" },
+  { label: "Soft", value: "soft", descriptor: "1 -> 1.25 -> 1.5" },
+  { label: "Ultra Thin", value: "ultra-thin", descriptor: "0.5 -> 1 -> 2 -> 3" },
+  { label: "Sweet Spot", value: "sweet-spot", descriptor: "1 -> 1.5 -> 2 -> 3" },
+];
+
+function DemoButton({
+  variant,
+  size,
+  state = "default",
+}: {
+  variant: "primary" | "secondary" | "ghost" | "destructive";
+  size: "sm" | "md" | "lg";
+  state?: "default" | "hover" | "active" | "disabled" | "loading";
+}): React.JSX.Element {
+  const classes = ["cf-ds-btn", `cf-ds-btn--${variant}`, `cf-ds-btn--${size}`];
+  if (state !== "default") {
+    classes.push(`cf-ds-btn--${state}`);
+  }
+
+  return (
+    <button type="button" className={classes.join(" ")} disabled={state === "disabled"}>
+      {state === "loading" ? "Loading" : `${variant} ${size}`}
+    </button>
+  );
+}
+
+function motionDescription(value: number): string {
+  if (value <= 100) {
+    return "Micro (hover, toggle)";
+  }
+
+  if (value <= 300) {
+    return "Default (modal, dropdown)";
+  }
+
+  return "XL (complex operations)";
+}
+
+export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardProps): React.JSX.Element {
+  const prefs = useUIStore((state) => state.designTokenPreferences);
+  const tokens = useUIStore((state) => state.designTokens);
+  const setPrefs = useUIStore((state) => state.setDesignTokenPreferences);
+  const resetPrefs = useUIStore((state) => state.resetDesignTokenPreferences);
+  const applySystemDefaults = useUIStore((state) => state.applySystemDesignTokenDefaults);
+
+  const [status, setStatus] = React.useState<string | null>(null);
+  const [persistenceMode, setPersistenceMode] = React.useState<PersistenceMode>("local");
+  const [showKeepDialog, setShowKeepDialog] = React.useState(false);
+  const [secondsLeft, setSecondsLeft] = React.useState(12);
+  const [cloudPromptVisible, setCloudPromptVisible] = React.useState(false);
+  const [cloudPromptStatus, setCloudPromptStatus] = React.useState<string | null>(null);
+  const [cloudDecisionBusy, setCloudDecisionBusy] = React.useState(false);
+  const [corruptionStatus, setCorruptionStatus] = React.useState<string | null>(null);
+  const [localDiagnostics, setLocalDiagnostics] = React.useState(() => readLocalDesignTokenDiagnostics());
+  const confirmedRef = React.useRef<DesignTokenPreferences>(prefs);
+  const countdownIdRef = React.useRef<number | null>(null);
+  const layoutContainerRef = React.useRef<HTMLDivElement>(null);
+  const [layoutWidth, setLayoutWidth] = React.useState(1024);
+  const layout = React.useMemo(() => selectDscMasonryLayout(layoutWidth, {
+    directionalFlow: prefs.directionalFlow,
+    optionalFibonacciSpacing: true,
+  }), [layoutWidth, prefs.directionalFlow]);
+
+  React.useEffect(() => {
+    setLocalDiagnostics(readLocalDesignTokenDiagnostics());
+  }, [prefs]);
+
+  React.useEffect(() => {
+    const node = layoutContainerRef.current;
+    if (!node) {
+      return;
+    }
+
+    const updateWidth = () => {
+      setLayoutWidth(node.offsetWidth || (typeof window !== "undefined" ? window.innerWidth : 1024));
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateWidth);
+      return () => window.removeEventListener("resize", updateWidth);
+    }
+
+    const observer = new ResizeObserver(() => updateWidth());
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  React.useEffect(() => {
+    void logDscMasonryLayoutDecision(layout, {
+      directionalFlow: prefs.directionalFlow,
+      containerWidth: layoutWidth,
+    });
+  }, [layout, layoutWidth, prefs.directionalFlow]);
+
+  React.useEffect(() => {
+    if (!userId) {
+      setCloudPromptVisible(false);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const cloudInfo = await inspectCloudDesignTokenPreferences(userId);
+        if (!cloudInfo.exists) {
+          setCloudPromptVisible(false);
+          setCloudPromptStatus("No cloud design settings detected for this account.");
+          void logDesignSystemDebugEvent("Cloud design settings lookup: not found.", { userId });
+          return;
+        }
+
+        if (!cloudInfo.valid) {
+          setCloudPromptVisible(true);
+          setCloudPromptStatus(`Cloud design settings are corrupted (${cloudInfo.invalidFields.join(", ")}).`);
+          void logDesignSystemDebugEvent("Cloud design settings lookup: corrupted.", {
+            userId,
+            invalidFields: cloudInfo.invalidFields,
+          });
+          return;
+        }
+
+        setCloudPromptVisible(true);
+        setCloudPromptStatus("Cloud design settings found.");
+        void logDesignSystemDebugEvent("Cloud design settings lookup: valid settings found.", { userId });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown_cloud_lookup_error";
+        setCloudPromptStatus(`Unable to check cloud settings: ${message}`);
+        void logDesignSystemDebugEvent("Cloud design settings lookup failed.", { userId, message });
+      }
+    })();
+  }, [userId]);
+
+  React.useEffect(() => {
+    void logDesignSystemDebugEvent("Example card preview updated.", {
+      gamma: prefs.gamma,
+      typeRatio: prefs.typeRatio,
+      spacingRatio: prefs.spacingRatio,
+      strokePreset: prefs.strokePreset,
+      motionTimingMs: prefs.motionTimingMs,
+      motionEasing: prefs.motionEasing,
+    });
+  }, [prefs.gamma, prefs.motionEasing, prefs.motionTimingMs, prefs.spacingRatio, prefs.strokePreset, prefs.typeRatio]);
+
+  React.useEffect(() => {
+    if (!showKeepDialog) {
+      if (countdownIdRef.current !== null) {
+        window.clearInterval(countdownIdRef.current);
+      }
+      countdownIdRef.current = null;
+      return;
+    }
+
+    countdownIdRef.current = window.setInterval(() => {
+      setSecondsLeft((previous) => {
+        return previous <= 1 ? 0 : previous - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (countdownIdRef.current !== null) {
+        window.clearInterval(countdownIdRef.current);
+      }
+      countdownIdRef.current = null;
+    };
+  }, [setPrefs, showKeepDialog]);
+
+  React.useEffect(() => {
+    if (!showKeepDialog || secondsLeft > 0) {
+      return;
+    }
+
+    if (countdownIdRef.current !== null) {
+      window.clearInterval(countdownIdRef.current);
+      countdownIdRef.current = null;
+    }
+
+    setShowKeepDialog(false);
+    setPrefs(confirmedRef.current);
+    setStatus("Changes reverted automatically for safety.");
+    setSecondsLeft(12);
+    void logDesignSystemDebugEvent("Design token safety auto-revert triggered.");
+  }, [secondsLeft, setPrefs, showKeepDialog]);
+
+  async function handleSave(): Promise<void> {
+    setShowKeepDialog(true);
+    setSecondsLeft(12);
+
+    if (!userId || persistenceMode === "local") {
+      setStatus("Design settings saved locally.");
+      void logDesignSystemDebugEvent("Design tokens saved locally.");
+      return;
+    }
+
+    try {
+      if (persistenceMode === "cloud") {
+        await saveDesignTokenPreferencesToCloud(userId, prefs);
+        setStatus("Design settings saved to cloud.");
+      } else {
+        const cloud = await loadDesignTokenPreferencesFromCloud(userId);
+        const merged = sanitizeDesignTokenPreferences({
+          ...(cloud ?? {}),
+          ...prefs,
+        });
+        setPrefs(merged);
+        await saveDesignTokenPreferencesToCloud(userId, merged);
+        setStatus("Design settings merged and synced to cloud.");
+      }
+
+      void logDesignSystemDebugEvent("Design token persistence completed.", {
+        mode: persistenceMode,
+        userId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown cloud sync error.";
+      setStatus(`Unable to sync design settings: ${message}`);
+      void logDesignSystemDebugEvent("Design token persistence failed.", { mode: persistenceMode, message });
+    }
+  }
+
+  async function handleLoadCloudSettings(): Promise<void> {
+    if (!userId) {
+      setStatus("Sign in to load cloud settings.");
+      return;
+    }
+
+    try {
+      const cloud = await loadDesignTokenPreferencesFromCloud(userId);
+      if (!cloud) {
+        setStatus("No cloud design settings were found for this account.");
+        return;
+      }
+
+      setPrefs(cloud);
+      setStatus("Loaded cloud design settings.");
+      void logDesignSystemDebugEvent("Design token cloud settings loaded.", { userId });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown cloud load error.";
+      setStatus(`Unable to load cloud settings: ${message}`);
+      void logDesignSystemDebugEvent("Design token cloud load failed.", { message, userId });
+    }
+  }
+
+  async function handleCloudDecision(decision: CloudSettingsDecision): Promise<void> {
+    if (!userId) {
+      setCloudPromptStatus("Sign in is required for cloud settings decisions.");
+      return;
+    }
+
+    setCloudDecisionBusy(true);
+    try {
+      const cloud = await loadDesignTokenPreferencesFromCloud(userId);
+      const outcome = resolveCloudSettingsDecision({
+        local: prefs,
+        cloud,
+        decision,
+      });
+
+      if (decision === "delete-cloud-use-local-defaults") {
+        await deleteCloudDesignTokenPreferences(userId);
+      } else if (outcome.cloudTarget) {
+        await saveDesignTokenPreferencesToCloud(userId, outcome.cloudTarget);
+      }
+
+      setPrefs(outcome.nextLocal);
+      setCloudPromptStatus(outcome.trace);
+      setCloudPromptVisible(false);
+
+      void logDesignSystemDebugEvent("Cloud settings decision applied.", {
+        userId,
+        decision,
+        trace: outcome.trace,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown_cloud_decision_error";
+      setCloudPromptStatus(`Cloud settings action failed: ${message}`);
+      void logDesignSystemDebugEvent("Cloud settings decision failed.", {
+        userId,
+        decision,
+        message,
+      });
+    } finally {
+      setCloudDecisionBusy(false);
+    }
+  }
+
+  async function handleDeleteOldSettings(): Promise<void> {
+    try {
+      resetPrefs();
+      setCorruptionStatus("Deleted old settings and reset to defaults.");
+      void logDesignSystemDebugEvent("Corrupted settings deleted and defaults restored.", {
+        invalidFields: localDiagnostics.invalidFields,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown_delete_settings_error";
+      setCorruptionStatus(`Unable to delete old settings: ${message}`);
+      void logDesignSystemDebugEvent("Failed to delete corrupted settings.", { message });
+    }
+  }
+
+  async function handleRepairSettings(): Promise<void> {
+    const repair = tryRepairCorruptedLocalDesignSettings();
+    if (!repair.success) {
+      resetPrefs();
+      setCorruptionStatus("Repair failed. Defaults restored.");
+      void logDesignSystemDebugEvent("Corrupted settings repair failed. Defaults restored.", {
+        invalidFields: repair.invalidFields,
+      });
+      return;
+    }
+
+    setPrefs(repair.repaired);
+    setCorruptionStatus(`Repaired settings with fallback values (${repair.invalidFields.length} corrected fields).`);
+    void logDesignSystemDebugEvent("Corrupted settings repaired.", {
+      invalidFields: repair.invalidFields,
+    });
+  }
+
+  function handleConfirmKeepChanges(): void {
+    confirmedRef.current = prefs;
+    setShowKeepDialog(false);
+    setSecondsLeft(12);
+    setStatus("Changes confirmed.");
+    void logDesignSystemDebugEvent("Design token changes confirmed by user.");
+  }
+
+  function setSemanticColor(key: keyof DesignTokenPreferences["semanticColors"], value: string): void {
+    setPrefs({
+      semanticColors: {
+        ...prefs.semanticColors,
+        [key]: value,
+      },
+    });
+  }
+  const layoutClassName = layout.columnCount === 12
+    ? "cf-ds-masonry-layout--wide"
+    : layout.columnCount === 10
+      ? "cf-ds-masonry-layout--medium"
+      : "cf-ds-masonry-layout--single";
+
+  return (
+    <article className="settings-card cf-ds-card settings-card--full cf-ds-card--masonry" aria-live="polite">
+      <h3>Design System Controls</h3>
+      <p className="settings-meta">Single source of truth for color, type, stroke, spacing, and motion tokens.</p>
+      <div className="cf-ds-layout-meta" aria-label="Layout engine summary">
+        <span className="cf-ds-layout-meta__chip">Engine: Masonry</span>
+        <span className="cf-ds-layout-meta__chip">Columns: {layout.columnCount}</span>
+        <span className="cf-ds-layout-meta__chip">Spacing: Fib {layout.spacingToken}px</span>
+        <span className="cf-ds-layout-meta__chip">Adaptive Reflow: On</span>
+        <span className="cf-ds-layout-meta__chip">Auto-arrange: Ready</span>
+        <span className="cf-ds-layout-meta__chip">Drag-and-drop: Ready</span>
+        <span className="cf-ds-layout-meta__chip">Preview Mirroring: On</span>
+      </div>
+
+      {cloudPromptVisible ? (
+        <div className="cf-keep-dialog" role="group" aria-label="Cloud settings choices">
+          <p>Cloud settings were detected for this account. Choose how to proceed.</p>
+          <div className="form-actions">
+            <button type="button" disabled={cloudDecisionBusy} onClick={() => { void handleCloudDecision("apply-cloud"); }}>Apply Cloud Settings</button>
+            <button type="button" className="btn-secondary" disabled={cloudDecisionBusy} onClick={() => { void handleCloudDecision("keep-local"); }}>Keep Local Settings</button>
+            <button type="button" className="btn-secondary" disabled={cloudDecisionBusy} onClick={() => { void handleCloudDecision("merge-local-into-cloud"); }}>Merge Local Into Cloud</button>
+            <button type="button" className="btn-secondary" disabled={cloudDecisionBusy} onClick={() => { void handleCloudDecision("delete-cloud-use-local-defaults"); }}>Delete Cloud Settings and Use Local Defaults</button>
+          </div>
+        </div>
+      ) : null}
+
+      {cloudPromptStatus ? <p className="settings-meta">{cloudPromptStatus}</p> : null}
+
+      {localDiagnostics.corrupted ? (
+        <div className="cf-keep-dialog" role="group" aria-label="Corrupted settings recovery">
+          <p>Saved settings appear invalid. Choose a recovery option.</p>
+          <p className="settings-meta">Invalid fields: {localDiagnostics.invalidFields.join(", ") || "unknown"}</p>
+          <div className="form-actions">
+            <button type="button" onClick={() => { void handleDeleteOldSettings(); }}>Delete Old Settings</button>
+            <button type="button" className="btn-secondary" onClick={() => resetPrefs()}>Reset to Defaults</button>
+            <button type="button" className="btn-secondary" onClick={() => { void handleRepairSettings(); }}>Try to Repair Settings</button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setCorruptionStatus(`Debug details: ${JSON.stringify(localDiagnostics.raw).slice(0, 260)}`);
+              }}
+            >
+              View Debug Details
+            </button>
+          </div>
+          {corruptionStatus ? <p className="settings-meta">{corruptionStatus}</p> : null}
+        </div>
+      ) : null}
+
+      <div
+        ref={layoutContainerRef}
+        className={`cf-ds-masonry-layout ${layoutClassName}`}
+        data-flow={prefs.directionalFlow}
+        data-columns={layout.columnCount}
+      >
+        <section className="cf-ds-masonry-layout__panel cf-ds-masonry-layout__examples">
+          <div className="cf-example-card" aria-label="example card preview">
+            <div className="cf-example-card__row">
+              <h4>Buttons</h4>
+              <div className="cf-example-card__button-grid">
+                <DemoButton variant="primary" size="sm" />
+                <DemoButton variant="primary" size="md" state="hover" />
+                <DemoButton variant="primary" size="lg" state="active" />
+                <DemoButton variant="secondary" size="md" />
+                <DemoButton variant="ghost" size="md" />
+                <DemoButton variant="destructive" size="md" />
+                <DemoButton variant="secondary" size="sm" state="disabled" />
+                <DemoButton variant="secondary" size="lg" state="loading" />
+              </div>
+            </div>
+
+            <div className="cf-example-card__row">
+              <h4>Cards</h4>
+              <div className="cf-example-card__cards">
+                <article className="cf-sample-card">
+                  <h5>Email card</h5>
+                  <p>Subject: Weekly curriculum update</p>
+                  <button type="button" className="cf-ds-btn cf-ds-btn--primary cf-ds-btn--sm">Open</button>
+                </article>
+                <article className="cf-sample-card cf-sample-card--disabled">
+                  <h5>Disabled card</h5>
+                  <p>This section is not available yet.</p>
+                </article>
+                <article className="cf-sample-card cf-sample-card--default">
+                  <h5>Default card</h5>
+                  <p>Color, title, description, and action all follow tokens.</p>
+                  <button type="button" className="cf-ds-btn cf-ds-btn--secondary cf-ds-btn--sm">Action</button>
+                </article>
+              </div>
+            </div>
+
+            <div className="cf-example-card__row">
+              <h4>Organizer Buttons</h4>
+              <div className="cf-example-card__organizers">
+                <span className="cf-organizer cf-organizer--new">New</span>
+                <span className="cf-organizer cf-organizer--active">Active</span>
+                <span className="cf-organizer cf-organizer--pending">Pending</span>
+                <span className="cf-organizer cf-organizer--error">Error</span>
+              </div>
+            </div>
+
+            <div className="cf-example-card__row">
+              <h4>Motion Preview</h4>
+              <p className="settings-meta">Hover to preview. Timing: {prefs.motionTimingMs}ms | Flow: {prefs.directionalFlow}</p>
+              <div className="cf-motion-row">
+                <div className="cf-motion-box__item">
+                  <span className="cf-motion-box cf-motion-box--enter" title="Enter — ease-in" />
+                  <span className="cf-motion-box__label">Ease In</span>
+                </div>
+                <div className="cf-motion-box__item">
+                  <span className="cf-motion-box cf-motion-box--move" title="Move — ease-in-out" />
+                  <span className="cf-motion-box__label">Ease In-Out</span>
+                </div>
+                <div className="cf-motion-box__item">
+                  <span className="cf-motion-box cf-motion-box--exit" title="Exit — ease-out" />
+                  <span className="cf-motion-box__label">Ease Out</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="cf-example-card__row">
+              <h4>Type Scale</h4>
+              <p className="cf-type-base">Body text (base)</p>
+              <p className="cf-type-lg">Subheading text (text-lg)</p>
+              <p className="cf-type-2xl">Heading text (text-2xl)</p>
+              <p className="cf-type-3xl">Title text (text-3xl)</p>
+              <p className="cf-type-4xl">text-4xl</p>
+              <p className="cf-type-5xl">text-5xl</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="cf-ds-masonry-layout__panel cf-ds-masonry-layout__controls">
+          <div className="cf-ds-layout-spec" aria-label="layout engine spec">
+            <article className="cf-ds-layout-spec__card">
+              <h4>Layout Spec</h4>
+              <p>Masonry columns adapt to width while preserving preview-first ordering.</p>
+            </article>
+            <article className="cf-ds-layout-spec__card">
+              <h4>Card Heuristics</h4>
+              <p>{layout.cardTypeHeuristics.examples}</p>
+            </article>
+            <article className="cf-ds-layout-spec__card">
+              <h4>Unified Surfaces</h4>
+              <p>Status, settings, and preview surfaces share the same flow and spacing tokens.</p>
+            </article>
+          </div>
+          <div className="cf-ds-settings-grid">
+            <label>
+              Gamma: {prefs.gamma.toFixed(2)}
+              <input type="range" min={2} max={2.4} step={0.05} value={prefs.gamma} onChange={(event) => setPrefs({ gamma: Number(event.target.value) })} />
+            </label>
+
+            <label>
+              Type ratio: {prefs.typeRatio.toFixed(3)}
+              <input type="range" min={1.067} max={1.5} step={0.001} value={prefs.typeRatio} onChange={(event) => setPrefs({ typeRatio: Number(event.target.value) })} />
+            </label>
+
+            <div className="cf-ds-chip-row">
+              {TYPE_RATIO_PRESETS.map((preset) => (
+                <button key={preset.value} type="button" className="btn-secondary" onClick={() => setPrefs({ typeRatio: preset.value })}>
+                  {preset.label} ({preset.description})
+                </button>
+              ))}
+            </div>
+
+            <label>
+              Stroke preset
+              <select value={prefs.strokePreset} onChange={(event) => setPrefs({ strokePreset: event.target.value as DesignTokenPreferences["strokePreset"] })}>
+                {STROKE_PRESET_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label} - {option.descriptor}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Spacing ratio: {prefs.spacingRatio.toFixed(3)}
+              <input type="range" min={1.25} max={2} step={0.001} value={prefs.spacingRatio} onChange={(event) => setPrefs({ spacingRatio: Number(event.target.value) })} />
+            </label>
+
+            <div className="cf-ds-chip-row">
+              {SPACING_PRESETS.map((preset) => (
+                <button key={preset.value} type="button" className="btn-secondary" onClick={() => setPrefs({ spacingRatio: preset.value })}>
+                  {preset.label} ({preset.description})
+                </button>
+              ))}
+            </div>
+
+            <label>
+              Motion timing: {prefs.motionTimingMs}ms ({motionDescription(prefs.motionTimingMs)})
+              <input type="range" min={100} max={500} step={10} value={prefs.motionTimingMs} onChange={(event) => setPrefs({ motionTimingMs: Number(event.target.value) })} />
+            </label>
+
+            <label>
+              Motion easing
+              <select value={prefs.motionEasing} onChange={(event) => setPrefs({ motionEasing: event.target.value as DesignTokenPreferences["motionEasing"] })}>
+                <option value="ease-in">ease-in</option>
+                <option value="ease-out">ease-out</option>
+                <option value="ease-in-out">ease-in-out</option>
+              </select>
+            </label>
+
+            <label>
+              Directional flow
+              <select
+                value={prefs.directionalFlow}
+                onChange={(event) => {
+                  setPrefs({ directionalFlow: event.target.value as DesignTokenPreferences["directionalFlow"] });
+                  void logDesignSystemDebugEvent("Directional flow changed.", { directionalFlow: event.target.value });
+                }}
+              >
+                <option value="left-to-right">Left to Right (LTR)</option>
+                <option value="right-to-left">Right to Left (RTL)</option>
+              </select>
+            </label>
+
+            <div className="cf-ds-semantic-grid">
+              <label>Error
+                <input type="color" aria-label="error color" value={prefs.semanticColors.error} onChange={(event) => setSemanticColor("error", event.target.value)} />
+              </label>
+              <label>Success
+                <input type="color" aria-label="success color" value={prefs.semanticColors.success} onChange={(event) => setSemanticColor("success", event.target.value)} />
+              </label>
+              <label>Pending
+                <input type="color" aria-label="pending color" value={prefs.semanticColors.pending} onChange={(event) => setSemanticColor("pending", event.target.value)} />
+              </label>
+              <label>New
+                <input type="color" aria-label="new color" value={prefs.semanticColors.new} onChange={(event) => setSemanticColor("new", event.target.value)} />
+              </label>
+            </div>
+          </div>
+
+          <div className="cf-ds-swatches" aria-label="primary color swatches">
+            {tokens.color.primary.map((_, index) => (
+              <span key={`shade-${index}`} className={`cf-ds-swatch cf-ds-swatch--${index + 1}`} title={`Shade ${index + 1}`} />
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <label>
+        Save mode
+        <select value={persistenceMode} onChange={(event) => setPersistenceMode(event.target.value as PersistenceMode)}>
+          <option value="local">Use Local Settings</option>
+          <option value="cloud" disabled={!userId}>Use Cloud Settings</option>
+          <option value="merge" disabled={!userId}>Merge and Update Cloud</option>
+        </select>
+      </label>
+
+      <div className="form-actions">
+        <button type="button" onClick={() => { void handleSave(); }}>Save</button>
+        <button type="button" className="btn-secondary" onClick={() => { void handleLoadCloudSettings(); }} disabled={!userId}>Load Cloud Settings</button>
+        <button type="button" className="btn-secondary" onClick={() => resetPrefs()}>Reset to defaults</button>
+        <button type="button" className="btn-secondary" onClick={() => applySystemDefaults()}>Use System Defaults</button>
+      </div>
+
+      {status ? <p className="settings-meta">{status}</p> : null}
+
+      {showKeepDialog ? (
+        <div className="cf-keep-dialog" role="dialog" aria-modal="true" aria-label="Keep Changes">
+          <p>Keep Changes? Reverting in {secondsLeft}s if not confirmed.</p>
+          <div className="form-actions">
+            <button type="button" onClick={handleConfirmKeepChanges}>Keep Changes</button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setPrefs(confirmedRef.current);
+                setShowKeepDialog(false);
+                setSecondsLeft(12);
+                setStatus("Changes reverted.");
+                void logDesignSystemDebugEvent("Design token changes reverted manually.");
+              }}
+            >
+              Revert Now
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </article>
+  );
+}

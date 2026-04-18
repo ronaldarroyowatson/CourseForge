@@ -1,6 +1,20 @@
 import { create } from "zustand";
-import { applyAuthoritativeSemanticPalette } from "../../core/services/designTokenDebugService";
 import type { Textbook } from "../../core/models";
+import {
+  applyAuthoritativeSemanticPalette,
+} from "../../core/services/designTokenDebugService";
+import {
+  type DesignTokenPreferences,
+  type DesignTokens,
+  applyDesignTokensToDocument,
+  DEFAULT_DESIGN_TOKEN_PREFERENCES,
+  detectSystemDesignDefaults,
+  generateDesignTokens,
+  initializeDesignTokenPreferencesOnFirstRun,
+  logDesignSystemDebugEvent,
+  sanitizeDesignTokenPreferences,
+  saveLocalDesignTokenPreferences,
+} from "../../core/services/designSystemService";
 
 export type ThemeMode = "light" | "dark";
 export type SupportedLanguage = "en" | "es" | "pt" | "zm" | "fr" | "de";
@@ -111,13 +125,22 @@ function getInitialTheme(): ThemeMode {
   return "light";
 }
 
+const initialDesignResolution = initializeDesignTokenPreferencesOnFirstRun();
+const initialDesignPreferences = sanitizeDesignTokenPreferences(initialDesignResolution.preferences);
+const initialDesignTokens = generateDesignTokens(initialDesignPreferences);
+
+if (typeof document !== "undefined") {
+  applyDesignTokensToDocument(initialDesignTokens);
+  applyAuthoritativeSemanticPalette();
+}
+
 function applyTheme(theme: ThemeMode): void {
   if (typeof document === "undefined") {
     return;
   }
 
   document.documentElement.setAttribute("data-theme", theme);
-  applyAuthoritativeSemanticPalette(document.documentElement);
+  applyAuthoritativeSemanticPalette();
 }
 
 function applyLanguage(language: SupportedLanguage): void {
@@ -203,6 +226,11 @@ interface UIStore {
   accessibility: AccessibilityPreferences;
   setAccessibility: (next: AccessibilityPreferences) => void;
   patchAccessibility: (partial: Partial<AccessibilityPreferences>) => void;
+  designTokenPreferences: DesignTokenPreferences;
+  designTokens: DesignTokens;
+  setDesignTokenPreferences: (next: Partial<DesignTokenPreferences>) => void;
+  resetDesignTokenPreferences: () => void;
+  applySystemDesignTokenDefaults: () => void;
 
   // Selected textbook for editing
   selectedTextbookId: string | null;
@@ -297,13 +325,14 @@ export const useUIStore = create<UIStore>((set) => ({
 
   // Theme defaults and actions
   theme: getInitialTheme(),
-  setTheme: (theme: ThemeMode) => {
-    applyTheme(theme);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-    }
-    set({ theme });
-  },
+  setTheme: (theme: ThemeMode) =>
+    set(() => {
+      applyTheme(theme);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+      }
+      return { theme };
+    }),
   toggleTheme: () =>
     set((state) => {
       const nextTheme: ThemeMode = state.theme === "dark" ? "light" : "dark";
@@ -312,6 +341,58 @@ export const useUIStore = create<UIStore>((set) => ({
         window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
       }
       return { theme: nextTheme };
+    }),
+  designTokenPreferences: initialDesignPreferences,
+  designTokens: initialDesignTokens,
+  setDesignTokenPreferences: (next: Partial<DesignTokenPreferences>) =>
+    set((state) => {
+      const merged = sanitizeDesignTokenPreferences({
+        ...state.designTokenPreferences,
+        ...next,
+      });
+      const generated = generateDesignTokens(merged);
+      applyDesignTokensToDocument(generated);
+      saveLocalDesignTokenPreferences(merged);
+      void logDesignSystemDebugEvent("Design tokens updated.", {
+        gamma: merged.gamma,
+        typeRatio: merged.typeRatio,
+        spacingRatio: merged.spacingRatio,
+        strokePreset: merged.strokePreset,
+        motionTimingMs: merged.motionTimingMs,
+      });
+      return {
+        designTokenPreferences: merged,
+        designTokens: generated,
+      };
+    }),
+  resetDesignTokenPreferences: () =>
+    set(() => {
+      const next = sanitizeDesignTokenPreferences(DEFAULT_DESIGN_TOKEN_PREFERENCES);
+      const generated = generateDesignTokens(next);
+      applyDesignTokensToDocument(generated);
+      saveLocalDesignTokenPreferences(next);
+      void logDesignSystemDebugEvent("Design tokens reset to defaults.");
+      return {
+        designTokenPreferences: next,
+        designTokens: generated,
+      };
+    }),
+  applySystemDesignTokenDefaults: () =>
+    set((state) => {
+      const systemDefaults = detectSystemDesignDefaults();
+      const next = sanitizeDesignTokenPreferences({
+        ...state.designTokenPreferences,
+        ...systemDefaults,
+        useSystemDefaults: true,
+      });
+      const generated = generateDesignTokens(next);
+      applyDesignTokensToDocument(generated);
+      saveLocalDesignTokenPreferences(next);
+      void logDesignSystemDebugEvent("System defaults applied to design tokens.", systemDefaults as Record<string, unknown>);
+      return {
+        designTokenPreferences: next,
+        designTokens: generated,
+      };
     }),
   language: detectInitialLanguage(),
   setLanguage: (language: SupportedLanguage) => {

@@ -1,11 +1,11 @@
 # Test Index
 
-Generated: 2026-04-02T03:20:46.570Z
+Generated: 2026-04-18T00:04:19.927Z
 
 ## Summary
 
-- Total test files: 49
-- Unit test files: 31
+- Total test files: 51
+- Unit test files: 33
 - Integration test files: 16
 - Rules test files: 2
 - Canonical sample files: 5
@@ -20,6 +20,7 @@ Generated: 2026-04-02T03:20:46.570Z
 - tests/core/copilot.auditLogger.test.ts
 - tests/core/copilot.premiumUsageTracker.test.ts
 - tests/core/debugLogService.test.ts
+- tests/core/designTokenDebugService.test.ts
 - tests/core/documentExtraction.guardrails.test.ts
 - tests/core/documentIngest.extraction.test.ts
 - tests/core/equationFormatService.test.ts
@@ -33,6 +34,7 @@ Generated: 2026-04-02T03:20:46.570Z
 - tests/core/metadataExtractionPipelineService.test.ts
 - tests/core/premiumUsage.limits.test.ts
 - tests/core/presentationService.conversion.test.ts
+- tests/core/programCli.dsc.test.ts
 - tests/core/syncNow.safety.test.ts
 - tests/core/syncService.moderationHold.test.ts
 - tests/core/textbookAutoExtractionService.test.ts

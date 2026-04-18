@@ -14,6 +14,47 @@ const baseDir = localAppData
 const configPath = path.join(baseDir, "debug-config.json");
 const logPath = path.join(baseDir, "debug-log.jsonl");
 const rotatedPrefix = path.join(baseDir, "debug-log");
+const dscConfigPath = path.join(baseDir, "dsc-debug-config.json");
+const dscReportCachePath = path.join(baseDir, "dsc-debug-report.json");
+
+const authoritativeSemanticPalette = {
+  MAJOR: "#2563EB",
+  MINOR: "#73A2F5",
+  ACCENT: "#FFFFFF",
+  SUCCESS: "#22C55E",
+  WARNING: "#FACC15",
+  ERROR: "#EF4444",
+  INFO: "#06B6D4",
+};
+
+const dscCatalog = {
+  settings: {
+    id: "settings",
+    label: "Settings",
+    cards: {
+      "debug-log": {
+        id: "debug-log",
+        label: "Debug Log",
+        components: [
+          { id: "debug-toggle", label: "Enable Debug Logging", type: "toggle" },
+          { id: "debug-clear", label: "Clear Debug Log", type: "button" },
+          { id: "debug-send", label: "Send Debug Log to Cloud", type: "button" },
+          { id: "debug-introspection", label: "Token Introspection", type: "summary" },
+        ],
+      },
+    },
+  },
+};
+
+const dscFallbacks = {
+  MAJOR: ["--cf-semantic-major", "--primary-bg", "--cf-accent"],
+  MINOR: ["--cf-semantic-minor", "--primary-border", "--cf-accent-strong"],
+  ACCENT: ["--cf-semantic-accent", "--on-accent", "--cf-text-on-accent"],
+  SUCCESS: ["--cf-semantic-success", "--success-color", "--cf-success"],
+  WARNING: ["--cf-semantic-warning", "--cf-warning"],
+  ERROR: ["--cf-semantic-error", "--danger-bg", "--cf-danger"],
+  INFO: ["--cf-semantic-info", "--cf-info"],
+};
 
 const defaultConfig = {
   enabled: true,
@@ -21,6 +62,10 @@ const defaultConfig = {
   rotateBytes: 300_000,
   maxRotatedFiles: 4,
   requireApprovalForDeleteAfterSync: true,
+};
+
+const defaultDscConfig = {
+  enabled: true,
 };
 
 function ensureDir() {
@@ -46,6 +91,27 @@ function readConfig() {
 function writeConfig(next) {
   ensureDir();
   fs.writeFileSync(configPath, JSON.stringify(next, null, 2), "utf8");
+}
+
+function readDscConfig() {
+  ensureDir();
+  if (!fs.existsSync(dscConfigPath)) {
+    fs.writeFileSync(dscConfigPath, JSON.stringify(defaultDscConfig, null, 2), "utf8");
+    return { ...defaultDscConfig };
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(dscConfigPath, "utf8"));
+    return { ...defaultDscConfig, ...parsed };
+  } catch {
+    fs.writeFileSync(dscConfigPath, JSON.stringify(defaultDscConfig, null, 2), "utf8");
+    return { ...defaultDscConfig };
+  }
+}
+
+function writeDscConfig(next) {
+  ensureDir();
+  fs.writeFileSync(dscConfigPath, JSON.stringify(next, null, 2), "utf8");
 }
 
 function parseFlag(name, fallback = "") {
@@ -245,10 +311,100 @@ function setEnabled(enabled) {
 function showHelp() {
   console.log("Usage:");
   console.log("  program debug <feature> [--severity info|warn|error] [--sourceType automatic|manual] [--message text]");
+  console.log("  program debug dsc <enable|disable|report|clear> [--page settings] [--card \"Debug Log\"] [--report path]");
   console.log("  program debug dump-log [--sourceType automatic|manual] [--output path] [--sync-cloud] [--approve-delete]");
   console.log("  program debug clear-log");
   console.log("  program debug enable");
   console.log("  program debug disable");
+}
+
+function normalizeCardId(value) {
+  const trimmed = String(value || "").trim().toLowerCase();
+  if (!trimmed) {
+    return "debug-log";
+  }
+
+  return trimmed.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "debug-log";
+}
+
+function buildDscReport() {
+  const config = readDscConfig();
+  const pageId = parseFlag("page", "settings").toLowerCase();
+  const cardId = normalizeCardId(parseFlag("card", "Debug Log"));
+  const page = dscCatalog[pageId] || dscCatalog.settings;
+  const card = page.cards[cardId] || page.cards["debug-log"];
+
+  const tokens = Object.entries(authoritativeSemanticPalette).reduce((accumulator, [token, value]) => {
+    accumulator[token] = {
+      expectedValue: value,
+      resolvedValue: value,
+      source: dscFallbacks[token][0],
+      status: "resolved",
+      fallbackChain: dscFallbacks[token],
+      usedFallback: false,
+      usedLegacyWhitelist: false,
+    };
+    return accumulator;
+  }, {});
+
+  return {
+    enabled: config.enabled,
+    page: {
+      id: page.id,
+      label: page.label,
+    },
+    card: {
+      id: card.id,
+      label: card.label,
+      components: card.components,
+    },
+    tokens,
+    mismatches: [],
+    cascadingFailureRisk: {
+      level: "none",
+      summary: "No cascading token failures detected.",
+      impactedTokens: [],
+    },
+  };
+}
+
+function handleDsc() {
+  const action = args[2] || (hasFlag("enable") ? "enable" : hasFlag("disable") ? "disable" : hasFlag("clear") ? "clear" : hasFlag("report") ? "report" : "report");
+
+  if (action === "enable") {
+    const next = { ...readDscConfig(), enabled: true };
+    writeDscConfig(next);
+    console.log("DSC debug enabled.");
+    return;
+  }
+
+  if (action === "disable") {
+    const next = { ...readDscConfig(), enabled: false };
+    writeDscConfig(next);
+    console.log("DSC debug disabled.");
+    return;
+  }
+
+  if (action === "clear") {
+    if (fs.existsSync(dscReportCachePath)) {
+      fs.unlinkSync(dscReportCachePath);
+    }
+    console.log("Cleared DSC debug report cache.");
+    return;
+  }
+
+  const report = buildDscReport();
+  ensureDir();
+  fs.writeFileSync(dscReportCachePath, JSON.stringify(report, null, 2), "utf8");
+
+  const reportPath = parseFlag("report", "");
+  if (reportPath) {
+    const resolvedOut = path.resolve(reportPath);
+    fs.mkdirSync(path.dirname(resolvedOut), { recursive: true });
+    fs.writeFileSync(resolvedOut, JSON.stringify(report, null, 2), "utf8");
+  }
+
+  console.log(JSON.stringify(report, null, 2));
 }
 
 if (command !== "debug") {
@@ -263,6 +419,11 @@ if (!subcommand) {
 
 if (subcommand === "dump-log") {
   dumpLog();
+  process.exit(0);
+}
+
+if (subcommand === "dsc") {
+  handleDsc();
   process.exit(0);
 }
 

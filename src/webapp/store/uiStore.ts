@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { applyAuthoritativeSemanticPalette } from "../../core/services/designTokenDebugService";
 import type { Textbook } from "../../core/models";
 
 export type ThemeMode = "light" | "dark";
@@ -116,6 +117,7 @@ function applyTheme(theme: ThemeMode): void {
   }
 
   document.documentElement.setAttribute("data-theme", theme);
+  applyAuthoritativeSemanticPalette(document.documentElement);
 }
 
 function applyLanguage(language: SupportedLanguage): void {

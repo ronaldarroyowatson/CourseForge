@@ -134,6 +134,15 @@ All major debug workflows should remain available from the CLI through:
 - `automatic`
 - `manual`
 
+DSC token debugging must remain available from the same entry point via:
+
+- `npm run program -- debug dsc enable`
+- `npm run program -- debug dsc disable`
+- `npm run program -- debug dsc report --page settings --card "Debug Log"`
+- `npm run program -- debug dsc clear`
+
+`debug dsc report` should emit the authoritative semantic palette resolution, page/card/component introspection, mismatch detection, and cascading-failure risk status.
+
 When extending debug functionality in the live app, add or update a CLI-equivalent command path.
 
 ## 9. Source Type Standard

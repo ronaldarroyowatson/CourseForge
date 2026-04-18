@@ -15,9 +15,12 @@
   --cf-shadow-1: 0 1px 3px rgba(17, 37, 58, 0.07);
   --cf-shadow-2: 0 10px 30px rgba(15, 35, 55, 0.12);
   --cf-shadow-3: 0 18px 46px rgba(12, 28, 45, 0.16);
-  --cf-accent: #1f6fb6;
-  --cf-accent-strong: #0e5797;
-  --cf-success: #16794c;
+  --cf-accent: #2563eb;
+  --cf-accent-strong: #73a2f5;
+  --cf-success: #22c55e;
+  --cf-warning: #facc15;
+  --cf-danger: #ef4444;
+  --cf-info: #06b6d4;
 
   --text-primary: var(--cf-text-strong);
   --text-secondary: var(--cf-text-muted);
@@ -31,9 +34,9 @@
   --primary-bg: var(--cf-accent);
   --primary-border: var(--cf-accent-strong);
   --primary-bg-hover: var(--cf-accent-strong);
-  --danger-bg: #d64039;
-  --danger-border: #bf2f2a;
-  --danger-bg-hover: #bf2f2a;
+  --danger-bg: var(--cf-danger);
+  --danger-border: #dc2626;
+  --danger-bg-hover: #dc2626;
   --status-draft-bg: rgba(37, 99, 235, 0.18);
   --status-draft-fg: var(--cf-accent-strong);
   --status-draft-border: color-mix(in srgb, var(--cf-accent) 44%, var(--cf-border));
@@ -101,8 +104,8 @@ body {
   --cf-surface-muted: #ececec;
   --cf-border: #000000;
   --cf-border-strong: #000000;
-  --cf-accent: #0033a0;
-  --cf-accent-strong: #001f6a;
+  --cf-accent: #2563eb;
+  --cf-accent-strong: #73a2f5;
 }
 
 :root[data-colorblind-mode="protanopia"] {
@@ -889,6 +892,27 @@ body {
 
 .settings-card--compact.settings-card--expanded {
   grid-column: auto;
+}
+
+.settings-card--debug-log {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.settings-debug-log__controls {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.settings-debug-log__introspection {
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--button-bg);
+  padding: 0.75rem;
+}
+
+.settings-debug-log__introspection p:last-child {
+  margin-bottom: 0;
 }
 
 .settings-sync-retry-row {

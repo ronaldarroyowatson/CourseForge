@@ -12,6 +12,31 @@ const firestoreMocks = vi.hoisted(() => ({
 }));
 
 const coreServiceMocks = vi.hoisted(() => ({
+  getDesignTokenDebugReport: vi.fn(() => ({
+    enabled: true,
+    page: { id: "settings", label: "Settings" },
+    card: {
+      id: "debug-log",
+      label: "Debug Log",
+      components: [
+        { id: "debug-toggle", label: "Enable Debug Logging", type: "toggle" },
+        { id: "debug-clear", label: "Clear Debug Log", type: "button" },
+        { id: "debug-send", label: "Send Debug Log to Cloud", type: "button" },
+        { id: "debug-introspection", label: "Token Introspection", type: "summary" },
+      ],
+    },
+    tokens: {
+      MAJOR: { resolvedValue: "#2563EB", status: "resolved", source: "--cf-accent" },
+      MINOR: { resolvedValue: "#73A2F5", status: "resolved", source: "--cf-accent-strong" },
+      ACCENT: { resolvedValue: "#FFFFFF", status: "resolved", source: "--cf-text-on-accent" },
+      SUCCESS: { resolvedValue: "#22C55E", status: "resolved", source: "--cf-success" },
+      WARNING: { resolvedValue: "#FACC15", status: "resolved", source: "--cf-warning" },
+      ERROR: { resolvedValue: "#EF4444", status: "resolved", source: "--cf-danger" },
+      INFO: { resolvedValue: "#06B6D4", status: "resolved", source: "--cf-info" },
+    },
+    mismatches: [],
+    cascadingFailureRisk: { level: "none", summary: "No cascading token failures detected.", impactedTokens: [] },
+  })),
   clearDebugLogEntries: vi.fn(async () => undefined),
   getDebugLoggingPolicy: vi.fn(async () => ({ enabledGlobally: true })),
   getDebugLogStorageStats: vi.fn(async () => ({
@@ -52,6 +77,7 @@ vi.mock("../../src/firebase/firestore", () => ({
 }));
 
 vi.mock("../../src/core/services", () => ({
+  getDesignTokenDebugReport: coreServiceMocks.getDesignTokenDebugReport,
   clearDebugLogEntries: coreServiceMocks.clearDebugLogEntries,
   getDebugLoggingPolicy: coreServiceMocks.getDebugLoggingPolicy,
   getDebugLogStorageStats: coreServiceMocks.getDebugLogStorageStats,
@@ -575,5 +601,21 @@ describe("Settings updater communication", () => {
     await waitFor(() => {
       expect(screen.getByText("Already up to date (latest confirmed: v1.4.5). You're running v1.4.5.")).toBeInTheDocument();
     });
+  });
+
+  it("shows unified debug controls and token introspection in the Debug Log card", async () => {
+    render(<SettingsPage onBack={() => undefined} />);
+
+    const debugCard = screen.getByText("Debug Log").closest("article");
+    expect(debugCard).not.toBeNull();
+
+    expect(within(debugCard as HTMLElement).getByLabelText("Enable Debug Logging")).toBeInTheDocument();
+    expect(within(debugCard as HTMLElement).getByRole("button", { name: "Clear Debug Log" })).toBeInTheDocument();
+    expect(within(debugCard as HTMLElement).getByRole("button", { name: "Send Debug Log to Cloud" })).toBeInTheDocument();
+    expect(within(debugCard as HTMLElement).getByText("Page: Settings")).toBeInTheDocument();
+    expect(within(debugCard as HTMLElement).getByText("Card: Debug Log")).toBeInTheDocument();
+    expect(within(debugCard as HTMLElement).getByText("Components: Enable Debug Logging, Clear Debug Log, Send Debug Log to Cloud, Token Introspection")).toBeInTheDocument();
+    expect(within(debugCard as HTMLElement).getByText("MAJOR: #2563EB")).toBeInTheDocument();
+    expect(within(debugCard as HTMLElement).getByText("Risk: No cascading token failures detected.")).toBeInTheDocument();
   });
 });

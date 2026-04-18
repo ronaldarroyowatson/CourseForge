@@ -13,6 +13,7 @@ import {
 import { fetchLanguageRegistryFromUrl } from "../../../core/services/translationWorkflowService";
 import {
   clearDebugLogEntries,
+  getDesignTokenDebugReport,
   getDebugLoggingPolicy,
   getDebugLogStorageStats,
   isDebugLoggingEnabled,
@@ -345,6 +346,11 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const secondChoiceProviderId = ocrProviderOrder.find((providerId) => providerId !== ocrProviderOrder[0] && providerId !== "local_tesseract") ?? "cloud_github_models_vision";
   const retryVisualTotal = Math.max(1, Math.min(5, retryLimit || 3));
   const retryVisualUsed = Math.max(0, Math.min(retryVisualTotal, retryCount));
+  const designTokenDebugReport = React.useMemo(() => getDesignTokenDebugReport({
+    enabled: debugEnabled,
+    pageId: "settings",
+    cardId: "debug-log",
+  }), [debugEnabled, debugStats.entries, debugStats.totalBytes, debugPolicyStatus, debugStatus]);
 
   function refreshMetadataTrainingStats(): void {
     const corrections = readLocalCorrectionRecords();
@@ -1261,29 +1267,43 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           ) : null}
         </article>
 
-        <article className="settings-card">
+        <article className="settings-card settings-card--debug-log">
           <h3>Debug Log</h3>
           <p>Store local troubleshooting events for Auto Mode and sync behavior. You control whether logs are collected and when they are uploaded.</p>
-          <label className="settings-toggle" title="When disabled, no new local debug events are stored.">
-            <input
-              type="checkbox"
-              checked={debugEnabled}
-              onChange={(event) => handleDebugToggle(event.target.checked)}
-            />
-            Enable Debug Logging
-          </label>
-          <p className="settings-meta">Stored entries: {debugStats.entries}</p>
-          <p className="settings-meta">Local log size: {Math.round(debugStats.totalBytes / 1024)} KB / {Math.round(debugStats.maxTotalBytes / 1024)} KB</p>
-          <p className="settings-meta">Upload limit: {Math.round(debugStats.maxUploadBytes / 1024)} KB</p>
-          <p className="settings-meta">Last upload: {debugStats.lastUploadTimestamp ? new Date(debugStats.lastUploadTimestamp).toLocaleString() : "Never"}</p>
-          {debugPolicyStatus ? <p className="settings-meta">{debugPolicyStatus}</p> : null}
-          <div className="form-actions">
+          <div className="settings-debug-log__controls">
+            <label className="settings-toggle" title="When disabled, no new local debug events are stored.">
+              <input
+                type="checkbox"
+                checked={debugEnabled}
+                onChange={(event) => handleDebugToggle(event.target.checked)}
+              />
+              Enable Debug Logging
+            </label>
+            <div className="form-actions">
             <button type="button" className="btn-secondary" onClick={handleClearDebugLog}>
               Clear Debug Log
             </button>
             <button type="button" onClick={() => { void handleSendDebugLogToCloud(); }} disabled={isUploadingDebugLog}>
               {isUploadingDebugLog ? "Sending..." : "Send Debug Log to Cloud"}
             </button>
+            </div>
+          </div>
+          <p className="settings-meta">Stored entries: {debugStats.entries}</p>
+          <p className="settings-meta">Local log size: {Math.round(debugStats.totalBytes / 1024)} KB / {Math.round(debugStats.maxTotalBytes / 1024)} KB</p>
+          <p className="settings-meta">Upload limit: {Math.round(debugStats.maxUploadBytes / 1024)} KB</p>
+          <p className="settings-meta">Last upload: {debugStats.lastUploadTimestamp ? new Date(debugStats.lastUploadTimestamp).toLocaleString() : "Never"}</p>
+          {debugPolicyStatus ? <p className="settings-meta">{debugPolicyStatus}</p> : null}
+          <div className="settings-debug-log__introspection">
+            <p className="settings-meta">Page: {designTokenDebugReport.page.label}</p>
+            <p className="settings-meta">Card: {designTokenDebugReport.card.label}</p>
+            <p className="settings-meta">Components: {designTokenDebugReport.card.components.map((component) => component.label).join(", ")}</p>
+            <p className="settings-meta">MAJOR: {designTokenDebugReport.tokens.MAJOR.resolvedValue}</p>
+            <p className="settings-meta">MINOR: {designTokenDebugReport.tokens.MINOR.resolvedValue}</p>
+            <p className="settings-meta">ACCENT: {designTokenDebugReport.tokens.ACCENT.resolvedValue}</p>
+            <p className="settings-meta">Risk: {designTokenDebugReport.cascadingFailureRisk.summary}</p>
+            {designTokenDebugReport.mismatches.length > 0 ? (
+              <p className="error-text">Mismatches: {designTokenDebugReport.mismatches.map((entry) => `${entry.token} ${entry.actual} -> ${entry.expected}`).join(" | ")}</p>
+            ) : null}
           </div>
           {debugStatus ? <p className="settings-meta">{debugStatus}</p> : null}
         </article>

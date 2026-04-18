@@ -17,6 +17,7 @@ export * from "./metadataCorrectionSyncService";
 export * from "./metadataExtractionPipelineService";
 export * from "./coverImageService";
 export * from "./debugLogService";
+export * from "./designTokenDebugService";
 export {
   appendDebugLogEntry,
   clearDebugLogEntries,
@@ -28,6 +29,7 @@ export {
   setDebugLoggingEnabled,
   uploadAndClearDebugLogs,
 } from "./debugLogService";
+export { getDesignTokenDebugReport } from "./designTokenDebugService";
 export * from "./documentIngestService";
 export * from "./premiumUsageService";
 export * from "./presentationService";

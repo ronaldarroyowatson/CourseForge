@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { AUTHORITATIVE_SEMANTIC_PALETTE } from "../../src/core/services/designTokenDebugService";
 import { useUIStore } from "../../src/webapp/store/uiStore";
 
 describe("ui store language and accessibility preferences", () => {
@@ -25,5 +26,14 @@ describe("ui store language and accessibility preferences", () => {
     expect(document.documentElement.getAttribute("data-high-contrast")).toBe("enabled");
     expect(document.documentElement.style.getPropertyValue("--cf-font-scale")).toBe("1.2");
     expect(document.documentElement.style.getPropertyValue("--cf-ui-scale")).toBe("1.1");
+  });
+
+  it("re-applies the authoritative semantic palette when the theme changes", () => {
+    useUIStore.getState().setTheme("dark");
+
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(document.documentElement.style.getPropertyValue("--cf-accent")).toBe(AUTHORITATIVE_SEMANTIC_PALETTE.MAJOR);
+    expect(document.documentElement.style.getPropertyValue("--cf-accent-strong")).toBe(AUTHORITATIVE_SEMANTIC_PALETTE.MINOR);
+    expect(document.documentElement.style.getPropertyValue("--cf-success")).toBe(AUTHORITATIVE_SEMANTIC_PALETTE.SUCCESS);
   });
 });

@@ -19,6 +19,7 @@ describe("masonryLayoutService", () => {
     expect(decision.columnCount).toBe(10);
     expect(decision.placements.examples.columnSpan).toBeGreaterThan(decision.placements.controls.columnSpan);
     expect(decision.directionalFlow).toBe("right-to-left");
+    expect(decision.placements.examples.order).toBeGreaterThan(decision.placements.controls.order);
     expect(decision.featureSet.dragAndDrop).toBe(true);
     expect(decision.featureSet.autoArrange).toBe(true);
   });

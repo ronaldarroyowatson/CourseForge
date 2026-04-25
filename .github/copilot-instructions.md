@@ -23,6 +23,30 @@ npm run bugfix:release -- -Description "..." -DryRun
 
 ---
 
+## MemPalace Architecture Governance (MANDATORY)
+
+From now on, every architectural change, new file, refactor, plugin addition, plugin removal, loader update, installer/uninstaller change, CLI command, or design decision MUST be written into MemPalace using add_memory. MemPalace is the authoritative source of truth for the CourseForge architecture.
+
+Before performing any task, ALWAYS verify MemPalace is alive.
+If not alive, trigger the CourseForge watchdog restart sequence.
+
+Completion gate:
+
+- Any architecture-impacting task is incomplete until its MemPalace entry has been written.
+- Include changed files, rationale, and compatibility impact in the memory record.
+
+### Workspace-Scoped Startup Rules (MANDATORY)
+
+- MemPalace startup logic must stay in workspace automation (`.vscode/tasks.json`, watchdog scripts, preflight scripts), not in app runtime entrypoints.
+- App startup commands (`npm run dev`, `npm run webapp`, app bootstrap code) must not depend on MemPalace preflight, restart, or watchdog success.
+- If MemPalace is offline, the web app must still start immediately; diagnostics and retries belong to watchdog/task layers only.
+- Watchdog retry policy must be bounded (single `--once` retry cycle before watch mode) to prevent runaway loops.
+- Port cleanup and ownership checks must verify the listener belongs to CourseForge before treating recovery as successful.
+- Prevent duplicate MemPalace instances: startup scripts/tasks should avoid spawning additional watchers when one is already active for the workspace.
+- Add or update regression tests whenever changing startup/task/watchdog coupling to enforce app/MemPalace isolation.
+
+---
+
 ## Version Numbering — CRITICAL
 
 **PATCH only for bug fixes. PATCH counts indefinitely — never resets, never rolls over.**

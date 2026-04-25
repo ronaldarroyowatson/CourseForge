@@ -22,6 +22,8 @@ $script:UninstallRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion
 $script:UserRoot = Join-Path $env:LOCALAPPDATA "CourseForge"
 $script:LogsRoot = Join-Path $script:UserRoot "logs"
 $script:DataRoot = Join-Path $script:UserRoot "data"
+$script:PluginsRoot = Join-Path $script:DataRoot "plugins"
+$script:PluginsStateFileName = "plugins-state.json"
 $script:RollbackRoot = Join-Path $script:UserRoot "rollback"
 $script:DefaultInstallPath = Join-Path (Join-Path $env:LOCALAPPDATA "Programs") "CourseForge"
 $script:InstallerMetadataFileName = "installer-metadata.json"
@@ -457,6 +459,49 @@ function Write-RegistryState {
 function Remove-RegistryState {
   if (Test-Path $script:RegistryPath) {
     Remove-Item -Path $script:RegistryPath -Force
+  }
+}
+
+function Write-PluginState {
+  param(
+    [string]$PluginId,
+    [bool]$Installed
+  )
+
+  Ensure-Directory -Path $script:PluginsRoot
+  $statePath = Join-Path $script:PluginsRoot $script:PluginsStateFileName
+  $state = [ordered]@{
+    installed = [ordered]@{}
+    updatedAtUtc = Get-TimestampString
+  }
+
+  if (Test-Path $statePath) {
+    try {
+      $existing = Get-Content -Path $statePath -Raw | ConvertFrom-Json -ErrorAction Stop
+      if ($null -ne $existing -and $null -ne $existing.installed) {
+        foreach ($prop in $existing.installed.PSObject.Properties) {
+          $state.installed[$prop.Name] = [bool]$prop.Value
+        }
+      }
+    }
+    catch {
+      Write-InstallerLog "Plugin state file was invalid and was reset."
+    }
+  }
+
+  $state.installed[$PluginId] = $Installed
+  $state.updatedAtUtc = Get-TimestampString
+  $state | ConvertTo-Json -Depth 8 | Set-Content -Path $statePath -Encoding ASCII
+}
+
+function Remove-PluginState {
+  $statePath = Join-Path $script:PluginsRoot $script:PluginsStateFileName
+  if (Test-Path $statePath) {
+    Remove-Item -Path $statePath -Force -ErrorAction SilentlyContinue
+  }
+
+  if (Test-Path $script:PluginsRoot) {
+    Remove-Item -Path $script:PluginsRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
 
@@ -1510,6 +1555,10 @@ function Verify-Install {
     $issues.Add("installer-metadata.json missing after install.")
   }
 
+  if (Test-Path (Join-Path $ResolvedInstallPath "plugins\dsc")) {
+    $issues.Add("DSC plugin should not be installed by default installer.")
+  }
+
   if ($Icons.desktop -and -not (Test-Path (Get-DesktopShortcutPath))) {
     $issues.Add("Desktop shortcut missing after install.")
   }
@@ -1622,6 +1671,13 @@ function Uninstall-CourseForge {
     Write-InstallerLog "Removed extension directory."
   }
 
+  if (Test-Path (Join-Path $ResolvedInstallPath "plugins\dsc")) {
+    Remove-Item -Path (Join-Path $ResolvedInstallPath "plugins\dsc") -Recurse -Force -ErrorAction SilentlyContinue
+    Write-InstallerLog "Removed DSC plugin directory."
+  }
+
+  Write-PluginState -PluginId "dsc" -Installed $false
+
   Remove-Shortcuts
   Write-InstallerLog "Removed shortcuts."
 
@@ -1644,6 +1700,7 @@ function Uninstall-CourseForge {
       "Test-CourseForge-Integrity.ps1",
       "CourseForge-Start.url",
       "CourseForge.ico",
+      "plugins",
       "node-runtime",
       "README.md",
       "CHANGELOG.md",
@@ -1675,6 +1732,8 @@ function Uninstall-CourseForge {
     Write-InstallerLog "Removed local user data."
   }
 
+  Remove-PluginState
+
 
   $verificationIssues = New-Object System.Collections.Generic.List[string]
   if ($removeSelection.webapp -and (Test-Path (Join-Path $ResolvedInstallPath "webapp"))) {
@@ -1694,6 +1753,12 @@ function Uninstall-CourseForge {
   }
   if (-not $remainingWebapp -and -not $remainingExtension -and (Test-Path $script:RegistryPath)) {
     $verificationIssues.Add("Registry map still exists.")
+  }
+  if (Test-Path (Join-Path $ResolvedInstallPath "plugins\dsc")) {
+    $verificationIssues.Add("DSC plugin directory still exists.")
+  }
+  if (Test-Path (Join-Path $script:PluginsRoot $script:PluginsStateFileName)) {
+    $verificationIssues.Add("Plugin state file still exists.")
   }
 
   if ($verificationIssues.Count -gt 0) {
@@ -1853,6 +1918,7 @@ try {
       Set-Shortcuts -ResolvedInstallPath $resolvedInstallPath -Selection $selection -CreateDesktop ([bool]$icons.desktop) -CreateStartMenu ([bool]$icons.startMenu)
       Write-IntegrityManifest -RootPath $resolvedInstallPath -Selection $selection
       Write-InstallerMetadata -ResolvedInstallPath $resolvedInstallPath -Selection $selection -Icons $icons -InstallPathSource $installPathSource -Mode $operationMode
+      Write-PluginState -PluginId "dsc" -Installed $false
       Write-RegistryState -InstallPath $resolvedInstallPath -WebappInstalled ([bool]$selection.webapp) -ExtensionInstalled ([bool]$selection.extension) -DesktopIconInstalled ([bool]$icons.desktop) -StartMenuIconInstalled ([bool]$icons.startMenu) -LastRepairTimestamp ""
       Write-UninstallRegistration -ResolvedInstallPath $resolvedInstallPath
 

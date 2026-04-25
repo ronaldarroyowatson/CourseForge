@@ -42,6 +42,7 @@ export {
 
 export {
   deleteTextbook,
+  findDuplicateTextbookCandidate,
   findTextbookByIsbn,
   getAll as getAllTextbooks,
   getTextbookById,

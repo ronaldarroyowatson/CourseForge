@@ -14,15 +14,20 @@ import { fetchLanguageRegistryFromUrl } from "../../../core/services/translation
 import {
   buildFullDebugReport,
   clearDebugLogEntries,
+  getPluginStatusesSnapshot,
   getDesignTokenDebugReport,
   getDebugLoggingPolicy,
   getDebugLogStorageStats,
+  installPlugin,
   isDebugLoggingEnabled,
   isMetadataCorrectionSharingEnabled,
   readLocalCorrectionRecords,
   setMetadataCorrectionSharingEnabled,
   setDebugLoggingEnabled,
+  subscribePluginStatusChanges,
+  uninstallPlugin,
   uploadAndClearDebugLogs,
+  refreshPluginStatus as refreshPluginLifecycleStatus,
 } from "../../../core/services";
 import { readMetadataPipelineRuntimeStatus, type MetadataPipelineRuntimeStatus } from "../../../core/services/metadataExtractionPipelineService";
 import { readMetadataCorrectionSyncRuntimeState, type MetadataCorrectionSyncRuntimeState } from "../../../core/services/metadataCorrectionSyncService";
@@ -30,7 +35,7 @@ import { getSupportedLanguages, t as translate } from "../../../core/services/i1
 import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
-import { DesignSystemSettingsCard } from "./DesignSystemSettingsCard";
+import { FloatingDesignSystemCard } from "./FloatingDesignSystemCard";
 
 interface SettingsPageProps {
   onBack?: () => void;
@@ -87,6 +92,11 @@ function formatBytes(bytes: number | null | undefined): string {
   }
 
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function getDscInstalledSnapshot(): boolean {
+  const snapshot = getPluginStatusesSnapshot();
+  return snapshot.some((status) => status.manifest.id === "dsc" && status.installed);
 }
 
 type UpdaterProgress = {
@@ -323,6 +333,9 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const [showLanguageSettings, setShowLanguageSettings] = React.useState(false);
   const [showAccessibilitySettings, setShowAccessibilitySettings] = React.useState(false);
   const [showMetadataLearning, setShowMetadataLearning] = React.useState(false);
+  const [showFloatingDesignSystemCard, setShowFloatingDesignSystemCard] = React.useState(false);
+  const [dscPluginInstalled, setDscPluginInstalled] = React.useState<boolean>(() => getDscInstalledSnapshot());
+  const [dscPluginStatus, setDscPluginStatus] = React.useState<string | null>(() => (getDscInstalledSnapshot() ? "Installed" : "Not Installed"));
   const [debugReportOutput, setDebugReportOutput] = React.useState<string>("");
   const [metadataTrainingStats, setMetadataTrainingStats] = React.useState<LocalMetadataTrainingStats>({
     totalCorrections: 0,
@@ -354,6 +367,64 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     pageId: "settings",
     cardId: "debug-log",
   }), [debugEnabled, debugStats.entries, debugStats.totalBytes, debugPolicyStatus, debugStatus]);
+
+  const refreshDscPluginStatus = React.useCallback(async () => {
+    const status = await refreshPluginLifecycleStatus("dsc");
+    const installed = Boolean(status.installed);
+    setDscPluginInstalled(installed);
+    setDscPluginStatus(installed ? "Installed" : "Not Installed");
+  }, []);
+
+  React.useEffect(() => {
+    const snapshot = getPluginStatusesSnapshot().find((status) => status.manifest.id === "dsc");
+    if (snapshot) {
+      setDscPluginInstalled(Boolean(snapshot.installed));
+      setDscPluginStatus(snapshot.installed ? "Installed" : "Not Installed");
+    }
+
+    const unsubscribe = subscribePluginStatusChanges((event) => {
+      const status = event.statuses.find((entry) => entry.manifest.id === "dsc");
+      if (!status) {
+        return;
+      }
+
+      setDscPluginInstalled(Boolean(status.installed));
+      setDscPluginStatus(status.installed ? "Installed" : "Not Installed");
+      if (!status.installed) {
+        setShowFloatingDesignSystemCard(false);
+      }
+    });
+
+    void refreshDscPluginStatus();
+    return () => {
+      unsubscribe();
+    };
+  }, [refreshDscPluginStatus]);
+
+  async function handleInstallDscPlugin(): Promise<void> {
+    const status = await installPlugin("dsc");
+    if (status.error) {
+      setDscPluginStatus(`Install failed: ${status.error}`);
+      return;
+    }
+
+    setDscPluginInstalled(true);
+    setDscPluginStatus("Installed");
+    await refreshDscPluginStatus();
+  }
+
+  async function handleUninstallDscPlugin(): Promise<void> {
+    const status = await uninstallPlugin("dsc");
+    if (status.error) {
+      setDscPluginStatus(`Uninstall failed: ${status.error}`);
+      return;
+    }
+
+    setShowFloatingDesignSystemCard(false);
+    setDscPluginInstalled(false);
+    setDscPluginStatus("Not Installed");
+    await refreshDscPluginStatus();
+  }
 
   function refreshMetadataTrainingStats(): void {
     const corrections = readLocalCorrectionRecords();
@@ -1296,7 +1367,23 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           ) : null}
         </article>
 
-        <DesignSystemSettingsCard userId={userId} />
+        <article className="settings-card settings-card--dsc-workspace" aria-live="polite">
+          <h3>Design System Controls</h3>
+          <p className="settings-meta">Install DSC to unlock advanced design controls, visual equations, and the floating workspace.</p>
+          {dscPluginInstalled ? (
+            <>
+              <div className="form-actions">
+                <button type="button" onClick={() => setShowFloatingDesignSystemCard(true)}>Open DSC Module</button>
+                <button type="button" className="btn-secondary" onClick={() => { void handleUninstallDscPlugin(); }}>Uninstall DSC Module</button>
+              </div>
+            </>
+          ) : (
+            <div className="form-actions">
+              <button type="button" onClick={() => { void handleInstallDscPlugin(); }}>Install DSC Module</button>
+            </div>
+          )}
+          {dscPluginStatus ? <p className="settings-meta">{dscPluginStatus}</p> : null}
+        </article>
 
         <article className="settings-card settings-card--debug-log">
           <h3>Debug Log</h3>
@@ -1467,6 +1554,11 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           ) : null}
         </article>
       </div>
+      <FloatingDesignSystemCard
+        open={dscPluginInstalled && showFloatingDesignSystemCard}
+        userId={userId}
+        onClose={() => setShowFloatingDesignSystemCard(false)}
+      />
     </section>
   );
 }

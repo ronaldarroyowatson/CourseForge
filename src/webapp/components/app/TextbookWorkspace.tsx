@@ -118,8 +118,19 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
       try {
         setIsLoadingTextbooks(true);
         setTextbookLoadError(null);
+        console.info("[CourseForge][TextbookLoad] Boot load started.");
         await initDB();
         const results = await getAllTextbooks();
+        const cloudSyncedCount = results.filter((textbook) => textbook.source === "cloud").length;
+        console.info("[CourseForge][TextbookLoad] Boot load completed.", {
+          total: results.length,
+          cloudSynced: cloudSyncedCount,
+          localOnly: results.length - cloudSyncedCount,
+          textbookIds: results.map((textbook) => textbook.id),
+        });
+        console.info("[CourseForge][TextbookLoad] Post-boot verification snapshot captured.", {
+          textbookIds: results.map((textbook) => textbook.id),
+        });
 
         if (!isMounted) {
           return;

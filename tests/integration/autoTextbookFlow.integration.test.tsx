@@ -36,6 +36,7 @@ const metadataPipelineMocks = vi.hoisted(() => ({
 const repositoryMocks = vi.hoisted(() => ({
   createTextbook: vi.fn<(input: any) => Promise<string>>(async () => "textbook-1"),
   editTextbook: vi.fn<(id: string, changes: Record<string, unknown>) => Promise<{ id: string }>>(async () => ({ id: "textbook-1" })),
+  findDuplicateTextbook: vi.fn<(input: Record<string, unknown>) => Promise<any>>(async () => undefined),
   findTextbookByISBN: vi.fn<(isbn: string) => Promise<any>>(async () => undefined),
   createChapter: vi.fn<(input: { textbookId: string; index: number; name: string; description?: string }) => Promise<string>>(async ({ index }) => `chapter-${index}`),
   createSection: vi.fn<(input: { chapterId: string; index: number; title: string; notes?: string }) => Promise<string>>(async () => "section-1"),
@@ -68,6 +69,7 @@ vi.mock("../../src/webapp/hooks/useRepositories", () => ({
   useRepositories: () => ({
     createTextbook: repositoryMocks.createTextbook,
     editTextbook: repositoryMocks.editTextbook,
+    findDuplicateTextbook: repositoryMocks.findDuplicateTextbook,
     findTextbookByISBN: repositoryMocks.findTextbookByISBN,
     createChapter: repositoryMocks.createChapter,
     createSection: repositoryMocks.createSection,
@@ -100,6 +102,7 @@ describe("auto textbook flow integration", () => {
   beforeEach(() => {
     repositoryMocks.createTextbook.mockClear();
     repositoryMocks.editTextbook.mockClear();
+    repositoryMocks.findDuplicateTextbook.mockClear();
     repositoryMocks.findTextbookByISBN.mockClear();
     repositoryMocks.createChapter.mockClear();
     repositoryMocks.createSection.mockClear();
@@ -373,6 +376,51 @@ describe("auto textbook flow integration", () => {
         })
       );
     });
+  });
+
+  it("prompts before saving a duplicate ISBN in manual mode and only proceeds when confirmed", async () => {
+    repositoryMocks.findDuplicateTextbook.mockResolvedValueOnce({
+      id: "tb-existing-manual",
+      title: "Existing Algebra",
+      isbnRaw: "9781402894626",
+      sourceType: "manual",
+    });
+
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+    try {
+      render(<TextbookForm onSaved={() => undefined} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /^Manual/i }));
+      });
+
+      await screen.findByLabelText("Title");
+
+      await act(async () => {
+        fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Manual Algebra" } });
+        fireEvent.change(screen.getByLabelText("Grade"), { target: { value: "8" } });
+        fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "Math" } });
+        fireEvent.change(screen.getByLabelText("Edition"), { target: { value: "2" } });
+        fireEvent.change(screen.getByLabelText("Publication Year"), { target: { value: "2025" } });
+        fireEvent.change(screen.getByLabelText(/ISBN/i), { target: { value: "9781402894626" } });
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Save Textbook" }));
+
+      await waitFor(() => {
+        expect(confirmSpy).toHaveBeenCalledWith("A textbook with this ISBN already exists. Upload anyway?");
+      });
+      expect(repositoryMocks.createTextbook).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Save Textbook" }));
+
+      await waitFor(() => {
+        expect(repositoryMocks.createTextbook).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      confirmSpy.mockRestore();
+    }
   });
 
   it("persists textbook, chapters, and sections while only storing cover image data", async () => {

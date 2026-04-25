@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-04-25T01:08:23.731Z",
+  "mode": "strict",
+  "mempalaceStatus": "unhealthy",
+  "port": 4478,
+  "pid": 2108,
+  "healthCheck": {
+    "host": "127.0.0.1",
+    "port": 4478,
+    "reachable": false,
+    "detail": "connect ETIMEDOUT 127.0.0.1:4478",
+    "isMempalaceProcess": true,
+    "isCurrentProjectPalace": true,
+    "processName": "python.exe",
+    "processCommandLine": "\"C:\\Users\\ronal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe\"  \"C:\\Users\\ronal\\AppData\\Local\\Programs\\Python\\Python311\\Scripts\\mempalace.exe\" serve C:\\Users\\ronal\\Documents\\CourseForge\\.mempalace --port 4478"
+  },
+  "errors": [
+    "MemPalace health check failed (connect ETIMEDOUT 127.0.0.1:4478)."
+  ],
+  "ok": false
+}

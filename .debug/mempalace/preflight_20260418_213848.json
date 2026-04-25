@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-04-19T02:38:36.418Z",
+  "mode": "relaxed",
+  "mempalaceStatus": "occupied_by_other_process",
+  "port": 3929,
+  "pid": 28956,
+  "healthCheck": {
+    "host": "127.0.0.1",
+    "port": 3929,
+    "reachable": false,
+    "detail": "timeout",
+    "isMempalaceProcess": false,
+    "isCurrentProjectPalace": true,
+    "processName": "unknown",
+    "processCommandLine": ""
+  },
+  "errors": [
+    "Configured MemPalace port is occupied by a non-MemPalace process."
+  ],
+  "ok": true
+}

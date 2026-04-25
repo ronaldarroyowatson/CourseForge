@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-04-19T02:47:18.043Z",
+  "mode": "relaxed",
+  "mempalaceStatus": "unhealthy",
+  "port": 3929,
+  "pid": 4180,
+  "healthCheck": {
+    "host": "127.0.0.1",
+    "port": 3929,
+    "reachable": false,
+    "detail": "timeout",
+    "isMempalaceProcess": true,
+    "isCurrentProjectPalace": true,
+    "processName": "python.exe",
+    "processCommandLine": "\"C:\\Users\\ronal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe\"  \"C:\\Users\\ronal\\AppData\\Local\\Programs\\Python\\Python311\\Scripts\\mempalace.exe\" serve .mempalace --port 3929"
+  },
+  "errors": [
+    "MemPalace health check failed (timeout)."
+  ],
+  "ok": true
+}

@@ -118,7 +118,9 @@ The Debug Log card (`article.settings-card > h3:Debug Log`) is the unified contr
 - Uploading/clearing the general debug log
 - **DSC Token Debug section**: Enable/disable DSC debug mode, generate/copy full DSC report, clear DSC logs
 
-The restored DSC card now uses a masonry layout engine with preview-first placement, adaptive reflow, Fibonacci spacing tokens, and mirrored preview/control surfaces.
+The restored DSC workspace now launches from Settings as a floating, portal-backed card with highest-layer z-order, viewport-level clipping escape, draggable/resizable shell behavior, and an internal masonry layout with preview-first placement, adaptive reflow, Fibonacci spacing tokens, mirrored preview/control surfaces, and directional-flow-aware Example/Controls ordering.
+
+Current DSC interaction contract also includes: draggable brand/accent/alt wheel markers with slider synchronization, harmony-anchored accent/alt suggestions from primary hue, semantic-family constrained harmony influence (error red, success green, pending yellow, new blue/cyan), slider snap helper labels for type/spacing presets, and mode-coupled glow/shadow previews.
 
 ---
 

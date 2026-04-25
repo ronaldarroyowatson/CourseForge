@@ -29,6 +29,37 @@
 			"problemMatcher": []
 		},
 		{
+			"label": "Start MemPalace MCP Server",
+			"type": "shell",
+			"command": "$env:CF_DEV_MODE='agent'; node infrastructure/mempalace_watchdog.js --once; if ($LASTEXITCODE -ne 0) { node infrastructure/mempalace_watchdog.js --once; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }; node infrastructure/mempalace_watchdog.js --watch --intervalMs 3000",
+			"isBackground": true,
+			"presentation": {
+				"reveal": "never",
+				"focus": false,
+				"panel": "dedicated",
+				"showReuseMessage": false,
+				"clear": false
+			},
+			"problemMatcher": [],
+			"runOptions": {
+				"runOn": "folderOpen"
+			}
+		},
+		{
+			"label": "Start MemPalace Watchdog",
+			"type": "shell",
+			"command": "node infrastructure/mempalace_watchdog.js --watch --intervalMs 3000",
+			"isBackground": true,
+			"presentation": {
+				"reveal": "never",
+				"focus": false,
+				"panel": "dedicated",
+				"showReuseMessage": false,
+				"clear": false
+			},
+			"problemMatcher": []
+		},
+		{
 			"label": "bugfix: dry run (tests only, no publish)",
 			"type": "shell",
 			"command": "powershell -ExecutionPolicy Bypass -File scripts/bugfix-release.ps1 -Description \"${input:fixDescription}\" -DryRun",

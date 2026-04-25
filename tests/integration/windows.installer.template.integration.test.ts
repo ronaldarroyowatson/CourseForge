@@ -66,6 +66,8 @@ describe("windows installer template guardrails", () => {
     expect(template).toContain("function Invoke-WithRollback");
     expect(template).toContain("function Repair-Installation");
     expect(template).toContain("function Uninstall-CourseForge");
+    expect(template).toContain("function Write-PluginState");
+    expect(template).toContain("function Remove-PluginState");
     expect(template).toContain('"boot-splash.html"');
     expect(template).toContain('"Test-CourseForge-Integrity.ps1"');
     expect(template).toContain("Using script directory as install root hint");
@@ -80,6 +82,8 @@ describe("windows installer template guardrails", () => {
     expect(template).toContain("/UNINSTALL");
     expect(template).toContain("installer-metadata.json");
     expect(template).toContain("installer-integrity.json");
+    expect(template).toContain("DSC plugin should not be installed by default installer.");
+    expect(template).toContain("Removed DSC plugin directory.");
     expect(template).toContain("rollback.log");
     expect(template).toContain("New-InstallerSupportCode");
     expect(template).toContain("Write-NodeEnvironmentDiagnostics");

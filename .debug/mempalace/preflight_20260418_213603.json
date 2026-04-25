@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-04-19T02:35:53.005Z",
+  "mode": "strict",
+  "mempalaceStatus": "running_from_other_project",
+  "port": 3929,
+  "pid": 2464,
+  "healthCheck": {
+    "host": "127.0.0.1",
+    "port": 3929,
+    "reachable": true,
+    "detail": null,
+    "isMempalaceProcess": true,
+    "isCurrentProjectPalace": false,
+    "processName": "python.exe",
+    "processCommandLine": "\"C:\\Users\\ronal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe\"  \"C:\\Users\\ronal\\AppData\\Local\\Programs\\Python\\Python311\\Scripts\\mempalace.exe\" serve .mempalace --port 3929"
+  },
+  "errors": [
+    "MemPalace process belongs to a different palace root."
+  ],
+  "ok": false
+}

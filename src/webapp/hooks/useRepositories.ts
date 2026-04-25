@@ -8,6 +8,7 @@ import {
   deleteKeyIdea,
   deleteSection,
   deleteTextbook,
+  findDuplicateTextbookCandidate,
   deleteVocabTerm,
   updateChapter,
   updateSection,
@@ -32,6 +33,8 @@ import {
   updateTextbookFlags,
 } from "../../core/services/repositories";
 import { uploadTextbookCoverFromDataUrl, uploadTextbookCoverImage } from "../../core/services/coverImageService";
+import { hardDeleteTextbookFromCloud } from "../../core/services/syncService";
+import { getCurrentUser } from "../../firebase/auth";
 import { useUIStore } from "../store/uiStore";
 
 export interface CreateTextbookInput {
@@ -300,12 +303,47 @@ export function useRepositories() {
   }, [markLocalChange]);
 
   const removeTextbook = useCallback(async (id: string): Promise<void> => {
+    console.info("[CourseForge][TextbookDelete] Request received.", { textbookId: id });
+
+    if (typeof window !== "undefined") {
+      const selectedTextbookId = window.localStorage.getItem("courseforge-selectedTextbookId");
+      if (selectedTextbookId === id) {
+        window.localStorage.removeItem("courseforge-selectedTextbookId");
+        window.localStorage.removeItem("courseforge-selectedChapterId");
+        window.localStorage.removeItem("courseforge-selectedSectionId");
+      }
+    }
+
+    const currentUser = getCurrentUser();
+    if (currentUser?.uid) {
+      try {
+        await hardDeleteTextbookFromCloud(currentUser.uid, id);
+      } catch (error) {
+        console.warn("[CourseForge][TextbookDelete] Cloud hard-delete failed; local delete will still proceed.", {
+          textbookId: id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     await deleteTextbook(id);
+    console.info("[CourseForge][TextbookDelete] Hard delete completed for local hierarchy.", { textbookId: id });
     markLocalChange();
   }, [markLocalChange]);
 
   const findTextbookByISBN = useCallback(async (isbnInput: string): Promise<Textbook | undefined> => {
     return findTextbookByIsbn(isbnInput);
+  }, []);
+
+  const findDuplicateTextbook = useCallback(async (input: {
+    isbnRaw?: string;
+    title?: string;
+    grade?: string;
+    publisher?: string;
+    seriesName?: string;
+    publicationYear?: number;
+  }): Promise<Textbook | undefined> => {
+    return findDuplicateTextbookCandidate(input);
   }, []);
 
   const editTextbook = useCallback(async (id: string, changes: Partial<Textbook>): Promise<Textbook> => {
@@ -463,6 +501,7 @@ export function useRepositories() {
     fetchTextbooks,
     createTextbook,
     removeTextbook,
+    findDuplicateTextbook,
     findTextbookByISBN,
     editTextbook,
     toggleTextbookFavorite,

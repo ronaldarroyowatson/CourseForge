@@ -1,4 +1,15 @@
 {
+  "task.allowAutomaticTasks": "on",
+  "tasks.runOnFolderOpen": "Start MemPalace MCP Server",
+  "mcpServers": {
+    "mempalace": {
+      "command": "mempalace",
+      "args": [
+        "serve",
+        ".mempalace"
+      ]
+    }
+  },
   "powershell.scriptAnalysis.enable": false,
   "powershell.scriptAnalysis.settingsPath": ".vscode/PSScriptAnalyzerSettings.psd1",
   "markdownlint.ignore": [
@@ -7,5 +18,25 @@
   ],
   "markdownlint.config": {
     "MD041": false
-  }
+  },
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/tmp-smoke/**": true,
+    "**/release/**": true,
+    "**/.debug/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/tmp-smoke": true,
+    "**/release": true,
+    "**/.debug": true
+  },
+  "extensions.experimental.affinity": {
+    "GitHub.copilot-chat": 1,
+    "Continue.continue": 2,
+    "ms-python.python": 3,
+    "ms-python.vscode-pylance": 3
+  },
+  "terminal.integrated.enablePersistentSessions": false,
+  "window.restoreWindows": "none"
 }

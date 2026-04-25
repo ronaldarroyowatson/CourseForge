@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-04-19T17:07:51.959Z",
+  "mode": "strict",
+  "mempalaceStatus": "healthy",
+  "port": 4319,
+  "pid": 20396,
+  "healthCheck": {
+    "host": "127.0.0.1",
+    "port": 4319,
+    "reachable": true,
+    "detail": null,
+    "isMempalaceProcess": true,
+    "isCurrentProjectPalace": true,
+    "processName": "python.exe",
+    "processCommandLine": "\"C:\\Users\\ronal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe\"  \"C:\\Users\\ronal\\AppData\\Local\\Programs\\Python\\Python311\\Scripts\\mempalace.exe\" serve .mempalace --port 4319"
+  },
+  "errors": [],
+  "ok": true
+}

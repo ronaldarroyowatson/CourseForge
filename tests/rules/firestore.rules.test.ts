@@ -17,6 +17,55 @@ const OTHER_UID = "other-user";
 
 let rulesEnv: RulesTestEnvironment;
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isTransientEmulatorStartupError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const code = (error as NodeJS.ErrnoException).code;
+  const message = `${error.message} ${(error.cause as Error | undefined)?.message ?? ""}`;
+
+  return code === "ETIMEDOUT"
+    || code === "ECONNREFUSED"
+    || /ETIMEDOUT|ECONNREFUSED|127\.0\.0\.1:4400/i.test(message);
+}
+
+async function initializeRulesEnvironmentWithRetry(options: {
+  projectId: string;
+  host: string;
+  port: number;
+  rules: string;
+}): Promise<RulesTestEnvironment> {
+  const maxAttempts = 4;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await initializeTestEnvironment({
+        projectId: options.projectId,
+        firestore: {
+          rules: options.rules,
+          host: options.host,
+          port: options.port,
+        },
+      });
+    } catch (error) {
+      if (!isTransientEmulatorStartupError(error) || attempt === maxAttempts) {
+        throw error;
+      }
+
+      await sleep(400 * attempt);
+    }
+  }
+
+  throw new Error("Unable to initialize Firestore rules test environment.");
+}
+
 function getEmulatorConnection(): { host: string; port: number } {
   const configuredHost = process.env.FIRESTORE_EMULATOR_HOST;
   if (configuredHost) {
@@ -53,13 +102,11 @@ beforeAll(async () => {
   const firestoreRules = readFileSync(rulesPath, "utf8");
   const emulator = getEmulatorConnection();
 
-  rulesEnv = await initializeTestEnvironment({
+  rulesEnv = await initializeRulesEnvironmentWithRetry({
     projectId: PROJECT_ID,
-    firestore: {
-      rules: firestoreRules,
-      host: emulator.host,
-      port: emulator.port,
-    },
+    rules: firestoreRules,
+    host: emulator.host,
+    port: emulator.port,
   });
 });
 

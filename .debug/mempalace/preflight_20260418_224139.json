@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-04-19T03:41:27.930Z",
+  "mode": "relaxed",
+  "mempalaceStatus": "healthy",
+  "port": 3929,
+  "pid": 25808,
+  "healthCheck": {
+    "host": "127.0.0.1",
+    "port": 3929,
+    "reachable": true,
+    "detail": null,
+    "isMempalaceProcess": true,
+    "isCurrentProjectPalace": true,
+    "processName": "python.exe",
+    "processCommandLine": "\"C:\\Users\\ronal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe\"  \"C:\\Users\\ronal\\AppData\\Local\\Programs\\Python\\Python311\\Scripts\\mempalace.exe\" serve .mempalace --port 3929"
+  },
+  "errors": [],
+  "ok": true
+}

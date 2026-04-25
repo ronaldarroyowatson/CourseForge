@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-04-22T00:18:25.965Z",
+  "mode": "relaxed",
+  "mempalaceStatus": "missing",
+  "port": 4447,
+  "pid": 40700,
+  "healthCheck": {
+    "host": "127.0.0.1",
+    "port": 4447,
+    "reachable": false,
+    "detail": "connect ECONNREFUSED 127.0.0.1:4447",
+    "isMempalaceProcess": false,
+    "isCurrentProjectPalace": false,
+    "processName": "none",
+    "processCommandLine": ""
+  },
+  "errors": [
+    "No listening process found on MemPalace port."
+  ],
+  "ok": true
+}

@@ -12,6 +12,8 @@ const firestoreMocks = vi.hoisted(() => ({
 }));
 
 const coreServiceMocks = vi.hoisted(() => ({
+  dscInstalled: false,
+  pluginStatusSubscribers: new Set<(event: { statuses: Array<{ manifest: { id: string }; installed: boolean; loaded: boolean }> }) => void>(),
   buildFullDebugReport: vi.fn(() => ({
     generatedAt: "2026-04-17T00:00:00.000Z",
     debugEnabled: true,
@@ -59,6 +61,71 @@ const coreServiceMocks = vi.hoisted(() => ({
   setMetadataCorrectionSharingEnabled: vi.fn(),
   setDebugLoggingEnabled: vi.fn(),
   uploadAndClearDebugLogs: vi.fn(async () => ({ uploadedCount: 0 })),
+  getPluginStatus: vi.fn(async () => ({
+    manifest: { id: "dsc", name: "Design System Controls", version: "1.0.0", optional: true, entry: "./index.ts", description: "" },
+    installed: coreServiceMocks.dscInstalled,
+    loaded: coreServiceMocks.dscInstalled,
+  })),
+  getPluginStatusesSnapshot: vi.fn(() => ([{
+    manifest: { id: "dsc", name: "Design System Controls", version: "1.0.0", optional: true, entry: "./index.ts", description: "" },
+    installed: coreServiceMocks.dscInstalled,
+    loaded: coreServiceMocks.dscInstalled,
+  }])),
+  subscribePluginStatusChanges: vi.fn((listener: (event: { statuses: Array<{ manifest: { id: string }; installed: boolean; loaded: boolean }> }) => void) => {
+    coreServiceMocks.pluginStatusSubscribers.add(listener);
+    return () => {
+      coreServiceMocks.pluginStatusSubscribers.delete(listener);
+    };
+  }),
+  loadPlugin: vi.fn(async () => ({
+    manifest: { id: "dsc", name: "Design System Controls", version: "1.0.0", optional: true, entry: "./index.ts", description: "" },
+    installed: coreServiceMocks.dscInstalled,
+    loaded: coreServiceMocks.dscInstalled,
+  })),
+  unloadPlugin: vi.fn(async () => ({
+    manifest: { id: "dsc", name: "Design System Controls", version: "1.0.0", optional: true, entry: "./index.ts", description: "" },
+    installed: coreServiceMocks.dscInstalled,
+    loaded: false,
+  })),
+  installPlugin: vi.fn(async () => {
+    coreServiceMocks.dscInstalled = true;
+    coreServiceMocks.pluginStatusSubscribers.forEach((listener) => {
+      listener({
+        statuses: [{
+          manifest: { id: "dsc" },
+          installed: true,
+          loaded: true,
+        }],
+      });
+    });
+    return {
+      manifest: { id: "dsc", name: "Design System Controls", version: "1.0.0", optional: true, entry: "./index.ts", description: "" },
+      installed: true,
+      loaded: true,
+    };
+  }),
+  uninstallPlugin: vi.fn(async () => {
+    coreServiceMocks.dscInstalled = false;
+    coreServiceMocks.pluginStatusSubscribers.forEach((listener) => {
+      listener({
+        statuses: [{
+          manifest: { id: "dsc" },
+          installed: false,
+          loaded: false,
+        }],
+      });
+    });
+    return {
+      manifest: { id: "dsc", name: "Design System Controls", version: "1.0.0", optional: true, entry: "./index.ts", description: "" },
+      installed: false,
+      loaded: false,
+    };
+  }),
+  refreshPluginStatus: vi.fn(async () => ({
+    manifest: { id: "dsc", name: "Design System Controls", version: "1.0.0", optional: true, entry: "./index.ts", description: "" },
+    installed: coreServiceMocks.dscInstalled,
+    loaded: coreServiceMocks.dscInstalled,
+  })),
 }));
 
 const ocrMocks = vi.hoisted(() => ({
@@ -95,6 +162,14 @@ vi.mock("../../src/core/services", () => ({
   setMetadataCorrectionSharingEnabled: coreServiceMocks.setMetadataCorrectionSharingEnabled,
   setDebugLoggingEnabled: coreServiceMocks.setDebugLoggingEnabled,
   uploadAndClearDebugLogs: coreServiceMocks.uploadAndClearDebugLogs,
+  getPluginStatus: coreServiceMocks.getPluginStatus,
+  getPluginStatusesSnapshot: coreServiceMocks.getPluginStatusesSnapshot,
+  subscribePluginStatusChanges: coreServiceMocks.subscribePluginStatusChanges,
+  loadPlugin: coreServiceMocks.loadPlugin,
+  unloadPlugin: coreServiceMocks.unloadPlugin,
+  installPlugin: coreServiceMocks.installPlugin,
+  uninstallPlugin: coreServiceMocks.uninstallPlugin,
+  refreshPluginStatus: coreServiceMocks.refreshPluginStatus,
 }));
 
 vi.mock("../../src/core/services/autoOcrService", () => ({
@@ -186,6 +261,9 @@ describe("Settings updater communication", () => {
   beforeEach(() => {
     resetStores();
     vi.restoreAllMocks();
+    coreServiceMocks.dscInstalled = false;
+    coreServiceMocks.pluginStatusSubscribers.clear();
+    window.localStorage.clear();
     coreServiceMocks.readLocalCorrectionRecords.mockReturnValue([]);
     coreServiceMocks.isMetadataCorrectionSharingEnabled.mockReturnValue(false);
     ocrMocks.getAutoOcrProviderHealth.mockResolvedValue([
@@ -627,17 +705,89 @@ describe("Settings updater communication", () => {
     expect(within(debugCard as HTMLElement).getByText("Risk: No cascading token failures detected.")).toBeInTheDocument();
   });
 
-  it("renders the DSC card controls in settings", async () => {
+  it("shows DSC as not installed by default and renders minimal settings", async () => {
     render(<SettingsPage onBack={() => undefined} />);
 
-    expect(await screen.findByText("Design System Controls")).toBeInTheDocument();
-    expect(screen.getByText("Engine: Masonry")).toBeInTheDocument();
-    expect(screen.getByText(/Gamma:/)).toBeInTheDocument();
-    expect(screen.getByText("Stroke preset")).toBeInTheDocument();
-    expect(screen.getByText("Directional flow")).toBeInTheDocument();
-    expect(screen.getByText("Buttons")).toBeInTheDocument();
-    expect(screen.getByText("Save mode")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Use System Defaults" })).toBeInTheDocument();
+    const dscCard = (await screen.findByText("Design System Controls")).closest("article") as HTMLElement;
+    expect(within(dscCard).getAllByText("Not Installed").length).toBeGreaterThan(0);
+    expect(within(dscCard).getByText(/Install DSC to unlock advanced design controls/)).toBeInTheDocument();
+    expect(within(dscCard).getByRole("button", { name: "Install DSC Module" })).toBeInTheDocument();
+    expect(within(dscCard).queryByRole("button", { name: "Open DSC Module" })).not.toBeInTheDocument();
+  });
+
+  it("installs DSC from UI and opens the floating workspace", async () => {
+    render(<SettingsPage onBack={() => undefined} />);
+
+    const dscCard = (await screen.findByText("Design System Controls")).closest("article") as HTMLElement;
+    fireEvent.click(within(dscCard).getByRole("button", { name: "Install DSC Module" }));
+
+    await waitFor(() => {
+      expect(within(dscCard).getAllByText("Installed").length).toBeGreaterThan(0);
+      expect(within(dscCard).getByRole("button", { name: "Open DSC Module" })).toBeInTheDocument();
+      expect(within(dscCard).getByRole("button", { name: "Uninstall DSC Module" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(within(dscCard).getByRole("button", { name: "Open DSC Module" }));
+
+    const floatingCard = await screen.findByRole("dialog", { name: "Design System Controls" });
+    expect(floatingCard).toHaveAttribute("data-floating-layer", "highest");
+    expect(floatingCard).toHaveAttribute("data-clip-root", "viewport");
+    expect(within(floatingCard).getByText(/Gamma:/)).toBeInTheDocument();
+    expect(within(floatingCard).getByText("Stroke preset")).toBeInTheDocument();
+    expect(within(floatingCard).getByText("Directional flow")).toBeInTheDocument();
+    expect(within(floatingCard).getByText("Buttons & Cards")).toBeInTheDocument();
+    expect(within(floatingCard).getByText("Save mode")).toBeInTheDocument();
+    expect(within(floatingCard).getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(within(floatingCard).getByRole("button", { name: "Use System Defaults" })).toBeInTheDocument();
+  });
+
+  it("supports floating DSC card move-and-close lifecycle from settings", async () => {
+    render(<SettingsPage onBack={() => undefined} />);
+
+    const dscCard = (await screen.findByText("Design System Controls")).closest("article") as HTMLElement;
+    fireEvent.click(within(dscCard).getByRole("button", { name: "Install DSC Module" }));
+    await waitFor(() => expect(within(dscCard).getByRole("button", { name: "Open DSC Module" })).toBeInTheDocument());
+    fireEvent.click(within(dscCard).getByRole("button", { name: "Open DSC Module" }));
+
+    const floatingCard = await screen.findByRole("dialog", { name: "Design System Controls" });
+    const initialLeft = floatingCard.style.left;
+    const initialTop = floatingCard.style.top;
+    const header = floatingCard.querySelector(".dsc-floating-card__header");
+    expect(header).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.mouseDown(header as Element, { button: 0, clientX: 180, clientY: 120 });
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      fireEvent.mouseMove(window, { clientX: 260, clientY: 190 });
+      fireEvent.mouseUp(window);
+    });
+
+    expect(floatingCard.style.left).not.toBe(initialLeft);
+    expect(floatingCard.style.top).not.toBe(initialTop);
+
+    fireEvent.click(within(floatingCard).getByRole("button", { name: "Close" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Design System Controls" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("uninstalls DSC from UI and returns to minimal settings", async () => {
+    render(<SettingsPage onBack={() => undefined} />);
+
+    const dscCard = (await screen.findByText("Design System Controls")).closest("article") as HTMLElement;
+    fireEvent.click(within(dscCard).getByRole("button", { name: "Install DSC Module" }));
+    await waitFor(() => expect(within(dscCard).getByRole("button", { name: "Uninstall DSC Module" })).toBeInTheDocument());
+
+    fireEvent.click(within(dscCard).getByRole("button", { name: "Uninstall DSC Module" }));
+
+    await waitFor(() => {
+      expect(within(dscCard).getAllByText("Not Installed").length).toBeGreaterThan(0);
+      expect(within(dscCard).getByRole("button", { name: "Install DSC Module" })).toBeInTheDocument();
+      expect(within(dscCard).queryByRole("button", { name: "Open DSC Module" })).not.toBeInTheDocument();
+    });
   });
 });

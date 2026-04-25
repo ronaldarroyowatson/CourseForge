@@ -1,7 +1,7 @@
-import { collection, collectionGroup, doc, getDocs, query, setDoc, where } from "firebase/firestore";
+import { collection, collectionGroup, deleteDoc, doc, getDocs, query, setDoc, where } from "firebase/firestore";
 
 import type { CourseForgeEntityMap } from "../models";
-import { getAll, save, STORE_NAMES } from "./db";
+import { delete as deleteLocalRecord, getAll, save, STORE_NAMES } from "./db";
 import { normalizeISBN } from "./isbnService";
 import { firestoreDb } from "../../firebase/firestore";
 import { getAdminClaim, getCurrentUser } from "../../firebase/auth";
@@ -1027,6 +1027,57 @@ async function saveLocalStoreItem<T extends SyncStoreName>(
   await save(storeName, item);
 }
 
+function isDeletedEntity(item: SyncEntity | undefined): boolean {
+  return Boolean(item?.isDeleted);
+}
+
+async function deleteLocalStoreItem<T extends SyncStoreName>(
+  storeName: T,
+  itemId: string
+): Promise<void> {
+  await deleteLocalRecord(storeName, itemId);
+}
+
+async function deleteCloudStoreItem<T extends SyncStoreName>(
+  storeName: T,
+  item: CourseForgeEntityMap[T],
+  indexes: HierarchyIndexes
+): Promise<boolean> {
+  const resolved = getDocPathFromStoreItem(storeName, item, indexes);
+  if (!resolved) {
+    return false;
+  }
+
+  const path = resolved.path;
+  if (isForbiddenUserScopedPath(path)) {
+    logSyncEvent("delete:blocked-user-scope", path, resolved.payload, {
+      code: "invalid-sync-path",
+      message: "Blocked user-scoped cloud delete path.",
+    });
+    return false;
+  }
+
+  if (shouldSkipWriteForLoop(path)) {
+    return false;
+  }
+
+  if (!hasWriteBudgetCapacity(path, { id: item.id, action: "delete" })) {
+    return false;
+  }
+
+  logSyncEvent("delete:start", path, { id: item.id, storeName });
+  try {
+    await deleteDoc(doc(firestoreDb, path));
+    sessionWriteCount += 1;
+    persistDailyWriteBudgetState();
+    logSyncEvent("delete:success", path, { id: item.id, storeName });
+    return true;
+  } catch (error) {
+    logSyncEvent("delete:error", path, { id: item.id, storeName }, error);
+    throw error;
+  }
+}
+
 async function saveCloudStoreItem<T extends SyncStoreName>(
   storeName: T,
   userId: string,
@@ -1125,6 +1176,18 @@ export async function uploadLocalChanges(userId: string): Promise<void> {
 
         await Promise.all(
           changedItems.map(async (item) => {
+            if (isDeletedEntity(item)) {
+              const deletedFromCloud = await deleteCloudStoreItem(storeName, {
+                ...item,
+                userId,
+              } as CourseForgeEntityMap[typeof storeName], indexes);
+
+              if (deletedFromCloud) {
+                await deleteLocalStoreItem(storeName, item.id);
+              }
+              return;
+            }
+
             const synced = {
               ...item,
               userId,
@@ -1224,8 +1287,71 @@ export async function syncUserData(userId: string): Promise<void> {
             const cloudItem = cloudById.get(id);
 
             if (localItem && cloudItem) {
+              if (isDeletedEntity(localItem) && isDeletedEntity(cloudItem)) {
+                await Promise.all([
+                  deleteCloudStoreItem(storeName, {
+                    ...localItem,
+                    userId,
+                  } as CourseForgeEntityMap[typeof storeName], indexes),
+                  deleteLocalStoreItem(storeName, localItem.id),
+                ]);
+                return;
+              }
+
               const localTs = toTimestamp(localItem.lastModified);
               const cloudTs = toTimestamp(cloudItem.lastModified);
+
+              if (isDeletedEntity(localItem)) {
+                if (localTs >= cloudTs) {
+                  const deletedFromCloud = await deleteCloudStoreItem(storeName, {
+                    ...localItem,
+                    userId,
+                  } as CourseForgeEntityMap[typeof storeName], indexes);
+
+                  if (deletedFromCloud) {
+                    await deleteLocalStoreItem(storeName, localItem.id);
+                  }
+                  return;
+                }
+
+                const cloudWinner = withSyncDefaults(
+                  {
+                    ...cloudItem,
+                    userId,
+                    pendingSync: false,
+                    source: "cloud",
+                  } as CourseForgeEntityMap[typeof storeName],
+                  "cloud",
+                  false
+                ) as CourseForgeEntityMap[typeof storeName];
+
+                await saveLocalStoreItem(storeName, cloudWinner);
+                return;
+              }
+
+              if (isDeletedEntity(cloudItem)) {
+                if (cloudTs >= localTs) {
+                  await deleteLocalStoreItem(storeName, cloudItem.id);
+                  return;
+                }
+
+                const localWinner = withSyncDefaults(
+                  {
+                    ...localItem,
+                    userId,
+                    pendingSync: false,
+                    source: "cloud",
+                  } as CourseForgeEntityMap[typeof storeName],
+                  "cloud",
+                  false
+                ) as CourseForgeEntityMap[typeof storeName];
+
+                const wroteToCloud = await saveCloudStoreItem(storeName, userId, localWinner, indexes, userPolicy);
+                if (wroteToCloud) {
+                  await saveLocalStoreItem(storeName, localWinner);
+                }
+                return;
+              }
 
               if (cloudTs > localTs) {
                 const cloudWinner = withSyncDefaults(
@@ -1266,6 +1392,18 @@ export async function syncUserData(userId: string): Promise<void> {
             }
 
             if (localItem) {
+              if (isDeletedEntity(localItem)) {
+                const deletedFromCloud = await deleteCloudStoreItem(storeName, {
+                  ...localItem,
+                  userId,
+                } as CourseForgeEntityMap[typeof storeName], indexes);
+
+                if (deletedFromCloud) {
+                  await deleteLocalStoreItem(storeName, localItem.id);
+                }
+                return;
+              }
+
               const localOnly = withSyncDefaults(
                 {
                   ...localItem,
@@ -1285,6 +1423,11 @@ export async function syncUserData(userId: string): Promise<void> {
             }
 
             if (cloudItem) {
+              if (isDeletedEntity(cloudItem)) {
+                await deleteLocalStoreItem(storeName, cloudItem.id);
+                return;
+              }
+
               const cloudOnly = withSyncDefaults(
                 {
                   ...cloudItem,
@@ -1528,4 +1671,150 @@ export async function findCloudTextbookByISBN(userId: string, isbnInput: string)
     "cloud",
     false
   ) as CourseForgeEntityMap["textbooks"];
+}
+
+export async function hardDeleteTextbookFromCloud(userId: string, textbookId: string): Promise<void> {
+  const trimmedUserId = userId.trim();
+  const trimmedTextbookId = textbookId.trim();
+  if (!trimmedUserId || !trimmedTextbookId) {
+    return;
+  }
+
+  const mergeByPath = (
+    first: Array<{ ref: { path: string } }>,
+    second: Array<{ ref: { path: string } }>
+  ) => {
+    const byPath = new Map<string, { ref: { path: string } }>();
+    [...first, ...second].forEach((snapshot) => {
+      byPath.set(snapshot.ref.path, snapshot);
+    });
+    return [...byPath.values()];
+  };
+
+  let directHierarchyCache: Promise<{
+    chapters: Array<{ ref: { path: string } }>;
+    sections: Array<{ ref: { path: string } }>;
+    vocab: Array<{ ref: { path: string } }>;
+    equations: Array<{ ref: { path: string } }>;
+    concepts: Array<{ ref: { path: string } }>;
+    keyIdeas: Array<{ ref: { path: string } }>;
+  }> | null = null;
+
+  const loadDirectHierarchy = async () => {
+    if (directHierarchyCache) {
+      return directHierarchyCache;
+    }
+
+    directHierarchyCache = (async () => {
+      const chapterSnapshot = await trackedGetDocs(getDocs(collection(firestoreDb, `textbooks/${trimmedTextbookId}/chapters`)));
+      const chapters = chapterSnapshot.docs;
+
+      const sectionSnapshots = await Promise.all(
+        chapters.map((chapterSnapshotDoc) => trackedGetDocs(getDocs(collection(firestoreDb, `${chapterSnapshotDoc.ref.path}/sections`))))
+      );
+      const sections = sectionSnapshots.flatMap((snapshot) => snapshot.docs);
+
+      const [vocabSnapshots, equationSnapshots, conceptSnapshots, keyIdeaSnapshots] = await Promise.all([
+        Promise.all(sections.map((sectionSnapshotDoc) => trackedGetDocs(getDocs(collection(firestoreDb, `${sectionSnapshotDoc.ref.path}/vocab`))))),
+        Promise.all(sections.map((sectionSnapshotDoc) => trackedGetDocs(getDocs(collection(firestoreDb, `${sectionSnapshotDoc.ref.path}/equations`))))),
+        Promise.all(sections.map((sectionSnapshotDoc) => trackedGetDocs(getDocs(collection(firestoreDb, `${sectionSnapshotDoc.ref.path}/concepts`))))),
+        Promise.all(sections.map((sectionSnapshotDoc) => trackedGetDocs(getDocs(collection(firestoreDb, `${sectionSnapshotDoc.ref.path}/keyIdeas`))))),
+      ]);
+
+      return {
+        chapters,
+        sections,
+        vocab: vocabSnapshots.flatMap((snapshot) => snapshot.docs),
+        equations: equationSnapshots.flatMap((snapshot) => snapshot.docs),
+        concepts: conceptSnapshots.flatMap((snapshot) => snapshot.docs),
+        keyIdeas: keyIdeaSnapshots.flatMap((snapshot) => snapshot.docs),
+      };
+    })();
+
+    return directHierarchyCache;
+  };
+
+  const deleteSnapshots = async (
+    snapshots: Array<{ ref: { path: string } }>,
+    label: string,
+  ): Promise<void> => {
+    await Promise.all(
+      snapshots.map(async (snapshot) => {
+        const path = snapshot.ref.path;
+        logSyncEvent("delete:start", path, { storeName: label });
+        await deleteDoc(doc(firestoreDb, path));
+        logSyncEvent("delete:success", path, { storeName: label });
+      })
+    );
+  };
+
+  const fetchOwnedDocs = async (
+    groupName: "chapters" | "sections" | "vocab" | "equations" | "concepts" | "keyIdeas",
+  ) => {
+    try {
+      const [byUser, byOwner] = await Promise.all([
+        trackedGetDocs(getDocs(query(
+          collectionGroup(firestoreDb, groupName),
+          where("textbookId", "==", trimmedTextbookId),
+          where("userId", "==", trimmedUserId),
+        ))),
+        trackedGetDocs(getDocs(query(
+          collectionGroup(firestoreDb, groupName),
+          where("textbookId", "==", trimmedTextbookId),
+          where("ownerId", "==", trimmedUserId),
+        ))),
+      ]);
+
+      return mergeByPath(byUser.docs, byOwner.docs);
+    } catch (error) {
+      if (getErrorCode(error) !== "permission-denied") {
+        throw error;
+      }
+
+      logSyncEvent("read:fallback-canonical", `cloud/${groupName}`, {
+        userId: trimmedUserId,
+        textbookId: trimmedTextbookId,
+        reason: "collection-group-permission-denied",
+      }, error);
+
+      const hierarchy = await loadDirectHierarchy();
+      return hierarchy[groupName];
+    }
+  };
+
+  const fetchSafeOwnedDocs = async (
+    groupName: "chapters" | "sections" | "vocab" | "equations" | "concepts" | "keyIdeas",
+  ) => {
+    try {
+      return await fetchOwnedDocs(groupName);
+    } catch (error) {
+      logSyncEvent("read:error", `cloud/${groupName}`, {
+        userId: trimmedUserId,
+        textbookId: trimmedTextbookId,
+        reason: "owned-doc-read-failed",
+      }, error);
+      return [];
+    }
+  };
+
+  const [chapters, sections, vocab, equations, concepts, keyIdeas] = await Promise.all([
+    fetchSafeOwnedDocs("chapters"),
+    fetchSafeOwnedDocs("sections"),
+    fetchSafeOwnedDocs("vocab"),
+    fetchSafeOwnedDocs("equations"),
+    fetchSafeOwnedDocs("concepts"),
+    fetchSafeOwnedDocs("keyIdeas"),
+  ]);
+
+  await deleteSnapshots(vocab, "vocab");
+  await deleteSnapshots(equations, "equations");
+  await deleteSnapshots(concepts, "concepts");
+  await deleteSnapshots(keyIdeas, "keyIdeas");
+  await deleteSnapshots(sections, "sections");
+  await deleteSnapshots(chapters, "chapters");
+
+  const textbookPath = `textbooks/${trimmedTextbookId}`;
+  logSyncEvent("delete:start", textbookPath, { storeName: "textbooks" });
+  await deleteDoc(doc(firestoreDb, textbookPath));
+  logSyncEvent("delete:success", textbookPath, { storeName: "textbooks" });
 }

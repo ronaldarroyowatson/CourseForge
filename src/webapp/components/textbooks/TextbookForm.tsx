@@ -60,7 +60,7 @@ const ISBN_TYPES: RelatedIsbnType[] = [
 ];
 
 export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps): React.JSX.Element {
-  const { createTextbook, editTextbook, findTextbookByISBN } = useRepositories();
+  const { createTextbook, editTextbook, findDuplicateTextbook } = useRepositories();
   const { selectedTextbook, setSelectedTextbook } = useUIStore();
   const language = useUIStore((state) => state.language);
 
@@ -299,13 +299,24 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
         });
         setSelectedTextbook(null);
       } else {
-        if (isbnRaw) {
-          const existingLocal = await findTextbookByISBN(isbnRaw);
-          if (existingLocal) {
-            setErrorMessage("A textbook with this ISBN already exists in your local library.");
+        const existingLocal = await findDuplicateTextbook({
+          isbnRaw,
+          title: form.title.trim(),
+          grade: form.grade.trim(),
+          publisher: "",
+          seriesName: "",
+          publicationYear: parsedYear,
+        });
+
+        if (existingLocal) {
+          const shouldContinue = window.confirm("A textbook with this ISBN already exists. Upload anyway?");
+          if (!shouldContinue) {
+            setErrorMessage("Upload canceled to avoid creating a duplicate textbook.");
             return;
           }
+        }
 
+        if (isbnRaw) {
           const currentUser = getCurrentUser();
           if (currentUser?.uid) {
             try {

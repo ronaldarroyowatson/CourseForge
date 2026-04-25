@@ -1,0 +1,8 @@
+{
+  "name": "Design System Controls",
+  "id": "dsc",
+  "version": "1.0.0",
+  "description": "A full design system control suite for CourseForge and other web apps.",
+  "optional": true,
+  "entry": "./index.ts"
+}

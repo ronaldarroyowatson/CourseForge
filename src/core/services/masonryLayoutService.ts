@@ -73,11 +73,14 @@ export function selectDscMasonryLayout(
     optionalFibonacciSpacing?: boolean;
   } = {},
 ): DscMasonryLayoutDecision {
+  const directionalFlow = options.directionalFlow ?? "left-to-right";
   const columnCount = selectColumnCount(availableWidthPx);
   const spacingToken = selectSpacingToken(availableWidthPx);
   const minColumnWidthPx = columnCount === 1 ? 320 : 220;
   const examplesSpan = columnCount === 12 ? 7 : columnCount === 10 ? 6 : 1;
   const controlsSpan = columnCount === 12 ? 5 : columnCount === 10 ? 4 : 1;
+  const exampleOrder = directionalFlow === "right-to-left" ? 2 : 1;
+  const controlsOrder = directionalFlow === "right-to-left" ? 1 : 2;
 
   return {
     engine: "masonry",
@@ -89,18 +92,18 @@ export function selectDscMasonryLayout(
     denseFlow: true,
     adaptiveReflow: true,
     optionalFibonacciSpacing: options.optionalFibonacciSpacing ?? true,
-    directionalFlow: options.directionalFlow ?? "left-to-right",
+    directionalFlow,
     placements: {
       examples: {
         kind: "examples",
         columnSpan: examplesSpan,
-        order: 1,
+        order: exampleOrder,
         minWidthPx: 420,
       },
       controls: {
         kind: "controls",
         columnSpan: controlsSpan,
-        order: 2,
+        order: controlsOrder,
         minWidthPx: 360,
       },
     },

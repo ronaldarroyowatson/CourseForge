@@ -113,3 +113,9 @@ See `XML_SCHEMA.md` for details.
 ## 7. Updater maintenance
 
 - For updater architecture, pipeline, diagnostics files, and extension conventions, see `updater-maintainer-guide.md`.
+
+---
+
+## 8. MemPalace governance
+
+From now on, every architectural change, new file, refactor, plugin addition, plugin removal, loader update, installer/uninstaller change, CLI command, or design decision MUST be written into MemPalace using add_memory. MemPalace is the authoritative source of truth for the CourseForge architecture.

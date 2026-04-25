@@ -1,11 +1,11 @@
 # Test Index
 
-Generated: 2026-04-18T03:30:34.990Z
+Generated: 2026-04-25T03:52:44.643Z
 
 ## Summary
 
-- Total test files: 56
-- Unit test files: 37
+- Total test files: 61
+- Unit test files: 42
 - Integration test files: 17
 - Rules test files: 2
 - Canonical sample files: 5
@@ -31,16 +31,21 @@ Generated: 2026-04-18T03:30:34.990Z
 - tests/core/installerLifecycle.matrix.test.ts
 - tests/core/installerLifecycle.test.ts
 - tests/core/masonryLayoutService.test.ts
+- tests/core/mempalaceStartupIsolation.test.ts
 - tests/core/metadataCorrectionLearningService.test.ts
 - tests/core/metadataCorrectionSafeguards.test.ts
 - tests/core/metadataExtractionPipelineService.test.ts
+- tests/core/pluginService.test.ts
 - tests/core/premiumUsage.limits.test.ts
 - tests/core/presentationService.conversion.test.ts
 - tests/core/programCli.dsc.test.ts
+- tests/core/programCli.plugins.test.ts
 - tests/core/semanticTokens.test.ts
 - tests/core/syncNow.safety.test.ts
+- tests/core/syncService.hardDeleteTextbookFromCloud.test.ts
 - tests/core/syncService.moderationHold.test.ts
 - tests/core/textbookAutoExtractionService.test.ts
+- tests/core/textbookRepository.deletePersistence.test.ts
 - tests/core/tocPreviewPipeline.test.ts
 - tests/core/tokenDebugService.test.ts
 - tests/core/translationReviewService.test.ts

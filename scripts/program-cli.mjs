@@ -16,6 +16,11 @@ const logPath = path.join(baseDir, "debug-log.jsonl");
 const rotatedPrefix = path.join(baseDir, "debug-log");
 const dscConfigPath = path.join(baseDir, "dsc-debug-config.json");
 const dscReportCachePath = path.join(baseDir, "dsc-debug-report.json");
+const pluginStateDir = localAppData
+  ? path.join(localAppData, "CourseForge", "plugins")
+  : path.join(os.homedir(), ".courseforge", "plugins");
+const pluginStatePath = path.join(pluginStateDir, "plugins-state.json");
+const dscPluginArtifactDir = path.join(process.cwd(), ".debug", "plugins", "dsc");
 
 const authoritativeSemanticPalette = {
   MAJOR: "#2563EB",
@@ -70,6 +75,210 @@ const defaultDscConfig = {
 
 function ensureDir() {
   fs.mkdirSync(baseDir, { recursive: true });
+}
+
+function ensurePluginStateDir() {
+  fs.mkdirSync(pluginStateDir, { recursive: true });
+}
+
+function scanPluginManifests() {
+  const pluginsRoot = path.join(process.cwd(), "plugins");
+  if (!fs.existsSync(pluginsRoot)) {
+    return [];
+  }
+
+  const childEntries = fs.readdirSync(pluginsRoot, { withFileTypes: true });
+  const manifests = [];
+
+  for (const entry of childEntries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const manifestPath = path.join(pluginsRoot, entry.name, "plugin.json");
+    if (!fs.existsSync(manifestPath)) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+      manifests.push(parsed);
+    } catch {
+      manifests.push({
+        name: entry.name,
+        id: entry.name,
+        version: "0.0.0",
+        description: "Invalid plugin manifest.",
+        optional: true,
+        entry: "",
+      });
+    }
+  }
+
+  return manifests;
+}
+
+function readPluginState() {
+  ensurePluginStateDir();
+  if (!fs.existsSync(pluginStatePath)) {
+    const initial = { installed: {} };
+    fs.writeFileSync(pluginStatePath, JSON.stringify(initial, null, 2), "utf8");
+    return initial;
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(pluginStatePath, "utf8"));
+    if (!parsed || typeof parsed !== "object" || !parsed.installed || typeof parsed.installed !== "object") {
+      throw new Error("Invalid plugin state format.");
+    }
+
+    return parsed;
+  } catch {
+    const reset = { installed: {} };
+    fs.writeFileSync(pluginStatePath, JSON.stringify(reset, null, 2), "utf8");
+    return reset;
+  }
+}
+
+function writePluginState(next) {
+  ensurePluginStateDir();
+  fs.writeFileSync(pluginStatePath, JSON.stringify(next, null, 2), "utf8");
+}
+
+function getArtifactTimestamp() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const hh = String(now.getHours()).padStart(2, "0");
+  const min = String(now.getMinutes()).padStart(2, "0");
+  const sec = String(now.getSeconds()).padStart(2, "0");
+  const ms = String(now.getMilliseconds()).padStart(3, "0");
+  return `${yyyy}${mm}${dd}_${hh}${min}${sec}_${ms}`;
+}
+
+function writeDscLifecycleArtifact(action, payload) {
+  fs.mkdirSync(dscPluginArtifactDir, { recursive: true });
+  const artifact = {
+    action,
+    timestamp: new Date().toISOString(),
+    ...payload,
+  };
+  const filePath = path.join(dscPluginArtifactDir, `${getArtifactTimestamp()}_${action}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(artifact, null, 2), "utf8");
+  return filePath;
+}
+
+function handlePlugins() {
+  const action = subcommand || "status";
+  const pluginId = args[2] ? String(args[2]).trim().toLowerCase() : "";
+  const manifests = scanPluginManifests();
+  const state = readPluginState();
+
+  if (action === "status") {
+    const summary = manifests.map((manifest) => ({
+      id: manifest.id,
+      name: manifest.name,
+      version: manifest.version,
+      optional: Boolean(manifest.optional),
+      installed: Boolean(state.installed[manifest.id]),
+      available: true,
+    }));
+    const dscStatus = summary.find((plugin) => plugin.id === "dsc") || {
+      id: "dsc",
+      installed: Boolean(state.installed.dsc),
+      available: false,
+    };
+    writeDscLifecycleArtifact("detect", {
+      plugin: "dsc",
+      installed: Boolean(dscStatus.installed),
+      available: Boolean(dscStatus.available),
+      state: state.installed,
+    });
+    console.log(JSON.stringify({ plugins: summary }, null, 2));
+    return;
+  }
+
+  if (!pluginId) {
+    console.error("Plugin id is required. Example: courseforge plugins install dsc");
+    process.exit(1);
+  }
+
+  const manifest = manifests.find((item) => String(item.id).toLowerCase() === pluginId);
+  if (!manifest) {
+    if (pluginId === "dsc") {
+      writeDscLifecycleArtifact(action, {
+        plugin: pluginId,
+        ok: true,
+        message: "Plugin manifest not found. No action applied.",
+        state: state.installed,
+      });
+    }
+    console.log(JSON.stringify({
+      plugin: pluginId,
+      action,
+      ok: true,
+      message: "Plugin manifest not found. No action applied.",
+    }, null, 2));
+    return;
+  }
+
+  if (action === "install") {
+    state.installed[manifest.id] = true;
+    writePluginState(state);
+    if (manifest.id === "dsc") {
+      writeDscLifecycleArtifact("install", {
+        plugin: manifest.id,
+        installed: true,
+        ok: true,
+        state: state.installed,
+      });
+      writeDscLifecycleArtifact("refresh", {
+        plugin: manifest.id,
+        installed: true,
+        ok: true,
+        state: state.installed,
+      });
+    }
+    console.log(JSON.stringify({
+      plugin: manifest.id,
+      action,
+      ok: true,
+      installed: true,
+      message: `${manifest.name} installed.`,
+    }, null, 2));
+    return;
+  }
+
+  if (action === "uninstall") {
+    delete state.installed[manifest.id];
+    writePluginState(state);
+    if (manifest.id === "dsc") {
+      writeDscLifecycleArtifact("uninstall", {
+        plugin: manifest.id,
+        installed: false,
+        ok: true,
+        state: state.installed,
+      });
+      writeDscLifecycleArtifact("refresh", {
+        plugin: manifest.id,
+        installed: false,
+        ok: true,
+        state: state.installed,
+      });
+    }
+    console.log(JSON.stringify({
+      plugin: manifest.id,
+      action,
+      ok: true,
+      installed: false,
+      message: `${manifest.name} uninstalled.`,
+    }, null, 2));
+    return;
+  }
+
+  console.error("Unknown plugins action. Use install, uninstall, or status.");
+  process.exit(1);
 }
 
 function readConfig() {
@@ -310,6 +519,7 @@ function setEnabled(enabled) {
 
 function showHelp() {
   console.log("Usage:");
+  console.log("  courseforge plugins <install|uninstall|status> [plugin-id]");
   console.log("  courseforge debug <feature> [flags]  (alias: npm run courseforge -- debug ...)");
   console.log("  program debug <feature> [--severity info|warn|error] [--sourceType automatic|manual] [--message text]");
   console.log("  program debug dsc <enable|disable|report|clear> [--page settings] [--card \"Debug Log\"] [--report path]");
@@ -476,6 +686,11 @@ function handleDsc() {
   }
 
   console.log(JSON.stringify(report, null, 2));
+}
+
+if (command === "plugins") {
+  handlePlugins();
+  process.exit(0);
 }
 
 if (command !== "debug") {

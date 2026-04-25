@@ -2,7 +2,10 @@ import React from "react";
 
 import {
   type CloudSettingsDecision,
+  type ColorHarmony,
+  type ColorMode,
   type DesignTokenPreferences,
+  type RoundingPreset,
   deleteCloudDesignTokenPreferences,
   inspectCloudDesignTokenPreferences,
   loadDesignTokenPreferencesFromCloud,
@@ -55,6 +58,29 @@ const STROKE_PRESET_OPTIONS: Array<{ label: string; value: DesignTokenPreference
   { label: "Sweet Spot", value: "sweet-spot", descriptor: "1 -> 1.5 -> 2 -> 3" },
 ];
 
+const ROUNDING_OPTIONS: Array<{ label: string; value: RoundingPreset; descriptor: string }> = [
+  { label: "Sharp", value: "sharp", descriptor: "0 / 2 / 4 px" },
+  { label: "Soft", value: "soft", descriptor: "4 / 8 / 12 px" },
+  { label: "Round", value: "round", descriptor: "8 / 16 / 24 px" },
+  { label: "Pill", value: "pill", descriptor: "full radius" },
+];
+
+const COLOR_HARMONY_OPTIONS: Array<{ label: string; value: ColorHarmony }> = [
+  { label: "System Default", value: "system-default" },
+  { label: "Monochromatic", value: "monochromatic" },
+  { label: "Analogous", value: "analogous" },
+  { label: "Complementary", value: "complementary" },
+  { label: "Triadic", value: "triadic" },
+  { label: "Split-Complementary", value: "split-complementary" },
+  { label: "Tetradic", value: "tetradic" },
+];
+
+const COLOR_MODE_OPTIONS: Array<{ label: string; value: ColorMode }> = [
+  { label: "Light", value: "light" },
+  { label: "Dark", value: "dark" },
+  { label: "System Default", value: "system" },
+];
+
 function DemoButton({
   variant,
   size,
@@ -88,6 +114,136 @@ function motionDescription(value: number): string {
   return "XL (complex operations)";
 }
 
+function normalizeHue(value: number): number {
+  return ((value % 360) + 360) % 360;
+}
+
+function circularHueDistance(h1: number, h2: number): number {
+  const diff = Math.abs(normalizeHue(h1) - normalizeHue(h2));
+  return Number(Math.min(diff, 360 - diff).toFixed(1));
+}
+
+function harmonyAngles(primaryHue: number, harmony: ColorHarmony): { accentHue: number; altHue: number; brandHue: number } {
+  const base = normalizeHue(primaryHue);
+  switch (harmony) {
+    case "monochromatic":
+      return { accentHue: base, altHue: normalizeHue(base + 18), brandHue: normalizeHue(base + 12) };
+    case "analogous":
+      return { accentHue: normalizeHue(base + 30), altHue: normalizeHue(base + 60), brandHue: normalizeHue(base + 330) };
+    case "complementary":
+      return { accentHue: normalizeHue(base + 180), altHue: normalizeHue(base + 210), brandHue: normalizeHue(base + 30) };
+    case "triadic":
+      return { accentHue: normalizeHue(base + 120), altHue: normalizeHue(base + 240), brandHue: normalizeHue(base + 120) };
+    case "split-complementary":
+      return { accentHue: normalizeHue(base + 150), altHue: normalizeHue(base + 210), brandHue: normalizeHue(base + 150) };
+    case "tetradic":
+      return { accentHue: normalizeHue(base + 90), altHue: normalizeHue(base + 180), brandHue: normalizeHue(base + 90) };
+    case "system-default":
+    default:
+      return { accentHue: normalizeHue(base + 24), altHue: normalizeHue(base + 48), brandHue: normalizeHue(base + 12) };
+  }
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const safe = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : "#4f87ff";
+  return [
+    parseInt(safe.slice(1, 3), 16),
+    parseInt(safe.slice(3, 5), 16),
+    parseInt(safe.slice(5, 7), 16),
+  ];
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const toHex = (channel: number) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function hexToHue(hex: string): number {
+  const [r, g, b] = hexToRgb(hex).map((value) => value / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  if (delta === 0) {
+    return 0;
+  }
+
+  let hue = 0;
+  if (max === r) {
+    hue = ((g - b) / delta) % 6;
+  } else if (max === g) {
+    hue = (b - r) / delta + 2;
+  } else {
+    hue = (r - g) / delta + 4;
+  }
+
+  return normalizeHue(hue * 60);
+}
+
+function hueToHex(hue: number, saturation: number, lightness = 0.52): string {
+  const h = normalizeHue(hue);
+  const s = Math.max(0, Math.min(1, saturation / 100));
+  const l = Math.max(0, Math.min(1, lightness));
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (h < 60) {
+    r = c;
+    g = x;
+  } else if (h < 120) {
+    r = x;
+    g = c;
+  } else if (h < 180) {
+    g = c;
+    b = x;
+  } else if (h < 240) {
+    g = x;
+    b = c;
+  } else if (h < 300) {
+    r = x;
+    b = c;
+  } else {
+    r = c;
+    b = x;
+  }
+
+  return rgbToHex((r + m) * 255, (g + m) * 255, (b + m) * 255);
+}
+
+function buildWheelMarkerStyle(hue: number, distance: number): React.CSSProperties {
+  const normalizedHue = normalizeHue(hue);
+  const radians = ((normalizedHue - 90) * Math.PI) / 180;
+  const normalizedDistance = Math.max(10, Math.min(48, distance));
+  const offset = normalizedDistance / 2;
+
+  return {
+    left: `calc(50% + ${(Math.cos(radians) * offset).toFixed(2)}%)`,
+    top: `calc(50% + ${(Math.sin(radians) * offset).toFixed(2)}%)`,
+  };
+}
+
+/** A paired row in the DSC workspace — example cell left, control cell right. */
+function PairedRow({
+  children,
+  id,
+}: {
+  children: [React.ReactNode, React.ReactNode];
+  id?: string;
+}): React.JSX.Element {
+  return (
+    <>
+      <div className="cf-ds-pair__example" id={id ? `${id}-example` : undefined}>
+        {children[0]}
+      </div>
+      <div className="cf-ds-pair__control" aria-labelledby={id ? `${id}-example` : undefined}>
+        {children[1]}
+      </div>
+    </>
+  );
+}
+
 export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardProps): React.JSX.Element {
   const prefs = useUIStore((state) => state.designTokenPreferences);
   const tokens = useUIStore((state) => state.designTokens);
@@ -103,10 +259,14 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
   const [cloudPromptStatus, setCloudPromptStatus] = React.useState<string | null>(null);
   const [cloudDecisionBusy, setCloudDecisionBusy] = React.useState(false);
   const [corruptionStatus, setCorruptionStatus] = React.useState<string | null>(null);
+  const [distanceDirection, setDistanceDirection] = React.useState<1 | -1>(1);
+  const [draggingMarker, setDraggingMarker] = React.useState<"brand" | "accent" | "alt" | null>(null);
+  const [brandColorManualOverride, setBrandColorManualOverride] = React.useState(false);
   const [localDiagnostics, setLocalDiagnostics] = React.useState(() => readLocalDesignTokenDiagnostics());
   const confirmedRef = React.useRef<DesignTokenPreferences>(prefs);
   const countdownIdRef = React.useRef<number | null>(null);
   const layoutContainerRef = React.useRef<HTMLDivElement>(null);
+  const wheelRef = React.useRef<HTMLDivElement | null>(null);
   const [layoutWidth, setLayoutWidth] = React.useState(1024);
   const layout = React.useMemo(() => selectDscMasonryLayout(layoutWidth, {
     directionalFlow: prefs.directionalFlow,
@@ -124,7 +284,8 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
     }
 
     const updateWidth = () => {
-      setLayoutWidth(node.offsetWidth || (typeof window !== "undefined" ? window.innerWidth : 1024));
+      const nextWidth = node.offsetWidth || (typeof window !== "undefined" ? window.innerWidth : 1024);
+      setLayoutWidth((current) => (current === nextWidth ? current : nextWidth));
     };
 
     updateWidth();
@@ -182,17 +343,6 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
       }
     })();
   }, [userId]);
-
-  React.useEffect(() => {
-    void logDesignSystemDebugEvent("Example card preview updated.", {
-      gamma: prefs.gamma,
-      typeRatio: prefs.typeRatio,
-      spacingRatio: prefs.spacingRatio,
-      strokePreset: prefs.strokePreset,
-      motionTimingMs: prefs.motionTimingMs,
-      motionEasing: prefs.motionEasing,
-    });
-  }, [prefs.gamma, prefs.motionEasing, prefs.motionTimingMs, prefs.spacingRatio, prefs.strokePreset, prefs.typeRatio]);
 
   React.useEffect(() => {
     if (!showKeepDialog) {
@@ -384,24 +534,135 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
       },
     });
   }
+
+  const applyHarmonyToHues = React.useCallback((harmony: ColorHarmony) => {
+    const next = harmonyAngles(prefs.primaryHue, harmony);
+    setPrefs({
+      colorHarmony: harmony,
+      accentHue: next.accentHue,
+      altHue: next.altHue,
+      ...(brandColorManualOverride ? {} : { brandHue: next.brandHue }),
+    });
+  }, [brandColorManualOverride, prefs.primaryHue, setPrefs]);
+
+  const updateWheelMarkerFromPointer = React.useCallback((event: PointerEvent | React.PointerEvent<HTMLElement>, marker: "brand" | "accent" | "alt") => {
+    const wheel = wheelRef.current;
+    if (!wheel) {
+      return;
+    }
+
+    const rect = wheel.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = event.clientX - cx;
+    const dy = event.clientY - cy;
+    const angle = normalizeHue((Math.atan2(dy, dx) * 180) / Math.PI + 90);
+    const radius = Math.sqrt(dx * dx + dy * dy);
+    const radial = Math.round(Math.max(10, Math.min(48, (radius / (rect.width / 2)) * 48)));
+
+    if (marker === "brand") {
+      setPrefs({ brandHue: Math.round(angle), brandDistance: radial });
+      setBrandColorManualOverride(true);
+      return;
+    }
+    if (marker === "accent") {
+      setPrefs({ accentHue: Math.round(angle), accentDistance: radial });
+      return;
+    }
+    setPrefs({ altHue: Math.round(angle), accentDistance: radial });
+  }, [setPrefs]);
+
+  React.useEffect(() => {
+    if (!draggingMarker) {
+      return;
+    }
+
+    const move = (event: PointerEvent) => updateWheelMarkerFromPointer(event, draggingMarker);
+    const up = () => setDraggingMarker(null);
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+  }, [draggingMarker, updateWheelMarkerFromPointer]);
+
+  function flipHueDirection(): void {
+    const nextDirection: 1 | -1 = distanceDirection === 1 ? -1 : 1;
+    setDistanceDirection(nextDirection);
+    setPrefs({
+      brandHue: Math.round(normalizeHue(prefs.primaryHue + nextDirection * prefs.brandDistance)),
+      altHue: Math.round(normalizeHue(prefs.accentHue + nextDirection * prefs.accentDistance)),
+    });
+  }
+
+  function onBrandHexChange(value: string): void {
+    if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
+      return;
+    }
+    setBrandColorManualOverride(true);
+    setPrefs({ brandHue: Math.round(hexToHue(value)) });
+  }
+
+  function onBrandRgbChange(value: string): void {
+    const parts = value.split(",").map((part) => Number(part.trim()));
+    if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
+      return;
+    }
+    setBrandColorManualOverride(true);
+    setPrefs({ brandHue: Math.round(hexToHue(rgbToHex(parts[0], parts[1], parts[2]))) });
+  }
   const layoutClassName = layout.columnCount === 12
     ? "cf-ds-masonry-layout--wide"
     : layout.columnCount === 10
       ? "cf-ds-masonry-layout--medium"
       : "cf-ds-masonry-layout--single";
 
+  const roundingValues: Record<string, string> = {
+    sharp: "0px / 2px / 4px",
+    soft: "4px / 8px / 12px",
+    round: "8px / 16px / 24px",
+    pill: "16px / 32px / 9999px",
+  };
+
+  const typeSnapPreset = React.useMemo(
+    () => TYPE_RATIO_PRESETS.find((preset) => Math.abs(preset.value - prefs.typeRatio) < 0.0015) ?? null,
+    [prefs.typeRatio],
+  );
+  const spacingSnapPreset = React.useMemo(
+    () => SPACING_PRESETS.find((preset) => Math.abs(preset.value - prefs.spacingRatio) < 0.0015) ?? null,
+    [prefs.spacingRatio],
+  );
+  const brandColorHex = React.useMemo(() => hueToHex(prefs.brandHue, prefs.saturation), [prefs.brandHue, prefs.saturation]);
+  const brandColorRgb = React.useMemo(() => {
+    const [r, g, b] = hexToRgb(brandColorHex);
+    return `${r}, ${g}, ${b}`;
+  }, [brandColorHex]);
+  const effectiveMode: "light" | "dark" = React.useMemo(() => {
+    if (prefs.colorMode === "dark") return "dark";
+    if (prefs.colorMode === "light") return "light";
+    // "system" — resolve against the OS preference at render time
+    return typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+  }, [prefs.colorMode]);
+  const semanticSurfaceClass = effectiveMode === "dark" ? "cf-ds-semantic-chip--glow" : "cf-ds-semantic-chip--shadow";
+
   return (
     <article className="settings-card cf-ds-card settings-card--full cf-ds-card--masonry" aria-live="polite">
       <h3>Design System Controls</h3>
-      <p className="settings-meta">Single source of truth for color, type, stroke, spacing, and motion tokens.</p>
+      <p className="settings-meta">Single source of truth for color, type, stroke, spacing, motion, rounding, and glow tokens.</p>
       <div className="cf-ds-layout-meta" aria-label="Layout engine summary">
         <span className="cf-ds-layout-meta__chip">Engine: Masonry</span>
         <span className="cf-ds-layout-meta__chip">Columns: {layout.columnCount}</span>
         <span className="cf-ds-layout-meta__chip">Spacing: Fib {layout.spacingToken}px</span>
         <span className="cf-ds-layout-meta__chip">Adaptive Reflow: On</span>
-        <span className="cf-ds-layout-meta__chip">Auto-arrange: Ready</span>
-        <span className="cf-ds-layout-meta__chip">Drag-and-drop: Ready</span>
-        <span className="cf-ds-layout-meta__chip">Preview Mirroring: On</span>
+        <span className="cf-ds-layout-meta__chip">Motion Preview: Hover</span>
       </div>
 
       {cloudPromptVisible ? (
@@ -442,148 +703,353 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
 
       <div
         ref={layoutContainerRef}
-        className={`cf-ds-masonry-layout ${layoutClassName}`}
+        className={`cf-ds-masonry-layout ${layoutClassName} cf-ds-paired-workspace`}
         data-flow={prefs.directionalFlow}
         data-columns={layout.columnCount}
+        aria-label="Design System Controls workspace"
       >
-        <section className="cf-ds-masonry-layout__panel cf-ds-masonry-layout__examples">
-          <div className="cf-example-card" aria-label="example card preview">
-            <div className="cf-example-card__row">
-              <h4>Buttons</h4>
-              <div className="cf-example-card__button-grid">
-                <DemoButton variant="primary" size="sm" />
-                <DemoButton variant="primary" size="md" state="hover" />
-                <DemoButton variant="primary" size="lg" state="active" />
-                <DemoButton variant="secondary" size="md" />
-                <DemoButton variant="ghost" size="md" />
-                <DemoButton variant="destructive" size="md" />
-                <DemoButton variant="secondary" size="sm" state="disabled" />
-                <DemoButton variant="secondary" size="lg" state="loading" />
-              </div>
-            </div>
+        <div className="cf-ds-pair__header cf-ds-pair__example" aria-label="Example Card" data-card-order={layout.placements.examples.order}>
+          <h4>Example Card</h4>
+          <p className="settings-meta">Visual previews of every token in action.</p>
+        </div>
+        <div className="cf-ds-pair__header cf-ds-pair__control" aria-label="Controls Card" data-card-order={layout.placements.controls.order}>
+          <h4>Controls Card</h4>
+          <p className="settings-meta">Controls aligned horizontally with each example.</p>
+        </div>
 
-            <div className="cf-example-card__row">
-              <h4>Cards</h4>
-              <div className="cf-example-card__cards">
-                <article className="cf-sample-card">
-                  <h5>Email card</h5>
-                  <p>Subject: Weekly curriculum update</p>
-                  <button type="button" className="cf-ds-btn cf-ds-btn--primary cf-ds-btn--sm">Open</button>
-                </article>
-                <article className="cf-sample-card cf-sample-card--disabled">
-                  <h5>Disabled card</h5>
-                  <p>This section is not available yet.</p>
-                </article>
-                <article className="cf-sample-card cf-sample-card--default">
-                  <h5>Default card</h5>
-                  <p>Color, title, description, and action all follow tokens.</p>
-                  <button type="button" className="cf-ds-btn cf-ds-btn--secondary cf-ds-btn--sm">Action</button>
-                </article>
-              </div>
-            </div>
-
-            <div className="cf-example-card__row">
-              <h4>Organizer Buttons</h4>
-              <div className="cf-example-card__organizers">
-                <span className="cf-organizer cf-organizer--new">New</span>
-                <span className="cf-organizer cf-organizer--active">Active</span>
-                <span className="cf-organizer cf-organizer--pending">Pending</span>
-                <span className="cf-organizer cf-organizer--error">Error</span>
-              </div>
-            </div>
-
-            <div className="cf-example-card__row">
-              <h4>Motion Preview</h4>
-              <p className="settings-meta">Hover to preview. Timing: {prefs.motionTimingMs}ms | Flow: {prefs.directionalFlow}</p>
-              <div className="cf-motion-row">
-                <div className="cf-motion-box__item">
-                  <span className="cf-motion-box cf-motion-box--enter" title="Enter — ease-in" />
-                  <span className="cf-motion-box__label">Ease In</span>
-                </div>
-                <div className="cf-motion-box__item">
-                  <span className="cf-motion-box cf-motion-box--move" title="Move — ease-in-out" />
-                  <span className="cf-motion-box__label">Ease In-Out</span>
-                </div>
-                <div className="cf-motion-box__item">
-                  <span className="cf-motion-box cf-motion-box--exit" title="Exit — ease-out" />
-                  <span className="cf-motion-box__label">Ease Out</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="cf-example-card__row">
-              <h4>Type Scale</h4>
-              <p className="cf-type-base">Body text (base)</p>
-              <p className="cf-type-lg">Subheading text (text-lg)</p>
-              <p className="cf-type-2xl">Heading text (text-2xl)</p>
-              <p className="cf-type-3xl">Title text (text-3xl)</p>
-              <p className="cf-type-4xl">text-4xl</p>
-              <p className="cf-type-5xl">text-5xl</p>
+        <PairedRow id="cf-dsc-colors">
+          <div>
+            <h5>Primary Color Scale</h5>
+            <div className="cf-ds-swatches" aria-label="primary color swatches">
+              {tokens.color.primary.map((shade, index) => (
+                <span
+                  key={`primary-${index}`}
+                  className={`cf-ds-swatch cf-ds-swatch--${index + 1}`}
+                  title={`Primary shade ${index + 1}: ${shade}`}
+                />
+              ))}
             </div>
           </div>
-        </section>
-
-        <section className="cf-ds-masonry-layout__panel cf-ds-masonry-layout__controls">
-          <div className="cf-ds-layout-spec" aria-label="layout engine spec">
-            <article className="cf-ds-layout-spec__card">
-              <h4>Layout Spec</h4>
-              <p>Masonry columns adapt to width while preserving preview-first ordering.</p>
-            </article>
-            <article className="cf-ds-layout-spec__card">
-              <h4>Card Heuristics</h4>
-              <p>{layout.cardTypeHeuristics.examples}</p>
-            </article>
-            <article className="cf-ds-layout-spec__card">
-              <h4>Unified Surfaces</h4>
-              <p>Status, settings, and preview surfaces share the same flow and spacing tokens.</p>
-            </article>
-          </div>
-          <div className="cf-ds-settings-grid">
+          <div>
+            <label>
+              Primary hue: {prefs.primaryHue}&deg;
+              <input type="range" min={0} max={359} step={1} value={prefs.primaryHue} onChange={(event) => {
+                const newPrimaryHue = Number(event.target.value);
+                if (prefs.colorHarmony !== "system-default") {
+                  const derived = harmonyAngles(newPrimaryHue, prefs.colorHarmony);
+                  setPrefs({ primaryHue: newPrimaryHue, accentHue: derived.accentHue, altHue: derived.altHue, ...(brandColorManualOverride ? {} : { brandHue: derived.brandHue }) });
+                } else {
+                  setPrefs({ primaryHue: newPrimaryHue });
+                }
+              }} />
+            </label>
+            <label>
+              Saturation: {prefs.saturation}%
+              <input type="range" min={0} max={100} step={1} value={prefs.saturation} onChange={(event) => setPrefs({ saturation: Number(event.target.value) })} />
+            </label>
             <label>
               Gamma: {prefs.gamma.toFixed(2)}
               <input type="range" min={2} max={2.4} step={0.05} value={prefs.gamma} onChange={(event) => setPrefs({ gamma: Number(event.target.value) })} />
             </label>
+          </div>
+        </PairedRow>
 
+        <PairedRow id="cf-dsc-accent">
+          <div>
+            <h5>Accent &amp; Brand Colors</h5>
+            <div className="cf-ds-swatches" aria-label="accent color swatches">
+              {tokens.color.accent.map((shade, index) => (
+                <span
+                  key={`accent-${index}`}
+                  className={`cf-ds-swatch ${index === 0 ? "cf-ds-swatch--accent-brand" : index === 1 ? "cf-ds-swatch--accent-main" : "cf-ds-swatch--accent-alt"}`}
+                  title={`Accent shade ${index + 1}: ${shade}`}
+                />
+              ))}
+            </div>
+            <div
+              ref={wheelRef}
+              className="cf-ds-color-wheel"
+              aria-label="accent derivation wheel"
+              data-render-key={`${prefs.saturation}-${prefs.glowIntensity}-${prefs.gamma}`}
+            >
+              <span className="cf-ds-color-wheel__dot cf-ds-color-wheel__dot--primary" style={{ ["--cf-ds-dot-angle" as string]: `${prefs.primaryHue}deg`, ["--cf-ds-dot-distance" as string]: "42%" }} />
+              <button
+                type="button"
+                aria-label="brand wheel marker"
+                data-hue={Math.round(prefs.brandHue)}
+                className="cf-ds-color-wheel__dot cf-ds-color-wheel__dot--brand"
+                style={buildWheelMarkerStyle(prefs.brandHue, prefs.brandDistance)}
+                onPointerDown={(event) => {
+                  setDraggingMarker("brand");
+                  updateWheelMarkerFromPointer(event, "brand");
+                }}
+              />
+              <button
+                type="button"
+                aria-label="accent wheel marker"
+                data-hue={Math.round(prefs.accentHue)}
+                className="cf-ds-color-wheel__dot cf-ds-color-wheel__dot--accent"
+                style={buildWheelMarkerStyle(prefs.accentHue, prefs.accentDistance)}
+                onPointerDown={(event) => {
+                  setDraggingMarker("accent");
+                  updateWheelMarkerFromPointer(event, "accent");
+                }}
+              />
+              <button
+                type="button"
+                aria-label="alt wheel marker"
+                data-hue={Math.round(prefs.altHue)}
+                className="cf-ds-color-wheel__dot cf-ds-color-wheel__dot--alt"
+                style={buildWheelMarkerStyle(prefs.altHue, prefs.accentDistance)}
+                onPointerDown={(event) => {
+                  setDraggingMarker("alt");
+                  updateWheelMarkerFromPointer(event, "alt");
+                }}
+              />
+            </div>
+            <div className="cf-ds-accent-pair">
+              <span className="cf-ds-accent-chip cf-ds-accent-chip--brand">Brand</span>
+              <span className="cf-ds-accent-chip cf-ds-accent-chip--accent">Accent</span>
+              <span className="cf-ds-accent-chip cf-ds-accent-chip--alt">Alt</span>
+            </div>
+          </div>
+          <div>
+            <label>
+              Brand hue: {prefs.brandHue}&deg;
+              <input type="range" min={0} max={359} step={1} value={prefs.brandHue} onChange={(event) => { setBrandColorManualOverride(true); setPrefs({ brandHue: Number(event.target.value) }); }} />
+            </label>
+            <label>
+              Accent hue: {prefs.accentHue}&deg;
+              <input type="range" min={0} max={359} step={1} value={prefs.accentHue} onChange={(event) => setPrefs({ accentHue: Number(event.target.value) })} />
+            </label>
+            <label>
+              Alt hue: {prefs.altHue}&deg;
+              <input type="range" min={0} max={359} step={1} value={prefs.altHue} onChange={(event) => setPrefs({ altHue: Number(event.target.value) })} />
+            </label>
+            <label>
+              Brand radial distance: {prefs.brandDistance.toFixed(0)}&deg;
+              <input type="range" min={10} max={48} step={1} value={prefs.brandDistance} onChange={(event) => setPrefs({ brandDistance: Number(event.target.value), brandHue: Math.round(normalizeHue(prefs.primaryHue + distanceDirection * Number(event.target.value))) })} />
+            </label>
+            <label>
+              Accent radial distance: {prefs.accentDistance.toFixed(0)}&deg;
+              <input type="range" min={10} max={48} step={1} value={prefs.accentDistance} onChange={(event) => setPrefs({ accentDistance: Number(event.target.value), altHue: Math.round(normalizeHue(prefs.accentHue + distanceDirection * Number(event.target.value))) })} />
+            </label>
+            <button type="button" className="btn-secondary" onClick={flipHueDirection}>Flip direction</button>
+          </div>
+        </PairedRow>
+
+        <PairedRow id="cf-dsc-harmony">
+          <div>
+            <h5>Color Harmony &mdash; {tokens.color.harmony.label}</h5>
+            <div className="cf-ds-harmony-swatches" aria-label="color harmony swatches">
+              {tokens.color.harmony.colors.map((color, index) => (
+                <span key={`harmony-${index}`} className="cf-ds-harmony-swatch" title={`Harmony color ${index + 1}: ${color}`} />
+              ))}
+            </div>
+            <p className="settings-meta">Primary↔Accent hue distance: {circularHueDistance(prefs.primaryHue, prefs.accentHue)}&deg;</p>
+            <div className="cf-ds-harmony-brand-suggestion">
+              <span className="cf-ds-harmony-swatch" style={{ background: tokens.color.harmony.suggestedBrandColor }} title={`Suggested brand color: ${tokens.color.harmony.suggestedBrandColor}`} />
+              <span className="settings-meta">Suggested brand color</span>
+            </div>
+          </div>
+          <div>
+            <label>
+              Color harmony
+              <select value={prefs.colorHarmony} onChange={(event) => { applyHarmonyToHues(event.target.value as ColorHarmony); void logDesignSystemDebugEvent("Color harmony changed.", { colorHarmony: event.target.value }); }}>
+                {COLOR_HARMONY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Brand color hex
+              <input aria-label="Brand color hex" type="text" value={brandColorHex} onChange={(event) => onBrandHexChange(event.target.value)} />
+            </label>
+            <label>
+              Brand color rgb
+              <input aria-label="Brand color rgb" type="text" value={brandColorRgb} onChange={(event) => onBrandRgbChange(event.target.value)} />
+            </label>
+          </div>
+        </PairedRow>
+
+        <PairedRow id="cf-dsc-colormode">
+          <div>
+            <h5>Light / Dark Mode</h5>
+            <div className="cf-ds-mode-pair">
+              <div
+                className="cf-ds-mode-sample cf-ds-mode-sample--light"
+                aria-label="Light mode sample"
+                style={{ borderColor: tokens.color.primary[9], boxShadow: "0 8px 24px rgba(15, 23, 42, 0.24)" }}
+              >
+                <span className="cf-ds-mode-sample__label">Light</span>
+                <span className="cf-ds-mode-sample__card">Card</span>
+              </div>
+              <div className="cf-ds-mode-sample cf-ds-mode-sample--dark" aria-label="Dark mode sample"><span className="cf-ds-mode-sample__label">Dark</span><span className="cf-ds-mode-sample__card">Card</span></div>
+              <div className={`cf-ds-mode-sample cf-ds-mode-sample--${prefs.colorMode === "system" ? "system" : prefs.colorMode}`} aria-label="Active mode sample" style={{ outline: `1px solid ${tokens.color.primary[0]}` }}><span className="cf-ds-mode-sample__label">Active</span><span className="cf-ds-mode-sample__card">{prefs.colorMode}</span></div>
+            </div>
+          </div>
+          <div>
+            <label>
+              Color mode
+              <select value={prefs.colorMode} onChange={(event) => { setPrefs({ colorMode: event.target.value as ColorMode }); void logDesignSystemDebugEvent("Color mode changed.", { colorMode: event.target.value }); }}>
+                {COLOR_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </PairedRow>
+
+        <PairedRow id="cf-dsc-glow">
+          <div>
+            <h5>Glow &amp; Shadow</h5>
+            <div className="cf-ds-glow-row" aria-label="glow and shadow examples">
+              <span className="cf-ds-light-shadow-pad"><span className="cf-ds-shadow-box" aria-label="light mode shadow sample" /></span>
+              <span className={`cf-ds-glow-box ${effectiveMode === "dark" || prefs.glowEnabled ? "cf-ds-glow-box--enabled" : "cf-ds-glow-box--disabled"}`} aria-label={prefs.glowEnabled ? "glow enabled" : "glow disabled"} />
+            </div>
+          </div>
+          <div>
+            <label>
+              Glow radius: {prefs.glowRadius}px
+              <input type="range" min={4} max={48} step={1} value={prefs.glowRadius} onChange={(event) => setPrefs({ glowRadius: Number(event.target.value) })} />
+            </label>
+            <label>
+              Glow intensity: {prefs.glowIntensity.toFixed(2)}
+              <input type="range" min={0.1} max={1} step={0.05} value={prefs.glowIntensity} onChange={(event) => setPrefs({ glowIntensity: Number(event.target.value) })} />
+            </label>
+            <label>
+              Shadow strength: {prefs.shadowStrength.toFixed(2)}
+              <input type="range" min={0.1} max={1} step={0.05} value={prefs.shadowStrength} onChange={(event) => setPrefs({ shadowStrength: Number(event.target.value) })} />
+            </label>
+            <label>
+              Shadow distance: {prefs.shadowDistance.toFixed(0)}px
+              <input type="range" min={0} max={40} step={1} value={prefs.shadowDistance} onChange={(event) => setPrefs({ shadowDistance: Number(event.target.value) })} />
+            </label>
+            <label>
+              Shadow blur: {prefs.shadowBlur.toFixed(0)}px
+              <input type="range" min={2} max={80} step={1} value={prefs.shadowBlur} onChange={(event) => setPrefs({ shadowBlur: Number(event.target.value) })} />
+            </label>
+            <label>
+              Shadow spread: {prefs.shadowSpread.toFixed(0)}px
+              <input type="range" min={-12} max={20} step={1} value={prefs.shadowSpread} onChange={(event) => setPrefs({ shadowSpread: Number(event.target.value) })} />
+            </label>
+          </div>
+        </PairedRow>
+
+        <PairedRow id="cf-dsc-rounding">
+          <div>
+            <h5>Rounding &mdash; {prefs.rounding}</h5>
+            <div className="cf-ds-rounding-row" aria-label="rounding examples">
+              <span className="cf-ds-rounding-box" data-rounding="sharp" data-size="sm" />
+              <span className="cf-ds-rounding-box" data-rounding="soft" data-size="md" />
+              <span className="cf-ds-rounding-box" data-rounding="round" data-size="lg" />
+              <span className="cf-ds-rounding-box cf-ds-rounding-box--pill" data-rounding="pill" />
+            </div>
+            <p className="settings-meta">{roundingValues[prefs.rounding]}</p>
+          </div>
+          <div>
+            <div className="cf-ds-chip-row" role="group" aria-label="Rounding preset">
+              {ROUNDING_OPTIONS.map((option) => (
+                <button key={option.value} type="button" className="btn-secondary cf-ds-rounding-button" aria-label={`${option.label} rounding`} data-rounding={option.value} onClick={() => setPrefs({ rounding: option.value })}>{option.label}</button>
+              ))}
+            </div>
+          </div>
+        </PairedRow>
+
+        <PairedRow id="cf-dsc-type">
+          <div>
+            <h5>Type Scale</h5>
+            <div className="cf-ds-type-columns">
+              <div>
+                <p className="cf-type-5xl">text-5xl</p>
+                <p className="cf-type-4xl">text-4xl</p>
+                <p className="cf-type-3xl">Title text (text-3xl)</p>
+              </div>
+              <div>
+                <p className="cf-type-2xl">Heading text (text-2xl)</p>
+                <p className="cf-type-lg">Subheading text (text-lg)</p>
+                <p className="cf-type-base">Body text (base)</p>
+              </div>
+            </div>
+          </div>
+          <div>
             <label>
               Type ratio: {prefs.typeRatio.toFixed(3)}
               <input type="range" min={1.067} max={1.5} step={0.001} value={prefs.typeRatio} onChange={(event) => setPrefs({ typeRatio: Number(event.target.value) })} />
             </label>
+            {typeSnapPreset ? <p className="settings-meta">Type preset: {typeSnapPreset.label}</p> : null}
+          </div>
+        </PairedRow>
 
-            <div className="cf-ds-chip-row">
-              {TYPE_RATIO_PRESETS.map((preset) => (
-                <button key={preset.value} type="button" className="btn-secondary" onClick={() => setPrefs({ typeRatio: preset.value })}>
-                  {preset.label} ({preset.description})
-                </button>
+        <PairedRow id="cf-dsc-spacing">
+          <div>
+            <h5>Spacing Scale</h5>
+            <div className="cf-ds-spacing-row" aria-label="spacing scale examples">
+              {tokens.spacing.values.map((value, index) => (
+                <div key={`spacing-${index}`} className="cf-ds-spacing-item">
+                  <span className="cf-ds-spacing-bar" title={`Space-${index}: ${value}px`} data-value={value} />
+                  <span className="cf-ds-spacing-label">{value}px</span>
+                </div>
               ))}
             </div>
-
-            <label>
-              Stroke preset
-              <select value={prefs.strokePreset} onChange={(event) => setPrefs({ strokePreset: event.target.value as DesignTokenPreferences["strokePreset"] })}>
-                {STROKE_PRESET_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label} - {option.descriptor}</option>
-                ))}
-              </select>
-            </label>
-
+          </div>
+          <div>
             <label>
               Spacing ratio: {prefs.spacingRatio.toFixed(3)}
               <input type="range" min={1.25} max={2} step={0.001} value={prefs.spacingRatio} onChange={(event) => setPrefs({ spacingRatio: Number(event.target.value) })} />
             </label>
+            {spacingSnapPreset ? <p className="settings-meta">Spacing preset: {spacingSnapPreset.label}</p> : null}
+          </div>
+        </PairedRow>
 
-            <div className="cf-ds-chip-row">
-              {SPACING_PRESETS.map((preset) => (
-                <button key={preset.value} type="button" className="btn-secondary" onClick={() => setPrefs({ spacingRatio: preset.value })}>
-                  {preset.label} ({preset.description})
-                </button>
+        <PairedRow id="cf-dsc-stroke">
+          <div>
+            <h5>Stroke Weights</h5>
+            <div className="cf-ds-stroke-row" aria-label="stroke weight examples">
+              {tokens.stroke.values.map((value, index) => (
+                <div key={`stroke-${index}`} className="cf-ds-stroke-item">
+                  <span className="cf-ds-stroke-bar" title={`Stroke ${index + 1}: ${value}px`} data-value={value} />
+                  <span className="cf-ds-stroke-label">{value}px</span>
+                </div>
               ))}
             </div>
+            <p className="settings-meta">Preset: {prefs.strokePreset}</p>
+          </div>
+          <div>
+            <label>
+              Stroke preset
+              <select value={prefs.strokePreset} onChange={(event) => setPrefs({ strokePreset: event.target.value as DesignTokenPreferences["strokePreset"] })}>
+                {STROKE_PRESET_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label} &mdash; {option.descriptor}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </PairedRow>
 
+        <PairedRow id="cf-dsc-motion">
+          <div>
+            <h5>Motion Preview</h5>
+            <div className="cf-motion-row" aria-label="motion preview - hover to animate">
+              <div className="cf-motion-box__item">
+                <span className="cf-motion-box cf-motion-box--enter" title="Enter - ease-in. Hover to preview." />
+                <span className="cf-motion-box__label">Ease In</span>
+              </div>
+              <div className="cf-motion-box__item">
+                <span className="cf-motion-box cf-motion-box--move" title="Move - ease-in-out. Hover to preview." />
+                <span className="cf-motion-box__label">Ease In-Out</span>
+              </div>
+              <div className="cf-motion-box__item">
+                <span className="cf-motion-box cf-motion-box--exit" title="Exit - ease-out. Hover to preview." />
+                <span className="cf-motion-box__label">Ease Out</span>
+              </div>
+            </div>
+          </div>
+          <div>
             <label>
               Motion timing: {prefs.motionTimingMs}ms ({motionDescription(prefs.motionTimingMs)})
               <input type="range" min={100} max={500} step={10} value={prefs.motionTimingMs} onChange={(event) => setPrefs({ motionTimingMs: Number(event.target.value) })} />
             </label>
-
             <label>
               Motion easing
               <select value={prefs.motionEasing} onChange={(event) => setPrefs({ motionEasing: event.target.value as DesignTokenPreferences["motionEasing"] })}>
@@ -592,59 +1058,81 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
                 <option value="ease-in-out">ease-in-out</option>
               </select>
             </label>
+          </div>
+        </PairedRow>
 
+        <PairedRow id="cf-dsc-components">
+          <div>
+            <h5>Buttons &amp; Cards</h5>
+            <div className="cf-example-card__button-grid">
+              <DemoButton variant="primary" size="sm" />
+              <DemoButton variant="primary" size="md" state="hover" />
+              <DemoButton variant="primary" size="lg" state="active" />
+              <DemoButton variant="secondary" size="md" />
+              <DemoButton variant="ghost" size="md" />
+              <DemoButton variant="destructive" size="md" />
+              <DemoButton variant="secondary" size="sm" state="disabled" />
+              <DemoButton variant="secondary" size="lg" state="loading" />
+            </div>
+            <div className="cf-example-card__cards">
+              <article className="cf-sample-card">
+                <h6>Email card</h6>
+                <p>Subject: Weekly curriculum update</p>
+                <button type="button" className="cf-ds-btn cf-ds-btn--primary cf-ds-btn--sm">Open</button>
+              </article>
+              <article className="cf-sample-card cf-sample-card--disabled">
+                <h6>Disabled card</h6>
+                <p>This section is not available yet.</p>
+              </article>
+            </div>
+          </div>
+          <div>
             <label>
               Directional flow
-              <select
-                value={prefs.directionalFlow}
-                onChange={(event) => {
-                  setPrefs({ directionalFlow: event.target.value as DesignTokenPreferences["directionalFlow"] });
-                  void logDesignSystemDebugEvent("Directional flow changed.", { directionalFlow: event.target.value });
-                }}
-              >
+              <select value={prefs.directionalFlow} onChange={(event) => { setPrefs({ directionalFlow: event.target.value as DesignTokenPreferences["directionalFlow"] }); void logDesignSystemDebugEvent("Directional flow changed.", { directionalFlow: event.target.value }); }}>
                 <option value="left-to-right">Left to Right (LTR)</option>
                 <option value="right-to-left">Right to Left (RTL)</option>
               </select>
             </label>
+          </div>
+        </PairedRow>
 
-            <div className="cf-ds-semantic-grid">
-              <label>Error
-                <input type="color" aria-label="error color" value={prefs.semanticColors.error} onChange={(event) => setSemanticColor("error", event.target.value)} />
-              </label>
-              <label>Success
-                <input type="color" aria-label="success color" value={prefs.semanticColors.success} onChange={(event) => setSemanticColor("success", event.target.value)} />
-              </label>
-              <label>Pending
-                <input type="color" aria-label="pending color" value={prefs.semanticColors.pending} onChange={(event) => setSemanticColor("pending", event.target.value)} />
-              </label>
-              <label>New
-                <input type="color" aria-label="new color" value={prefs.semanticColors.new} onChange={(event) => setSemanticColor("new", event.target.value)} />
-              </label>
+        <PairedRow id="cf-dsc-semantic">
+          <div>
+            <h5>Semantic Colors</h5>
+            <div className="cf-ds-semantic-examples" aria-label="semantic color examples">
+              <span className={`cf-ds-semantic-chip cf-ds-semantic-chip--error ${semanticSurfaceClass}`} data-rounding={prefs.rounding}>Error</span>
+              <span className={`cf-ds-semantic-chip cf-ds-semantic-chip--success ${semanticSurfaceClass}`} data-rounding={prefs.rounding}>Success</span>
+              <span className={`cf-ds-semantic-chip cf-ds-semantic-chip--pending ${semanticSurfaceClass}`} data-rounding={prefs.rounding}>Pending</span>
+              <span className={`cf-ds-semantic-chip cf-ds-semantic-chip--new ${semanticSurfaceClass}`} data-rounding={prefs.rounding}>New</span>
             </div>
           </div>
-
-          <div className="cf-ds-swatches" aria-label="primary color swatches">
-            {tokens.color.primary.map((_, index) => (
-              <span key={`shade-${index}`} className={`cf-ds-swatch cf-ds-swatch--${index + 1}`} title={`Shade ${index + 1}`} />
-            ))}
+          <div>
+            <div className="cf-ds-semantic-grid">
+              <label>Error<input type="color" aria-label="error color" value={prefs.semanticColors.error} onChange={(event) => setSemanticColor("error", event.target.value)} /></label>
+              <label>Success<input type="color" aria-label="success color" value={prefs.semanticColors.success} onChange={(event) => setSemanticColor("success", event.target.value)} /></label>
+              <label>Pending<input type="color" aria-label="pending color" value={prefs.semanticColors.pending} onChange={(event) => setSemanticColor("pending", event.target.value)} /></label>
+              <label>New<input type="color" aria-label="new color" value={prefs.semanticColors.new} onChange={(event) => setSemanticColor("new", event.target.value)} /></label>
+            </div>
           </div>
-        </section>
+        </PairedRow>
       </div>
 
-      <label>
-        Save mode
-        <select value={persistenceMode} onChange={(event) => setPersistenceMode(event.target.value as PersistenceMode)}>
-          <option value="local">Use Local Settings</option>
-          <option value="cloud" disabled={!userId}>Use Cloud Settings</option>
-          <option value="merge" disabled={!userId}>Merge and Update Cloud</option>
-        </select>
-      </label>
-
-      <div className="form-actions">
-        <button type="button" onClick={() => { void handleSave(); }}>Save</button>
-        <button type="button" className="btn-secondary" onClick={() => { void handleLoadCloudSettings(); }} disabled={!userId}>Load Cloud Settings</button>
-        <button type="button" className="btn-secondary" onClick={() => resetPrefs()}>Reset to defaults</button>
-        <button type="button" className="btn-secondary" onClick={() => applySystemDefaults()}>Use System Defaults</button>
+      <div className="cf-ds-settings-footer">
+        <label>
+          Save mode
+          <select value={persistenceMode} onChange={(event) => setPersistenceMode(event.target.value as PersistenceMode)}>
+            <option value="local">Use Local Settings</option>
+            <option value="cloud" disabled={!userId}>Use Cloud Settings</option>
+            <option value="merge" disabled={!userId}>Merge and Update Cloud</option>
+          </select>
+        </label>
+        <div className="form-actions">
+          <button type="button" onClick={() => { void handleSave(); }}>Save</button>
+          <button type="button" className="btn-secondary" onClick={() => { void handleLoadCloudSettings(); }} disabled={!userId}>Load Cloud Settings</button>
+          <button type="button" className="btn-secondary" onClick={() => resetPrefs()}>Reset to defaults</button>
+          <button type="button" className="btn-secondary" onClick={() => applySystemDefaults()}>Use System Defaults</button>
+        </div>
       </div>
 
       {status ? <p className="settings-meta">{status}</p> : null}

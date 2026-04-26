@@ -1,0 +1,116 @@
+{
+  "steps": [
+    {
+      "step_number": 0,
+      "description": "Phase 0 — Preflight: collected git state and located active VS Code log session",
+      "commands_run": [
+        "git rev-parse --is-inside-work-tree",
+        "git branch --show-current",
+        "git remote -v",
+        "git status --porcelain",
+        "Get-ChildItem C:/Users/ronal/AppData/Roaming/Code/logs | Sort-Object LastWriteTime -Descending | Select-Object -First 5",
+        "Get-ChildItem <logBase> -Recurse -Filter *.log | Where-Object { $_.Name -match 'Copilot Chat|Authentication|renderer' }"
+      ],
+      "start_time": "2026-04-26T12:06:40Z",
+      "end_time": "2026-04-26T12:07:10Z",
+      "stdout": "is-inside-work-tree: true\nbranch: main\norigin: https://github.com/ronaldarroyowatson/CourseForge.git (fetch/push)\ntest: https://github.com/ronaldarroyowatson/CourseForge-test.git (fetch/push)\nuncommitted: .mempalace/port.json, docs/codebase-index.md, src/core/services/designSystemService.ts, src/webapp/components/settings/DesignSystemSettingsCard.tsx, src/webapp/styles/globals.css\nuntracked: docs/COPILOT_CODEBASE_INDEX_DIAGNOSTICS.md, workspaceState.state.json\nActive log session folder: 20260426T120517\nCopilot Chat log: C:\\Users\\ronal\\AppData\\Roaming\\Code\\logs\\20260426T120517\\window1\\exthost\\GitHub.copilot-chat\\GitHub Copilot Chat.log\nAuth log: C:\\Users\\ronal\\AppData\\Roaming\\Code\\logs\\20260426T120517\\window1\\exthost\\vscode.github-authentication\\GitHub Authentication.log\nRenderer log: C:\\Users\\ronal\\AppData\\Roaming\\Code\\logs\\20260426T120517\\window1\\renderer.log",
+      "stderr": "",
+      "status": "success"
+    },
+    {
+      "step_number": 1,
+      "description": "Phase 1 — Auth and eligibility snapshot: extracted token state, 429 events, and ingest references from active session logs",
+      "commands_run": [
+        "Get-Content <copilot-chat.log> -Tail 300",
+        "Get-Content <auth.log> -Tail 100",
+        "Select-String <copilot-chat.log> -Pattern 'external-code-ingest|fileset|ExternalIngest|429'",
+        "Select-String <auth.log> -Pattern '429|Too Many Requests'",
+        "Select-String <renderer.log> -Pattern 'external-code-ingest|fileset|ExternalIngest|404|429'",
+        "grep docs/COPILOT_CODEBASE_INDEX_DIAGNOSTICS.md for '09d20171'"
+      ],
+      "start_time": "2026-04-26T12:07:10Z",
+      "end_time": "2026-04-26T12:08:30Z",
+      "stdout": "CURRENT SESSION (20260426T120517):\n  12:05:29.438 429 Too Many Requests (GitHub auth EDU details check at startup)\n  12:05:34.591 Got 0 sessions for project,read:org,read:user,repo,user:email,workflow\n  12:05:34.927 Got 1 sessions for read:user,repo,user:email,workflow\n  12:05:38.610 Got Copilot token for ronaldarroyowatson\n  12:05:41.227 Has token: true\n  12:05:41.248 GithubAvailableEmbeddingTypesManager: Got embeddings. Primary: metis-1024-I16-Binary\n  12:05:41.249 WorkspaceChunkSearchService: using embedding type metis-1024-I16-Binary\n  No external-code-ingest, fileset, or ExternalIngest lines in current session logs.\nPRIOR SESSION EVIDENCE (from docs/COPILOT_CODEBASE_INDEX_DIAGNOSTICS.md):\n  2026-04-25 22:21:59.767 ExternalIngestIndex: Deleting index for fileset vscode.copilot-chat.09d20171-d551-429b-bf54-087a6f9150be\n  2026-04-25 22:21:59.975 DELETE external-code-ingest failed with status 404, body message: fileset not found\n  2026-04-25 22:24:05.163 DELETE external-code-ingest failed with status 404, body message: fileset not found\n  2026-04-25 22:25:57.493 GitHub login failed\n  2026-04-25 22:25:57.553 Has token: false\n  2026-04-25 22:26:12.460 Got Copilot token (recovery)\n  2026-04-25 22:17:42.494 429 Too Many Requests\n  2026-04-25 22:22:34.648 429 Too Many Requests",
+      "stderr": "",
+      "status": "success"
+    },
+    {
+      "step_number": 2,
+      "description": "Phase 2 — Single index lifecycle probe: HALTED. A 429 Too Many Requests response was observed at 2026-04-26T12:05:29 in the active session startup. Per hard rules, no delete or build index commands were executed in this run. Prior evidence confirms Delete External Ingest command exists and returned HTTP 404 (fileset not found) in two separate attempts during the 2026-04-25 session.",
+      "commands_run": [],
+      "start_time": "2026-04-26T12:08:30Z",
+      "end_time": "2026-04-26T12:08:30Z",
+      "stdout": "HALTED: 429 observed at session startup (2026-04-26T12:05:29). No index operations attempted.",
+      "stderr": "429 Too Many Requests at 2026-04-26 12:05:29.438 in GitHub Authentication.log",
+      "status": "halted_429"
+    },
+    {
+      "step_number": 3,
+      "description": "Phase 3 — Status and log excerpts: collected tight window around known failure timestamps; confirmed index never reached Ready state; no 'command not found' for delete or build commands.",
+      "commands_run": [
+        "Select-String <all-chat-logs> -Pattern 'external-code-ingest|fileset|ExternalIngest|404|429|requestId'",
+        "Get-ChildItem <logBase> -Recurse -Filter 'GitHub Copilot Chat.log' | scan for ingest evidence",
+        "Review docs/COPILOT_CODEBASE_INDEX_DIAGNOSTICS.md for prior remediation timeline"
+      ],
+      "start_time": "2026-04-26T12:08:30Z",
+      "end_time": "2026-04-26T12:09:10Z",
+      "stdout": "Index never reached 'Ready' state across any observed session.\nDelete command IS available (used successfully in prior session — returned 404, not 'command not found').\nBuild command IS available (used in prior session — returned no explicit error but index remained blocked).\nNo 'command not found' for either command.\nAll three active-session log files located and readable.\nfileset_id identified from prior session log: vscode.copilot-chat.09d20171-d551-429b-bf54-087a6f9150be\nBroad OAuth scope (project,read:org,...) returned 0 sessions in current session.\nBaseline scope (read:user,repo,user:email,workflow) returned 1 session — auth is basically functional.",
+      "stderr": "",
+      "status": "success"
+    },
+    {
+      "step_number": 4,
+      "description": "Phase 4 — Final classification and escalation bundle assembly",
+      "commands_run": [],
+      "start_time": "2026-04-26T12:09:10Z",
+      "end_time": "2026-04-26T12:09:21Z",
+      "stdout": "final_status: BlockedFileset404",
+      "stderr": "",
+      "status": "success"
+    }
+  ],
+  "final_status": "BlockedFileset404",
+  "escalation_bundle": {
+    "repo": "ronaldarroyowatson/CourseForge",
+    "local_path": "C:/Users/ronal/Documents/CourseForge",
+    "fileset_id": "vscode.copilot-chat.09d20171-d551-429b-bf54-087a6f9150be",
+    "primary_error": "DELETE external-code-ingest 404 fileset not found",
+    "request_ids": [],
+    "timestamps": {
+      "delete_404_first": "2026-04-25T22:21:59.975Z",
+      "delete_404_second": "2026-04-25T22:24:05.163Z",
+      "auth_token_loss": "2026-04-25T22:25:57.553Z",
+      "auth_429_prior_session_1": "2026-04-25T22:17:42.494Z",
+      "auth_429_prior_session_2": "2026-04-25T22:22:34.648Z",
+      "auth_429_current_session": "2026-04-26T12:05:29.438Z",
+      "token_recovery_prior_session": "2026-04-25T22:26:12.460Z",
+      "token_confirmed_current_session": "2026-04-26T12:05:38.610Z",
+      "phase2_halted_due_to_429": "2026-04-26T12:05:29.438Z",
+      "bundle_generated": "2026-04-26T12:09:21Z"
+    },
+    "log_paths": {
+      "copilot_chat": "C:\\Users\\ronal\\AppData\\Roaming\\Code\\logs\\20260426T120517\\window1\\exthost\\GitHub.copilot-chat\\GitHub Copilot Chat.log",
+      "auth_log": "C:\\Users\\ronal\\AppData\\Roaming\\Code\\logs\\20260426T120517\\window1\\exthost\\vscode.github-authentication\\GitHub Authentication.log",
+      "renderer": "C:\\Users\\ronal\\AppData\\Roaming\\Code\\logs\\20260426T120517\\window1\\renderer.log"
+    },
+    "log_excerpts": {
+      "delete_404": "2026-04-25 22:21:59.767 [info] ExternalIngestIndex: Deleting index for fileset vscode.copilot-chat.09d20171-d551-429b-bf54-087a6f9150be\n2026-04-25 22:21:59.975 [error] DELETE external-code-ingest failed with status 404, body message: fileset not found\n2026-04-25 22:24:05.163 [error] DELETE external-code-ingest failed with status 404, body message: fileset not found",
+      "rate_limit_429": "2026-04-25 22:17:42.494 [info] FetcherService: Node fetch failed with status: 429 Too Many Requests\n2026-04-25 22:22:34.648 [info] FetcherService: Node fetch failed with status: 429 Too Many Requests\n2026-04-26 12:05:29.438 [info] FetcherService: Node fetch failed with status: 429 Too Many Requests\n2026-04-26 12:05:29.440 [info] Unable to resolve optional EDU details. Status: 429 Too Many Requests",
+      "command_unavailable": "N/A — Delete External Ingest and Build Remote Workspace Index commands are present and executable (prior session confirmed Delete command was invoked and returned HTTP 404, not 'command not found'). Phase 2 was halted due to 429 observed at session startup, not due to missing commands.",
+      "auth_token_loss_prior_session": "2026-04-25 22:25:57.493 [warning] GitHub login failed\n2026-04-25 22:25:57.553 [info] Has token: false\n2026-04-25 22:25:57.599 [error] You are not signed in to GitHub. Please sign in to use Copilot.\n2026-04-25 22:26:12.460 [info] Got Copilot token (recovery)\n2026-04-25 22:26:12.525 [info] token sku restored (plus_yearly_subscriber_quota)",
+      "broad_scope_missing": "2026-04-25 22:17:48.624 [info] Got 0 sessions for project,read:org,read:user,repo,user:email,workflow\n2026-04-26 12:05:34.591 [info] Got 0 sessions for project,read:org,read:user,repo,user:email,workflow\n2026-04-26 12:05:34.927 [info] Got 1 sessions for read:user,repo,user:email,workflow"
+    },
+    "attempted_steps_summary": [
+      "Phase 0: Verified workspace git state — inside work-tree, branch main, origin https://github.com/ronaldarroyowatson/CourseForge.git, test remote https://github.com/ronaldarroyowatson/CourseForge-test.git. 5 files modified (uncommitted), 2 untracked. Repo structure is healthy.",
+      "Phase 0: Located active VS Code log session folder 20260426T120517 and confirmed paths for GitHub Copilot Chat.log, GitHub Authentication.log, and renderer.log.",
+      "Phase 1: Extracted auth state from current session — Copilot token confirmed present and valid (plus_yearly_subscriber_quota) at 12:05:38 and 12:05:41. Has token: true confirmed. Baseline OAuth scope functional; broad project/org scope returned 0 sessions (consistently across sessions).",
+      "Phase 1: Found 429 Too Many Requests in current session auth log at 12:05:29.438 (EDU details check at startup). Additional 429s found in prior 2026-04-25 session logs at 22:17:42 and 22:22:34.",
+      "Phase 1: No external-code-ingest or fileset lines found in current session (20260426T120517) Copilot Chat log — the blocked state is a carry-over from prior sessions.",
+      "Phase 1: Prior session log evidence (sourced from docs/COPILOT_CODEBASE_INDEX_DIAGNOSTICS.md, originally from session 20260425T221714) confirmed fileset_id vscode.copilot-chat.09d20171-d551-429b-bf54-087a6f9150be and two DELETE 404 failures at 22:21:59 and 22:24:05.",
+      "Phase 2: HALTED — 429 Too Many Requests observed at session startup (12:05:29.438). Per hard rules, no delete or build index commands were issued in this run. The 429 was on an auth/EDU check, not on ingest directly, but rules mandate immediate stop-and-record.",
+      "Phase 3: Confirmed index has never reached Ready state across any inspected session. Workspace embeddings service initialized (metis-1024-I16-Binary) but this reflects embedding type config, not that the remote workspace index is complete. Delete and Build commands are known-available from prior session invocations. No renderer.log lines for external-code-ingest or fileset found.",
+      "Phase 4: Classified as BlockedFileset404. Root cause is stale/orphaned fileset state server-side. Local repo, auth, and command availability are all healthy."
+    ],
+    "recommended_escalation_message": "We are requesting a service-side inspection and manual reset of a stale Copilot external ingest fileset for the repository ronaldarroyowatson/CourseForge (local path: C:/Users/ronal/Documents/CourseForge, branch: main). Copilot codebase indexing has been persistently blocked: every attempt to delete the external ingest fileset returns HTTP 404 with the message 'fileset not found', yet the index never transitions to a Ready state either. The fileset identifier observed in logs is vscode.copilot-chat.09d20171-d551-429b-bf54-087a6f9150be. Two DELETE 404 failures were recorded on 2026-04-25 at 22:21:59 and 22:24:05 UTC, a third 429 Too Many Requests was observed at 22:17:42 and 22:22:34 UTC during the same session, and a 429 was again observed at session startup on 2026-04-26 at 12:05:29 UTC. The local repository is fully healthy: git reports it is inside a work-tree on branch main with a valid GitHub remote, and Copilot token authentication is confirmed active (sku: plus_yearly_subscriber_quota). A separate test repository (ronaldarroyowatson/CourseForge-test) was also tried without resolving the block, which rules out a simple repo-structure or local-configuration issue. The Delete External Ingest and Build Remote Workspace Index commands are present and executable in VS Code. We request that the Copilot service team inspect the server-side fileset lifecycle state for this workspace/fileset ID, clear any stale or orphaned ingest state, and re-enable the index pipeline so that a fresh Build Remote Workspace Index can succeed."
+  }
+}

@@ -108,8 +108,21 @@ Before marking any bug fix complete, confirm:
 - Debug metadata should include timestamp, subsystem, severity, source type, and error context whenever available.
 - Use normalized source type vocabulary (`automatic`, `manual`) for new debug and CLI flows; preserve compatibility with older app entity values only where needed.
 
+### Design System Controls (DSC) and Color Harmony Standards
 
----
+- **Reactive state coupling:** All DSC wheel markers, glow/shadow examples, and semantic chips must subscribe to the same central `uiStore` preferences. Do NOT use local component state for hue, saturation, glow radius, or shadow geometry—only for UI-only flags like `draggingMarker`.
+- **Wheel marker positioning:** Use CSS variables (`--cf-ds-wheel-primary`, `--cf-ds-wheel-brand`, `--cf-ds-wheel-accent`, `--cf-ds-wheel-alt`, `--cf-ds-wheel-brand-distance`, `--cf-ds-wheel-accent-distance`) for marker transform calculation. Update these variables in a `useEffect` when preferences change (no inline `style=` attributes).
+- **Harmony base color editing:** When `colorHarmony !== "system-default"`, hex/rgb/slider edits to the brand color must update `primaryHue`, which then triggers `harmonyAngles()` to recalculate `accentHue`, `altHue`, and `brandHue`. Never freeze the base hue in harmony modes.
+- **Semantic glow color:** Use `buildSemanticGlowShadow(color: string): string` to compute per-semantic-color box-shadow strings. Apply via `data-semantic-glow-color` and `data-semantic-glow-shadow` attributes, **not** inline styles or global glow tokens.
+- **Shadow preview theming:** Shadow and glow example boxes must use isolated preview styles (`data-shadow-style`, `data-glow-style`) that ignore global theme CSS overrides. Never rely on descendant `.cf-ds-glow-box` or `.cf-ds-shadow-box` CSS to be overridden by page-level dark-mode rules.
+
+### Textbook Deletion Standards
+
+- **Optimistic UI removal:** Call `setTextbooks()` with filtered list **before** awaiting the cloud delete. This makes the row disappear instantly.
+- **Stale cache prevention:** After deletion, reload textbooks via `listTextbooks()` (which filters deleted rows), **not** `getAll()` (which includes deleted rows). Prevent `TextbookWorkspace` from hydrating raw cached records that carry stale data.
+- **Deletion state sync:** Add both `removeTextbook()` (immediate UI) and load path (`listTextbooks()` post-delete) regression tests to the permanent integration suite. Mock both the repository layer and the hydration path.
+
+
 
 ## Changelog Size Management
 

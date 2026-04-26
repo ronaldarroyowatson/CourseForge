@@ -1667,7 +1667,6 @@ button.cf-ds-color-wheel__dot {
   pointer-events: auto;
   cursor: grab;
   padding: 0;
-  transform: translate(-50%, -50%);
 }
 
 button.cf-ds-color-wheel__dot:active {
@@ -1675,9 +1674,9 @@ button.cf-ds-color-wheel__dot:active {
 }
 
 .cf-ds-color-wheel__dot--primary { --cf-ds-dot-angle: var(--cf-ds-wheel-primary, 0deg); background: var(--cf-ds-primary-6, #4f87ff); }
-.cf-ds-color-wheel__dot--brand { --cf-ds-dot-angle: var(--cf-ds-wheel-brand, 32deg); background: var(--cf-ds-accent-brand, #79a1ff); }
-.cf-ds-color-wheel__dot--accent { --cf-ds-dot-angle: var(--cf-ds-wheel-accent, 220deg); background: var(--cf-ds-accent-main, #2f76d2); }
-.cf-ds-color-wheel__dot--alt { --cf-ds-dot-angle: var(--cf-ds-wheel-alt, 280deg); background: var(--cf-ds-accent-alt, #1f4bc7); }
+.cf-ds-color-wheel__dot--brand { --cf-ds-dot-angle: var(--cf-ds-wheel-brand, 32deg); --cf-ds-dot-distance: var(--cf-ds-wheel-brand-distance, 42%); background: var(--cf-ds-accent-brand, #79a1ff); }
+.cf-ds-color-wheel__dot--accent { --cf-ds-dot-angle: var(--cf-ds-wheel-accent, 220deg); --cf-ds-dot-distance: var(--cf-ds-wheel-accent-distance, 42%); background: var(--cf-ds-accent-main, #2f76d2); }
+.cf-ds-color-wheel__dot--alt { --cf-ds-dot-angle: var(--cf-ds-wheel-alt, 280deg); --cf-ds-dot-distance: var(--cf-ds-wheel-alt-distance, 42%); background: var(--cf-ds-accent-alt, #1f4bc7); }
 
 /* ── Color harmony swatches ── */
 .cf-ds-harmony-swatches {
@@ -1700,6 +1699,10 @@ button.cf-ds-color-wheel__dot:active {
 .cf-ds-harmony-swatch:nth-child(2) { background: var(--cf-ds-harmony-2, #7eb4ff); }
 .cf-ds-harmony-swatch:nth-child(3) { background: var(--cf-ds-harmony-3, #5278cc); }
 .cf-ds-harmony-swatch:nth-child(4) { background: var(--cf-ds-harmony-4, #a855f7); }
+
+.cf-ds-harmony-brand-suggestion .cf-ds-harmony-swatch {
+  background: var(--cf-ds-harmony-suggested-brand, var(--cf-ds-accent-brand, #79a1ff));
+}
 
 /* ── Light / Dark mode examples ── */
 .cf-ds-mode-pair {
@@ -1736,6 +1739,8 @@ button.cf-ds-color-wheel__dot:active {
 .cf-ds-mode-sample--light {
   background: #f8fafc;
   color: #1a202c;
+  border-color: var(--cf-ds-primary-10, #173694);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.24);
 }
 
 .cf-ds-mode-sample--dark {
@@ -1756,6 +1761,10 @@ button.cf-ds-color-wheel__dot:active {
 .cf-ds-mode-sample--system .cf-ds-mode-sample__card {
   background: var(--bg-subtle, var(--bg-panel));
   color: var(--text-secondary);
+}
+
+.cf-ds-mode-sample--active {
+  outline: 1px solid var(--cf-ds-primary-1, #dbe8ff);
 }
 
 /* ── Rounding examples ── */

@@ -750,6 +750,7 @@ export function applyDesignTokensToDocument(tokens: DesignTokens, docRef: Docume
   tokens.color.harmony.colors.forEach((color, index) => {
     root.style.setProperty(`--cf-ds-harmony-${index + 1}`, color);
   });
+  root.style.setProperty("--cf-ds-harmony-suggested-brand", tokens.color.harmony.suggestedBrandColor);
 
   root.style.setProperty("--cf-ds-semantic-error", tokens.color.semantic.error);
   root.style.setProperty("--cf-ds-semantic-success", tokens.color.semantic.success);

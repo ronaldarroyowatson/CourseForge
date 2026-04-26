@@ -206,19 +206,19 @@ describe("DesignSystemSettingsCard", () => {
   it("updates marker coordinates when radial distance and hue change", async () => {
     render(<DesignSystemSettingsCard userId={null} />);
 
-    const brandMarker = screen.getByLabelText("brand wheel marker") as HTMLButtonElement;
-    const beforeLeft = brandMarker.style.left;
-    const beforeTop = brandMarker.style.top;
+    const wheel = screen.getByLabelText("accent derivation wheel") as HTMLDivElement;
+    const beforeHue = wheel.style.getPropertyValue("--cf-ds-wheel-brand");
+    const beforeDistance = wheel.style.getPropertyValue("--cf-ds-wheel-brand-distance");
 
     fireEvent.change(getRangeFromLabel(/Brand hue:/i), { target: { value: "359" } });
     fireEvent.change(getRangeFromLabel(/Brand radial distance:/i), { target: { value: "48" } });
 
     await waitFor(() => {
-      const marker = screen.getByLabelText("brand wheel marker") as HTMLButtonElement;
-      expect(marker.style.left).not.toBe(beforeLeft);
-      expect(marker.style.top).not.toBe(beforeTop);
-      expect(marker.style.left).toContain("calc(");
-      expect(marker.style.top).toContain("calc(");
+      const wheelNode = screen.getByLabelText("accent derivation wheel") as HTMLDivElement;
+      expect(wheelNode.style.getPropertyValue("--cf-ds-wheel-brand")).not.toBe(beforeHue);
+      expect(wheelNode.style.getPropertyValue("--cf-ds-wheel-brand-distance")).not.toBe(beforeDistance);
+      expect(wheelNode.style.getPropertyValue("--cf-ds-wheel-brand-distance")).toBe("48%");
+      expect(screen.getByLabelText("brand wheel marker")).toHaveAttribute("data-hue", String(useUIStore.getState().designTokenPreferences.brandHue));
     });
   });
 
@@ -262,6 +262,22 @@ describe("DesignSystemSettingsCard", () => {
       const rgbValue = (screen.getByLabelText(/Brand color rgb/i) as HTMLInputElement).value;
       expect(rgbValue).not.toBe(beforeRgb);
       expect(rgbValue).toMatch(/^\d{1,3}, \d{1,3}, \d{1,3}$/);
+    });
+  });
+
+  it("recomputes harmony from the edited base hex color", async () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: /Color harmony/i }), { target: { value: "complementary" } });
+    fireEvent.change(screen.getByLabelText(/Brand color hex/i), { target: { value: "#ff0000" } });
+
+    await waitFor(() => {
+      const state = useUIStore.getState().designTokenPreferences;
+      expect(state.primaryHue).toBe(0);
+      expect(state.accentHue).toBe(180);
+      expect(state.altHue).toBe(210);
+      expect(screen.getByLabelText("accent wheel marker")).toHaveAttribute("data-hue", "180");
+      expect(screen.getByLabelText("alt wheel marker")).toHaveAttribute("data-hue", "210");
     });
   });
 
@@ -315,6 +331,42 @@ describe("DesignSystemSettingsCard", () => {
 
     await waitFor(() => {
       expect(document.querySelector(".cf-ds-semantic-chip--error")).toHaveAttribute("data-rounding", "pill");
+    });
+  });
+
+  it("semantic glow uses each semantic color instead of the global glow color", async () => {
+    render(<DesignSystemSettingsCard userId={null} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: /Color mode/i }), { target: { value: "dark" } });
+    fireEvent.change(screen.getByLabelText(/error color/i), { target: { value: "#ff0000" } });
+    fireEvent.change(screen.getByLabelText(/success color/i), { target: { value: "#00ff00" } });
+
+    await waitFor(() => {
+      const errorChip = document.querySelector(".cf-ds-semantic-chip--error") as HTMLElement | null;
+      const successChip = document.querySelector(".cf-ds-semantic-chip--success") as HTMLElement | null;
+      expect(errorChip).not.toBeNull();
+      expect(successChip).not.toBeNull();
+      expect(errorChip?.getAttribute("data-semantic-glow-color")).toBe("#ff0000");
+      expect(successChip?.getAttribute("data-semantic-glow-color")).toBe("#00ff00");
+      expect(errorChip?.getAttribute("data-semantic-glow-shadow")).toContain("#ff0000");
+      expect(successChip?.getAttribute("data-semantic-glow-shadow")).toContain("#00ff00");
+    });
+  });
+
+  it("shadow preview stays visible and reactive even under a dark global theme", async () => {
+    document.documentElement.setAttribute("data-theme", "dark");
+    render(<DesignSystemSettingsCard userId={null} />);
+
+    fireEvent.change(getRangeFromLabel(/Shadow strength:/i), { target: { value: "1" } });
+    fireEvent.change(getRangeFromLabel(/Shadow distance:/i), { target: { value: "24" } });
+    fireEvent.change(getRangeFromLabel(/Shadow blur:/i), { target: { value: "40" } });
+    fireEvent.change(getRangeFromLabel(/Shadow spread:/i), { target: { value: "8" } });
+
+    await waitFor(() => {
+      const shadowSample = screen.getByLabelText("light mode shadow sample") as HTMLElement;
+      const shadowValue = shadowSample.getAttribute("data-shadow-style");
+      expect(shadowValue).toContain("0 24px 40px 8px rgba(0, 0, 0");
+      expect(shadowValue).not.toBe("none");
     });
   });
 

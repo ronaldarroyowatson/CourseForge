@@ -1,12 +1,12 @@
 # Test Index
 
-Generated: 2026-04-25T03:52:44.643Z
+Generated: 2026-04-26T19:47:13.887Z
 
 ## Summary
 
-- Total test files: 61
+- Total test files: 62
 - Unit test files: 42
-- Integration test files: 17
+- Integration test files: 18
 - Rules test files: 2
 - Canonical sample files: 5
 
@@ -72,6 +72,7 @@ Generated: 2026-04-25T03:52:44.643Z
 - tests/integration/package-integrity.integration.test.ts
 - tests/integration/settings.updater.integration.test.tsx
 - tests/integration/startupSync.probe.test.tsx
+- tests/integration/textbookDeletion.integration.test.tsx
 - tests/integration/update-status-server.integration.test.ts
 - tests/integration/windows.installer.template.integration.test.ts
 

@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import type { Chapter, Section, Textbook } from "../../../core/models";
 import { initDB } from "../../../core/services/db";
-import { getAll as getAllTextbooks } from "../../../core/services/repositories/textbookRepository";
+import { listTextbooks as getVisibleTextbooks } from "../../../core/services/repositories/textbookRepository";
 import { signOutCurrentUser } from "../../../firebase/auth";
 import { useRepositories } from "../../hooks/useRepositories";
 import { useAuthStore } from "../../store/authStore";
@@ -120,7 +120,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
         setTextbookLoadError(null);
         console.info("[CourseForge][TextbookLoad] Boot load started.");
         await initDB();
-        const results = await getAllTextbooks();
+        const results = await getVisibleTextbooks();
         const cloudSyncedCount = results.filter((textbook) => textbook.source === "cloud").length;
         console.info("[CourseForge][TextbookLoad] Boot load completed.", {
           total: results.length,

@@ -57,11 +57,13 @@ export function TextbookList({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   async function handleDelete(id: string): Promise<void> {
+    onDeleted(id);
+
     try {
       await removeTextbook(id);
-      onDeleted(id);
     } catch {
       setErrorMessage("Unable to delete textbook.");
+      onRefresh();
     }
   }
 

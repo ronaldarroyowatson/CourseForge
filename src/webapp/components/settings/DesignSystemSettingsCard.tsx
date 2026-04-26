@@ -212,18 +212,6 @@ function hueToHex(hue: number, saturation: number, lightness = 0.52): string {
   return rgbToHex((r + m) * 255, (g + m) * 255, (b + m) * 255);
 }
 
-function buildWheelMarkerStyle(hue: number, distance: number): React.CSSProperties {
-  const normalizedHue = normalizeHue(hue);
-  const radians = ((normalizedHue - 90) * Math.PI) / 180;
-  const normalizedDistance = Math.max(10, Math.min(48, distance));
-  const offset = normalizedDistance / 2;
-
-  return {
-    left: `calc(50% + ${(Math.cos(radians) * offset).toFixed(2)}%)`,
-    top: `calc(50% + ${(Math.sin(radians) * offset).toFixed(2)}%)`,
-  };
-}
-
 /** A paired row in the DSC workspace — example cell left, control cell right. */
 function PairedRow({
   children,
@@ -260,7 +248,7 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
   const [cloudDecisionBusy, setCloudDecisionBusy] = React.useState(false);
   const [corruptionStatus, setCorruptionStatus] = React.useState<string | null>(null);
   const [distanceDirection, setDistanceDirection] = React.useState<1 | -1>(1);
-  const [draggingMarker, setDraggingMarker] = React.useState<"brand" | "accent" | "alt" | null>(null);
+  const [draggingMarker, setDraggingMarker] = React.useState<"primary" | "brand" | "accent" | "alt" | null>(null);
   const [brandColorManualOverride, setBrandColorManualOverride] = React.useState(false);
   const [localDiagnostics, setLocalDiagnostics] = React.useState(() => readLocalDesignTokenDiagnostics());
   const confirmedRef = React.useRef<DesignTokenPreferences>(prefs);
@@ -343,6 +331,24 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
       }
     })();
   }, [userId]);
+
+  React.useEffect(() => {
+    const wheel = wheelRef.current;
+    if (!wheel) {
+      return;
+    }
+
+    wheel.style.setProperty("--cf-ds-wheel-primary", `${normalizeHue(prefs.primaryHue)}deg`);
+    wheel.style.setProperty("--cf-ds-wheel-brand", `${normalizeHue(prefs.brandHue)}deg`);
+    wheel.style.setProperty("--cf-ds-wheel-accent", `${normalizeHue(prefs.accentHue)}deg`);
+    wheel.style.setProperty("--cf-ds-wheel-alt", `${normalizeHue(prefs.altHue)}deg`);
+
+    const brandDistance = Math.max(10, Math.min(48, prefs.brandDistance));
+    const accentDistance = Math.max(10, Math.min(48, prefs.accentDistance));
+    wheel.style.setProperty("--cf-ds-wheel-brand-distance", `${brandDistance}%`);
+    wheel.style.setProperty("--cf-ds-wheel-accent-distance", `${accentDistance}%`);
+    wheel.style.setProperty("--cf-ds-wheel-alt-distance", `${accentDistance}%`);
+  }, [prefs.primaryHue, prefs.brandHue, prefs.accentHue, prefs.altHue, prefs.brandDistance, prefs.accentDistance]);
 
   React.useEffect(() => {
     if (!showKeepDialog) {
@@ -535,17 +541,38 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
     });
   }
 
+  const applyPrimaryHue = React.useCallback((nextPrimaryHue: number) => {
+    const normalizedPrimaryHue = Math.round(normalizeHue(nextPrimaryHue));
+
+    if (prefs.colorHarmony !== "system-default") {
+      const derived = harmonyAngles(normalizedPrimaryHue, prefs.colorHarmony);
+      setBrandColorManualOverride(false);
+      setPrefs({
+        primaryHue: normalizedPrimaryHue,
+        accentHue: derived.accentHue,
+        altHue: derived.altHue,
+        brandHue: derived.brandHue,
+      });
+      return;
+    }
+
+    setPrefs({ primaryHue: normalizedPrimaryHue });
+  }, [prefs.colorHarmony, setPrefs]);
+
   const applyHarmonyToHues = React.useCallback((harmony: ColorHarmony) => {
     const next = harmonyAngles(prefs.primaryHue, harmony);
+    if (harmony !== "system-default") {
+      setBrandColorManualOverride(false);
+    }
     setPrefs({
       colorHarmony: harmony,
       accentHue: next.accentHue,
       altHue: next.altHue,
-      ...(brandColorManualOverride ? {} : { brandHue: next.brandHue }),
+      ...(harmony === "system-default" && brandColorManualOverride ? {} : { brandHue: next.brandHue }),
     });
   }, [brandColorManualOverride, prefs.primaryHue, setPrefs]);
 
-  const updateWheelMarkerFromPointer = React.useCallback((event: PointerEvent | React.PointerEvent<HTMLElement>, marker: "brand" | "accent" | "alt") => {
+  const updateWheelMarkerFromPointer = React.useCallback((event: PointerEvent | React.PointerEvent<HTMLElement>, marker: "primary" | "brand" | "accent" | "alt") => {
     const wheel = wheelRef.current;
     if (!wheel) {
       return;
@@ -564,7 +591,17 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
     const radius = Math.sqrt(dx * dx + dy * dy);
     const radial = Math.round(Math.max(10, Math.min(48, (radius / (rect.width / 2)) * 48)));
 
+    if (marker === "primary") {
+      applyPrimaryHue(angle);
+      return;
+    }
+
     if (marker === "brand") {
+      if (prefs.colorHarmony !== "system-default") {
+        applyPrimaryHue(angle);
+        return;
+      }
+
       setPrefs({ brandHue: Math.round(angle), brandDistance: radial });
       setBrandColorManualOverride(true);
       return;
@@ -574,7 +611,7 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
       return;
     }
     setPrefs({ altHue: Math.round(angle), accentDistance: radial });
-  }, [setPrefs]);
+  }, [applyPrimaryHue, prefs.colorHarmony, setPrefs]);
 
   React.useEffect(() => {
     if (!draggingMarker) {
@@ -605,6 +642,12 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
     if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
       return;
     }
+
+    if (prefs.colorHarmony !== "system-default") {
+      applyPrimaryHue(hexToHue(value));
+      return;
+    }
+
     setBrandColorManualOverride(true);
     setPrefs({ brandHue: Math.round(hexToHue(value)) });
   }
@@ -614,8 +657,22 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
     if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
       return;
     }
+
+    if (prefs.colorHarmony !== "system-default") {
+      applyPrimaryHue(hexToHue(rgbToHex(parts[0], parts[1], parts[2])));
+      return;
+    }
+
     setBrandColorManualOverride(true);
     setPrefs({ brandHue: Math.round(hexToHue(rgbToHex(parts[0], parts[1], parts[2]))) });
+  }
+
+  function buildSemanticGlowShadow(color: string): string {
+    const softRadius = Math.round(prefs.glowRadius * 0.75);
+    const wideRadius = Math.round(prefs.glowRadius * 1.45);
+    const intensity = Math.max(0.1, Math.min(1, prefs.glowIntensity));
+
+    return `0 0 0 1px ${color}44, 0 0 ${softRadius}px color-mix(in srgb, ${color} ${Math.round(intensity * 100)}%, transparent), 0 0 ${wideRadius}px color-mix(in srgb, ${color} ${Math.round(intensity * 72)}%, transparent), ${tokens.glow.shadow}`;
   }
   const layoutClassName = layout.columnCount === 12
     ? "cf-ds-masonry-layout--wide"
@@ -638,6 +695,10 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
     () => SPACING_PRESETS.find((preset) => Math.abs(preset.value - prefs.spacingRatio) < 0.0015) ?? null,
     [prefs.spacingRatio],
   );
+  const errorSemanticGlowShadow = React.useMemo(() => buildSemanticGlowShadow(prefs.semanticColors.error), [prefs.glowIntensity, prefs.glowRadius, prefs.semanticColors.error, tokens.glow.shadow]);
+  const successSemanticGlowShadow = React.useMemo(() => buildSemanticGlowShadow(prefs.semanticColors.success), [prefs.glowIntensity, prefs.glowRadius, prefs.semanticColors.success, tokens.glow.shadow]);
+  const pendingSemanticGlowShadow = React.useMemo(() => buildSemanticGlowShadow(prefs.semanticColors.pending), [prefs.glowIntensity, prefs.glowRadius, prefs.semanticColors.pending, tokens.glow.shadow]);
+  const newSemanticGlowShadow = React.useMemo(() => buildSemanticGlowShadow(prefs.semanticColors.new), [prefs.glowIntensity, prefs.glowRadius, prefs.semanticColors.new, tokens.glow.shadow]);
   const brandColorHex = React.useMemo(() => hueToHex(prefs.brandHue, prefs.saturation), [prefs.brandHue, prefs.saturation]);
   const brandColorRgb = React.useMemo(() => {
     const [r, g, b] = hexToRgb(brandColorHex);
@@ -734,13 +795,7 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
             <label>
               Primary hue: {prefs.primaryHue}&deg;
               <input type="range" min={0} max={359} step={1} value={prefs.primaryHue} onChange={(event) => {
-                const newPrimaryHue = Number(event.target.value);
-                if (prefs.colorHarmony !== "system-default") {
-                  const derived = harmonyAngles(newPrimaryHue, prefs.colorHarmony);
-                  setPrefs({ primaryHue: newPrimaryHue, accentHue: derived.accentHue, altHue: derived.altHue, ...(brandColorManualOverride ? {} : { brandHue: derived.brandHue }) });
-                } else {
-                  setPrefs({ primaryHue: newPrimaryHue });
-                }
+                applyPrimaryHue(Number(event.target.value));
               }} />
             </label>
             <label>
@@ -772,13 +827,21 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
               aria-label="accent derivation wheel"
               data-render-key={`${prefs.saturation}-${prefs.glowIntensity}-${prefs.gamma}`}
             >
-              <span className="cf-ds-color-wheel__dot cf-ds-color-wheel__dot--primary" style={{ ["--cf-ds-dot-angle" as string]: `${prefs.primaryHue}deg`, ["--cf-ds-dot-distance" as string]: "42%" }} />
+              <button
+                type="button"
+                aria-label="primary wheel marker"
+                data-hue={Math.round(prefs.primaryHue)}
+                className="cf-ds-color-wheel__dot cf-ds-color-wheel__dot--primary"
+                onPointerDown={(event) => {
+                  setDraggingMarker("primary");
+                  updateWheelMarkerFromPointer(event, "primary");
+                }}
+              />
               <button
                 type="button"
                 aria-label="brand wheel marker"
                 data-hue={Math.round(prefs.brandHue)}
                 className="cf-ds-color-wheel__dot cf-ds-color-wheel__dot--brand"
-                style={buildWheelMarkerStyle(prefs.brandHue, prefs.brandDistance)}
                 onPointerDown={(event) => {
                   setDraggingMarker("brand");
                   updateWheelMarkerFromPointer(event, "brand");
@@ -789,7 +852,6 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
                 aria-label="accent wheel marker"
                 data-hue={Math.round(prefs.accentHue)}
                 className="cf-ds-color-wheel__dot cf-ds-color-wheel__dot--accent"
-                style={buildWheelMarkerStyle(prefs.accentHue, prefs.accentDistance)}
                 onPointerDown={(event) => {
                   setDraggingMarker("accent");
                   updateWheelMarkerFromPointer(event, "accent");
@@ -800,7 +862,6 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
                 aria-label="alt wheel marker"
                 data-hue={Math.round(prefs.altHue)}
                 className="cf-ds-color-wheel__dot cf-ds-color-wheel__dot--alt"
-                style={buildWheelMarkerStyle(prefs.altHue, prefs.accentDistance)}
                 onPointerDown={(event) => {
                   setDraggingMarker("alt");
                   updateWheelMarkerFromPointer(event, "alt");
@@ -848,7 +909,7 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
             </div>
             <p className="settings-meta">Primary↔Accent hue distance: {circularHueDistance(prefs.primaryHue, prefs.accentHue)}&deg;</p>
             <div className="cf-ds-harmony-brand-suggestion">
-              <span className="cf-ds-harmony-swatch" style={{ background: tokens.color.harmony.suggestedBrandColor }} title={`Suggested brand color: ${tokens.color.harmony.suggestedBrandColor}`} />
+              <span className="cf-ds-harmony-swatch cf-ds-harmony-swatch--suggested" title={`Suggested brand color: ${tokens.color.harmony.suggestedBrandColor}`} />
               <span className="settings-meta">Suggested brand color</span>
             </div>
           </div>
@@ -879,13 +940,12 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
               <div
                 className="cf-ds-mode-sample cf-ds-mode-sample--light"
                 aria-label="Light mode sample"
-                style={{ borderColor: tokens.color.primary[9], boxShadow: "0 8px 24px rgba(15, 23, 42, 0.24)" }}
               >
                 <span className="cf-ds-mode-sample__label">Light</span>
                 <span className="cf-ds-mode-sample__card">Card</span>
               </div>
               <div className="cf-ds-mode-sample cf-ds-mode-sample--dark" aria-label="Dark mode sample"><span className="cf-ds-mode-sample__label">Dark</span><span className="cf-ds-mode-sample__card">Card</span></div>
-              <div className={`cf-ds-mode-sample cf-ds-mode-sample--${prefs.colorMode === "system" ? "system" : prefs.colorMode}`} aria-label="Active mode sample" style={{ outline: `1px solid ${tokens.color.primary[0]}` }}><span className="cf-ds-mode-sample__label">Active</span><span className="cf-ds-mode-sample__card">{prefs.colorMode}</span></div>
+              <div className={`cf-ds-mode-sample cf-ds-mode-sample--active cf-ds-mode-sample--${prefs.colorMode === "system" ? "system" : prefs.colorMode}`} aria-label="Active mode sample"><span className="cf-ds-mode-sample__label">Active</span><span className="cf-ds-mode-sample__card">{prefs.colorMode}</span></div>
             </div>
           </div>
           <div>
@@ -904,8 +964,8 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
           <div>
             <h5>Glow &amp; Shadow</h5>
             <div className="cf-ds-glow-row" aria-label="glow and shadow examples">
-              <span className="cf-ds-light-shadow-pad"><span className="cf-ds-shadow-box" aria-label="light mode shadow sample" /></span>
-              <span className={`cf-ds-glow-box ${effectiveMode === "dark" || prefs.glowEnabled ? "cf-ds-glow-box--enabled" : "cf-ds-glow-box--disabled"}`} aria-label={prefs.glowEnabled ? "glow enabled" : "glow disabled"} />
+              <span className="cf-ds-light-shadow-pad"><span className="cf-ds-shadow-box" aria-label="light mode shadow sample" data-shadow-style={tokens.glow.shadow} /></span>
+              <span className={`cf-ds-glow-box ${effectiveMode === "dark" || prefs.glowEnabled ? "cf-ds-glow-box--enabled" : "cf-ds-glow-box--disabled"}`} aria-label={prefs.glowEnabled ? "glow enabled" : "glow disabled"} data-glow-style={tokens.glow.boxShadow} />
             </div>
           </div>
           <div>
@@ -1101,10 +1161,10 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
           <div>
             <h5>Semantic Colors</h5>
             <div className="cf-ds-semantic-examples" aria-label="semantic color examples">
-              <span className={`cf-ds-semantic-chip cf-ds-semantic-chip--error ${semanticSurfaceClass}`} data-rounding={prefs.rounding}>Error</span>
-              <span className={`cf-ds-semantic-chip cf-ds-semantic-chip--success ${semanticSurfaceClass}`} data-rounding={prefs.rounding}>Success</span>
-              <span className={`cf-ds-semantic-chip cf-ds-semantic-chip--pending ${semanticSurfaceClass}`} data-rounding={prefs.rounding}>Pending</span>
-              <span className={`cf-ds-semantic-chip cf-ds-semantic-chip--new ${semanticSurfaceClass}`} data-rounding={prefs.rounding}>New</span>
+              <span className={`cf-ds-semantic-chip cf-ds-semantic-chip--error ${semanticSurfaceClass}`} data-rounding={prefs.rounding} data-semantic-glow-color={prefs.semanticColors.error} data-semantic-glow-shadow={errorSemanticGlowShadow}>Error</span>
+              <span className={`cf-ds-semantic-chip cf-ds-semantic-chip--success ${semanticSurfaceClass}`} data-rounding={prefs.rounding} data-semantic-glow-color={prefs.semanticColors.success} data-semantic-glow-shadow={successSemanticGlowShadow}>Success</span>
+              <span className={`cf-ds-semantic-chip cf-ds-semantic-chip--pending ${semanticSurfaceClass}`} data-rounding={prefs.rounding} data-semantic-glow-color={prefs.semanticColors.pending} data-semantic-glow-shadow={pendingSemanticGlowShadow}>Pending</span>
+              <span className={`cf-ds-semantic-chip cf-ds-semantic-chip--new ${semanticSurfaceClass}`} data-rounding={prefs.rounding} data-semantic-glow-color={prefs.semanticColors.new} data-semantic-glow-shadow={newSemanticGlowShadow}>New</span>
             </div>
           </div>
           <div>

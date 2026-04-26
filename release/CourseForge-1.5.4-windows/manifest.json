@@ -1,7 +1,7 @@
 {
     "name":  "CourseForge",
     "version":  "1.5.4",
-    "generatedAtUtc":  "2026-04-26T19:54:46.3354845Z",
+    "generatedAtUtc":  "2026-04-26T19:57:10.3456016Z",
     "dependencyVersions":  {
                                "node":  "\u003e=20 \u003c25"
                            },
@@ -158,7 +158,7 @@
                   {
                       "path":  "package-manifest.json",
                       "sizeBytes":  1314,
-                      "sha256":  "8925bb04de2ec00be5dbb0638aafd5bb4429e21b25c13857729b47468b8d2e8b"
+                      "sha256":  "99dcaa73ea1d42adddc163b281506ff5605ed1d677a27ed59a1d1e44438e824c"
                   },
                   {
                       "path":  "LICENSE",

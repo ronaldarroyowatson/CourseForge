@@ -1,5 +1,5 @@
 {
-    "generatedAtUtc":  "2026-04-26T19:54:47.1525692Z",
+    "generatedAtUtc":  "2026-04-26T19:57:11.1033658Z",
     "version":  "1.5.4",
     "files":  [
                   {
@@ -60,7 +60,7 @@
                   },
                   {
                       "path":  "package-manifest.json",
-                      "hash":  "E5C33B4BCD762026EA2CF21059F74722AFF1066029E7A3BEEC1F951439497576"
+                      "hash":  "F7CF1F14B6CEF51A67ED58EDD83F6CD115C7F258D392E1437FE7D9F559BC286D"
                   },
                   {
                       "path":  "webapp/index.html",

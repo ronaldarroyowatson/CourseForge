@@ -13,6 +13,7 @@ import {
   updateChapter,
   updateSection,
   findTextbookByIsbn,
+  getTextbookById,
   getChapterById,
   getSectionById,
   listChaptersByTextbookId,
@@ -305,6 +306,9 @@ export function useRepositories() {
   const removeTextbook = useCallback(async (id: string): Promise<void> => {
     console.info("[CourseForge][TextbookDelete] Request received.", { textbookId: id });
 
+    const existingTextbook = await getTextbookById(id);
+    let cloudDeleteFailed = false;
+
     if (typeof window !== "undefined") {
       const selectedTextbookId = window.localStorage.getItem("courseforge-selectedTextbookId");
       if (selectedTextbookId === id) {
@@ -319,6 +323,7 @@ export function useRepositories() {
       try {
         await hardDeleteTextbookFromCloud(currentUser.uid, id);
       } catch (error) {
+        cloudDeleteFailed = true;
         console.warn("[CourseForge][TextbookDelete] Cloud hard-delete failed; local delete will still proceed.", {
           textbookId: id,
           message: error instanceof Error ? error.message : String(error),
@@ -327,6 +332,18 @@ export function useRepositories() {
     }
 
     await deleteTextbook(id);
+
+    if (cloudDeleteFailed && existingTextbook) {
+      await saveTextbook({
+        ...existingTextbook,
+        isDeleted: true,
+        pendingSync: true,
+        source: "local",
+        lastModified: new Date().toISOString(),
+      });
+      console.info("[CourseForge][TextbookDelete] Local deletion tombstone persisted for cloud retry.", { textbookId: id });
+    }
+
     console.info("[CourseForge][TextbookDelete] Hard delete completed for local hierarchy.", { textbookId: id });
     markLocalChange();
   }, [markLocalChange]);

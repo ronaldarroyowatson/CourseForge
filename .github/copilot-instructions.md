@@ -120,6 +120,7 @@ Before marking any bug fix complete, confirm:
 
 - **Optimistic UI removal:** Call `setTextbooks()` with filtered list **before** awaiting the cloud delete. This makes the row disappear instantly.
 - **Stale cache prevention:** After deletion, reload textbooks via `listTextbooks()` (which filters deleted rows), **not** `getAll()` (which includes deleted rows). Prevent `TextbookWorkspace` from hydrating raw cached records that carry stale data.
+- **Cloud failure tombstones:** If cloud hard-delete fails, persist a local textbook tombstone (`isDeleted: true`, `pendingSync: true`) after local hierarchy cleanup so sync can retry deletion and refresh cannot resurrect the row.
 - **Deletion state sync:** Add both `removeTextbook()` (immediate UI) and load path (`listTextbooks()` post-delete) regression tests to the permanent integration suite. Mock both the repository layer and the hydration path.
 
 

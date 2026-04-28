@@ -1302,6 +1302,20 @@ export async function syncUserData(userId: string): Promise<void> {
               const cloudTs = toTimestamp(cloudItem.lastModified);
 
               if (isDeletedEntity(localItem)) {
+                // Tombstones represent an explicit local delete intent and
+                // must win over timestamp drift to avoid ghost rehydration.
+                if (localItem.pendingSync) {
+                  const deletedFromCloud = await deleteCloudStoreItem(storeName, {
+                    ...localItem,
+                    userId,
+                  } as CourseForgeEntityMap[typeof storeName], indexes);
+
+                  if (deletedFromCloud) {
+                    await deleteLocalStoreItem(storeName, localItem.id);
+                  }
+                  return;
+                }
+
                 if (localTs >= cloudTs) {
                   const deletedFromCloud = await deleteCloudStoreItem(storeName, {
                     ...localItem,

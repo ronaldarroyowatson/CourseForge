@@ -535,6 +535,27 @@ export function mergeAutoMetadata(
     });
   }
 
+  if (
+    base.subject
+    && incoming.subject
+    && base.subject.trim()
+    && incoming.subject.trim()
+    && base.subject.trim().toLowerCase() !== incoming.subject.trim().toLowerCase()
+    && base.subject.trim().toLowerCase() !== "other"
+  ) {
+    merged.subject = base.subject;
+  }
+
+  if (
+    base.seriesName
+    && incoming.seriesName
+    && base.seriesName.trim()
+    && incoming.seriesName.trim()
+    && base.seriesName.trim().toLowerCase() !== incoming.seriesName.trim().toLowerCase()
+  ) {
+    merged.seriesName = base.seriesName;
+  }
+
   return merged;
 }
 

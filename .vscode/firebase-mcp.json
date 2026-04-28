@@ -1,0 +1,28 @@
+{
+  "projects": {
+    "courseforge-prod": {
+      "firebase": {
+        "projectId": "courseforge-prod",
+        "serviceAccountPath": "./.secrets/courseforge-prod-service-account.json"
+      },
+      "firestore": {
+        "rules": {
+          "allow": [
+            "users/**",
+            "textbooks/**",
+            "chapters/**",
+            "sections/**"
+          ],
+          "deny": [
+            "**/__system__/**"
+          ]
+        },
+        "maxCollectionReadSize": 100,
+        "maxBatchFetchSize": 200
+      },
+      "timeouts": {
+        "callMs": 15000
+      }
+    }
+  }
+}

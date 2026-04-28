@@ -43,7 +43,7 @@ const syncMocks = vi.hoisted(() => ({
 }));
 
 const authMocks = vi.hoisted(() => ({
-  getCurrentUser: vi.fn(() => ({ uid: "user-1" })),
+  getCurrentUser: vi.fn<() => { uid: string } | null>(() => ({ uid: "user-1" })),
 }));
 
 const uiStoreMocks = vi.hoisted(() => ({
@@ -125,6 +125,42 @@ describe("textbook deletion persistence", () => {
     await result.current.removeTextbook("tb-1");
 
     expect(repositoryMocks.deleteTextbook).toHaveBeenCalledWith("tb-1");
+    expect(repositoryMocks.saveTextbook).not.toHaveBeenCalled();
+  });
+
+  it("stores a local tombstone when auth is unavailable for a cloud-owned textbook", async () => {
+    authMocks.getCurrentUser.mockReturnValue(null);
+    repositoryMocks.getTextbookById.mockResolvedValue(buildTextbook({ userId: "user-1" }));
+
+    const { result } = renderHook(() => useRepositories());
+
+    await result.current.removeTextbook("tb-1");
+
+    expect(syncMocks.hardDeleteTextbookFromCloud).not.toHaveBeenCalled();
+    expect(repositoryMocks.deleteTextbook).toHaveBeenCalledWith("tb-1");
+    expect(repositoryMocks.saveTextbook).toHaveBeenCalledTimes(1);
+    expect(repositoryMocks.saveTextbook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "tb-1",
+        isDeleted: true,
+        pendingSync: true,
+        source: "local",
+      })
+    );
+  });
+
+  it("rejects delete when textbook belongs to a different author", async () => {
+    authMocks.getCurrentUser.mockReturnValue({ uid: "user-1" });
+    repositoryMocks.getTextbookById.mockResolvedValue(buildTextbook({ userId: "user-2" }));
+
+    const { result } = renderHook(() => useRepositories());
+
+    await expect(result.current.removeTextbook("tb-1")).rejects.toThrow(
+      "You can only delete textbooks that you authored."
+    );
+
+    expect(syncMocks.hardDeleteTextbookFromCloud).not.toHaveBeenCalled();
+    expect(repositoryMocks.deleteTextbook).not.toHaveBeenCalled();
     expect(repositoryMocks.saveTextbook).not.toHaveBeenCalled();
   });
 });

@@ -166,3 +166,20 @@ Before merging test or debug changes, confirm:
 - no canonical sample is unused
 - test index was regenerated
 - bugfix workflow passes without Problems pane errors
+
+## 11. Auto Textbook Regression Guards
+
+When changing auto textbook capture, extraction, or TOC parsing, include explicit regression checks for:
+
+- subject stability across cover and copyright captures: later captures must not regress a confirmed subject (for example Science -> ELA)
+- series stability across reparses: later noisy OCR must not overwrite an established series with publisher/legal tokens
+- metadata glyph rendering in the auto form: extraction summary and related-ISBN remove controls must render clean symbols (no mojibake)
+- publisher location formatting in form inputs: multi-line extracted addresses must display with visible separators
+- TOC ancillary section handling: unnumbered sections (for example CER, Scientific Methods, Module Wrap-Up) are valid and must infer page end boundaries from neighboring entries, including same-page transitions
+
+Minimum test touchpoints:
+
+- `tests/core/textbookAutoExtractionService.test.ts`
+- `tests/core/tocPreviewPipeline.test.ts`
+- `tests/integration/autoTextbookFlow.integration.test.tsx`
+- `tests/core/metadataExtractionPipelineService.test.ts`

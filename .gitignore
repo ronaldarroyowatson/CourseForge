@@ -12,6 +12,7 @@ serviceAccountKey*.json
 *.key
 *.p12
 *.pfx
+.secrets/
 *.log
 .DS_Store
 

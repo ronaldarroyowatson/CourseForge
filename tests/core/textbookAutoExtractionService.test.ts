@@ -190,6 +190,24 @@ describe("textbookAutoExtractionService", () => {
     expect(merged.subtitle).toBe("Student Edition");
   });
 
+  it("does not let later conflicting OCR override established subject or series", () => {
+    const merged = mergeAutoMetadata(
+      {
+        title: "Inspire Physical Science With Earth Science",
+        subject: "Science",
+        seriesName: "Inspire",
+      },
+      {
+        title: "Phenomenon",
+        subject: "ELA",
+        seriesName: "McGraw",
+      }
+    );
+
+    expect(merged.subject).toBe("Science");
+    expect(merged.seriesName).toBe("Inspire");
+  });
+
   it("parses TOC lines into chapters and sections", () => {
     const parsed = parseTocFromOcrText([
       "Table of Contents",

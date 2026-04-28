@@ -82,6 +82,7 @@ async function importSyncServiceModule(options: {
 
   const getAll = vi.fn(async (storeName: string) => options.localByStore?.[storeName] ?? []);
   const save = vi.fn(async (_storeName: string, item: { id?: string }) => item.id ?? "saved-id");
+  const deleteLocal = vi.fn(async () => undefined);
 
   const where = vi.fn((field: string, op: string, value: unknown) => ({ field, op, value }));
   const collection = vi.fn((_db: unknown, name: string) => ({ kind: "collection" as const, name }));
@@ -89,6 +90,7 @@ async function importSyncServiceModule(options: {
   const query = vi.fn((ref: MockQuery["ref"], ...clauses: MockQueryClause[]) => ({ ref, clauses }));
   const docFn = vi.fn((_db: unknown, ...segments: string[]) => ({ path: segments.join("/") }));
   const setDoc = vi.fn(async () => undefined);
+  const deleteDoc = vi.fn(async () => undefined);
   const getDocs = vi.fn(async (queryObject: MockQuery) => {
     const ownerClause = queryObject.clauses.find((clause) => clause.field === "ownerId");
     const userClause = queryObject.clauses.find((clause) => clause.field === "userId");
@@ -109,6 +111,7 @@ async function importSyncServiceModule(options: {
     },
     getAll,
     save,
+    delete: deleteLocal,
   }));
 
   vi.doMock("firebase/firestore", () => ({
@@ -118,6 +121,7 @@ async function importSyncServiceModule(options: {
     query,
     doc: docFn,
     setDoc,
+    deleteDoc,
     getDocs,
   }));
 
@@ -140,12 +144,14 @@ async function importSyncServiceModule(options: {
     mocks: {
       getAll,
       save,
+      deleteLocal,
       where,
       collection,
       collectionGroup,
       query,
       docFn,
       setDoc,
+      deleteDoc,
       getDocs,
     },
   };
@@ -1073,6 +1079,73 @@ describe("Cross-surface pipeline communication", () => {
 
     await syncModule.uploadLocalChanges("teacher-min-write");
     expect(mocks.setDoc).not.toHaveBeenCalled();
+  });
+
+  it("fail-first: tombstoned authored textbook must delete cloud copy even when cloud timestamp is newer", async () => {
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-delete-owner",
+      localByStore: {
+        textbooks: [
+          {
+            id: "tb-ghost-1",
+            userId: "teacher-delete-owner",
+            ownerId: "teacher-delete-owner",
+            title: "Ghost Candidate",
+            grade: "9",
+            subject: "Science",
+            edition: "1",
+            publicationYear: 2021,
+            isbnRaw: "",
+            isbnNormalized: "",
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+            isFavorite: false,
+            isArchived: false,
+            isDeleted: true,
+          },
+        ],
+      },
+      cloudQueryDocs: {
+        "collection:textbooks:userId": [
+          createMockDoc("textbooks/tb-ghost-1", "tb-ghost-1", {
+            id: "tb-ghost-1",
+            userId: "teacher-delete-owner",
+            ownerId: "teacher-delete-owner",
+            title: "Ghost Candidate",
+            grade: "9",
+            subject: "Science",
+            edition: "1",
+            publicationYear: 2021,
+            isbnRaw: "",
+            isbnNormalized: "",
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T05:00:00.000Z",
+            pendingSync: false,
+            source: "cloud",
+            isFavorite: false,
+            isArchived: false,
+          }),
+        ],
+      },
+    });
+
+    await syncModule.syncUserData("teacher-delete-owner");
+
+    expect(mocks.deleteDoc).toHaveBeenCalledWith({ path: "textbooks/tb-ghost-1" });
+    expect(mocks.deleteLocal).toHaveBeenCalledWith("textbooks", "tb-ghost-1");
+
+    const resurrectedSaves = (mocks.save.mock.calls as Array<[string, Record<string, unknown>]>).filter(
+      ([storeName, payload]) =>
+        storeName === "textbooks"
+        && payload.id === "tb-ghost-1"
+        && payload.isDeleted !== true
+        && payload.source === "cloud"
+    );
+    expect(resurrectedSaves.length).toBe(0);
   });
 });
 

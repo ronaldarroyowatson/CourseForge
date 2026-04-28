@@ -69,6 +69,74 @@
 				"panel": "dedicated"
 			},
 			"problemMatcher": ["$tsc"]
+		},
+		{
+			"label": "CourseForge: Setup (Windows)",
+			"type": "shell",
+			"command": "scripts/setup-courseforge.windows.ps1",
+			"isBackground": false,
+			"problemMatcher": [],
+			"windows": {
+				"options": {
+					"shell": {
+						"executable": "powershell",
+						"args": [
+							"-NoProfile",
+							"-ExecutionPolicy",
+							"Bypass",
+							"-File"
+						]
+					}
+				}
+			}
+		},
+		{
+			"label": "CourseForge: Setup (macOS)",
+			"type": "shell",
+			"command": "bash scripts/setup-courseforge.macos.sh",
+			"isBackground": false,
+			"problemMatcher": [],
+			"osx": {
+				"options": {
+					"shell": {
+						"executable": "/bin/bash",
+						"args": [
+							"-lc"
+						]
+					}
+				}
+			}
+		},
+		{
+			"label": "CourseForge: Setup (Linux)",
+			"type": "shell",
+			"command": "bash scripts/setup-courseforge.linux.sh",
+			"isBackground": false,
+			"problemMatcher": [],
+			"linux": {
+				"options": {
+					"shell": {
+						"executable": "/bin/bash",
+						"args": [
+							"-lc"
+						]
+					}
+				}
+			}
+		},
+		{
+			"label": "CourseForge: Install Recommended VS Code Extensions",
+			"type": "shell",
+			"command": "node scripts/print-vscode-extension-commands.mjs",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "CourseForge: Verify MCP Servers",
+			"type": "shell",
+			"command": "node scripts/verify-mcp-servers.mjs",
+			"isBackground": false,
+			"problemMatcher": []
 		}
 	],
 	"inputs": [

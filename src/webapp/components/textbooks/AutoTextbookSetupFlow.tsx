@@ -442,6 +442,13 @@ async function detectExtensionTabReadiness(): Promise<{ hasTabs: boolean; hasKno
 }
 
 function toMetadataFormState(metadata: AutoTextbookMetadata, tocConfidence: number): MetadataFormState {
+  const publisherLocation = (metadata.publisherLocation ?? "")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(", ");
+
   return {
     title: metadata.title ?? "",
     subtitle: metadata.subtitle ?? "",
@@ -455,12 +462,71 @@ function toMetadataFormState(metadata: AutoTextbookMetadata, tocConfidence: numb
     additionalIsbnsCsv: (metadata.additionalIsbns ?? []).join(", "),
     seriesName: metadata.seriesName ?? "",
     publisher: metadata.publisher ?? "",
-    publisherLocation: metadata.publisherLocation ?? "",
+    publisherLocation,
     platformUrl: metadata.platformUrl ?? "",
     mhid: metadata.mhid ?? "",
     authorsCsv: (metadata.authors ?? []).join(", "),
     tocExtractionConfidence: tocConfidence > 0 ? tocConfidence.toFixed(2) : "",
   };
+}
+
+function choosePreferredSubject(
+  pipelineSubject: string | null | undefined,
+  ocrDerivedSubject: string | null | undefined,
+  rawText: string
+): string | undefined {
+  const pipeline = pipelineSubject?.trim() ?? "";
+  const ocrDerived = ocrDerivedSubject?.trim() ?? "";
+
+  if (!pipeline) {
+    return ocrDerived || undefined;
+  }
+
+  if (!ocrDerived || pipeline.toLowerCase() === ocrDerived.toLowerCase()) {
+    return pipeline;
+  }
+
+  const lower = rawText.toLowerCase();
+  const hasScienceSignal = /physical science|earth science|life science|biology|chemistry|physics|\bscience\b|\bstem\b/.test(lower);
+  if (hasScienceSignal) {
+    if (ocrDerived.toLowerCase() === "science") {
+      return ocrDerived;
+    }
+    if (pipeline.toLowerCase() !== "science") {
+      return "Science";
+    }
+  }
+
+  if (pipeline.toLowerCase() === "ela") {
+    return ocrDerived;
+  }
+
+  return pipeline;
+}
+
+function choosePreferredPublisherLocation(
+  pipelineLocation: string | null | undefined,
+  ocrDerivedLocation: string | null | undefined
+): string | undefined {
+  const pipeline = pipelineLocation?.trim() ?? "";
+  const ocrDerived = ocrDerivedLocation?.trim() ?? "";
+
+  if (!pipeline) {
+    return ocrDerived || undefined;
+  }
+
+  if (!ocrDerived) {
+    return pipeline;
+  }
+
+  const pipelineLooksFused = !/[\n,]/.test(pipeline) && /[a-z][A-Z]/.test(pipeline);
+  const ocrLooksDelimited = /[\n,]/.test(ocrDerived);
+
+  if (pipelineLooksFused && ocrLooksDelimited) {
+    return ocrDerived;
+  }
+
+  return pipeline;
 }
 
 function fromMetadataFormState(form: MetadataFormState): AutoTextbookMetadata {
@@ -560,16 +626,16 @@ function buildSectionNotes(pageStart: number | undefined, pageEnd: number | unde
 
 function metadataResultToAutoMetadata(metadata: MetadataResult): AutoTextbookMetadata {
   const rawExtracted = extractMetadataFromOcrText(metadata.rawText);
-  const inferredSubject = metadata.subject ?? rawExtracted.subject ?? null;
+  const inferredSubject = choosePreferredSubject(metadata.subject, rawExtracted.subject, metadata.rawText);
   return {
     title: metadata.title ?? rawExtracted.title ?? undefined,
     subtitle: metadata.subtitle ?? rawExtracted.subtitle ?? undefined,
     edition: metadata.edition ?? rawExtracted.edition ?? undefined,
     publisher: metadata.publisher ?? rawExtracted.publisher ?? undefined,
-    publisherLocation: metadata.publisherLocation ?? rawExtracted.publisherLocation ?? undefined,
+    publisherLocation: choosePreferredPublisherLocation(metadata.publisherLocation, rawExtracted.publisherLocation),
     seriesName: metadata.series ?? rawExtracted.seriesName ?? undefined,
     gradeBand: metadata.gradeLevel ?? rawExtracted.gradeBand ?? undefined,
-    subject: inferredSubject ?? undefined,
+    subject: inferredSubject,
     copyrightYear: metadata.copyrightYear ?? rawExtracted.copyrightYear ?? undefined,
     isbn: metadata.isbn ?? rawExtracted.isbn ?? undefined,
     additionalIsbns: metadata.additionalIsbns,
@@ -2786,7 +2852,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           <ul className="extraction-summary__list">
             {lastExtractionFields.map((field) => (
               <li key={field} className="extraction-summary__item">
-                <span className="extraction-summary__check" aria-hidden="true">âœ“</span> {field}
+                <span className="extraction-summary__check" aria-hidden="true">{"\u2713"}</span> {field}
               </li>
             ))}
           </ul>
@@ -2925,7 +2991,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             className="btn-text ocr-raw-section__label"
             onClick={() => setIsRawOcrExpanded((v) => !v)}
           >
-            {isRawOcrExpanded ? "â–¾" : "â–¸"} Raw OCR Output
+            {isRawOcrExpanded ? "\u25BE" : "\u25B8"} Raw OCR Output
           </button>
           {isRawOcrExpanded ? (
             <pre className="ocr-raw-section__pre">{rawOcrText}</pre>
@@ -3107,7 +3173,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                   placeholder="Label/Note (optional, e.g., Teacher Edition)"
                   className="related-isbn-note"
                 />
-                <button type="button" className="btn-icon btn-danger" onClick={() => removeRelatedIsbn(index)} aria-label="Remove related ISBN" title="Remove">âœ•</button>
+                <button type="button" className="btn-icon btn-danger" onClick={() => removeRelatedIsbn(index)} aria-label="Remove related ISBN" title="Remove">{"\u00D7"}</button>
               </div>
             ))}
             <button type="button" className="btn-secondary" onClick={addRelatedIsbn}>+ Add Related ISBN</button>

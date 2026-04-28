@@ -51,6 +51,16 @@ function inferSiblingEnd(
     return nextStart - 1;
   }
 
+  if (
+    typeof currentStart === "number"
+    && Number.isFinite(currentStart)
+    && typeof nextStart === "number"
+    && Number.isFinite(nextStart)
+    && nextStart === currentStart
+  ) {
+    return currentStart;
+  }
+
   return undefined;
 }
 
@@ -88,9 +98,14 @@ function scoreNodeConfidence(baseConfidence: number, hasNumber: boolean, hasTitl
   return Math.max(0.08, Math.min(1, score));
 }
 
-function collectMissingFields(numberValue: string, title: string, pageStart: number | undefined): string[] {
+function collectMissingFields(
+  numberValue: string,
+  title: string,
+  pageStart: number | undefined,
+  requireNumber = true
+): string[] {
   const missing: string[] = [];
-  if (!numberValue.trim()) {
+  if (requireNumber && !numberValue.trim()) {
     missing.push("number");
   }
 
@@ -134,7 +149,8 @@ function buildSectionNodes(chapterIndex: number, sections: TocSection[], baseCon
     const pageStart = normalizePageStart(section.pageStart);
     const nextStart = normalizePageStart(sections[sectionIndex + 1]?.pageStart);
     const pageEnd = inferSiblingEnd(pageStart, nextStart, section.pageEnd);
-    const missingFields = collectMissingFields(numberValue, title, pageStart);
+    const hasExplicitNumber = Boolean(numberValue.trim());
+    const missingFields = collectMissingFields(numberValue, title, pageStart, hasExplicitNumber);
     const nodeConfidence = scoreNodeConfidence(baseConfidence, Boolean(numberValue.trim()), Boolean(title.trim()), typeof pageStart === "number");
 
     const node: TocPreviewNodeModel = {

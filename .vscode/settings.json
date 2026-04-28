@@ -8,6 +8,37 @@
         "serve",
         ".mempalace"
       ]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "./"
+      ]
+    },
+    "terminal": {
+      "command": ".\\node_modules\\.bin\\mcp-terminal.cmd",
+      "args": [
+        "--allowed-paths",
+        "./"
+      ]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp"
+      ]
+    },
+    "firebase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "firebase-mcp",
+        "--config",
+        ".vscode/firebase-mcp.json"
+      ]
     }
   },
   "powershell.scriptAnalysis.enable": false,

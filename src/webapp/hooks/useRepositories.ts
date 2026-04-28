@@ -308,6 +308,15 @@ export function useRepositories() {
 
     const existingTextbook = await getTextbookById(id);
     let cloudDeleteFailed = false;
+    const currentUser = getCurrentUser();
+
+    if (
+      existingTextbook?.userId
+      && currentUser?.uid
+      && existingTextbook.userId !== currentUser.uid
+    ) {
+      throw new Error("You can only delete textbooks that you authored.");
+    }
 
     if (typeof window !== "undefined") {
       const selectedTextbookId = window.localStorage.getItem("courseforge-selectedTextbookId");
@@ -318,7 +327,6 @@ export function useRepositories() {
       }
     }
 
-    const currentUser = getCurrentUser();
     if (currentUser?.uid) {
       try {
         await hardDeleteTextbookFromCloud(currentUser.uid, id);
@@ -329,6 +337,14 @@ export function useRepositories() {
           message: error instanceof Error ? error.message : String(error),
         });
       }
+    } else if (existingTextbook?.userId) {
+      // If cloud-owned content is deleted before auth is ready, keep a local
+      // tombstone so startup sync cannot resurrect the row from cloud data.
+      cloudDeleteFailed = true;
+      console.warn("[CourseForge][TextbookDelete] Cloud hard-delete skipped because no authenticated user is available.", {
+        textbookId: id,
+        ownerUserId: existingTextbook.userId,
+      });
     }
 
     await deleteTextbook(id);

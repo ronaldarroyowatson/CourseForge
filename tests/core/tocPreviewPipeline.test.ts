@@ -64,4 +64,38 @@ describe("TOC preview pipeline", () => {
     expect(lessonThree?.pageStart).toBe(19);
     expect(lessonThree?.pageEnd).toBe(23);
   });
+
+  it("treats unnumbered module sections as valid and infers same-page boundaries", () => {
+    const parsed = parseTocFromOcrText([
+      "MODULE 1: THE NATURE OF SCIENCE",
+      "CER Claim, Evidence, Reasoning 3",
+      "Lesson 1 The Methods of Science 4",
+      "NATURE OF SCIENCE 31",
+      "Module Wrap-Up 33",
+      "SEP 33",
+      "MODULE 2: MOTION 37",
+    ].join("\n"));
+
+    const preview = buildTocPreviewTree(parsed.chapters, parsed.confidence);
+    const chapterOne = preview.nodes[0];
+    expect(chapterOne).toBeDefined();
+
+    const cer = chapterOne.children.find((child) => /CER Claim, Evidence, Reasoning/i.test(child.title));
+    expect(cer).toBeDefined();
+    expect(cer?.missingFields).not.toContain("number");
+    expect(cer?.pageStart).toBe(3);
+    expect(cer?.pageEnd).toBe(3);
+
+    const scientificMethods = chapterOne.children.find((child) => /NATURE OF SCIENCE/i.test(child.title));
+    expect(scientificMethods).toBeDefined();
+    expect(scientificMethods?.missingFields).not.toContain("number");
+    expect(scientificMethods?.pageStart).toBe(31);
+    expect(scientificMethods?.pageEnd).toBe(32);
+
+    const moduleWrapUp = chapterOne.children.find((child) => /Module Wrap-Up/i.test(child.title));
+    expect(moduleWrapUp).toBeDefined();
+    expect(moduleWrapUp?.missingFields).not.toContain("number");
+    expect(moduleWrapUp?.pageStart).toBe(33);
+    expect(moduleWrapUp?.pageEnd).toBe(33);
+  });
 });

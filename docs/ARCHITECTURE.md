@@ -29,8 +29,11 @@ CourseForge consists of three main layers:
 2. Data is persisted via the core database service.
 3. Auto textbook capture applies text/image moderation; flagged educational content is marked `pending-admin-review` and remains local-only.
 4. Sync service uploads only content allowed by textbook moderation state and user cloud-access policy.
-5. When requested, the XML exporter reads from the database and generates a schema‑compliant XML document.
-6. The game engine and AI tutor consume the XML.
+5. Textbook deletion is author-scoped: only the owning user can issue a delete for canonical textbook records.
+6. Deleted textbooks create a local tombstone when cloud deletion cannot be confirmed immediately.
+7. During sync reconciliation, tombstones with pending delete intent take precedence over timestamp drift so deleted textbooks cannot rehydrate as ghost records on refresh.
+8. When requested, the XML exporter reads from the database and generates a schema‑compliant XML document.
+9. The game engine and AI tutor consume the XML.
 
 ---
 

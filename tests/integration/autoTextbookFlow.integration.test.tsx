@@ -227,6 +227,55 @@ describe("auto textbook flow integration", () => {
     }
   });
 
+  it("renders multi-line extracted publisher location with comma separators in the input field", () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "cover",
+          coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+          metadataDraft: {
+            title: "Inspire Physical Science",
+            subject: "Science",
+            publisherLocation: [
+              "McGraw-Hill Education",
+              "STEM Learning Solutions Center",
+              "8777 Lusk Road",
+              "Columbus, OH 43240",
+            ].join("\n"),
+          },
+        }}
+      />
+    );
+
+    expect((screen.getByLabelText("Publisher Location") as HTMLInputElement).value).toBe(
+      "McGraw-Hill Education, STEM Learning Solutions Center, 8777 Lusk Road, Columbus, OH 43240"
+    );
+  });
+
+  it("renders clean extraction/remove symbols without mojibake in auto metadata UI", () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "cover",
+          coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+          metadataDraft: {
+            title: "Inspire Physical Science",
+            subject: "Science",
+            relatedIsbns: [{ isbn: "9780076770007", type: "teacher", note: "Teacher Edition" }],
+          },
+        }}
+      />
+    );
+
+    const removeButton = screen.getByRole("button", { name: "Remove related ISBN" });
+    expect(removeButton.textContent?.trim()).toBe("×");
+    expect(document.body.textContent ?? "").not.toContain("âœ");
+  });
+
   it("restores additional and typed ISBN metadata when resuming a queued draft", async () => {
     const now = Date.now();
     window.localStorage.setItem(

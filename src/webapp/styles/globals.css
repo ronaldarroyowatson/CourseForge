@@ -3695,6 +3695,41 @@ button:not(:disabled):active {
   font-weight: 600;
 }
 
+.auto-save-upload-progress {
+  margin: 0.35rem auto 0;
+  max-width: 520px;
+  width: 100%;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.auto-save-upload-progress p {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+}
+
+.auto-save-upload-progress__bar {
+  width: 100%;
+  height: 0.68rem;
+}
+
+.auto-save-upload-progress__bar::-webkit-progress-bar {
+  background: color-mix(in srgb, var(--cf-surface-muted) 74%, transparent);
+  border: 1px solid var(--cf-border);
+  border-radius: 999px;
+}
+
+.auto-save-upload-progress__bar::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--brand-primary) 0%, color-mix(in srgb, var(--brand-primary) 65%, #ffffff 35%) 100%);
+  border-radius: 999px;
+}
+
+.auto-save-upload-progress__bar::-moz-progress-bar {
+  background: linear-gradient(90deg, var(--brand-primary) 0%, color-mix(in srgb, var(--brand-primary) 65%, #ffffff 35%) 100%);
+  border-radius: 999px;
+}
+
 /* ============================================================
    Cover Action Row — thumbnail + inline action buttons
    ============================================================ */

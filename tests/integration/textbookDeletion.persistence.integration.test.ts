@@ -5,7 +5,7 @@ import type { Textbook } from "../../src/core/models";
 
 const repositoryMocks = vi.hoisted(() => ({
   listTextbooks: vi.fn(async () => []),
-  saveTextbook: vi.fn(async () => "tb-1"),
+  saveTextbook: vi.fn<(textbook: Textbook) => Promise<string>>(async () => "tb-1"),
   deleteTextbook: vi.fn(async () => undefined),
   getTextbookById: vi.fn<(id: string) => Promise<Textbook | undefined>>(async () => undefined),
   findDuplicateTextbookCandidate: vi.fn(async () => undefined),
@@ -50,11 +50,16 @@ const uiStoreMocks = vi.hoisted(() => ({
   markLocalChange: vi.fn(),
 }));
 
+const coverImageServiceMocks = vi.hoisted(() => ({
+  uploadTextbookCoverFromDataUrl: vi.fn(async () => "https://example.invalid/cover.png"),
+  uploadTextbookCoverImage: vi.fn(async () => "https://example.invalid/cover.png"),
+}));
+
 vi.mock("../../src/core/services/repositories", () => repositoryMocks);
 
 vi.mock("../../src/core/services/coverImageService", () => ({
-  uploadTextbookCoverFromDataUrl: vi.fn(async () => "https://example.invalid/cover.png"),
-  uploadTextbookCoverImage: vi.fn(async () => "https://example.invalid/cover.png"),
+  uploadTextbookCoverFromDataUrl: (...args: Parameters<typeof coverImageServiceMocks.uploadTextbookCoverFromDataUrl>) => coverImageServiceMocks.uploadTextbookCoverFromDataUrl(...args),
+  uploadTextbookCoverImage: (...args: Parameters<typeof coverImageServiceMocks.uploadTextbookCoverImage>) => coverImageServiceMocks.uploadTextbookCoverImage(...args),
 }));
 
 vi.mock("../../src/core/services/syncService", () => syncMocks);
@@ -100,6 +105,59 @@ describe("textbook deletion persistence", () => {
     repositoryMocks.getTextbookById.mockResolvedValue(buildTextbook());
   });
 
+  it("fail-first: persists textbook locally before cover upload resolves", async () => {
+    let resolveUpload: ((value: string) => void) | undefined;
+    coverImageServiceMocks.uploadTextbookCoverFromDataUrl.mockImplementationOnce(
+      () => new Promise<string>((resolve) => {
+        resolveUpload = resolve;
+      })
+    );
+
+    const { result } = renderHook(() => useRepositories());
+
+    const createPromise = result.current.createTextbook({
+      sourceType: "auto",
+      originalLanguage: "en",
+      title: "Inspire Physical Science",
+      grade: "8",
+      subject: "Science",
+      edition: "Student",
+      publicationYear: 2026,
+      isbnRaw: "9780076716852",
+      isbnNormalized: "9780076716852",
+      coverDataUrl: "data:image/png;base64,AAAA",
+    });
+
+    await Promise.resolve();
+
+    expect(repositoryMocks.saveTextbook).toHaveBeenCalledTimes(1);
+    expect(repositoryMocks.saveTextbook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Inspire Physical Science",
+        coverImageUrl: null,
+      })
+    );
+
+    expect(repositoryMocks.updateTextbook).not.toHaveBeenCalled();
+
+    expect(resolveUpload).toBeDefined();
+    resolveUpload!("https://example.invalid/deferred-cover.png");
+    await createPromise;
+
+    const savedTextbook = repositoryMocks.saveTextbook.mock.lastCall?.[0] as Textbook | undefined;
+    expect(savedTextbook).toBeDefined();
+    if (!savedTextbook) {
+      throw new Error("Expected saveTextbook to receive a textbook payload.");
+    }
+
+    expect(repositoryMocks.updateTextbook).toHaveBeenCalledWith(
+      savedTextbook.id,
+      expect.objectContaining({
+        coverImageUrl: "https://example.invalid/deferred-cover.png",
+      })
+    );
+  });
+
   it("stores a local tombstone when cloud hard-delete fails so refresh cannot resurrect textbook", async () => {
     syncMocks.hardDeleteTextbookFromCloud.mockRejectedValueOnce(new Error("permission-denied"));
 
@@ -120,10 +178,19 @@ describe("textbook deletion persistence", () => {
   });
 
   it("does not write a tombstone when cloud hard-delete succeeds", async () => {
+    repositoryMocks.getTextbookById.mockResolvedValue(
+      buildTextbook({
+        source: "cloud",
+        pendingSync: false,
+        userId: "user-1",
+      })
+    );
+
     const { result } = renderHook(() => useRepositories());
 
     await result.current.removeTextbook("tb-1");
 
+    expect(syncMocks.hardDeleteTextbookFromCloud).toHaveBeenCalledWith("user-1", "tb-1");
     expect(repositoryMocks.deleteTextbook).toHaveBeenCalledWith("tb-1");
     expect(repositoryMocks.saveTextbook).not.toHaveBeenCalled();
   });

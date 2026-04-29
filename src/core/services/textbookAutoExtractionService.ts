@@ -560,9 +560,29 @@ export function mergeAutoMetadata(
 }
 
 export function parseTocFromOcrText(rawText: string): ParsedTocResult {
+  const normalizeTocLineOcrArtifacts = (line: string): string => {
+    let normalized = line;
+
+    if (/\bclaim\s*,\s*evidence\s*,\s*reasoning\b/i.test(normalized)) {
+      normalized = normalized.replace(/\bC[1I][T7][1I]\b/g, "CER");
+      if (!/^\s*CER\b/i.test(normalized)) {
+        normalized = normalized.replace(/^(\s*)(Claim\s*,\s*Evidence\s*,\s*Reasoning\b)/i, "$1CER $2");
+      }
+    }
+
+    if (/\bgo\s+further\b/i.test(normalized) && /\bdata\s+analysis\s+lab\b/i.test(normalized)) {
+      if (!/^\s*SEP\b/i.test(normalized)) {
+        normalized = normalized.replace(/^(\s*)(Go\s+Further\b)/i, "$1SEP $2");
+      }
+    }
+
+    return normalized;
+  };
+
   const lines = rawText
     .replace(/\r/g, "")
     .split("\n")
+    .map((line) => normalizeTocLineOcrArtifacts(line))
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean);
 

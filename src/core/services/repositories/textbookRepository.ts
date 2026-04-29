@@ -2,8 +2,117 @@ import type { Textbook } from "../../models";
 import { delete as deleteRecord, getAll as getAllRecords, getById, save, STORE_NAMES } from "../db";
 import { normalizeISBN } from "../isbnService";
 
+const LOCALHOST_SHARED_TEXTBOOK_ENDPOINT = "/api/local-textbooks-state";
+const LOCALHOST_SHARED_REQUEST_TIMEOUT_MS = 1200;
+
+let hasAttemptedLocalhostHydration = false;
+let localhostSharedSnapshotAvailable: boolean | null = null;
+
+function isLikelyLocalhostRuntime(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const protocol = window.location.protocol;
+  const hostname = window.location.hostname;
+  if (protocol !== "http:" && protocol !== "https:") {
+    return false;
+  }
+
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+function isTextbookRecord(value: unknown): value is Textbook {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<Textbook>;
+  return typeof candidate.id === "string" && typeof candidate.title === "string";
+}
+
+async function fetchLocalhostSharedTextbooks(): Promise<Textbook[] | null> {
+  if (!isLikelyLocalhostRuntime()) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(LOCALHOST_SHARED_TEXTBOOK_ENDPOINT, {
+      method: "GET",
+      headers: { "Accept": "application/json" },
+      signal: AbortSignal.timeout(LOCALHOST_SHARED_REQUEST_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      localhostSharedSnapshotAvailable = false;
+      return null;
+    }
+
+    const payload = await response.json() as { textbooks?: unknown };
+    if (!Array.isArray(payload.textbooks)) {
+      localhostSharedSnapshotAvailable = false;
+      return null;
+    }
+
+    const textbooks = payload.textbooks.filter(isTextbookRecord);
+    localhostSharedSnapshotAvailable = true;
+    return textbooks;
+  } catch {
+    localhostSharedSnapshotAvailable = false;
+    return null;
+  }
+}
+
+async function hydrateFromLocalhostSharedSnapshotIfNeeded(): Promise<void> {
+  if (hasAttemptedLocalhostHydration) {
+    return;
+  }
+
+  hasAttemptedLocalhostHydration = true;
+  if (!isLikelyLocalhostRuntime()) {
+    return;
+  }
+
+  const existing = await getAllRecords(STORE_NAMES.textbooks);
+  if (existing.length > 0) {
+    return;
+  }
+
+  const shared = await fetchLocalhostSharedTextbooks();
+  if (!shared || shared.length === 0) {
+    return;
+  }
+
+  await Promise.all(shared.map((textbook) => save(STORE_NAMES.textbooks, textbook)));
+}
+
+async function publishLocalhostSharedSnapshotBestEffort(): Promise<void> {
+  if (!isLikelyLocalhostRuntime()) {
+    return;
+  }
+
+  if (localhostSharedSnapshotAvailable === false) {
+    return;
+  }
+
+  try {
+    const textbooks = await getAllRecords(STORE_NAMES.textbooks);
+    const response = await fetch(LOCALHOST_SHARED_TEXTBOOK_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ textbooks }),
+      signal: AbortSignal.timeout(LOCALHOST_SHARED_REQUEST_TIMEOUT_MS),
+    });
+    localhostSharedSnapshotAvailable = response.ok;
+  } catch {
+    localhostSharedSnapshotAvailable = false;
+  }
+}
+
 export async function saveTextbook(textbook: Textbook): Promise<string> {
-  return save(STORE_NAMES.textbooks, textbook);
+  const id = await save(STORE_NAMES.textbooks, textbook);
+  void publishLocalhostSharedSnapshotBestEffort();
+  return id;
 }
 
 export async function getTextbookById(id: string): Promise<Textbook | undefined> {
@@ -16,6 +125,7 @@ export async function getTextbookById(id: string): Promise<Textbook | undefined>
 }
 
 export async function getAll(): Promise<Textbook[]> {
+  await hydrateFromLocalhostSharedSnapshotIfNeeded();
   return getAllRecords(STORE_NAMES.textbooks);
 }
 
@@ -134,6 +244,7 @@ export async function deleteTextbook(id: string): Promise<void> {
   ]);
 
   await deleteRecord(STORE_NAMES.textbooks, id);
+  void publishLocalhostSharedSnapshotBestEffort();
 }
 
   /**

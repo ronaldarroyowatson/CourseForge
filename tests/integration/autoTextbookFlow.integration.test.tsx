@@ -10,6 +10,39 @@ import { TextbookForm } from "../../src/webapp/components/textbooks/TextbookForm
 import { useUIStore } from "../../src/webapp/store/uiStore";
 
 const AUTO_SESSION_DRAFTS_KEY = "courseforge.autoSessionDrafts.v2";
+const SOURCE_OF_TRUTH_COVER_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=";
+
+const SOURCE_OF_TRUTH_COPYRIGHT_OCR_TEXT = [
+  "mheducation.com/prek-12",
+  "McGraw Hill",
+  "Copyright © 2021 McGraw-Hill Education",
+  "Send all inquiries to:",
+  "McGraw-Hill Education",
+  "STEM Learning Solutions Center",
+  "8787 Orion Place",
+  "Columbus, OH 43240",
+  "ISBN: 978-0-07-671685-2",
+  "MHID: 0-07-671685-6",
+].join("\n");
+
+const SOURCE_OF_TRUTH_TOC = {
+  confidence: 0.95,
+  chapters: [
+    {
+      chapterNumber: "31",
+      title: "STARS AND GALAXIES",
+      pageStart: 819,
+      sections: [
+        { sectionNumber: "31.1", title: "Discovering the Universe", pageStart: 819 },
+        { sectionNumber: "31.2", title: "Evolution of Stars", pageStart: 820 },
+        { sectionNumber: "31.3", title: "Galaxies and the Milky Way", pageStart: 825 },
+        { sectionNumber: "31.4", title: "Cosmological Discoveries", pageStart: 832 },
+        { sectionNumber: "", title: "Module Wrap-Up", pageStart: 841 },
+        { sectionNumber: "", title: "STEM Data Analysis Lab", pageStart: 843, pageEnd: 843 },
+      ],
+    },
+  ],
+} satisfies { confidence: number; chapters: TocChapter[] };
 
 const metadataPipelineMocks = vi.hoisted(() => ({
   extractMetadataWithOcrFallbackFromDataUrl: vi.fn(async () => ({
@@ -60,10 +93,58 @@ const coverServiceMocks = vi.hoisted(() => ({
   uploadTextbookCoverFromDataUrl: vi.fn<(textbookId: string, dataUrl: string) => Promise<string>>(async (textbookId) => `cover://${textbookId}`),
 }));
 
+const syncServiceMocks = vi.hoisted(() => ({
+  syncNow: vi.fn(async () => ({
+    success: true,
+    message: "Synced successfully.",
+    retryable: false,
+    permissionDenied: false,
+    throttled: false,
+    writeLoopTriggered: false,
+    writeBudgetExceeded: false,
+    writeCount: 0,
+    writeBudgetLimit: 500,
+    readCount: 0,
+    readBudgetLimit: 5000,
+    readBudgetExceeded: false,
+    retryLimit: 3,
+    errorCode: null,
+    pendingCount: 0,
+  })),
+}));
+
+const metadataCorrectionSyncMocks = vi.hoisted(() => ({
+  syncMetadataCorrectionLearning: vi.fn(async () => ({ message: null })),
+}));
+
+const authMocks = vi.hoisted(() => ({
+  getCurrentUser: vi.fn(() => ({ uid: "teacher-sync" })),
+}));
+
 vi.mock("../../src/core/services/coverImageService", () => ({
   uploadTextbookCoverFromDataUrl: (textbookId: string, dataUrl: string) => coverServiceMocks.uploadTextbookCoverFromDataUrl(textbookId, dataUrl),
   uploadTextbookCoverImage: vi.fn(async () => "cover://mock"),
 }));
+
+vi.mock("../../src/core/services/syncService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/core/services/syncService")>("../../src/core/services/syncService");
+  return {
+    ...actual,
+    syncNow: () => syncServiceMocks.syncNow(),
+  };
+});
+
+vi.mock("../../src/core/services/metadataCorrectionSyncService", () => ({
+  syncMetadataCorrectionLearning: () => metadataCorrectionSyncMocks.syncMetadataCorrectionLearning(),
+}));
+
+vi.mock("../../src/firebase/auth", async () => {
+  const actual = await vi.importActual<typeof import("../../src/firebase/auth")>("../../src/firebase/auth");
+  return {
+    ...actual,
+    getCurrentUser: () => authMocks.getCurrentUser(),
+  };
+});
 
 vi.mock("../../src/webapp/hooks/useRepositories", () => ({
   useRepositories: () => ({
@@ -133,6 +214,28 @@ describe("auto textbook flow integration", () => {
     window.localStorage.removeItem(AUTO_SESSION_DRAFTS_KEY);
     window.localStorage.removeItem("courseforge.autoSessionDraft.v1");
     metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl.mockClear();
+    syncServiceMocks.syncNow.mockClear();
+    metadataCorrectionSyncMocks.syncMetadataCorrectionLearning.mockClear();
+    authMocks.getCurrentUser.mockClear();
+    syncServiceMocks.syncNow.mockResolvedValue({
+      success: true,
+      message: "Synced successfully.",
+      retryable: false,
+      permissionDenied: false,
+      throttled: false,
+      writeLoopTriggered: false,
+      writeBudgetExceeded: false,
+      writeCount: 0,
+      writeBudgetLimit: 500,
+      readCount: 0,
+      readBudgetLimit: 5000,
+      readBudgetExceeded: false,
+      retryLimit: 3,
+      errorCode: null,
+      pendingCount: 0,
+    });
+    metadataCorrectionSyncMocks.syncMetadataCorrectionLearning.mockResolvedValue({ message: null });
+    authMocks.getCurrentUser.mockReturnValue({ uid: "teacher-sync" });
   });
 
   it("switches from Auto setup back to Manual entry", () => {
@@ -461,6 +564,10 @@ describe("auto textbook flow integration", () => {
         expect(confirmSpy).toHaveBeenCalledWith("A textbook with this ISBN already exists. Upload anyway?");
       });
       expect(repositoryMocks.createTextbook).not.toHaveBeenCalled();
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Save Textbook" })).not.toBeDisabled();
+      });
 
       fireEvent.click(screen.getByRole("button", { name: "Save Textbook" }));
 
@@ -811,6 +918,347 @@ describe("auto textbook flow integration", () => {
     expect(repositoryMocks.editChapter).not.toHaveBeenCalled();
     expect(repositoryMocks.editSection).not.toHaveBeenCalled();
     expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("fail-first: completes save and attempts immediate upload even when metadata-learning sync hangs", async () => {
+    const onSaved = vi.fn();
+    const validCoverDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=";
+
+    window.localStorage.setItem(METADATA_CORRECTION_STORAGE_KEYS.optedIn, "true");
+    repositoryMocks.findTextbookByISBN.mockResolvedValue(undefined);
+    metadataCorrectionSyncMocks.syncMetadataCorrectionLearning.mockImplementation(
+      async () => new Promise(() => undefined)
+    );
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={onSaved}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: validCoverDataUrl,
+          tocResult: {
+            confidence: 0.96,
+            chapters: [
+              {
+                chapterNumber: "31",
+                title: "Astronomy",
+                pageStart: 820,
+                sections: [
+                  { sectionNumber: "31.2", title: "Evolution of Stars", pageStart: 825 },
+                  { sectionNumber: "31.3", title: "Galaxies of the Milky Way", pageStart: 832 },
+                  { sectionNumber: "31.4", title: "Cosmology", pageStart: 837 },
+                  { sectionNumber: "", title: "Astrobiological Debates", pageStart: 841 },
+                  { sectionNumber: "", title: "Module Wrap-Up", pageStart: 843, pageEnd: 843 },
+                ],
+              },
+            ],
+          },
+          bypassImageModeration: true,
+          metadataForm: {
+            title: "Inspire Physical Science",
+            grade: "8",
+            gradeBand: "7-9",
+            subject: "Science",
+            edition: "Student",
+            publicationYear: "2026",
+            isbnRaw: "9780076716852",
+          },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+
+    await waitFor(() => {
+      expect(repositoryMocks.createTextbook).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(onSaved).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("shows save and upload progress after pressing Confirm and Save Textbook", async () => {
+    const validCoverDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=";
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: validCoverDataUrl,
+          tocResult: {
+            confidence: 0.93,
+            chapters: [
+              {
+                chapterNumber: "1",
+                title: "Astronomy",
+                sections: [{ sectionNumber: "1.1", title: "Cosmology", pageStart: 12 }],
+              },
+            ],
+          },
+          bypassImageModeration: true,
+          metadataForm: {
+            title: "Inspire Physical Science",
+            grade: "8",
+            gradeBand: "7-9",
+            subject: "Science",
+            edition: "Student",
+            publicationYear: "2026",
+            isbnRaw: "9780076716852",
+          },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+
+    expect(await screen.findByText(/Save and Upload Progress:/i)).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Textbook upload progress" })).toBeInTheDocument();
+  });
+
+  it("retries immediate upload once after sync throttling and reaches completion", async () => {
+    const onSaved = vi.fn();
+
+    syncServiceMocks.syncNow
+      .mockResolvedValueOnce({
+        success: false,
+        message: "Sync skipped to avoid excessive write frequency.",
+        retryable: false,
+        permissionDenied: false,
+        throttled: true,
+        writeLoopTriggered: false,
+        writeBudgetExceeded: false,
+        writeCount: 0,
+        writeBudgetLimit: 500,
+        readCount: 0,
+        readBudgetLimit: 5000,
+        readBudgetExceeded: false,
+        retryLimit: 3,
+        errorCode: null,
+        pendingCount: 1,
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        message: "Sync completed successfully.",
+        retryable: false,
+        permissionDenied: false,
+        throttled: false,
+        writeLoopTriggered: false,
+        writeBudgetExceeded: false,
+        writeCount: 1,
+        writeBudgetLimit: 500,
+        readCount: 0,
+        readBudgetLimit: 5000,
+        readBudgetExceeded: false,
+        retryLimit: 3,
+        errorCode: null,
+        pendingCount: 0,
+      });
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={onSaved}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          ocrDraft: SOURCE_OF_TRUTH_COPYRIGHT_OCR_TEXT,
+          tocResult: SOURCE_OF_TRUTH_TOC,
+          bypassImageModeration: true,
+          metadataForm: {
+            title: "Inspire Physical Science with Earth Science",
+            grade: "9",
+            gradeBand: "7-9",
+            subject: "Science",
+            edition: "Student",
+            publicationYear: "2021",
+            isbnRaw: "978-0-07-671685-2",
+            publisher: "McGraw-Hill Education",
+            publisherLocation: "STEM Learning Solutions Center, 8787 Orion Place, Columbus, OH 43240",
+            mhid: "0-07-671685-6",
+          },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+
+    await waitFor(() => {
+      expect(repositoryMocks.createTextbook).toHaveBeenCalledTimes(1);
+    });
+
+    expect(await screen.findByText(/Upload queued\. Waiting for sync window\./i)).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(syncServiceMocks.syncNow).toHaveBeenCalledTimes(2);
+    }, { timeout: 9000 });
+
+    expect(await screen.findByText(/Upload complete\./i)).toBeInTheDocument();
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains resumable TOC draft when cloud upload stays pending", async () => {
+    const resumableDraftId = "resume-keep-on-upload-pending";
+    const now = Date.now();
+
+    window.localStorage.setItem(
+      AUTO_SESSION_DRAFTS_KEY,
+      JSON.stringify([
+        {
+          id: resumableDraftId,
+          version: 1,
+          savedAt: now,
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          rawOcrText: SOURCE_OF_TRUTH_COPYRIGHT_OCR_TEXT,
+          metadataTitle: "Inspire Physical Science with Earth Science",
+          metadataSubject: "Science",
+          metadataPublisher: "McGraw-Hill Education",
+          metadataFormSnapshot: {
+            title: "Inspire Physical Science with Earth Science",
+            subtitle: "",
+            grade: "9",
+            gradeBand: "7-9",
+            subject: "Science",
+            edition: "Student",
+            publicationYear: "2021",
+            copyrightYear: "2021",
+            isbnRaw: "978-0-07-671685-2",
+            additionalIsbnsCsv: "",
+            seriesName: "",
+            publisher: "McGraw-Hill Education",
+            publisherLocation: "STEM Learning Solutions Center, 8787 Orion Place, Columbus, OH 43240",
+            platformUrl: "",
+            mhid: "0-07-671685-6",
+            authorsCsv: "",
+            tocExtractionConfidence: "0.95",
+          },
+          relatedIsbnsSnapshot: [],
+          step: "toc-editor",
+          stepsCompleted: { cover: true, copyright: true },
+        },
+      ])
+    );
+
+    syncServiceMocks.syncNow.mockResolvedValue({
+      success: false,
+      message: "Signed in successfully, but cloud sync is temporarily unavailable. Local data remains available.",
+      retryable: true,
+      permissionDenied: false,
+      throttled: false,
+      writeLoopTriggered: false,
+      writeBudgetExceeded: false,
+      writeCount: 0,
+      writeBudgetLimit: 500,
+      readCount: 0,
+      readBudgetLimit: 5000,
+      readBudgetExceeded: false,
+      retryLimit: 3,
+      errorCode: null,
+      pendingCount: 1,
+    });
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          tocResult: SOURCE_OF_TRUTH_TOC,
+          metadataForm: {
+            title: "Inspire Physical Science with Earth Science",
+            grade: "9",
+            gradeBand: "7-9",
+            subject: "Science",
+            edition: "Student",
+            publicationYear: "2021",
+            isbnRaw: "978-0-07-671685-2",
+            publisher: "McGraw-Hill Education",
+            publisherLocation: "STEM Learning Solutions Center, 8787 Orion Place, Columbus, OH 43240",
+            mhid: "0-07-671685-6",
+          },
+          bypassImageModeration: true,
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+
+    await waitFor(() => {
+      expect(repositoryMocks.createTextbook).toHaveBeenCalledTimes(1);
+    });
+
+    const savedDraftsRaw = window.localStorage.getItem(AUTO_SESSION_DRAFTS_KEY);
+    expect(savedDraftsRaw).toBeTruthy();
+    const savedDrafts = JSON.parse(savedDraftsRaw ?? "[]") as Array<{ id: string }>;
+    expect(savedDrafts.some((draft) => draft.id === resumableDraftId)).toBe(true);
+  });
+
+  it("source-of-truth: replays OCR-derived cover/copyright/TOC data and saves hierarchy with upload attempt", async () => {
+    const onSaved = vi.fn();
+    repositoryMocks.findTextbookByISBN.mockResolvedValue(undefined);
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={onSaved}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          ocrDraft: SOURCE_OF_TRUTH_COPYRIGHT_OCR_TEXT,
+          tocResult: SOURCE_OF_TRUTH_TOC,
+          tocPages: [
+            {
+              pageIndex: 0,
+              confidence: SOURCE_OF_TRUTH_TOC.confidence,
+              chapters: SOURCE_OF_TRUTH_TOC.chapters,
+            },
+          ],
+          bypassImageModeration: true,
+          metadataForm: {
+            title: "Inspire Physical Science with Earth Science",
+            grade: "9",
+            gradeBand: "7-9",
+            subject: "Science",
+            edition: "Student",
+            publicationYear: "2021",
+            isbnRaw: "978-0-07-671685-2",
+            publisher: "McGraw-Hill Education",
+            publisherLocation: "STEM Learning Solutions Center, 8787 Orion Place, Columbus, OH 43240",
+            mhid: "0-07-671685-6",
+          },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and Save Textbook" }));
+
+    await waitFor(() => {
+      expect(repositoryMocks.createTextbook).toHaveBeenCalledTimes(1);
+    });
+
+    expect(repositoryMocks.createTextbook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Inspire Physical Science with Earth Science",
+        subject: "Science",
+        publicationYear: 2021,
+        isbnRaw: "978-0-07-671685-2",
+      })
+    );
+    expect(repositoryMocks.createChapter).toHaveBeenCalledTimes(1);
+    expect(repositoryMocks.createSection).toHaveBeenCalledTimes(6);
+
+    await waitFor(() => {
+      expect(syncServiceMocks.syncNow).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(onSaved).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("builds live TOC hierarchy preview with computed ranges from OCR text", async () => {

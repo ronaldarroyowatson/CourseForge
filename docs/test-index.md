@@ -1,11 +1,11 @@
 # Test Index
 
-Generated: 2026-04-28T00:39:49.951Z
+Generated: 2026-04-29T02:47:10.796Z
 
 ## Summary
 
-- Total test files: 63
-- Unit test files: 42
+- Total test files: 64
+- Unit test files: 43
 - Integration test files: 19
 - Rules test files: 2
 - Canonical sample files: 5
@@ -45,6 +45,7 @@ Generated: 2026-04-28T00:39:49.951Z
 - tests/core/syncService.hardDeleteTextbookFromCloud.test.ts
 - tests/core/syncService.moderationHold.test.ts
 - tests/core/textbookAutoExtractionService.test.ts
+- tests/core/textbookRepository.crossPortPersistence.test.ts
 - tests/core/textbookRepository.deletePersistence.test.ts
 - tests/core/tocPreviewPipeline.test.ts
 - tests/core/tokenDebugService.test.ts

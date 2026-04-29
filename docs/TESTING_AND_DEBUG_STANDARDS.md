@@ -176,6 +176,9 @@ When changing auto textbook capture, extraction, or TOC parsing, include explici
 - metadata glyph rendering in the auto form: extraction summary and related-ISBN remove controls must render clean symbols (no mojibake)
 - publisher location formatting in form inputs: multi-line extracted addresses must display with visible separators
 - TOC ancillary section handling: unnumbered sections (for example CER, Scientific Methods, Module Wrap-Up) are valid and must infer page end boundaries from neighboring entries, including same-page transitions
+- localhost cross-port textbook persistence: when fallback ports are used, textbook/favorite state created on one localhost port must hydrate on another localhost port
+- save completion resilience: the Auto TOC save action must finish local persistence even if background metadata-learning sync or cloud sync calls are slow/unavailable; upload should be attempted best-effort without blocking save completion
+- local-first cover persistence: creating a textbook with a captured cover must write the textbook locally before Firebase Storage cover upload resolves; the cover URL may attach later as a follow-up local update
 
 Minimum test touchpoints:
 
@@ -183,3 +186,4 @@ Minimum test touchpoints:
 - `tests/core/tocPreviewPipeline.test.ts`
 - `tests/integration/autoTextbookFlow.integration.test.tsx`
 - `tests/core/metadataExtractionPipelineService.test.ts`
+- `tests/core/textbookRepository.crossPortPersistence.test.ts`

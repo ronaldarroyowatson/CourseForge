@@ -98,4 +98,41 @@ describe("TOC preview pipeline", () => {
     expect(moduleWrapUp?.pageStart).toBe(33);
     expect(moduleWrapUp?.pageEnd).toBe(33);
   });
+
+  it("normalizes OCR-misread CER labels from C1T1 in TOC lines", () => {
+    const parsed = parseTocFromOcrText([
+      "MODULE 1: THE NATURE OF SCIENCE",
+      "C1T1 Claim, Evidence, Reasoning 3",
+      "Lesson 1 The Methods of Science 4",
+      "MODULE 2: MOTION 37",
+    ].join("\n"));
+
+    const chapterOne = parsed.chapters[0];
+    expect(chapterOne).toBeDefined();
+    const cer = chapterOne.sections.find((section) => /Claim, Evidence, Reasoning/i.test(section.title));
+    expect(cer).toBeDefined();
+    expect(cer?.title).toContain("CER Claim, Evidence, Reasoning");
+    expect(cer?.title).not.toContain("C1T1");
+  });
+
+  it("restores missing CER and SEP prefixes for canonical ancillary sections", () => {
+    const parsed = parseTocFromOcrText([
+      "MODULE 1: THE NATURE OF SCIENCE",
+      "Claim, Evidence, Reasoning 3",
+      "Scientific Methods 31",
+      "Go Further Data Analysis Lab 37",
+      "MODULE 2: MOTION 38",
+    ].join("\n"));
+
+    const chapterOne = parsed.chapters[0];
+    expect(chapterOne).toBeDefined();
+
+    const cer = chapterOne.sections.find((section) => /Claim, Evidence, Reasoning/i.test(section.title));
+    expect(cer).toBeDefined();
+    expect(cer?.title).toBe("CER Claim, Evidence, Reasoning");
+
+    const sep = chapterOne.sections.find((section) => /Go Further Data Analysis Lab/i.test(section.title));
+    expect(sep).toBeDefined();
+    expect(sep?.title).toBe("SEP Go Further Data Analysis Lab");
+  });
 });

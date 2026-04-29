@@ -45,6 +45,7 @@ import {
   type MetadataPipelineResult,
 } from "../../../core/services/metadataExtractionPipelineService";
 import { syncMetadataCorrectionLearning } from "../../../core/services/metadataCorrectionSyncService";
+import { syncNow } from "../../../core/services/syncService";
 import { TocPreviewTree } from "./tocPreview/TocPreviewTree";
 import type { TocPreviewNodeModel } from "./tocPreview/PageRangeCalculator";
 import { useRepositories } from "../../hooks/useRepositories";
@@ -56,6 +57,8 @@ import { getCurrentUser } from "../../../firebase/auth";
 type AutoFlowStep = "cover" | "title" | "toc" | "toc-editor";
 
 const RELATED_ISBN_TYPES: RelatedIsbnType[] = ["student", "teacher", "digital", "workbook", "assessment", "other"];
+const IMMEDIATE_UPLOAD_SYNC_TIMEOUT_MS = 4500;
+const IMMEDIATE_UPLOAD_SYNC_RETRY_DELAY_MS = 5500;
 
 interface AutoTextbookSetupFlowProps {
   runtime?: "webapp" | "extension";
@@ -89,6 +92,12 @@ interface UploadPreviewState {
   editableOcrText: string;
   metadataResult: MetadataResult | null;
   pipelineResult: MetadataPipelineResult | null;
+}
+
+interface SaveUploadProgressState {
+  visible: boolean;
+  percent: number;
+  detail: string;
 }
 
 interface CaptureResult {
@@ -998,6 +1007,11 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     editableOcrText: "",
     metadataResult: null,
     pipelineResult: null,
+  });
+  const [saveUploadProgress, setSaveUploadProgress] = useState<SaveUploadProgressState>({
+    visible: false,
+    percent: 0,
+    detail: "",
   });
   const imageRef = useRef<HTMLImageElement | null>(null);
   const selectionResolverRef = useRef<((value: SelectionRect | null) => void) | null>(null);
@@ -2339,6 +2353,15 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     void handleCaptureToc();
   }
 
+  function updateSaveUploadProgress(percent: number, detail: string): void {
+    const nextPercent = Math.max(0, Math.min(100, Math.trunc(percent)));
+    setSaveUploadProgress({
+      visible: true,
+      percent: nextPercent,
+      detail,
+    });
+  }
+
   async function handleSaveAutoSetup(): Promise<void> {
     const traceId = createAutoFlowTraceId("auto-flow-save");
     emitAutoFlowDiagnostic("save_started", {
@@ -2350,10 +2373,12 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       },
     });
     setErrorMessage(null);
+    updateSaveUploadProgress(5, "Preparing textbook save...");
 
     const parsedYear = Number(metadataForm.publicationYear);
     if (!Number.isInteger(parsedYear) || parsedYear <= 0) {
       setErrorMessage("Publication year must be a valid whole number.");
+      setSaveUploadProgress({ visible: false, percent: 0, detail: "" });
       emitAutoFlowDiagnostic("save_validation_failed", {
         level: "warning",
         traceId,
@@ -2364,6 +2389,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
     if (!metadataForm.title.trim()) {
       setErrorMessage("Title is required before saving.");
+      setSaveUploadProgress({ visible: false, percent: 0, detail: "" });
       emitAutoFlowDiagnostic("save_validation_failed", {
         level: "warning",
         traceId,
@@ -2374,6 +2400,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
     if (!coverImageDataUrl) {
       setErrorMessage("Capture and accept a cover image before saving Auto setup.");
+      setSaveUploadProgress({ visible: false, percent: 0, detail: "" });
       emitAutoFlowDiagnostic("save_validation_failed", {
         level: "warning",
         traceId,
@@ -2404,6 +2431,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
     try {
       setIsBusy(true);
+      updateSaveUploadProgress(12, "Validating capture and moderation checks...");
 
       const moderationContext = [
         metadataForm.title,
@@ -2441,6 +2469,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             reason: imageModeration.reason,
           },
         });
+        setSaveUploadProgress({ visible: false, percent: 0, detail: "" });
         return;
       }
 
@@ -2466,8 +2495,11 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
             isbn: trimmedIsbn,
           },
         });
+        setSaveUploadProgress({ visible: false, percent: 0, detail: "" });
         return;
       }
+
+      updateSaveUploadProgress(30, "Saving textbook data locally...");
 
       const nextTextbookChanges = {
         originalLanguage: language,
@@ -2635,9 +2667,20 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         );
       }
 
-      clearPersistedCaptureUsage(draftKeyRef.current);
-      setResumableDrafts(deleteAutoSessionDraft(activeSessionDraftIdRef.current));
-      activeSessionDraftIdRef.current = createAutoFlowTraceId("auto-draft");
+      updateSaveUploadProgress(60, "Textbook saved locally. Starting cloud upload...");
+
+      let savedDraftArtifactsCleared = false;
+      const clearSavedDraftArtifacts = (): void => {
+        if (savedDraftArtifactsCleared) {
+          return;
+        }
+
+        clearPersistedCaptureUsage(draftKeyRef.current);
+        setResumableDrafts(deleteAutoSessionDraft(activeSessionDraftIdRef.current));
+        activeSessionDraftIdRef.current = createAutoFlowTraceId("auto-draft");
+        savedDraftArtifactsCleared = true;
+      };
+
       appendDebugLogEntry({
         eventType: "user_action",
         message: "Auto textbook setup saved.",
@@ -2663,14 +2706,90 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         setDuplicateMatch(null);
       }
 
+      if (!requiresAdminReview) {
+        updateSaveUploadProgress(72, "Cloud upload started.");
+        void (async () => {
+          try {
+            const runImmediateSyncAttempt = async () => {
+              return Promise.race([
+                syncNow(),
+                new Promise<null>((resolve) => {
+                  setTimeout(() => resolve(null), IMMEDIATE_UPLOAD_SYNC_TIMEOUT_MS);
+                }),
+              ]);
+            };
+
+            const immediateSyncResult = await runImmediateSyncAttempt();
+
+            if (!immediateSyncResult) {
+              updateSaveUploadProgress(86, "Upload started. Waiting for cloud response...");
+              setInfoMessage((current) => (
+                current
+                  ? `${current} Cloud upload is still running and will retry automatically if needed.`
+                  : "Saved locally. Cloud upload is still running and will retry automatically if needed."
+              ));
+            } else if (immediateSyncResult.throttled) {
+              updateSaveUploadProgress(80, "Upload queued. Waiting for sync window...");
+              await new Promise<void>((resolve) => {
+                setTimeout(() => resolve(), IMMEDIATE_UPLOAD_SYNC_RETRY_DELAY_MS);
+              });
+
+              const retrySyncResult = await runImmediateSyncAttempt();
+
+              if (!retrySyncResult) {
+                updateSaveUploadProgress(90, "Upload started. Sync pending retry.");
+                setInfoMessage((current) => (
+                  current
+                    ? `${current} Cloud upload still pending and will retry automatically.`
+                    : "Saved locally. Cloud upload still pending and will retry automatically."
+                ));
+              } else if (!retrySyncResult.success) {
+                updateSaveUploadProgress(90, "Upload started. Sync pending retry.");
+                setInfoMessage((current) => (
+                  current
+                    ? `${current} Cloud upload pending: ${retrySyncResult.message}`
+                    : `Saved locally. Cloud upload pending: ${retrySyncResult.message}`
+                ));
+              } else {
+                clearSavedDraftArtifacts();
+                updateSaveUploadProgress(100, "Upload complete.");
+              }
+            } else if (!immediateSyncResult.success) {
+              updateSaveUploadProgress(90, "Upload started. Sync pending retry.");
+              setInfoMessage((current) => (
+                current
+                  ? `${current} Cloud upload pending: ${immediateSyncResult.message}`
+                  : `Saved locally. Cloud upload pending: ${immediateSyncResult.message}`
+              ));
+            } else {
+              clearSavedDraftArtifacts();
+              updateSaveUploadProgress(100, "Upload complete.");
+            }
+          } catch {
+            updateSaveUploadProgress(90, "Upload started. Retrying in background.");
+            setInfoMessage((current) => (
+              current
+                ? `${current} Cloud upload will retry automatically.`
+                : "Saved locally. Cloud upload will retry automatically."
+            ));
+          }
+        })();
+      } else {
+        clearSavedDraftArtifacts();
+        updateSaveUploadProgress(100, "Saved locally. Upload blocked pending admin review.");
+      }
+
       if (isMetadataCorrectionSharingEnabled()) {
-        const syncResult = await syncMetadataCorrectionLearning({
+        void syncMetadataCorrectionLearning({
           optedIn: true,
           maxPushRecords: 30,
+        }).then((syncResult) => {
+          if (syncResult.message) {
+            setInfoMessage((current) => (current ? `${current} ${syncResult.message}` : syncResult.message));
+          }
+        }).catch(() => {
+          // Metadata-learning sync is best-effort and should not block textbook save.
         });
-        if (syncResult.message) {
-          setInfoMessage(syncResult.message);
-        }
       }
 
       onSaved();
@@ -2684,6 +2803,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       });
     } catch {
       setErrorMessage("Unable to save Auto setup. Please verify metadata and try again.");
+      updateSaveUploadProgress(0, "Save failed before upload could start.");
       emitAutoFlowDiagnostic("save_failed", {
         level: "error",
         traceId,
@@ -3322,6 +3442,19 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
               Back to TOC Capture
             </button>
           </div>
+          {saveUploadProgress.visible ? (
+            <div className="auto-save-upload-progress" role="status" aria-live="polite">
+              <p>
+                Save and Upload Progress: {saveUploadProgress.percent}% - {saveUploadProgress.detail}
+              </p>
+              <progress
+                className="auto-save-upload-progress__bar"
+                max={100}
+                value={saveUploadProgress.percent}
+                aria-label="Textbook upload progress"
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
 

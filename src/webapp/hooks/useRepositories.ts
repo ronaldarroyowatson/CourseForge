@@ -291,15 +291,36 @@ export function useRepositories() {
   const createTextbook = useCallback(async (input: CreateTextbookInput): Promise<string> => {
     const textbook = buildTextbookFromInput(input);
 
-    // Upload cover image if provided as a file or data-URL
-    if (input.coverFile) {
-      textbook.coverImageUrl = await uploadTextbookCoverImage(textbook.id, input.coverFile);
-    } else if (input.coverDataUrl) {
-      textbook.coverImageUrl = await uploadTextbookCoverFromDataUrl(textbook.id, input.coverDataUrl);
-    }
-
     const id = await saveTextbook(textbook);
     markLocalChange();
+
+    // Save locally first so textbook creation cannot block on network storage.
+    if (input.coverFile) {
+      void uploadTextbookCoverImage(textbook.id, input.coverFile)
+        .then(async (coverImageUrl) => {
+          await updateTextbook(textbook.id, { coverImageUrl });
+          markLocalChange();
+        })
+        .catch((error) => {
+          console.warn("[CourseForge][TextbookCreate] Cover upload failed after local save.", {
+            textbookId: textbook.id,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+    } else if (input.coverDataUrl) {
+      void uploadTextbookCoverFromDataUrl(textbook.id, input.coverDataUrl)
+        .then(async (coverImageUrl) => {
+          await updateTextbook(textbook.id, { coverImageUrl });
+          markLocalChange();
+        })
+        .catch((error) => {
+          console.warn("[CourseForge][TextbookCreate] Cover upload failed after local save.", {
+            textbookId: textbook.id,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+    }
+
     return id;
   }, [markLocalChange]);
 

@@ -2,7 +2,7 @@
     "name":  "CourseForge",
     "version":  "1.5.8",
     "packageType":  "portable",
-    "createdAtUtc":  "2026-04-29T23:03:32.3849443Z",
+    "createdAtUtc":  "2026-04-29T23:07:28.2880139Z",
     "includes":  [
                      "webapp/",
                      "extension/",

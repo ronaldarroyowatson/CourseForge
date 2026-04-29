@@ -1100,8 +1100,8 @@ describe("auto textbook flow integration", () => {
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
-  it("retains resumable TOC draft when cloud upload stays pending", async () => {
-    const resumableDraftId = "resume-keep-on-upload-pending";
+  it("clears resumable TOC draft immediately after local save, even when cloud upload fails", async () => {
+    const resumableDraftId = "resume-clear-on-local-save";
     const now = Date.now();
 
     window.localStorage.setItem(
@@ -1192,10 +1192,11 @@ describe("auto textbook flow integration", () => {
       expect(repositoryMocks.createTextbook).toHaveBeenCalledTimes(1);
     });
 
+    // Draft should be cleared immediately after local save, regardless of cloud sync status.
+    // This prevents duplicate entries: stale draft in Auto Add queue + fresh textbook in main list.
     const savedDraftsRaw = window.localStorage.getItem(AUTO_SESSION_DRAFTS_KEY);
-    expect(savedDraftsRaw).toBeTruthy();
     const savedDrafts = JSON.parse(savedDraftsRaw ?? "[]") as Array<{ id: string }>;
-    expect(savedDrafts.some((draft) => draft.id === resumableDraftId)).toBe(true);
+    expect(savedDrafts.some((draft) => draft.id === resumableDraftId)).toBe(false);
   });
 
   it("source-of-truth: replays OCR-derived cover/copyright/TOC data and saves hierarchy with upload attempt", async () => {

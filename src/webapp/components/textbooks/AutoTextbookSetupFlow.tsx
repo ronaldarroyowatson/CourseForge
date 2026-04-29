@@ -2681,6 +2681,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
         savedDraftArtifactsCleared = true;
       };
 
+      // Clear Auto Add draft immediately after local save succeeds, before upload starts.
+      // This ensures the Auto Add queue won't have a stale entry if cloud upload fails.
+      clearSavedDraftArtifacts();
+
       appendDebugLogEntry({
         eventType: "user_action",
         message: "Auto textbook setup saved.",
@@ -2751,7 +2755,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                     : `Saved locally. Cloud upload pending: ${retrySyncResult.message}`
                 ));
               } else {
-                clearSavedDraftArtifacts();
                 updateSaveUploadProgress(100, "Upload complete.");
               }
             } else if (!immediateSyncResult.success) {
@@ -2762,7 +2765,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                   : `Saved locally. Cloud upload pending: ${immediateSyncResult.message}`
               ));
             } else {
-              clearSavedDraftArtifacts();
               updateSaveUploadProgress(100, "Upload complete.");
             }
           } catch {
@@ -2775,7 +2777,6 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           }
         })();
       } else {
-        clearSavedDraftArtifacts();
         updateSaveUploadProgress(100, "Saved locally. Upload blocked pending admin review.");
       }
 

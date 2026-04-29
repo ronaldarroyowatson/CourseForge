@@ -4,6 +4,7 @@ import { PencilIcon } from "../icons/PencilIcon";
 import { StarIcon } from "../icons/StarIcon";
 
 import type { Textbook } from "../../../core/models";
+import { syncNow } from "../../../core/services/syncService";
 import { useRepositories } from "../../hooks/useRepositories";
 import { useUIStore } from "../../store/uiStore";
 
@@ -55,6 +56,7 @@ export function TextbookList({
   const { removeTextbook, toggleTextbookFavorite, toggleTextbookArchive } = useRepositories();
   const { setSelectedTextbook } = useUIStore();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [retrySyncInProgress, setRetrySyncInProgress] = useState<Set<string>>(new Set());
 
   async function handleDelete(id: string): Promise<void> {
     onDeleted(id);
@@ -64,6 +66,23 @@ export function TextbookList({
     } catch {
       setErrorMessage("Unable to delete textbook.");
       onRefresh();
+    }
+  }
+
+  async function handleRetrySync(textbookId: string): Promise<void> {
+    setRetrySyncInProgress((prev) => new Set(prev).add(textbookId));
+
+    try {
+      await syncNow();
+      onRefresh();
+    } catch {
+      setErrorMessage("Unable to retry cloud sync. Please try again.");
+    } finally {
+      setRetrySyncInProgress((prev) => {
+        const next = new Set(prev);
+        next.delete(textbookId);
+        return next;
+      });
     }
   }
 
@@ -157,6 +176,18 @@ export function TextbookList({
               </p>
               <p className="textbook-row__meta">
                 <span className={syncBadge.className}>{syncBadge.label}</span>
+                {textbook.pendingSync && (
+                  <button
+                    type="button"
+                    onClick={() => void handleRetrySync(textbook.id)}
+                    disabled={retrySyncInProgress.has(textbook.id)}
+                    title="Retry cloud sync"
+                    aria-label="Retry cloud sync"
+                    className="btn-retry-sync"
+                  >
+                    {retrySyncInProgress.has(textbook.id) ? "Retrying..." : "Retry Sync"}
+                  </button>
+                )}
               </p>
               <div className="textbook-row__actions">
                 <button

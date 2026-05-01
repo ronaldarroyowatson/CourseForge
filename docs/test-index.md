@@ -1,11 +1,11 @@
 # Test Index
 
-Generated: 2026-04-29T22:50:35.223Z
+Generated: 2026-05-01T02:33:01.371Z
 
 ## Summary
 
-- Total test files: 65
-- Unit test files: 43
+- Total test files: 66
+- Unit test files: 44
 - Integration test files: 20
 - Rules test files: 2
 - Canonical sample files: 5
@@ -41,6 +41,7 @@ Generated: 2026-04-29T22:50:35.223Z
 - tests/core/programCli.dsc.test.ts
 - tests/core/programCli.plugins.test.ts
 - tests/core/semanticTokens.test.ts
+- tests/core/syncBatchUpload.test.ts
 - tests/core/syncNow.safety.test.ts
 - tests/core/syncService.hardDeleteTextbookFromCloud.test.ts
 - tests/core/syncService.moderationHold.test.ts

@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-  "version": "1.5.8",
+  "version": "1.5.9",
   "private": true,
   "type": "module",
   "engines": {
@@ -31,7 +31,7 @@
     "test:core": "tsx tests/core/runCoreTests.ts",
     "test:unit": "vitest run tests/core",
     "test:integration": "vitest run tests/integration",
-    "test:e2e:webapp": "vitest run tests/integration/app.integration.test.tsx tests/integration/autoTextbookFlow.integration.test.tsx tests/integration/documentIngest.panel.integration.test.tsx tests/integration/startupSync.probe.test.tsx tests/integration/settings.updater.integration.test.tsx",
+    "test:e2e:webapp": "vitest run tests/integration/app.integration.test.tsx tests/integration/autoTextbookFlow.integration.test.tsx tests/integration/documentIngest.panel.integration.test.tsx tests/integration/startupSync.probe.test.tsx tests/integration/settings.updater.integration.test.tsx tests/integration/textbookSyncRetry.integration.test.tsx",
     "test:e2e:ocr": "vitest run tests/core/autoOcrService.test.ts tests/core/metadataExtractionPipelineService.test.ts tests/integration/autoTextbookFlow.integration.test.tsx",
     "test:e2e:extension": "vitest run tests/integration/extension.auth.communication.integration.test.ts tests/integration/extension.repositories.integration.test.ts",
     "test:e2e:autoupdate": "vitest run tests/integration/auto-update-portable.integration.test.ts tests/integration/auto-update-launcher.integration.test.ts tests/integration/update-status-server.integration.test.ts tests/integration/settings.updater.integration.test.tsx",

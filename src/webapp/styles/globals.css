@@ -714,6 +714,57 @@ body {
   border-color: var(--status-draft-border);
 }
 
+.textbook-retry-progress {
+  margin-top: 0.35rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+  background: rgba(26, 43, 65, 0.2);
+}
+
+.textbook-retry-progress__detail {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.textbook-retry-progress__bar {
+  width: 100%;
+  margin-top: 0.35rem;
+  height: 0.58rem;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.textbook-retry-progress__bar::-webkit-progress-bar {
+  background: rgba(125, 149, 177, 0.25);
+  border-radius: 999px;
+}
+
+.textbook-retry-progress__bar::-webkit-progress-value {
+  background: linear-gradient(90deg, #4c9eff, #2fd1b7);
+  border-radius: 999px;
+}
+
+.textbook-retry-progress__bar::-moz-progress-bar {
+  background: linear-gradient(90deg, #4c9eff, #2fd1b7);
+  border-radius: 999px;
+}
+
+.textbook-retry-progress--success {
+  border-color: var(--status-approved-border);
+  background: var(--status-approved-bg);
+}
+
+.textbook-retry-progress--warning {
+  border-color: var(--status-submitted-border);
+  background: var(--status-submitted-bg);
+}
+
+.textbook-retry-progress--error {
+  border-color: var(--status-blocked-border);
+  background: var(--status-blocked-bg);
+}
+
 .textbook-row p button {
   margin-top: 0.4rem;
 }

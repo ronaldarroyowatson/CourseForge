@@ -37,7 +37,8 @@ const WRITE_LOOP_WINDOW_MS = 500;
 // Prevent back-to-back sync invocations from flooding Firestore writes.
 const SYNC_THROTTLE_MS = 5000;
 // Session budget guardrail to avoid runaway browser-side sync writes.
-const DEFAULT_WRITE_BUDGET_LIMIT = Number(viteEnv?.VITE_SYNC_WRITE_BUDGET ?? "500");
+const DEFAULT_WRITE_BUDGET_LIMIT = Number(viteEnv?.VITE_SYNC_WRITE_BUDGET ?? "5000");
+const DEFAULT_WRITE_BATCH_LIMIT = Number(viteEnv?.VITE_SYNC_WRITE_BATCH_LIMIT ?? "120");
 const DEFAULT_READ_BUDGET_LIMIT = Number(viteEnv?.VITE_SYNC_READ_BUDGET ?? "5000");
 const DEFAULT_RETRY_LIMIT = 3;
 const WRITE_BUDGET_WARNING = "Cloud sync paused to prevent excessive writes. Please review your data or try again later.";
@@ -53,7 +54,27 @@ let writeBudgetDateKey = "";
 let readBudgetExceeded = false;
 let sessionReadCount = 0;
 let readBudgetDateKey = "";
+let syncRunWriteCount = 0;
+let writeBatchLimitReached = false;
 let syncContext: { uid: string | null; isAdmin: boolean | null } = { uid: null, isAdmin: null };
+
+// Number of consecutive batch-limit windows before a textbook is considered stalled.
+const BATCH_STALL_WINDOW_COUNT = 3;
+// Session-level stall window counters per textbook. Resets on page reload.
+const textbookStalledWindowCount = new Map<string, number>();
+
+function beginWriteBatchRun(): void {
+  syncRunWriteCount = 0;
+  writeBatchLimitReached = false;
+}
+
+export function getSyncWriteBatchLimit(): number {
+  return DEFAULT_WRITE_BATCH_LIMIT;
+}
+
+export function getSyncThrottleWindowMs(): number {
+  return SYNC_THROTTLE_MS;
+}
 
 function getUtcDateKey(now = new Date()): string {
   const year = now.getUTCFullYear();
@@ -122,7 +143,10 @@ function refreshDailyWriteBudgetState(): void {
   if (persisted && persisted.dateKey === currentDateKey) {
     writeBudgetDateKey = persisted.dateKey;
     sessionWriteCount = persisted.writeCount;
-    writeBudgetExceeded = persisted.exceeded || persisted.writeCount >= DEFAULT_WRITE_BUDGET_LIMIT;
+    writeBudgetExceeded = persisted.writeCount >= DEFAULT_WRITE_BUDGET_LIMIT;
+    if (persisted.exceeded !== writeBudgetExceeded) {
+      persistDailyWriteBudgetState();
+    }
     return;
   }
 
@@ -316,6 +340,16 @@ function shouldSkipWriteForLoop(path: string): boolean {
 function hasWriteBudgetCapacity(path: string, payload: unknown): boolean {
   refreshDailyWriteBudgetState();
 
+  if (writeBatchLimitReached || syncRunWriteCount >= DEFAULT_WRITE_BATCH_LIMIT) {
+    writeBatchLimitReached = true;
+    logSyncEvent("write:batch-limit-reached", path, {
+      payload,
+      syncRunWriteCount,
+      writeBatchLimit: DEFAULT_WRITE_BATCH_LIMIT,
+    });
+    return false;
+  }
+
   if (writeBudgetExceeded || sessionWriteCount >= DEFAULT_WRITE_BUDGET_LIMIT) {
     writeBudgetExceeded = true;
     persistDailyWriteBudgetState();
@@ -358,6 +392,40 @@ export function resetSyncSafetyStateForTests(): void {
   readBudgetExceeded = false;
   sessionReadCount = 0;
   readBudgetDateKey = getUtcDateKey();
+  syncRunWriteCount = 0;
+  writeBatchLimitReached = false;
+  textbookStalledWindowCount.clear();
+}
+
+/**
+ * Test-only helper to reset per-textbook stall window counters.
+ */
+export function resetTextbookBatchStateForTests(): void {
+  textbookStalledWindowCount.clear();
+}
+
+/**
+ * Test-only helper to read how many batch windows a textbook has stalled on.
+ */
+export function getTextbookStalledWindowCountForTests(textbookId: string): number {
+  return textbookStalledWindowCount.get(textbookId) ?? 0;
+}
+
+/**
+ * Sort textbooks so that in-progress uploads are finished before starting new ones.
+ * Priority order: in_progress (0) → new/complete/undefined (1) → invalid (2) → stalled (3).
+ * Stalled textbooks are placed last so other textbooks can complete first.
+ */
+export function prioritizeTextbooksForUpload<T extends { id: string; uploadStatus?: string }>(
+  textbooks: T[]
+): T[] {
+  function priority(status: string | undefined): number {
+    if (status === "in_progress") return 0;
+    if (!status || status === "complete") return 1;
+    if (status === "invalid") return 2;
+    return 3; // stalled
+  }
+  return [...textbooks].sort((a, b) => priority(a.uploadStatus) - priority(b.uploadStatus));
 }
 
 /**
@@ -1043,6 +1111,10 @@ async function deleteCloudStoreItem<T extends SyncStoreName>(
   item: CourseForgeEntityMap[T],
   indexes: HierarchyIndexes
 ): Promise<boolean> {
+  if (writeBatchLimitReached) {
+    return false;
+  }
+
   const resolved = getDocPathFromStoreItem(storeName, item, indexes);
   if (!resolved) {
     return false;
@@ -1069,6 +1141,7 @@ async function deleteCloudStoreItem<T extends SyncStoreName>(
   try {
     await deleteDoc(doc(firestoreDb, path));
     sessionWriteCount += 1;
+    syncRunWriteCount += 1;
     persistDailyWriteBudgetState();
     logSyncEvent("delete:success", path, { id: item.id, storeName });
     return true;
@@ -1085,6 +1158,10 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
   indexes: HierarchyIndexes,
   userPolicy?: UserCloudSyncPolicy
 ): Promise<boolean> {
+  if (writeBatchLimitReached) {
+    return false;
+  }
+
   if (userPolicy?.isBlocked) {
     logSyncEvent("write:blocked-user-policy", `cloud/${storeName}/${item.id}`, {
       userId,
@@ -1140,6 +1217,7 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
   try {
     await setDoc(doc(firestoreDb, path), cloudRecord, { merge: true });
     sessionWriteCount += 1;
+    syncRunWriteCount += 1;
     persistDailyWriteBudgetState();
     logSyncEvent("write:success", path, { id: item.id });
     return true;
@@ -1147,6 +1225,15 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
     logSyncEvent("write:error", path, cloudRecord, error);
     throw error;
   }
+}
+
+function recordBatchWindowHitForTextbook(textbookId: string): void {
+  const current = textbookStalledWindowCount.get(textbookId) ?? 0;
+  textbookStalledWindowCount.set(textbookId, current + 1);
+}
+
+function shouldSkipStalledTextbookThisSession(textbookId: string): boolean {
+  return (textbookStalledWindowCount.get(textbookId) ?? 0) >= BATCH_STALL_WINDOW_COUNT;
 }
 
 export async function uploadLocalChanges(userId: string): Promise<void> {
@@ -1167,43 +1254,201 @@ export async function uploadLocalChanges(userId: string): Promise<void> {
     await migrateLocalHierarchyData();
     const indexes = await buildHierarchyIndexes();
 
-    await Promise.all(
-      SYNC_STORES.map(async (storeName) => {
-        const localItems = await fetchLocalStore(storeName);
-        const changedItems = localItems.filter((item) => {
-          return item.pendingSync || !item.userId;
-        });
+    // Load all pending items from all stores upfront.
+    const allItemsByStore = new Map<SyncStoreName, SyncEntity[]>();
+    for (const storeName of SYNC_STORES) {
+      const localItems = await fetchLocalStore(storeName);
+      allItemsByStore.set(storeName, localItems.filter((item) => item.pendingSync || !item.userId));
+    }
 
-        await Promise.all(
-          changedItems.map(async (item) => {
-            if (isDeletedEntity(item)) {
-              const deletedFromCloud = await deleteCloudStoreItem(storeName, {
-                ...item,
-                userId,
-              } as CourseForgeEntityMap[typeof storeName], indexes);
+    // Group pending items by textbook ID so we can complete one textbook before starting the next.
+    const itemsByTextbook = new Map<string, Array<{ storeName: SyncStoreName; item: SyncEntity }>>();
+    const orphanedItems: Array<{ storeName: SyncStoreName; item: SyncEntity }> = [];
 
-              if (deletedFromCloud) {
-                await deleteLocalStoreItem(storeName, item.id);
-              }
-              return;
-            }
+    for (const [storeName, items] of allItemsByStore) {
+      for (const item of items) {
+        const textbook = resolveTextbookForEntity(storeName, item, indexes);
+        if (textbook?.id) {
+          if (!itemsByTextbook.has(textbook.id)) {
+            itemsByTextbook.set(textbook.id, []);
+          }
+          itemsByTextbook.get(textbook.id)!.push({ storeName, item });
+        } else {
+          orphanedItems.push({ storeName, item });
+        }
+      }
+    }
 
-            const synced = {
-              ...item,
-              userId,
-              pendingSync: false,
-              source: "cloud" as const,
-              lastModified: item.lastModified ?? toIsoNow(),
-            } as CourseForgeEntityMap[typeof storeName];
+    // Build a textbook lookup and sort by upload priority (in_progress first, stalled last).
+    const allTextbooks = await fetchLocalStore(STORE_NAMES.textbooks);
+    const textbookMap = new Map(allTextbooks.map((tb) => [tb.id, tb]));
 
-            const wroteToCloud = await saveCloudStoreItem(storeName, userId, synced, indexes, userPolicy);
-            if (wroteToCloud) {
-              await saveLocalStoreItem(storeName, synced);
-            }
-          })
+    const sortedTextbookIds = prioritizeTextbooksForUpload(
+      [...itemsByTextbook.keys()].map((id) => ({
+        id,
+        uploadStatus: textbookMap.get(id)?.uploadStatus,
+      }))
+    ).map((t) => t.id);
+
+    // Process each textbook group: finish one completely before starting the next.
+    for (const textbookId of sortedTextbookIds) {
+      if (writeBatchLimitReached) {
+        break;
+      }
+
+      const textbook = textbookMap.get(textbookId);
+
+      // Stalled textbooks are placed last; skip them if the stall count is already maxed
+      // out this session (they will be retried in a future session).
+      if (textbook?.uploadStatus === "stalled" && shouldSkipStalledTextbookThisSession(textbookId)) {
+        logSyncEvent("upload:stalled-skip", `textbooks/${textbookId}`, { textbookId });
+        continue;
+      }
+
+      const textbookItems = itemsByTextbook.get(textbookId) ?? [];
+
+      // Mark the textbook as in_progress (if not already) so a crash or shutdown can be
+      // detected on the next session and the textbook is resumed with priority.
+      if (textbook && textbook.uploadStatus !== "in_progress") {
+        const now = toIsoNow();
+        const updated: CourseForgeEntityMap["textbooks"] = {
+          ...textbook,
+          uploadStatus: "in_progress",
+          uploadStartedAt: textbook.uploadStartedAt ?? now,
+          uploadLastBatchAt: now,
+          uploadIncompleteReason: "Upload in progress.",
+          pendingSync: true,
+        };
+        await saveLocalStoreItem(STORE_NAMES.textbooks, updated);
+        textbookMap.set(textbookId, updated);
+      }
+
+      // Upload all entities for this textbook in hierarchy order (textbook → chapters → … → keyIdeas).
+      const STORE_ORDER = Object.fromEntries(SYNC_STORES.map((s, i) => [s, i]));
+      const sortedItems = [...textbookItems].sort(
+        (a, b) => (STORE_ORDER[a.storeName] ?? 99) - (STORE_ORDER[b.storeName] ?? 99)
+      );
+
+      let allUploaded = true;
+      let anyInvalidPath = false;
+
+      for (const { storeName, item } of sortedItems) {
+        if (writeBatchLimitReached) {
+          allUploaded = false;
+          break;
+        }
+
+        if (isDeletedEntity(item)) {
+          const deletedFromCloud = await deleteCloudStoreItem(
+            storeName,
+            { ...item, userId } as CourseForgeEntityMap[typeof storeName],
+            indexes
+          );
+          if (deletedFromCloud) {
+            await deleteLocalStoreItem(storeName, item.id);
+          }
+          continue;
+        }
+
+        // Detect invalid path early so we can flag the textbook accurately.
+        const resolved = getDocPathFromStoreItem(storeName, item, indexes);
+        if (!resolved) {
+          anyInvalidPath = true;
+          continue;
+        }
+
+        const synced = {
+          ...item,
+          userId,
+          pendingSync: false,
+          source: "cloud" as const,
+          lastModified: item.lastModified ?? toIsoNow(),
+        } as CourseForgeEntityMap[typeof storeName];
+
+        const wroteToCloud = await saveCloudStoreItem(storeName, userId, synced, indexes, userPolicy);
+        if (wroteToCloud) {
+          await saveLocalStoreItem(storeName, synced);
+        } else {
+          allUploaded = false;
+        }
+      }
+
+      // Persist the resulting upload state to local storage for diagnostics and resume logic.
+      const currentTextbook = textbookMap.get(textbookId);
+      if (currentTextbook) {
+        const now = toIsoNow();
+        let updated: CourseForgeEntityMap["textbooks"];
+
+        if (!allUploaded) {
+          recordBatchWindowHitForTextbook(textbookId);
+          if (shouldSkipStalledTextbookThisSession(textbookId)) {
+            updated = {
+              ...currentTextbook,
+              uploadStatus: "stalled",
+              uploadLastBatchAt: now,
+              uploadStalledAt: now,
+              uploadIncompleteReason: `Upload stalled after ${BATCH_STALL_WINDOW_COUNT} consecutive batch windows without completing.`,
+            };
+          } else {
+            updated = {
+              ...currentTextbook,
+              uploadStatus: "in_progress",
+              uploadLastBatchAt: now,
+              uploadIncompleteReason: "Batch limit reached; remaining items will upload in the next sync window.",
+            };
+          }
+        } else if (anyInvalidPath) {
+          updated = {
+            ...currentTextbook,
+            uploadStatus: "invalid",
+            uploadLastBatchAt: now,
+            uploadIncompleteReason: "Some entities had unresolvable document paths and were skipped.",
+          };
+        } else {
+          updated = {
+            ...currentTextbook,
+            uploadStatus: "complete",
+            uploadLastBatchAt: now,
+            uploadIncompleteReason: undefined,
+            uploadStalledAt: undefined,
+          };
+        }
+
+        await saveLocalStoreItem(STORE_NAMES.textbooks, updated);
+      }
+    }
+
+    // Process orphaned items (entities whose textbook cannot be resolved) last.
+    for (const { storeName, item } of orphanedItems) {
+      if (writeBatchLimitReached) {
+        break;
+      }
+
+      if (isDeletedEntity(item)) {
+        const deletedFromCloud = await deleteCloudStoreItem(
+          storeName,
+          { ...item, userId } as CourseForgeEntityMap[typeof storeName],
+          indexes
         );
-      })
-    );
+        if (deletedFromCloud) {
+          await deleteLocalStoreItem(storeName, item.id);
+        }
+        continue;
+      }
+
+      const synced = {
+        ...item,
+        userId,
+        pendingSync: false,
+        source: "cloud" as const,
+        lastModified: item.lastModified ?? toIsoNow(),
+      } as CourseForgeEntityMap[typeof storeName];
+
+      const wroteToCloud = await saveCloudStoreItem(storeName, userId, synced, indexes, userPolicy);
+      if (wroteToCloud) {
+        await saveLocalStoreItem(storeName, synced);
+      }
+    }
   } catch (error) {
     logSyncEvent("upload:error", "textbooks/*", { userId }, error);
     console.error("uploadLocalChanges failed", error);
@@ -1479,6 +1724,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
   writeBudgetExceeded: boolean;
   writeCount: number;
   writeBudgetLimit: number;
+  syncRunWriteCount: number;
+  writeBatchLimit: number;
+  writeBatchLimitReached: boolean;
   readCount: number;
   readBudgetLimit: number;
   readBudgetExceeded: boolean;
@@ -1492,6 +1740,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
   const runSyncUserData = deps.syncUserDataFn ?? syncUserData;
   refreshDailyWriteBudgetState();
   refreshDailyReadBudgetState();
+  beginWriteBatchRun();
 
   if (now - lastSyncAttemptAt < SYNC_THROTTLE_MS) {
     const pending = await getPending();
@@ -1505,6 +1754,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBudgetExceeded,
       writeCount: sessionWriteCount,
       writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      syncRunWriteCount,
+      writeBatchLimit: DEFAULT_WRITE_BATCH_LIMIT,
+      writeBatchLimitReached,
       readCount: sessionReadCount,
       readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
       readBudgetExceeded,
@@ -1529,6 +1781,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBudgetExceeded,
       writeCount: sessionWriteCount,
       writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      syncRunWriteCount,
+      writeBatchLimit: DEFAULT_WRITE_BATCH_LIMIT,
+      writeBatchLimitReached,
       readCount: sessionReadCount,
       readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
       readBudgetExceeded,
@@ -1550,6 +1805,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBudgetExceeded: true,
       writeCount: sessionWriteCount,
       writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      syncRunWriteCount,
+      writeBatchLimit: DEFAULT_WRITE_BATCH_LIMIT,
+      writeBatchLimitReached,
       readCount: sessionReadCount,
       readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
       readBudgetExceeded,
@@ -1574,6 +1832,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
         writeBudgetExceeded: true,
         writeCount: sessionWriteCount,
         writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+        syncRunWriteCount,
+        writeBatchLimit: DEFAULT_WRITE_BATCH_LIMIT,
+        writeBatchLimitReached,
         readCount: sessionReadCount,
         readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
         readBudgetExceeded,
@@ -1593,6 +1854,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBudgetExceeded: false,
       writeCount: sessionWriteCount,
       writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      syncRunWriteCount,
+      writeBatchLimit: DEFAULT_WRITE_BATCH_LIMIT,
+      writeBatchLimitReached,
       readCount: sessionReadCount,
       readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
       readBudgetExceeded,
@@ -1616,6 +1880,9 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBudgetExceeded,
       writeCount: sessionWriteCount,
       writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      syncRunWriteCount,
+      writeBatchLimit: DEFAULT_WRITE_BATCH_LIMIT,
+      writeBatchLimitReached,
       readCount: sessionReadCount,
       readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
       readBudgetExceeded,

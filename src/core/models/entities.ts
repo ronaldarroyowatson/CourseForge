@@ -151,6 +151,22 @@ export interface Textbook {
   status?: ContentStatus;
   /** Soft-delete flag set by admins. Hidden from all non-admin views when true. */
   isDeleted?: boolean;
+  /**
+   * Tracks incomplete cloud upload state for admin diagnostics and smart batch retry.
+   * "in_progress"  – a batch upload has started but not all entities are synced yet.
+   * "complete"     – all entities for this textbook have been uploaded successfully.
+   * "stalled"      – batch upload started but made no progress after repeated windows.
+   * "invalid"      – one or more entity paths could not be resolved during upload.
+   */
+  uploadStatus?: "in_progress" | "complete" | "stalled" | "invalid";
+  /** ISO timestamp when the first upload batch was initiated for this textbook. */
+  uploadStartedAt?: string;
+  /** ISO timestamp of the most recent upload batch attempt. */
+  uploadLastBatchAt?: string;
+  /** ISO timestamp when the stalled status was last set. */
+  uploadStalledAt?: string;
+  /** Human-readable reason for incomplete, stalled, or invalid upload state. */
+  uploadIncompleteReason?: string;
 }
 
 export interface Chapter {

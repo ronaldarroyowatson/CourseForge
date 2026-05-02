@@ -1050,6 +1050,64 @@ describe("Cross-surface pipeline communication", () => {
     expect(uploadedPayloads.every((payload) => payload.ownerId === "teacher-doc-ingest" && payload.userId === "teacher-doc-ingest")).toBe(true);
   });
 
+  it("strips nested undefined fields from textbook payloads before cloud sync writes", async () => {
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-translated-fields",
+      localByStore: {
+        textbooks: [
+          {
+            id: "tb-translated-fields",
+            title: "Translated Payload",
+            grade: "9",
+            subject: "Science",
+            edition: "1",
+            publicationYear: 2026,
+            isbnRaw: "2222222222222",
+            isbnNormalized: "2222222222222",
+            translatedFields: {
+              es: {
+                title: "Carga traducida",
+                subtitle: undefined,
+                chapters: ["Capitulo 1"],
+                sections: undefined,
+              },
+            },
+            createdAt: "2026-03-12T00:00:00.000Z",
+            updatedAt: "2026-03-12T00:00:00.000Z",
+            lastModified: "2026-03-12T01:00:00.000Z",
+            pendingSync: true,
+            source: "local",
+            isFavorite: false,
+            isArchived: false,
+          },
+        ],
+        chapters: [],
+        sections: [],
+        vocabTerms: [],
+        equations: [],
+        concepts: [],
+        keyIdeas: [],
+      },
+    });
+
+    await expect(syncModule.uploadLocalChanges("teacher-translated-fields")).resolves.toBeUndefined();
+
+    expect(mocks.setDoc).toHaveBeenCalledTimes(1);
+    const textbookPayload = (mocks.setDoc.mock.calls[0] as unknown[])[1] as {
+      translatedFields?: {
+        es?: {
+          title?: string;
+          subtitle?: string;
+          chapters?: string[];
+          sections?: string[];
+        };
+      };
+    };
+    expect(textbookPayload.translatedFields?.es?.title).toBe("Carga traducida");
+    expect("subtitle" in (textbookPayload.translatedFields?.es ?? {})).toBe(false);
+    expect("sections" in (textbookPayload.translatedFields?.es ?? {})).toBe(false);
+  });
+
   it("minimizes cloud writes by skipping already-synced owned rows (false-negative mutation guard)", async () => {
     const { syncModule, mocks } = await importSyncServiceModule({
       currentUid: "teacher-min-write",

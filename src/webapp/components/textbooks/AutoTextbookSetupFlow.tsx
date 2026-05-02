@@ -947,6 +947,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     editChapter,
     editSection,
     findTextbookByISBN,
+    findDuplicateTextbook,
     fetchChaptersByTextbookId,
     fetchSectionsByChapterId,
     fetchVocabTermsBySectionId,
@@ -2476,9 +2477,13 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       const requiresAdminReview = imageModeration.decision === "review";
 
       const trimmedIsbn = metadataForm.isbnRaw.trim();
-      const existingDuplicate = trimmedIsbn
-        ? await findTextbookByISBN(trimmedIsbn)
-        : undefined;
+      const existingDuplicate = await findDuplicateTextbook({
+        isbnRaw: trimmedIsbn,
+        title: metadataForm.title.trim(),
+        publisher: metadata.publisher,
+        seriesName: metadata.seriesName,
+        publicationYear: parsedYear || undefined,
+      });
 
       if (existingDuplicate && duplicateMatch?.id !== existingDuplicate.id) {
         setDuplicateMatch({

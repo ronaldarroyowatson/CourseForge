@@ -5,6 +5,7 @@ import { StarIcon } from "../icons/StarIcon";
 
 import type { Textbook } from "../../../core/models";
 import {
+  clearWriteBudgetForManualRetry,
   getPendingSyncDiagnostics,
   getSyncThrottleWindowMs,
   getSyncWriteBatchLimit,
@@ -96,6 +97,9 @@ export function TextbookList({
 
   async function handleRetrySync(textbookId: string): Promise<void> {
     setErrorMessage(null);
+    // Clear any stale write-budget-exceeded flag so the retry can proceed.
+    // The accumulated write count is preserved; only the blocked gate is lifted.
+    clearWriteBudgetForManualRetry();
     updateRetrySyncProgress(textbookId, 8, "Preparing retry...", "info");
     setRetrySyncInProgress((prev) => new Set(prev).add(textbookId));
 

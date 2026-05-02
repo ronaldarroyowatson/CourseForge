@@ -380,6 +380,16 @@ export function consumeWriteLoopTriggered(): boolean {
 }
 
 /**
+ * Clears the write-budget-exceeded flag to allow manual retry after a budget block.
+ * Only clears the exceeded gate — the accumulated write count is preserved for
+ * accurate daily accounting. Idempotent: safe to call when not exceeded.
+ */
+export function clearWriteBudgetForManualRetry(): void {
+  writeBudgetExceeded = false;
+  persistDailyWriteBudgetState();
+}
+
+/**
  * Test-only helper to keep sync safety tests deterministic.
  */
 export function resetSyncSafetyStateForTests(): void {
@@ -1099,6 +1109,26 @@ function isDeletedEntity(item: SyncEntity | undefined): boolean {
   return Boolean(item?.isDeleted);
 }
 
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .filter((entry) => entry !== undefined)
+      .map((entry) => stripUndefinedDeep(entry)) as T;
+  }
+
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).reduce<Record<string, unknown>>((accumulator, [key, entryValue]) => {
+      if (entryValue !== undefined) {
+        accumulator[key] = stripUndefinedDeep(entryValue);
+      }
+
+      return accumulator;
+    }, {}) as T;
+  }
+
+  return value;
+}
+
 async function deleteLocalStoreItem<T extends SyncStoreName>(
   storeName: T,
   itemId: string
@@ -1204,25 +1234,26 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
     source: "cloud",
     lastModified: item.lastModified ?? toIsoNow(),
   };
+  const firestoreSafeCloudRecord = stripUndefinedDeep(cloudRecord);
 
   if (shouldSkipWriteForLoop(path)) {
     return false;
   }
 
-  if (!hasWriteBudgetCapacity(path, cloudRecord)) {
+  if (!hasWriteBudgetCapacity(path, firestoreSafeCloudRecord)) {
     return false;
   }
 
-  logSyncEvent("write:start", path, cloudRecord);
+  logSyncEvent("write:start", path, firestoreSafeCloudRecord);
   try {
-    await setDoc(doc(firestoreDb, path), cloudRecord, { merge: true });
+    await setDoc(doc(firestoreDb, path), firestoreSafeCloudRecord, { merge: true });
     sessionWriteCount += 1;
     syncRunWriteCount += 1;
     persistDailyWriteBudgetState();
     logSyncEvent("write:success", path, { id: item.id });
     return true;
   } catch (error) {
-    logSyncEvent("write:error", path, cloudRecord, error);
+    logSyncEvent("write:error", path, firestoreSafeCloudRecord, error);
     throw error;
   }
 }

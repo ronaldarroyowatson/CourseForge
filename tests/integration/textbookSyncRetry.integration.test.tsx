@@ -37,6 +37,7 @@ const uiStoreMock = vi.hoisted(() => ({
 
 vi.mock("../../src/core/services/syncService", () => ({
   syncNow: syncNowMock,
+  clearWriteBudgetForManualRetry: vi.fn(),
   getPendingSyncDiagnostics: vi.fn(async () => ({
     pendingCount: 1,
     byStore: {

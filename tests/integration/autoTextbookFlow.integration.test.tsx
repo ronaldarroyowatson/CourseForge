@@ -111,6 +111,7 @@ const syncServiceMocks = vi.hoisted(() => ({
     errorCode: null,
     pendingCount: 0,
   })),
+  findCloudTextbookByISBN: vi.fn<(userId: string, isbnRaw: string) => Promise<unknown>>(async () => undefined),
 }));
 
 const metadataCorrectionSyncMocks = vi.hoisted(() => ({
@@ -131,6 +132,7 @@ vi.mock("../../src/core/services/syncService", async () => {
   return {
     ...actual,
     syncNow: () => syncServiceMocks.syncNow(),
+    findCloudTextbookByISBN: (userId: string, isbn: string) => syncServiceMocks.findCloudTextbookByISBN(userId, isbn),
   };
 });
 
@@ -183,8 +185,8 @@ describe("auto textbook flow integration", () => {
   beforeEach(() => {
     repositoryMocks.createTextbook.mockClear();
     repositoryMocks.editTextbook.mockClear();
-    repositoryMocks.findDuplicateTextbook.mockClear();
-    repositoryMocks.findTextbookByISBN.mockClear();
+    repositoryMocks.findDuplicateTextbook.mockReset().mockResolvedValue(undefined);
+    repositoryMocks.findTextbookByISBN.mockReset().mockResolvedValue(undefined);
     repositoryMocks.createChapter.mockClear();
     repositoryMocks.createSection.mockClear();
     repositoryMocks.editChapter.mockClear();
@@ -215,6 +217,7 @@ describe("auto textbook flow integration", () => {
     window.localStorage.removeItem("courseforge.autoSessionDraft.v1");
     metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl.mockClear();
     syncServiceMocks.syncNow.mockClear();
+    syncServiceMocks.findCloudTextbookByISBN.mockReset().mockResolvedValue(undefined);
     metadataCorrectionSyncMocks.syncMetadataCorrectionLearning.mockClear();
     authMocks.getCurrentUser.mockClear();
     syncServiceMocks.syncNow.mockResolvedValue({
@@ -698,7 +701,7 @@ describe("auto textbook flow integration", () => {
     const onSaved = vi.fn();
     const validCoverDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=";
 
-    repositoryMocks.findTextbookByISBN.mockResolvedValue({
+    repositoryMocks.findDuplicateTextbook.mockResolvedValue({
       id: "tb-existing",
       title: "Manual Algebra",
       isbnRaw: "9781402894626",
@@ -805,7 +808,7 @@ describe("auto textbook flow integration", () => {
     const onSaved = vi.fn();
     const validCoverDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=";
 
-    repositoryMocks.findTextbookByISBN.mockResolvedValue({
+    repositoryMocks.findDuplicateTextbook.mockResolvedValue({
       id: "tb-existing-overwrite",
       title: "Manual Precalculus",
       isbnRaw: "9781402894000",

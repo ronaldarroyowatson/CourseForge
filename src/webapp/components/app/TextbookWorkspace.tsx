@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import type { Chapter, Section, Textbook } from "../../../core/models";
 import { initDB } from "../../../core/services/db";
-import { listTextbooks as getVisibleTextbooks } from "../../../core/services/repositories/textbookRepository";
+import { findAllDuplicatePairs, listTextbooks as getVisibleTextbooks } from "../../../core/services/repositories/textbookRepository";
 import { signOutCurrentUser } from "../../../firebase/auth";
 import { useRepositories } from "../../hooks/useRepositories";
 import { useAuthStore } from "../../store/authStore";
@@ -20,6 +20,7 @@ import { SectionForm } from "../sections/SectionForm";
 import { SectionList } from "../sections/SectionList";
 import { SectionNavigationBar } from "../sections/SectionNavigationBar";
 import { SettingsPage } from "../settings/SettingsPage";
+import { DuplicateResolutionDialog } from "../textbooks/DuplicateResolutionDialog";
 import { TextbookForm } from "../textbooks/TextbookForm";
 import { TextbookList } from "../textbooks/TextbookList";
 
@@ -27,6 +28,40 @@ const AdminToolsPage = React.lazy(async () => {
   const module = await import("../admin/AdminToolsPage");
   return { default: module.AdminToolsPage };
 });
+
+const DISMISSED_PAIRS_KEY = "courseforge.dismissed_duplicate_pairs";
+
+function makePairKey(idA: string, idB: string): string {
+  return [idA, idB].sort().join(":");
+}
+
+function loadDismissedDuplicatePairs(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DISMISSED_PAIRS_KEY);
+    if (!raw) {
+      return new Set();
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return new Set();
+    }
+
+    return new Set(parsed.filter((item): item is string => typeof item === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDismissedDuplicatePair(key: string): void {
+  try {
+    const existing = loadDismissedDuplicatePairs();
+    existing.add(key);
+    localStorage.setItem(DISMISSED_PAIRS_KEY, JSON.stringify([...existing]));
+  } catch {
+    // localStorage unavailable — non-fatal
+  }
+}
 
 interface TextbookWorkspaceProps {
   showAdminPage?: boolean;
@@ -40,7 +75,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
   const currentUserId = useAuthStore((state) => state.userId);
   const currentUserEmail = useAuthStore((state) => state.userEmail);
   const isAdmin = useAuthStore((state) => state.isAdmin);
-  const { fetchChaptersByTextbookId, fetchSectionsByChapterId } = useRepositories();
+  const { fetchChaptersByTextbookId, fetchSectionsByChapterId, removeTextbook } = useRepositories();
 
   const [isSigningOut, setIsSigningOut] = React.useState(false);
   const [signOutError, setSignOutError] = React.useState<string | null>(null);
@@ -48,6 +83,8 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
   const [isLoadingTextbooks, setIsLoadingTextbooks] = React.useState(true);
   const [textbookLoadError, setTextbookLoadError] = React.useState<string | null>(null);
   const [textbookRefreshKey, setTextbookRefreshKey] = React.useState(0);
+  const [startupDuplicatePairs, setStartupDuplicatePairs] = React.useState<[Textbook, Textbook][]>([]);
+  const [duplicatePairIndex, setDuplicatePairIndex] = React.useState(0);
   const [chapterRefreshKey, setChapterRefreshKey] = React.useState(0);
   const [sectionRefreshKey, setSectionRefreshKey] = React.useState(0);
   const [selectedTextbookId, setSelectedTextbookId] = React.useState<string | null>(null);
@@ -137,6 +174,16 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
         }
 
         setTextbooks(results);
+
+        // Scan for duplicates on the already-loaded list — no extra DB read.
+        const allPairs = findAllDuplicatePairs(results);
+        const dismissed = loadDismissedDuplicatePairs();
+        const pendingPairs = allPairs.filter(([a, b]) => {
+          const key = makePairKey(a.id, b.id);
+          return !dismissed.has(key);
+        });
+        setStartupDuplicatePairs(pendingPairs);
+        setDuplicatePairIndex(0);
       } catch {
         if (isMounted) {
           setTextbooks([]);
@@ -341,6 +388,36 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
       setExpandedTile(selectedTextbookId ? "chapters" : "textbook");
     }
   }, [activeWorkflowTab, selectedChapterId, selectedTextbookId]);
+
+  // --- Startup duplicate-detection helpers ---
+
+  function handleDuplicateKeepBoth(): void {
+    const pair = startupDuplicatePairs[duplicatePairIndex];
+    if (pair) {
+      const key = makePairKey(pair[0].id, pair[1].id);
+      saveDismissedDuplicatePair(key);
+    }
+
+    setDuplicatePairIndex((current) => current + 1);
+  }
+
+  async function handleDuplicateDelete(idToDelete: string): Promise<void> {
+    // Optimistically remove from the textbook list so the UI updates instantly.
+    handleTextbookDeleted(idToDelete);
+
+    try {
+      await removeTextbook(idToDelete);
+    } catch {
+      // On failure, trigger a refresh so the list is consistent.
+      setTextbookRefreshKey((current) => current + 1);
+    }
+
+    // Advance past this pair regardless of success/failure — the deleted entry
+    // won't reappear because findAllDuplicatePairs won't match it again.
+    setDuplicatePairIndex((current) => current + 1);
+  }
+
+  // --- End duplicate helpers ---
 
   function handleTextbookSaved(): void {
     setTextbookRefreshKey((current) => current + 1);
@@ -736,6 +813,17 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
             </section>
 
             {renderWorkflowPanel()}
+
+            {duplicatePairIndex < startupDuplicatePairs.length ? (
+              <DuplicateResolutionDialog
+                pairIndex={duplicatePairIndex}
+                totalPairs={startupDuplicatePairs.length}
+                left={startupDuplicatePairs[duplicatePairIndex][0]}
+                right={startupDuplicatePairs[duplicatePairIndex][1]}
+                onDelete={(id) => { void handleDuplicateDelete(id); }}
+                onKeepBoth={handleDuplicateKeepBoth}
+              />
+            ) : null}
           </>
         )}
       </main>

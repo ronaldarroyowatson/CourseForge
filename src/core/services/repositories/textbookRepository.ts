@@ -207,6 +207,131 @@ export async function findDuplicateTextbookCandidate(input: DuplicateTextbookLoo
   });
 }
 
+/**
+ * Scans an already-loaded textbook list for duplicate pairs.
+ * Uses the same matching logic as findDuplicateTextbookCandidate:
+ *   1. Primary or related ISBN match (normalized)
+ *   2. All-5 metadata match: title + grade + publisher + seriesName + publicationYear
+ * Returns unique pairs only (A→B skips B→A). Tombstoned records are excluded.
+ */
+export function findAllDuplicatePairs(textbooks: Textbook[]): [Textbook, Textbook][] {
+  const active = textbooks.filter((tb) => !tb.isDeleted);
+  const pairs: [Textbook, Textbook][] = [];
+  const seenPairKeys = new Set<string>();
+
+  for (let i = 0; i < active.length; i++) {
+    for (let j = i + 1; j < active.length; j++) {
+      const a = active[i];
+      const b = active[j];
+
+      const isDuplicate = isbnOverlap(a, b) || metadataMatch(a, b);
+      if (a.id === b.id || !isDuplicate) {
+        continue;
+      }
+
+      const key = [a.id, b.id].sort().join(":");
+      if (seenPairKeys.has(key)) {
+        continue;
+      }
+
+      seenPairKeys.add(key);
+      pairs.push([a, b]);
+    }
+  }
+
+  return pairs;
+}
+
+function isbnOverlap(a: Textbook, b: Textbook): boolean {
+  const aNorm = a.isbnNormalized ?? "";
+  const bNorm = b.isbnNormalized ?? "";
+
+  if (aNorm.length > 0 && aNorm === bNorm) {
+    return true;
+  }
+
+  // Check a's relatedIsbns against b's primary
+  if (bNorm.length > 0 && a.relatedIsbns) {
+    if (a.relatedIsbns.some((r) => normalizeISBN(r.isbn) === bNorm)) {
+      return true;
+    }
+  }
+
+  // Check b's relatedIsbns against a's primary
+  if (aNorm.length > 0 && b.relatedIsbns) {
+    if (b.relatedIsbns.some((r) => normalizeISBN(r.isbn) === aNorm)) {
+      return true;
+    }
+  }
+
+  // Check a's raw ISBN against b's raw ISBN (fallback for un-normalized entries)
+  const aRaw = a.isbnRaw?.trim() ?? "";
+  const bRaw = b.isbnRaw?.trim() ?? "";
+  if (aRaw.length > 0 && aRaw === bRaw) {
+    return true;
+  }
+
+  return false;
+}
+
+function metadataMatch(a: Textbook, b: Textbook): boolean {
+  const title = normalizeText(a.title);
+  const grade = normalizeText(a.grade);
+  const publisher = normalizeText(a.publisher);
+  const seriesName = normalizeText(a.seriesName);
+  const year = typeof a.publicationYear === "number" ? a.publicationYear : null;
+
+  // All 5 fields must be non-empty on both sides to constitute a match
+  if (!title || !grade || !publisher || !seriesName || !year) {
+    return false;
+  }
+
+  return (
+    normalizeText(b.title) === title &&
+    normalizeText(b.grade) === grade &&
+    normalizeText(b.publisher) === publisher &&
+    normalizeText(b.seriesName) === seriesName &&
+    b.publicationYear === year
+  );
+}
+
+const METADATA_RICHNESS_FIELDS: ReadonlyArray<keyof Textbook> = [
+  "subtitle",
+  "grade",
+  "publisher",
+  "edition",
+  "subject",
+  "publicationYear",
+  "authors",
+  "seriesName",
+  "mhid",
+  "coverImageUrl",
+  "tocExtractionConfidence",
+];
+
+/**
+ * Counts how many optional metadata fields are populated on a textbook.
+ * Returns { filled, total } where total is the fixed set of checked fields.
+ */
+export function computeMetadataRichness(textbook: Textbook): { filled: number; total: number } {
+  let filled = 0;
+
+  for (const field of METADATA_RICHNESS_FIELDS) {
+    const value = textbook[field];
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+
+    if (Array.isArray(value) && value.length === 0) {
+      continue;
+    }
+
+    filled++;
+  }
+
+  return { filled, total: METADATA_RICHNESS_FIELDS.length };
+}
+
 export async function deleteTextbook(id: string): Promise<void> {
   const textbook = await getById(STORE_NAMES.textbooks, id);
   if (!textbook) {

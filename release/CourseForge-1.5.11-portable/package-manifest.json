@@ -1,8 +1,8 @@
 {
     "name":  "CourseForge",
-    "version":  "1.5.10",
-    "packageType":  "windows",
-    "createdAtUtc":  "2026-05-02T00:24:45.1573290Z",
+    "version":  "1.5.11",
+    "packageType":  "portable",
+    "createdAtUtc":  "2026-05-02T03:48:00.5280384Z",
     "includes":  [
                      "webapp/",
                      "extension/",
@@ -15,10 +15,8 @@
                      "boot-splash.html",
                      "Test-CourseForge-Integrity.ps1",
                      "CourseForge-Start.url",
-                     "Install-CourseForge-Windows.ps1",
-                     "Install-CourseForge-Windows.cmd",
-                     "Uninstall-CourseForge-Windows.cmd",
-                     "installer-integrity.json",
+                     "CourseForge.ico",
+                     "manifest.json",
                      "README.md",
                      "CHANGELOG.md",
                      "LICENSE"

@@ -33,6 +33,7 @@ vi.mock("../../src/core/services/repositories/textbookRepository", () => ({
     const rows = await textbookRepositoryMocks.getAllTextbooks();
     return rows.filter((textbook) => !textbook.isDeleted);
   },
+  findAllDuplicatePairs: () => [],
 }));
 
 vi.mock("../../src/webapp/hooks/useRepositories", () => ({

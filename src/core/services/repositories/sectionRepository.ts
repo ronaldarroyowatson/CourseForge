@@ -20,6 +20,11 @@ export async function listSectionsByChapterId(chapterId: string): Promise<Sectio
     .sort((a, b) => a.index - b.index);
 }
 
+export async function countSectionsByTextbookId(textbookId: string): Promise<number> {
+  const sections = await listSections();
+  return sections.filter((section) => section.textbookId === textbookId).length;
+}
+
 export async function deleteSection(id: string): Promise<void> {
   await deleteRecord(STORE_NAMES.sections, id);
 }

@@ -74,9 +74,13 @@ cleanup() {
 trap cleanup EXIT
 
 detach_existing_image_mounts
-ATTACH_OUTPUT="$(hdiutil attach "$DMG_ARTIFACT" -readonly -nobrowse)"
-ATTACHED_DEVICE="$(awk '$1 ~ /^\/dev\// {dev=$1} END {print dev}' <<<"$ATTACH_OUTPUT")"
-ATTACHED_MOUNT="$(awk '/\/Volumes\// {mount=$NF} END {print mount}' <<<"$ATTACH_OUTPUT")"
+ATTACH_OUTPUT_PLIST="$(hdiutil attach "$DMG_ARTIFACT" -readonly -nobrowse -plist)"
+ATTACHED_DEVICE="$(printf '%s' "$ATTACH_OUTPUT_PLIST" | plutil -extract system-entities.0.dev-entry raw - 2>/dev/null || true)"
+ATTACHED_MOUNT="$(printf '%s' "$ATTACH_OUTPUT_PLIST" | plutil -extract system-entities.0.mount-point raw - 2>/dev/null || true)"
+
+if [[ -z "$ATTACHED_DEVICE" || "$ATTACHED_DEVICE" == "(null)" ]]; then
+  ATTACHED_DEVICE="$(printf '%s' "$ATTACH_OUTPUT_PLIST" | plutil -extract system-entities.1.dev-entry raw - 2>/dev/null || true)"
+fi
 
 if [[ -z "$ATTACHED_MOUNT" || ! -d "$ATTACHED_MOUNT" ]]; then
   echo "Could not determine mounted DMG path." >&2

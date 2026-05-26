@@ -6,7 +6,7 @@ PORT="${COURSEFORGE_PORT:-3000}"
 HOST="${COURSEFORGE_HOST:-localhost}"
 DISABLE_BROWSER="${COURSEFORGE_DISABLE_AUTO_BROWSER:-0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_BUNDLE_PATH="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || true)"
+APP_BUNDLE_PATH="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd || true)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

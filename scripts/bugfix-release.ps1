@@ -41,7 +41,10 @@ param(
   [switch]$SkipGitHub,
 
   # Skip only the Firestore rules tests (use when emulator port is occupied by a stale process)
-  [switch]$SkipRules
+  [switch]$SkipRules,
+
+  # Allow unsigned/not-unnotarized macOS artifacts (emergency only)
+  [switch]$AllowUnsignedMacOS
 )
 
 $ErrorActionPreference = "Stop"
@@ -377,7 +380,14 @@ if (-not $SkipPackage) {
 
   Write-Host ""
   Write-Host "--- Building macOS package artifacts ---" -ForegroundColor Cyan
+  if ($AllowUnsignedMacOS) {
+    Write-Host "[WARNING] Building macOS artifacts without required signing/notarization checks (-AllowUnsignedMacOS)." -ForegroundColor Yellow
+    $env:COURSEFORGE_MAC_REQUIRE_SIGNING = "0"
+  } else {
+    $env:COURSEFORGE_MAC_REQUIRE_SIGNING = "1"
+  }
   npm run package:macos
+  Remove-Item Env:COURSEFORGE_MAC_REQUIRE_SIGNING -ErrorAction SilentlyContinue
   if ($LASTEXITCODE -ne 0) { Write-Error "macOS package build failed."; Pop-Location; exit 1 }
 
   Pop-Location

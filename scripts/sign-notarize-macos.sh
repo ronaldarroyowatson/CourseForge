@@ -3,6 +3,7 @@ set -euo pipefail
 
 APP_PATH=""
 DMG_PATH=""
+REQUIRE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -13,6 +14,10 @@ while [[ $# -gt 0 ]]; do
     --dmg-path)
       DMG_PATH="$2"
       shift 2
+      ;;
+    --require)
+      REQUIRE=true
+      shift
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -25,6 +30,10 @@ SIGN_IDENTITY="${COURSEFORGE_MAC_SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${COURSEFORGE_MAC_NOTARY_PROFILE:-}"
 
 if [[ -z "$SIGN_IDENTITY" ]]; then
+  if [[ "$REQUIRE" == "true" ]]; then
+    echo "[mac-sign] Signing is required but COURSEFORGE_MAC_SIGN_IDENTITY is not set." >&2
+    exit 1
+  fi
   echo "[mac-sign] COURSEFORGE_MAC_SIGN_IDENTITY not set; skipping signing/notarization."
   exit 0
 fi
@@ -45,6 +54,10 @@ if [[ -n "$DMG_PATH" && -f "$DMG_PATH" ]]; then
 fi
 
 if [[ -z "$NOTARY_PROFILE" ]]; then
+  if [[ "$REQUIRE" == "true" ]]; then
+    echo "[mac-sign] Notarization is required but COURSEFORGE_MAC_NOTARY_PROFILE is not set." >&2
+    exit 1
+  fi
   echo "[mac-sign] COURSEFORGE_MAC_NOTARY_PROFILE not set; skipping notarization."
   exit 0
 fi

@@ -1,4 +1,6 @@
 import type {
+  InstallerPathConventions,
+  InstallerPlatform,
   InstallerDetectionAction,
   IconOptions,
   InstallerLogFileName,
@@ -246,18 +248,87 @@ export function buildVerificationResult(input: {
   };
 }
 
-export function getInstallerLogPathForPlatform(input: {
-  isWindows: boolean;
+function resolvePlatform(input: { platform?: InstallerPlatform; isWindows?: boolean }): InstallerPlatform {
+  if (input.platform) {
+    return input.platform;
+  }
+
+  if (input.isWindows) {
+    return "windows";
+  }
+
+  return "linux";
+}
+
+export function getInstallerPathConventionsForPlatform(input: {
+  platform: InstallerPlatform;
   localAppData?: string;
   homeDir?: string;
+  appName?: string;
+}): InstallerPathConventions {
+  const appName = input.appName?.trim() || "CourseForge";
+  const homeDir = (input.homeDir ?? "~").replace(/[\\/]+$/, "");
+
+  if (input.platform === "windows") {
+    const localAppData = (input.localAppData ?? "%LOCALAPPDATA%").replace(/[\\/]+$/, "");
+    const programsRoot = `${localAppData}\\Programs\\${appName}`;
+    const stateRoot = `${localAppData}\\${appName}`;
+
+    return {
+      platform: "windows",
+      installRoot: programsRoot,
+      logsDir: `${stateRoot}\\logs`,
+      localDataPath: `${stateRoot}\\data`,
+      preferencesPath: `${stateRoot}\\installer-preferences.json`,
+      updaterStatePath: `${programsRoot}\\updater-status.json`,
+    };
+  }
+
+  if (input.platform === "macos") {
+    const appsRoot = `${homeDir}/Applications`;
+    const supportRoot = `${homeDir}/Library/Application Support/${appName}`;
+
+    return {
+      platform: "macos",
+      installRoot: `${appsRoot}/${appName}.app`,
+      logsDir: `${homeDir}/Library/Logs/${appName}`,
+      localDataPath: `${supportRoot}/data`,
+      preferencesPath: `${homeDir}/Library/Preferences/com.ronaldarroyowatson.${appName}.json`,
+      updaterStatePath: `${supportRoot}/updater/updater-status.json`,
+    };
+  }
+
+  const stateRoot = `${homeDir}/.courseforge`;
+  return {
+    platform: "linux",
+    installRoot: `${homeDir}/.local/share/${appName}`,
+    logsDir: `${stateRoot}/logs`,
+    localDataPath: `${stateRoot}/data`,
+    preferencesPath: `${stateRoot}/installer-preferences.json`,
+    updaterStatePath: `${stateRoot}/updater-status.json`,
+  };
+}
+
+export function getInstallerLogPathForPlatform(input: {
+  isWindows?: boolean;
+  platform?: InstallerPlatform;
+  localAppData?: string;
+  homeDir?: string;
+  appName?: string;
   logFileName?: InstallerLogFileName;
 }): string {
   const logFileName = input.logFileName ?? "installer.log";
+  const platform = resolvePlatform({ platform: input.platform, isWindows: input.isWindows });
+  const conventions = getInstallerPathConventionsForPlatform({
+    platform,
+    localAppData: input.localAppData,
+    homeDir: input.homeDir,
+    appName: input.appName,
+  });
 
-  if (input.isWindows && input.localAppData) {
-    return `${input.localAppData.replace(/[\\/]+$/, "")}\\CourseForge\\logs\\${logFileName}`;
+  if (platform === "windows") {
+    return `${conventions.logsDir}\\${logFileName}`;
   }
 
-  const homeDir = (input.homeDir ?? "~").replace(/[\\/]+$/, "");
-  return `${homeDir}/.courseforge/logs/${logFileName}`;
+  return `${conventions.logsDir}/${logFileName}`;
 }

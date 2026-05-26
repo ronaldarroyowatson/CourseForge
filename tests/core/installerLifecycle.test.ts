@@ -3,6 +3,7 @@ import {
   buildVerificationResult,
   createLifecyclePlan,
   getDetectionActions,
+  getInstallerPathConventionsForPlatform,
   getInstallerLogPathForPlatform,
   getLogFileNameForPlan,
   resolveComponentSelection,
@@ -201,6 +202,33 @@ describe("installer log path", () => {
     });
 
     expect(logPath).toBe("C:/Users/test/AppData/Local\\CourseForge\\logs\\rollback.log");
+  });
+
+  it("uses Library Logs on macOS when platform is macos", () => {
+    const logPath = getInstallerLogPathForPlatform({
+      platform: "macos",
+      homeDir: "/Users/test",
+    });
+
+    expect(logPath).toBe("/Users/test/Library/Logs/CourseForge/installer.log");
+  });
+});
+
+describe("installer path conventions", () => {
+  it("returns macOS conventions for app, logs, and updater state", () => {
+    const conventions = getInstallerPathConventionsForPlatform({
+      platform: "macos",
+      homeDir: "/Users/test",
+    });
+
+    expect(conventions.installRoot).toBe("/Users/test/Applications/CourseForge.app");
+    expect(conventions.localDataPath).toBe("/Users/test/Library/Application Support/CourseForge/data");
+    expect(conventions.preferencesPath).toBe(
+      "/Users/test/Library/Preferences/com.ronaldarroyowatson.CourseForge.json"
+    );
+    expect(conventions.updaterStatePath).toBe(
+      "/Users/test/Library/Application Support/CourseForge/updater/updater-status.json"
+    );
   });
 });
 

@@ -1,5 +1,7 @@
 export type InstallerMode = "install" | "modify" | "repair" | "uninstall" | "detect";
 
+export type InstallerPlatform = "windows" | "macos" | "linux";
+
 export type InstallComponent = "webapp" | "extension";
 
 export type InstallerDetectionAction =
@@ -88,6 +90,18 @@ export interface InstallerMetadata {
   registryMap?: InstallerRegistryMap;
   rollbackSnapshotPath?: string;
   shortcutState?: InstallerShortcutState;
+  platform?: InstallerPlatform;
+  preferencesPath?: string;
+  updaterStatePath?: string;
+}
+
+export interface InstallerPathConventions {
+  platform: InstallerPlatform;
+  installRoot: string;
+  logsDir: string;
+  localDataPath: string;
+  preferencesPath: string;
+  updaterStatePath: string;
 }
 
 export interface InstallerDetection {

@@ -1,11 +1,11 @@
 # Test Index
 
-Generated: 2026-05-02T00:11:11.070Z
+Generated: 2026-05-25T22:49:22.890Z
 
 ## Summary
 
-- Total test files: 66
-- Unit test files: 44
+- Total test files: 68
+- Unit test files: 46
 - Integration test files: 20
 - Rules test files: 2
 - Canonical sample files: 5
@@ -25,8 +25,10 @@ Generated: 2026-05-02T00:11:11.070Z
 - tests/core/documentExtraction.guardrails.test.ts
 - tests/core/documentIngest.extraction.test.ts
 - tests/core/equationFormatService.test.ts
+- tests/core/findAllDuplicatePairs.test.ts
 - tests/core/gameTextService.test.ts
 - tests/core/glossaryService.test.ts
+- tests/core/hybridIngestionPipeline.test.ts
 - tests/core/i18nService.test.ts
 - tests/core/installerLifecycle.matrix.test.ts
 - tests/core/installerLifecycle.test.ts

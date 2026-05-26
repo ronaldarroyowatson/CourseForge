@@ -60,6 +60,8 @@
     "package:windows:legacy": "powershell -ExecutionPolicy Bypass -File scripts/create-windows-package.ps1 -AllowLegacyBootstrap -EmitWindowsZip",
     "verify:windows": "powershell -ExecutionPolicy Bypass -File scripts/verify-windows-package.ps1",
     "package:macos": "bash scripts/create-macos-package.sh",
+    "package:macos:zip": "bash scripts/create-macos-package.sh --zip-only",
+    "package:macos:dmg": "bash scripts/create-macos-package.sh --dmg-only",
     "verify:macos": "bash scripts/verify-macos-package.sh",
     "check:installer": "npm run package:portable && npm run verify:portable && npm run package:windows && npm run verify:windows",
     "check:installer:all": "npm run check:installer && npm run package:macos && npm run verify:macos",

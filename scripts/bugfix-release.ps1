@@ -16,9 +16,9 @@
 #   4. Bump PATCH version in package.json (e.g. 1.4.10 -> 1.4.11)
 #   5. Create docs/releases/<version>.md  (release notes)
 #   6. Update CHANGELOG.md
-#   7. npm run package:portable + package:windows  (build release zips)
+#   7. npm run package:portable + package:windows + package:macos  (build release artifacts)
 #   8. git add -A, commit, tag, push
-#   9. gh release create with zip assets
+#   9. gh release create with platform assets
 
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Scope = 'Function', Target = '*', Justification = 'Helper names; suppress stale analyzer warnings.')]
 param(
@@ -375,6 +375,11 @@ if (-not $SkipPackage) {
   npm run package:windows
   if ($LASTEXITCODE -ne 0) { Write-Error "Windows installer package build failed."; Pop-Location; exit 1 }
 
+  Write-Host ""
+  Write-Host "--- Building macOS package artifacts ---" -ForegroundColor Cyan
+  npm run package:macos
+  if ($LASTEXITCODE -ne 0) { Write-Error "macOS package build failed."; Pop-Location; exit 1 }
+
   Pop-Location
 } else {
   Write-Host "[INFO] Package build skipped (-SkipPackage)." -ForegroundColor Yellow
@@ -436,6 +441,8 @@ if (-not $SkipGitHub) {
   $portableZip    = Join-Path $ReleaseDir "CourseForge-$newVersion-portable.zip"
   $windowsZip     = Join-Path $ReleaseDir "CourseForge-$newVersion-windows.zip"
   $installerExe   = Join-Path $ReleaseDir "CourseForge-$newVersion-installer.exe"
+  $macPortableZip = Join-Path $ReleaseDir "CourseForge-$newVersion-macos-portable.zip"
+  $macDmg         = Join-Path $ReleaseDir "CourseForge-$newVersion-macos.dmg"
 
   $ghArgs = @(
     "release", "create", "v$newVersion",
@@ -458,6 +465,20 @@ if (-not $SkipGitHub) {
     Write-Host "  Attaching: $windowsZip"
   } else {
     Write-Host "[WARNING] Windows installer not found (neither installer.exe nor windows.zip)" -ForegroundColor Yellow
+  }
+
+  if (Test-Path $macDmg) {
+    $ghArgs += $macDmg
+    Write-Host "  Attaching: $macDmg"
+  } else {
+    Write-Host "[WARNING] macOS DMG not found: $macDmg" -ForegroundColor Yellow
+  }
+
+  if (Test-Path $macPortableZip) {
+    $ghArgs += $macPortableZip
+    Write-Host "  Attaching: $macPortableZip"
+  } else {
+    Write-Host "[WARNING] macOS portable zip not found: $macPortableZip" -ForegroundColor Yellow
   }
 
   Push-Location $RepoRoot

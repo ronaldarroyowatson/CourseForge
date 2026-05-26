@@ -13,6 +13,8 @@ describe("macOS installer template guardrails", () => {
     const packageJson = readWorkspaceFile("package.json");
 
     expect(packageJson).toContain('"package:macos"');
+    expect(packageJson).toContain('"package:macos:zip"');
+    expect(packageJson).toContain('"package:macos:dmg"');
     expect(packageJson).toContain('"verify:macos"');
     expect(packageJson).toContain('"test:installer:macos"');
     expect(packageJson).toContain('"test:installer:cross-platform"');
@@ -28,6 +30,20 @@ describe("macOS installer template guardrails", () => {
     expect(packagerScript).toContain("Uninstall-CourseForge-macos.sh");
     expect(packagerScript).toContain("courseforge-serve.js");
     expect(packagerScript).toContain("package-manifest.json");
+    expect(packagerScript).toContain("CourseForge.app");
+    expect(packagerScript).toContain("hdiutil create");
+    expect(packagerScript).toContain("Applications");
+    expect(packagerScript).toContain("sign-notarize-macos.sh");
+  });
+
+  it("verifies both macOS portable zip and dmg artifacts", () => {
+    const verifyScript = readWorkspaceFile("scripts/verify-macos-package.sh");
+
+    expect(verifyScript).toContain("macos-portable.zip");
+    expect(verifyScript).toContain("macos.dmg");
+    expect(verifyScript).toContain("hdiutil attach");
+    expect(verifyScript).toContain("CourseForge.app");
+    expect(verifyScript).toContain("Applications");
   });
 
   it("includes detect, repair, uninstall, and reinstall macOS lifecycle modes", () => {

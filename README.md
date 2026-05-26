@@ -195,29 +195,28 @@ Windows install flow:
 
 macOS install flow:
 
-- In GitHub Releases, download the asset named `CourseForge-<version>-macos-portable.zip`.
-- In a local build workspace, the extracted package folder follows `release/CourseForge-<version>-macos/` naming.
-- Extract the zip, then run the installer script from the extracted folder.
+- In GitHub Releases, download the installer asset named `CourseForge-<version>-macos.dmg`.
+- Double-click the DMG file to open the CourseForge installer window.
+- Drag `CourseForge.app` into the `Applications` shortcut shown in that window.
+- Open `CourseForge` from Applications.
 
 ```bash
-cd ~/Downloads
-unzip CourseForge-<version>-macos-portable.zip -d CourseForge-<version>-macos
-cd CourseForge-<version>-macos
-chmod +x Install-CourseForge-macos.sh Start-CourseForge-macos.sh AutoUpdate-CourseForge.sh Uninstall-CourseForge-macos.sh
-./Install-CourseForge-macos.sh
+open ~/Downloads/CourseForge-<version>-macos.dmg
 ```
 
-Launch and update commands (from the extracted/install folder):
+Optional advanced/manual package asset:
 
-```bash
-./Start-CourseForge-macos.sh
-./AutoUpdate-CourseForge.sh
-```
+- `CourseForge-<version>-macos-portable.zip` remains available for updater-payload testing and advanced troubleshooting.
+
+Launch and update behavior:
+
+- Launch from `Applications/CourseForge.app`.
+- The app runs its startup update check in the background and never blocks startup if update checks fail.
 
 Uninstall command:
 
 ```bash
-./Uninstall-CourseForge-macos.sh
+rm -rf /Applications/CourseForge.app
 ```
 
 Windows installer UX notes:

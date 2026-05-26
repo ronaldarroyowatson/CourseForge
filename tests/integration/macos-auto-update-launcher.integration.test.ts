@@ -27,6 +27,15 @@ describe("macOS launcher and updater guardrails", () => {
     expect(launcherScript).toContain("|| true");
   });
 
+  it("guides users to move app from DMG into Applications on first launch", () => {
+    const launcherScript = readWorkspaceFile("scripts/installer/Start-CourseForge-macos.sh");
+
+    expect(launcherScript).toContain("prompt_move_to_applications");
+    expect(launcherScript).toContain("/Volumes/");
+    expect(launcherScript).toContain("Move to Applications");
+    expect(launcherScript).toContain("open -a");
+  });
+
   it("supports release polling, staging, and pending update marker creation", () => {
     const updaterScript = readWorkspaceFile("scripts/installer/AutoUpdate-CourseForge.sh");
 

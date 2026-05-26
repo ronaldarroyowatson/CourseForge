@@ -4,10 +4,11 @@ This guide is the single handoff document for future updater work. It describes 
 
 ## 1. Scope
 
-CourseForge has two updater surfaces:
+CourseForge has three updater surfaces:
 
 1. Runtime staged updater for packaged installs (portable and Windows launcher payloads)
 2. Local status API that powers the App Updates card and startup splash diagnostics
+3. macOS app-bundle launcher and DMG first-install flow
 
 The updater design goal is fail-safe behavior: update failures must never block app startup and must never corrupt the current install.
 
@@ -18,6 +19,9 @@ The updater design goal is fail-safe behavior: update failures must never block 
 | `scripts/auto-update-portable.ps1` | Downloads, validates, stages, and applies release payloads |
 | `scripts/installer/Test-CourseForge-Integrity.ps1` | Verifies package file contract against `manifest.json` |
 | `scripts/installer/Start-CourseForge.ps1` | Launch orchestration, staged update apply, local server startup |
+| `scripts/installer/Start-CourseForge-macos.sh` | macOS app launcher with staged apply + DMG move guidance |
+| `scripts/create-macos-package.sh` | Builds macOS `.app`, portable zip, and DMG artifacts |
+| `scripts/verify-macos-package.sh` | Validates macOS zip and DMG contract |
 | `scripts/installer/courseforge-serve.cjs` | `/api/update-status`, `/api/check-for-updates`, `/api/updater-progress`, diagnostics |
 | `src/webapp/components/settings/SettingsPage.tsx` | App Updates card UI and manual check UX |
 | `tests/integration/auto-update-*.integration.test.ts` | End-to-end updater behavior tests |
@@ -38,6 +42,15 @@ The updater design goal is fail-safe behavior: update failures must never block 
 7. Updater computes update plan and writes progress state.
 8. Updater stages payload and writes `pending-update.json`.
 9. On next launch, launcher applies staged update atomically and starts app.
+
+## 3.1 macOS first-install pipeline (DMG)
+
+1. Release build emits `CourseForge-{version}-macos.dmg` containing:
+   - `CourseForge.app`
+   - `Applications` symlink (drag-to-install)
+2. User drags app to Applications.
+3. First run from mounted DMG prompts user to move to Applications if not installed yet.
+4. Installed app launches from `CourseForge.app/Contents/MacOS/CourseForge` and resolves runtime payload from `Contents/Resources/CourseForge`.
 
 ## 4. State and diagnostics artifacts
 

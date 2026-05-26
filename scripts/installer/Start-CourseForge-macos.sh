@@ -5,6 +5,8 @@ PACKAGE_ROOT=""
 PORT="${COURSEFORGE_PORT:-3000}"
 HOST="${COURSEFORGE_HOST:-localhost}"
 DISABLE_BROWSER="${COURSEFORGE_DISABLE_AUTO_BROWSER:-0}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_BUNDLE_PATH="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd || true)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -32,7 +34,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$PACKAGE_ROOT" ]]; then
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   if [[ -d "$SCRIPT_DIR/../Resources/CourseForge" ]]; then
     PACKAGE_ROOT="$(cd "$SCRIPT_DIR/../Resources/CourseForge" && pwd)"
   else
@@ -51,6 +52,84 @@ PENDING_MARKER="$PACKAGE_ROOT/pending-update.json"
 write_log() {
   local message="$1"
   printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$message" >>"$LAUNCHER_LOG"
+}
+
+is_running_from_dmg() {
+  case "$PACKAGE_ROOT" in
+    /Volumes/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_installed_app_bundle() {
+  case "$APP_BUNDLE_PATH" in
+    /Applications/*.app|"$HOME"/Applications/*.app)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+prompt_move_to_applications() {
+  if ! is_running_from_dmg; then
+    return
+  fi
+
+  if is_installed_app_bundle; then
+    return
+  fi
+
+  if ! command -v osascript >/dev/null 2>&1; then
+    return
+  fi
+
+  local selection
+  selection="$(osascript <<APPLESCRIPT
+set resultButton to button returned of (display dialog "CourseForge is running from a downloaded disk image. Move it to Applications now for a smooth install experience?" buttons {"Continue", "Move to Applications"} default button "Move to Applications" with title "Install CourseForge")
+return resultButton
+APPLESCRIPT
+)"
+
+  if [[ "$selection" != "Move to Applications" ]]; then
+    return
+  fi
+
+  local target_app="/Applications/CourseForge.app"
+  local source_app="$APP_BUNDLE_PATH"
+
+  if [[ "$source_app" != *.app ]]; then
+    write_log "Move-to-Applications skipped: source app bundle path could not be resolved."
+    return
+  fi
+
+  if [[ -e "$target_app" ]]; then
+    local replace_choice
+    replace_choice="$(osascript <<APPLESCRIPT
+set resultButton to button returned of (display dialog "CourseForge already exists in Applications. Replace it with this version?" buttons {"Cancel", "Replace"} default button "Replace" with title "Install CourseForge")
+return resultButton
+APPLESCRIPT
+)"
+    if [[ "$replace_choice" != "Replace" ]]; then
+      return
+    fi
+    rm -rf "$target_app"
+  fi
+
+  if ! ditto "$source_app" "$target_app"; then
+    write_log "Move-to-Applications failed while copying app bundle."
+    osascript -e 'display dialog "Could not copy CourseForge to Applications. Please drag the app manually." buttons {"OK"} default button "OK" with title "Install CourseForge"' >/dev/null 2>&1 || true
+    return
+  fi
+
+  write_log "CourseForge copied to Applications. Relaunching from installed location."
+  open -a "$target_app" >/dev/null 2>&1 || true
+  exit 0
 }
 
 apply_staged_update() {
@@ -95,6 +174,7 @@ spawn_background_update_check() {
 }
 
 apply_staged_update
+prompt_move_to_applications
 NODE_BIN="$(resolve_node)"
 if [[ -z "$NODE_BIN" ]]; then
   write_log "Node runtime was not found."

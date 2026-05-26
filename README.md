@@ -193,6 +193,33 @@ Windows install flow:
 - Supports component flags and icon flags for IT automation: `/SILENT`, `/FULLAUTO`, `/INSTALL_WEBAPP`, `/INSTALL_EXTENSION`, `/INSTALL_BOTH`, `/NO_DESKTOP_ICON`, `/NO_STARTMENU_ICON`, `/REPAIR`, `/UNINSTALL`.
 - Writes structured logs to `%LOCALAPPDATA%\CourseForge\logs\` including `installer.log`, `silent-install.log`, `auto-install.log`, `repair.log`, `uninstaller.log`, and `rollback.log`.
 
+macOS install flow:
+
+- In GitHub Releases, download the asset named `CourseForge-<version>-macos-portable.zip`.
+- In a local build workspace, the extracted package folder follows `release/CourseForge-<version>-macos/` naming.
+- Extract the zip, then run the installer script from the extracted folder.
+
+```bash
+cd ~/Downloads
+unzip CourseForge-<version>-macos-portable.zip -d CourseForge-<version>-macos
+cd CourseForge-<version>-macos
+chmod +x Install-CourseForge-macos.sh Start-CourseForge-macos.sh AutoUpdate-CourseForge.sh Uninstall-CourseForge-macos.sh
+./Install-CourseForge-macos.sh
+```
+
+Launch and update commands (from the extracted/install folder):
+
+```bash
+./Start-CourseForge-macos.sh
+./AutoUpdate-CourseForge.sh
+```
+
+Uninstall command:
+
+```bash
+./Uninstall-CourseForge-macos.sh
+```
+
 Windows installer UX notes:
 
 - The packaging script now prefers an Inno Setup GUI wizard build when `ISCC.exe` (Inno Setup 6 compiler) is available on the build host.

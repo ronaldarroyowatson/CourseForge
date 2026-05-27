@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   resetSyncSafetyStateForTests,
+  setReadBudgetStateForTests,
   setWriteBudgetStateForTests,
   syncNow,
 } from "../../src/core/services/syncService";
@@ -60,6 +61,24 @@ describe("syncNow safety controls", () => {
     expect(result.writeBudgetExceeded).toBe(true);
     expect(result.writeCount).toBe(500);
     expect(result.message).toContain("Cloud sync paused");
+  });
+
+  it("returns budget-exceeded result when read budget is exhausted", async () => {
+    setReadBudgetStateForTests(true, 5000);
+    const syncUserDataFn = vi.fn(async () => Promise.resolve());
+
+    const result = await syncNow({
+      nowFn: () => 8000,
+      getCurrentUserFn: () => ({ uid: "user-1" }),
+      getPendingSyncDiagnosticsFn: async () => createPendingDiagnostics(),
+      syncUserDataFn,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.readBudgetExceeded).toBe(true);
+    expect(result.readCount).toBe(5000);
+    expect(result.message).toContain("prevent excessive reads");
+    expect(syncUserDataFn).not.toHaveBeenCalled();
   });
 
   it("marks permission denied errors correctly", async () => {
@@ -159,5 +178,37 @@ describe("syncNow safety controls", () => {
     expect(result).toHaveProperty("retryLimit");
     expect(result).toHaveProperty("pendingCount");
     expect(result.errorCode).toBeNull();
+  });
+
+  it("skips full sync when pending is zero and cloud token is unchanged", async () => {
+    const syncUserDataFn = vi.fn(async () => Promise.resolve());
+    const getCloudSyncPolicyFn = vi.fn(async () => ({
+      isBlocked: false,
+      reason: null,
+      syncToken: "token-1",
+    }));
+
+    const first = await syncNow({
+      nowFn: () => 20000,
+      getCurrentUserFn: () => ({ uid: "user-1" }),
+      getPendingSyncDiagnosticsFn: async () => createPendingDiagnostics(),
+      getCloudSyncPolicyFn,
+      syncUserDataFn,
+    });
+
+    expect(first.success).toBe(true);
+    expect(syncUserDataFn).toHaveBeenCalledTimes(1);
+
+    const second = await syncNow({
+      nowFn: () => 26001,
+      getCurrentUserFn: () => ({ uid: "user-1" }),
+      getPendingSyncDiagnosticsFn: async () => createPendingDiagnostics(),
+      getCloudSyncPolicyFn,
+      syncUserDataFn,
+    });
+
+    expect(second.success).toBe(true);
+    expect(second.message).toContain("no cloud changes");
+    expect(syncUserDataFn).toHaveBeenCalledTimes(1);
   });
 });

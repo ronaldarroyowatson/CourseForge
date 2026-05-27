@@ -16,7 +16,9 @@ import {
   getTextbookById,
   getChapterById,
   getSectionById,
+  getAllTextbooks,
   listChaptersByTextbookId,
+  listExpiredRecycledTextbooks,
   listConceptsBySectionId,
   listEquationsBySectionId,
   listKeyIdeasBySectionId,
@@ -28,6 +30,7 @@ import {
   saveEquation,
   saveKeyIdea,
   saveSection,
+  scheduleTextbookDeletion,
   saveTextbook,
   saveVocabTerm,
   updateTextbook,
@@ -421,6 +424,60 @@ export function useRepositories() {
     markLocalChange();
   }, [markLocalChange]);
 
+  const scheduleTextbookDelete = useCallback(async (id: string, retentionMs: number): Promise<void> => {
+    const existingTextbook = await getTextbookById(id);
+    const currentUser = getCurrentUser();
+
+    if (
+      existingTextbook?.userId
+      && currentUser?.uid
+      && existingTextbook.userId !== currentUser.uid
+    ) {
+      throw new Error("You can only delete textbooks that you authored.");
+    }
+
+    await scheduleTextbookDeletion(id, retentionMs);
+    markLocalChange();
+  }, [markLocalChange]);
+
+  const purgeExpiredTextbookDeletions = useCallback(async (): Promise<number> => {
+    const expiredBySchedule = await listExpiredRecycledTextbooks();
+    const nowMs = Date.now();
+    const allTextbooks = await getAllTextbooks();
+    const expiredLegacy = allTextbooks.filter((textbook) => {
+      if (!textbook.isDeleted || !textbook.recycleBinExpiresAt) {
+        return false;
+      }
+
+      const expiresAtMs = Date.parse(textbook.recycleBinExpiresAt);
+      return !Number.isNaN(expiresAtMs) && expiresAtMs <= nowMs;
+    });
+
+    const dueIds = new Set([
+      ...expiredBySchedule.map((textbook) => textbook.id),
+      ...expiredLegacy.map((textbook) => textbook.id),
+    ]);
+
+    if (dueIds.size === 0) {
+      return 0;
+    }
+
+    let purged = 0;
+    for (const textbookId of dueIds) {
+      try {
+        await removeTextbook(textbookId);
+        purged += 1;
+      } catch (error) {
+        console.warn("[CourseForge][TextbookDelete] Expired recycle-bin purge failed.", {
+          textbookId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return purged;
+  }, [removeTextbook]);
+
   const findTextbookByISBN = useCallback(async (isbnInput: string): Promise<Textbook | undefined> => {
     return findTextbookByIsbn(isbnInput);
   }, []);
@@ -611,6 +668,8 @@ export function useRepositories() {
     fetchTextbooks,
     createTextbook,
     removeTextbook,
+    scheduleTextbookDelete,
+    purgeExpiredTextbookDeletions,
     findDuplicateTextbook,
     findTextbookByISBN,
     editTextbook,

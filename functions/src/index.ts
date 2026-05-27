@@ -1413,6 +1413,32 @@ function parseDocPath(docPath: string): { ownerId: string | null; collectionName
   throw new HttpsError("invalid-argument", "Unsupported document path.");
 }
 
+async function touchOwnerSyncTokenFromDocPath(docPath: string): Promise<void> {
+  const snapshot = await firestore.doc(docPath).get();
+  if (!snapshot.exists) {
+    return;
+  }
+
+  const data = snapshot.data() ?? {};
+  const ownerId = typeof data.ownerId === "string"
+    ? data.ownerId.trim()
+    : typeof data.userId === "string"
+      ? data.userId.trim()
+      : "";
+
+  if (!ownerId) {
+    return;
+  }
+
+  await firestore.doc(`users/${ownerId}`).set(
+    {
+      uid: ownerId,
+      syncToken: new Date().toISOString(),
+    },
+    { merge: true }
+  );
+}
+
 async function getOwnerEmailMap(): Promise<Map<string, string>> {
   const snapshot = await firestore.collection("users").get();
   const map = new Map<string, string>();
@@ -1648,6 +1674,7 @@ export const updateModerationStatus = onCall(async (request) => {
     pendingSync: false,
     lastModified: new Date().toISOString(),
   });
+  await touchOwnerSyncTokenFromDocPath(docPath);
 
   return success(`Updated status to ${status}.`, `Updated status to ${status}.`);
 });
@@ -1669,6 +1696,7 @@ export const archiveAdminContent = onCall(async (request) => {
     pendingSync: false,
     lastModified: new Date().toISOString(),
   });
+  await touchOwnerSyncTokenFromDocPath(docPath);
 
   return success(isArchived ? "Content archived." : "Content restored from archive.", isArchived ? "Content archived." : "Content restored from archive.");
 });
@@ -1690,6 +1718,7 @@ export const softDeleteAdminContent = onCall(async (request) => {
     pendingSync: false,
     lastModified: new Date().toISOString(),
   });
+  await touchOwnerSyncTokenFromDocPath(docPath);
 
   return success(isDeleted ? "Content hidden from non-admin users." : "Content restored.", isDeleted ? "Content hidden from non-admin users." : "Content restored.");
 });
@@ -1786,6 +1815,7 @@ export const updateAdminContent = onCall(async (request) => {
     pendingSync: false,
     lastModified: new Date().toISOString(),
   });
+  await touchOwnerSyncTokenFromDocPath(docPath);
 
   return success("Content updated.", "Content updated.");
 });

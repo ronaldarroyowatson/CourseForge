@@ -23,6 +23,7 @@ for required in \
   "AutoUpdate-CourseForge.sh" \
   "Install-CourseForge-macos.sh" \
   "Uninstall-CourseForge-macos.sh" \
+  "courseforge-serve.cjs" \
   "courseforge-serve.js" \
   "package-manifest.json"; do
   if ! grep -q "$required" <<<"$LISTING"; then
@@ -33,6 +34,7 @@ done
 
 for required in \
   "CourseForge.app/Contents/MacOS/CourseForge" \
+  "CourseForge.app/Contents/Resources/CourseForge/courseforge-serve.cjs" \
   "CourseForge.app/Contents/Resources/CourseForge/courseforge-serve.js" \
   "CourseForge.app/Contents/Resources/CourseForge/webapp/index.html"; do
   if ! grep -q "$required" <<<"$LISTING"; then

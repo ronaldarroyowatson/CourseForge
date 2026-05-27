@@ -75,7 +75,13 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
   const currentUserId = useAuthStore((state) => state.userId);
   const currentUserEmail = useAuthStore((state) => state.userEmail);
   const isAdmin = useAuthStore((state) => state.isAdmin);
-  const { fetchChaptersByTextbookId, fetchSectionsByChapterId, removeTextbook } = useRepositories();
+  const syncStatus = useUIStore((state) => state.syncStatus);
+  const lastSyncTime = useUIStore((state) => state.lastSyncTime);
+  const repositories = useRepositories();
+  const fetchChaptersByTextbookId = repositories.fetchChaptersByTextbookId;
+  const fetchSectionsByChapterId = repositories.fetchSectionsByChapterId;
+  const removeTextbook = repositories.removeTextbook;
+  const purgeExpiredTextbookDeletions = repositories.purgeExpiredTextbookDeletions ?? (async () => 0);
 
   const [isSigningOut, setIsSigningOut] = React.useState(false);
   const [signOutError, setSignOutError] = React.useState<string | null>(null);
@@ -157,6 +163,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
         setTextbookLoadError(null);
         console.info("[CourseForge][TextbookLoad] Boot load started.");
         await initDB();
+        await purgeExpiredTextbookDeletions();
         const results = await getVisibleTextbooks();
         const cloudSyncedCount = results.filter((textbook) => textbook.source === "cloud").length;
         console.info("[CourseForge][TextbookLoad] Boot load completed.", {
@@ -201,7 +208,15 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
     return () => {
       isMounted = false;
     };
-  }, [textbookRefreshKey]);
+  }, [purgeExpiredTextbookDeletions, textbookRefreshKey]);
+
+  React.useEffect(() => {
+    if (syncStatus !== "synced" || !lastSyncTime) {
+      return;
+    }
+
+    setTextbookRefreshKey((current) => current + 1);
+  }, [syncStatus, lastSyncTime]);
 
   React.useEffect(() => {
     if (showAdminPage || showSettingsPage) {

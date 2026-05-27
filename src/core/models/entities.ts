@@ -167,6 +167,12 @@ export interface Textbook {
   uploadStalledAt?: string;
   /** Human-readable reason for incomplete, stalled, or invalid upload state. */
   uploadIncompleteReason?: string;
+  /** ISO timestamp when the textbook was moved to recycle bin. */
+  recycleBinDeletedAt?: string;
+  /** ISO timestamp when recycle-bin grace period expires and permanent delete is allowed. */
+  recycleBinExpiresAt?: string;
+  /** Grace period in milliseconds used for scheduled permanent deletion. */
+  recycleBinRetentionMs?: number;
 }
 
 export interface Chapter {

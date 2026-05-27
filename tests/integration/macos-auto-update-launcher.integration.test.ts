@@ -17,6 +17,7 @@ describe("macOS launcher and updater guardrails", () => {
     expect(launcherScript).toContain("pending-update.json");
     expect(launcherScript).toContain("_pending_update");
     expect(launcherScript).toContain("rsync -a --delete");
+    expect(launcherScript).toContain("courseforge-serve.cjs");
   });
 
   it("checks for updates in background without blocking startup", () => {
@@ -25,6 +26,11 @@ describe("macOS launcher and updater guardrails", () => {
     expect(launcherScript).toContain("spawn_background_update_check");
     expect(launcherScript).toContain("--check-only");
     expect(launcherScript).toContain("|| true");
+    expect(launcherScript).toContain('"/opt/homebrew/bin/node"');
+    expect(launcherScript).toContain('"$HOME/.nvm/versions/node"/v*/bin/node');
+    expect(launcherScript).toContain("server_is_reachable");
+    expect(launcherScript).toContain("nohup");
+    expect(launcherScript).toContain("Detected existing server");
   });
 
   it("guides users to move app from DMG into Applications on first launch", () => {
@@ -34,6 +40,7 @@ describe("macOS launcher and updater guardrails", () => {
     expect(launcherScript).toContain("/Volumes/");
     expect(launcherScript).toContain("Move to Applications");
     expect(launcherScript).toContain("open -a");
+    expect(launcherScript).toContain("xattr -dr com.apple.quarantine");
   });
 
   it("supports release polling, staging, and pending update marker creation", () => {

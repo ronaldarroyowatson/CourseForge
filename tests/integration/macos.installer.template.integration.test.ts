@@ -28,6 +28,7 @@ describe("macOS installer template guardrails", () => {
     expect(packagerScript).toContain("AutoUpdate-CourseForge.sh");
     expect(packagerScript).toContain("Install-CourseForge-macos.sh");
     expect(packagerScript).toContain("Uninstall-CourseForge-macos.sh");
+    expect(packagerScript).toContain("courseforge-serve.cjs");
     expect(packagerScript).toContain("courseforge-serve.js");
     expect(packagerScript).toContain("package-manifest.json");
     expect(packagerScript).toContain("CourseForge.app");
@@ -59,5 +60,6 @@ describe("macOS installer template guardrails", () => {
     expect(installerScript).toContain("reinstall");
     expect(installerScript).toContain("installer-metadata.json");
     expect(installerScript).toContain("com.ronaldarroyowatson.CourseForge");
+    expect(installerScript).toContain("xattr -dr com.apple.quarantine");
   });
 });

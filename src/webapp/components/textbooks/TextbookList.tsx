@@ -24,6 +24,15 @@ type RetrySyncProgressTone = "info" | "success" | "warning" | "error";
 const RETRY_SYNC_WINDOW_DELAY_MS = 5500;
 const RETRY_SYNC_TICK_MS = 1000;
 
+const DELETE_RETENTION_OPTIONS: Array<{ label: string; valueMs: number }> = [
+  { label: "5 minutes", valueMs: 5 * 60 * 1000 },
+  { label: "1 hour", valueMs: 60 * 60 * 1000 },
+  { label: "24 hours", valueMs: 24 * 60 * 60 * 1000 },
+  { label: "7 days", valueMs: 7 * 24 * 60 * 60 * 1000 },
+];
+
+const DEFAULT_DELETE_RETENTION_MS = DELETE_RETENTION_OPTIONS[2].valueMs;
+
 interface RetrySyncProgressState {
   percent: number;
   detail: string;
@@ -134,9 +143,13 @@ export function TextbookList({
   onDeleted,
   onRefresh,
 }: TextbookListProps): React.JSX.Element {
-  const { removeTextbook, toggleTextbookFavorite, toggleTextbookArchive } = useRepositories();
+  const repositories = useRepositories();
+  const scheduleTextbookDelete = repositories.scheduleTextbookDelete ?? repositories.removeTextbook;
+  const toggleTextbookFavorite = repositories.toggleTextbookFavorite;
+  const toggleTextbookArchive = repositories.toggleTextbookArchive;
   const { setSelectedTextbook } = useUIStore();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [deleteRetentionMs, setDeleteRetentionMs] = useState<number>(DEFAULT_DELETE_RETENTION_MS);
   const [retrySyncInProgress, setRetrySyncInProgress] = useState<Set<string>>(new Set());
   const [retrySyncProgress, setRetrySyncProgress] = useState<Map<string, RetrySyncProgressState>>(new Map());
   const [contentStatsById, setContentStatsById] = useState<Record<string, TextbookContentStats>>({});
@@ -180,12 +193,24 @@ export function TextbookList({
   }
 
   async function handleDelete(id: string): Promise<void> {
+    const selectedRetention = DELETE_RETENTION_OPTIONS.find((option) => option.valueMs === deleteRetentionMs)
+      ?? DELETE_RETENTION_OPTIONS[2];
+    const confirmed = typeof window === "undefined"
+      ? true
+      : window.confirm(
+        `Move this textbook to the recycle bin? It will be permanently deleted after ${selectedRetention.label}.`
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
     onDeleted(id);
 
     try {
-      await removeTextbook(id);
+      await scheduleTextbookDelete(id, deleteRetentionMs);
     } catch {
-      setErrorMessage("Unable to delete textbook.");
+      setErrorMessage("Unable to schedule textbook deletion.");
       onRefresh();
     }
   }
@@ -398,6 +423,25 @@ export function TextbookList({
         >
           Continue to Sections
         </button>
+        <label className="textbook-delete-retention-control" htmlFor="textbook-delete-retention">
+          Recycle-bin timer:
+          <select
+            id="textbook-delete-retention"
+            value={deleteRetentionMs}
+            onChange={(event) => {
+              const nextValue = Number(event.target.value);
+              if (!Number.isNaN(nextValue)) {
+                setDeleteRetentionMs(nextValue);
+              }
+            }}
+          >
+            {DELETE_RETENTION_OPTIONS.map((option) => (
+              <option key={option.valueMs} value={option.valueMs}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <ul className="textbook-list">
@@ -417,43 +461,12 @@ export function TextbookList({
               textbook.isFavorite ? "textbook-row--favorite" : "",
             ].filter(Boolean).join(" ")}
           >
-            {textbook.coverImageUrl ? (
-              <img
-                src={textbook.coverImageUrl}
-                alt={`${textbook.title} cover`}
-                className="textbook-row__cover"
-              />
-            ) : (
-              <div
-                className="textbook-row__cover textbook-row__cover--placeholder"
-                role="img"
-                aria-label="No cover image available"
-              >
-                No Image
-              </div>
-            )}
-
             <div className="textbook-row__info">
               <div className="textbook-row__title-row">
                 <strong>{textbook.title}</strong>
-                <div className="textbook-row__status-group">
-                  {isBestDataCandidate ? (
-                    <span className="textbook-best-badge" title="This textbook currently has the strongest captured data footprint.">
-                      Best Data
-                    </span>
-                  ) : null}
-                  <span
-                    className={`textbook-quality-chip textbook-quality-chip--${quality.kind}`}
-                    title={quality.hint}
-                    aria-label={`Data status: ${quality.label}`}
-                  >
-                    <span className="textbook-quality-chip__icon" aria-hidden="true" />
-                    {quality.label}
-                  </span>
-                </div>
               </div>
               {textbook.subtitle ? <p className="textbook-row__meta">{textbook.subtitle}</p> : null}
-              <p>
+              <p className="textbook-row__meta">
                 Grade {textbook.grade} &bull; {textbook.subject} &bull; {textbook.publicationYear}
               </p>
               {textbook.seriesName || textbook.publisher || textbook.gradeBand ? (
@@ -473,37 +486,34 @@ export function TextbookList({
                   </span>
                 ) : null}
               </p>
-              <p className="textbook-row__meta">
-                Captured: {stats.chapters} chapters &bull; {stats.sections} sections &bull; {stats.vocab} vocab &bull; {stats.equations} equations &bull; {stats.concepts} concepts &bull; {stats.keyIdeas} key ideas
-              </p>
-              <p className="textbook-row__meta">
+            </div>
+
+            <div className="textbook-row__capture-list" aria-label="Captured content summary">
+              <p className="textbook-row__capture-item"><strong>Chapter</strong> {stats.chapters}</p>
+              <p className="textbook-row__capture-item"><strong>Sections</strong> {stats.sections}</p>
+              <p className="textbook-row__capture-item"><strong>Vocab</strong> {stats.vocab}</p>
+              <p className="textbook-row__capture-item"><strong>Equations</strong> {stats.equations}</p>
+              <p className="textbook-row__capture-item"><strong>Concepts</strong> {stats.concepts}</p>
+              <p className="textbook-row__capture-item"><strong>Key Ideas</strong> {stats.keyIdeas}</p>
+            </div>
+
+            <div className="textbook-row__right">
+              <div className="textbook-row__status-group">
+                {isBestDataCandidate ? (
+                  <span className="textbook-best-badge" title="This textbook currently has the strongest captured data footprint.">
+                    Best Data
+                  </span>
+                ) : null}
+                <span
+                  className={`textbook-quality-chip textbook-quality-chip--${quality.kind}`}
+                  title={quality.hint}
+                  aria-label={`Data status: ${quality.label}`}
+                >
+                  <span className="textbook-quality-chip__icon" aria-hidden="true" />
+                  {quality.label}
+                </span>
                 <span className={syncBadge.className}>{syncBadge.label}</span>
-                {textbook.pendingSync && (
-                  <button
-                    type="button"
-                    onClick={() => void handleRetrySync(textbook.id)}
-                    disabled={retrySyncInProgress.has(textbook.id)}
-                    title="Retry cloud sync"
-                    aria-label="Retry cloud sync"
-                    className="btn-retry-sync"
-                  >
-                    {retrySyncInProgress.has(textbook.id) ? "Retrying..." : "Retry Sync"}
-                  </button>
-                )}
-              </p>
-              {retryProgress ? (
-                <div className={`textbook-retry-progress textbook-retry-progress--${retryProgress.tone}`} role="status" aria-live="polite">
-                  <p className="textbook-row__meta textbook-retry-progress__detail">
-                    Retry Sync Progress: {retryProgress.percent}% - {retryProgress.detail}
-                  </p>
-                  <progress
-                    className="textbook-retry-progress__bar"
-                    max={100}
-                    value={retryProgress.percent}
-                    aria-label={`Retry sync upload progress for ${textbook.title}`}
-                  />
-                </div>
-              ) : null}
+              </div>
               <div className="textbook-row__actions">
                 <button
                   type="button"
@@ -540,11 +550,52 @@ export function TextbookList({
                   <ArchiveIcon size={15} />
                 </button>
               </div>
+              <p className="textbook-row__meta textbook-row__meta--right">
+                {textbook.pendingSync && (
+                  <button
+                    type="button"
+                    onClick={() => void handleRetrySync(textbook.id)}
+                    disabled={retrySyncInProgress.has(textbook.id)}
+                    title="Retry cloud sync"
+                    aria-label="Retry cloud sync"
+                    className="btn-retry-sync"
+                  >
+                    {retrySyncInProgress.has(textbook.id) ? "Retrying..." : "Retry Sync"}
+                  </button>
+                )}
+              </p>
+              {textbook.coverImageUrl ? (
+                <img
+                  src={textbook.coverImageUrl}
+                  alt={`${textbook.title} cover`}
+                  className="textbook-row__cover"
+                />
+              ) : (
+                <div
+                  className="textbook-row__cover textbook-row__cover--placeholder"
+                  role="img"
+                  aria-label="No cover image available"
+                >
+                  No Image
+                </div>
+              )}
+              {retryProgress ? (
+                <div className={`textbook-retry-progress textbook-retry-progress--${retryProgress.tone}`} role="status" aria-live="polite">
+                  <p className="textbook-row__meta textbook-retry-progress__detail">
+                    Retry Sync Progress: {retryProgress.percent}% - {retryProgress.detail}
+                  </p>
+                  <progress
+                    className="textbook-retry-progress__bar"
+                    max={100}
+                    value={retryProgress.percent}
+                    aria-label={`Retry sync upload progress for ${textbook.title}`}
+                  />
+                </div>
+              ) : null}
+              <button type="button" className="textbook-row__delete" onClick={() => void handleDelete(textbook.id)}>
+                Delete
+              </button>
             </div>
-
-            <button type="button" onClick={() => void handleDelete(textbook.id)}>
-              Delete
-            </button>
           </li>);
         })}
       </ul>

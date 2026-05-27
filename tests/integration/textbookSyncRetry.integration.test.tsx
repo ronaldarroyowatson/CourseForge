@@ -27,6 +27,8 @@ const syncNowMock = vi.hoisted(() => vi.fn<() => Promise<SyncNowResult>>());
 
 const repositoriesMock = vi.hoisted(() => ({
   removeTextbook: vi.fn(async () => undefined),
+  scheduleTextbookDelete: vi.fn(async () => undefined),
+  purgeExpiredTextbookDeletions: vi.fn(async () => 0),
   toggleTextbookFavorite: vi.fn(async () => undefined),
   toggleTextbookArchive: vi.fn(async () => undefined),
 }));

@@ -182,9 +182,20 @@ if [[ -z "$NODE_BIN" ]]; then
   exit 1
 fi
 
+SERVER_SCRIPT="$PACKAGE_ROOT/courseforge-serve.cjs"
+if [[ ! -f "$SERVER_SCRIPT" ]]; then
+  SERVER_SCRIPT="$PACKAGE_ROOT/courseforge-serve.js"
+fi
+
+if [[ ! -f "$SERVER_SCRIPT" ]]; then
+  write_log "Server script was not found in package root."
+  echo "CourseForge could not find its local server script."
+  exit 1
+fi
+
 write_log "Starting server on ${HOST}:${PORT}."
 spawn_background_update_check &
-"$NODE_BIN" "$PACKAGE_ROOT/courseforge-serve.js" "$PACKAGE_ROOT/webapp" "$PORT" "$HOST" &
+"$NODE_BIN" "$SERVER_SCRIPT" "$PACKAGE_ROOT/webapp" "$PORT" "$HOST" &
 SERVER_PID=$!
 
 if [[ "$DISABLE_BROWSER" != "1" ]]; then

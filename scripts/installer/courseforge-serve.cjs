@@ -178,7 +178,7 @@ function readBootStatus() {
 }
 
 function isUpdaterActiveState(state) {
-  return ["checking", "update-available", "downloading", "extracting", "staging"].includes(String(state || "").toLowerCase());
+  return ["checking", "downloading", "extracting", "staging"].includes(String(state || "").toLowerCase());
 }
 
 function getAutoUpdateScriptPath() {

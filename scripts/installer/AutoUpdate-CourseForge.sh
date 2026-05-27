@@ -5,7 +5,7 @@ PACKAGE_ROOT=""
 CURRENT_VERSION=""
 OWNER="ronaldarroyowatson"
 REPO="CourseForge"
-ASSET_NAME_TEMPLATE="CourseForge-{version}-portable.zip"
+ASSET_NAME_TEMPLATE="CourseForge-{version}-macos-portable.zip"
 STAGE_ONLY=false
 CHECK_ONLY=false
 
@@ -141,6 +141,24 @@ if ! ditto -x -k "$TMP_ZIP" "$PENDING_DIR"; then
   exit 1
 fi
 
+# Normalize archive layouts that contain a single top-level payload folder.
+top_level_entries=("$PENDING_DIR"/*)
+if [[ ${#top_level_entries[@]} -eq 1 && -d "${top_level_entries[0]}" ]]; then
+  inner_root="${top_level_entries[0]}"
+  if [[ -f "$inner_root/package-manifest.json" || -d "$inner_root/webapp" || -f "$inner_root/Start-CourseForge-macos.sh" ]]; then
+    tmp_flatten_dir="$PACKAGE_ROOT/_pending_update_flatten"
+    rm -rf "$tmp_flatten_dir"
+    mkdir -p "$tmp_flatten_dir"
+    if command -v rsync >/dev/null 2>&1; then
+      rsync -a "$inner_root/" "$tmp_flatten_dir/"
+    else
+      cp -R "$inner_root/." "$tmp_flatten_dir/"
+    fi
+    rm -rf "$PENDING_DIR"
+    mv "$tmp_flatten_dir" "$PENDING_DIR"
+  fi
+fi
+
 cat >"$PENDING_UPDATE_PATH" <<JSON
 {
   "version": "$LATEST_VERSION",
@@ -149,6 +167,8 @@ cat >"$PENDING_UPDATE_PATH" <<JSON
 }
 JSON
 
-write_status "staging" "Update staged for next launch." "$LATEST_VERSION"
+rm -f "$TMP_ZIP"
+
+write_status "staged" "Update staged for next launch." "$LATEST_VERSION"
 write_log "Update staged successfully for next launch."
 exit 0

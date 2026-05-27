@@ -35,6 +35,7 @@ CourseForge consists of three main layers:
 8. When requested, the XML exporter reads from the database and generates a schema‑compliant XML document.
 9. The game engine and AI tutor consume the XML.
 10. Textbook list and duplicate-resolution surfaces compute per-textbook content stats (chapters, sections, vocab, equations, concepts, key ideas) to classify data quality (`Complete`, `Partial`, `Empty`) and surface a strongest-record hint (`Best Data`) for quick duplicate triage.
+11. Sync preflight performs a single `/users/{uid}` token read (`syncToken`) and skips hierarchy fan-out reads when the token matches the last local checkpoint and there are no pending local writes.
 
 ---
 
@@ -57,6 +58,7 @@ CourseForge consists of three main layers:
   - `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}`
 - User profile docs stored at `/users/{uid}` for auth bootstrap and admin user management.
 - User profile docs also store cloud content policy state (`isContentBlocked`, reason/updatedBy metadata).
+- User profile docs store a lightweight cloud content token (`syncToken`) updated after cloud curriculum mutations so clients can cheaply detect no-change sync windows.
 - Firestore security model:
   - Authenticated users can read canonical curriculum docs.
   - Users can only write docs they own (`userId` / `ownerId` match).

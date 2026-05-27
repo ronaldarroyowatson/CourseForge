@@ -139,6 +139,48 @@ export async function listTextbooks(): Promise<Textbook[]> {
   return textbooks.filter((textbook) => !textbook.isDeleted);
 }
 
+export async function listExpiredRecycledTextbooks(nowIso = new Date().toISOString()): Promise<Textbook[]> {
+  const nowMs = Date.parse(nowIso);
+  if (Number.isNaN(nowMs)) {
+    return [];
+  }
+
+  const textbooks = await getAll();
+  return textbooks.filter((textbook) => {
+    if (!textbook.isDeleted || !textbook.recycleBinExpiresAt) {
+      return false;
+    }
+
+    const expiresAtMs = Date.parse(textbook.recycleBinExpiresAt);
+    return !Number.isNaN(expiresAtMs) && expiresAtMs <= nowMs;
+  });
+}
+
+export async function scheduleTextbookDeletion(id: string, retentionMs: number): Promise<Textbook> {
+  const textbook = await getById(STORE_NAMES.textbooks, id);
+  if (!textbook) {
+    throw new Error(`Textbook with id ${id} not found.`);
+  }
+
+  const clampedRetentionMs = Math.max(60_000, Math.floor(retentionMs));
+  const deletedAt = new Date();
+  const expiresAt = new Date(deletedAt.getTime() + clampedRetentionMs);
+
+  const updated: Textbook = {
+    ...textbook,
+    isDeleted: true,
+    pendingSync: true,
+    source: "local",
+    lastModified: deletedAt.toISOString(),
+    recycleBinDeletedAt: deletedAt.toISOString(),
+    recycleBinExpiresAt: expiresAt.toISOString(),
+    recycleBinRetentionMs: clampedRetentionMs,
+  };
+
+  await saveTextbook(updated);
+  return updated;
+}
+
 export async function findTextbookByIsbn(isbnInput: string): Promise<Textbook | undefined> {
   const raw = isbnInput.trim();
   const normalized = normalizeISBN(raw);

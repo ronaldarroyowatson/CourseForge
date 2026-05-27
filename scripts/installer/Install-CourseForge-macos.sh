@@ -68,6 +68,14 @@ copy_file() {
   fi
 }
 
+clear_quarantine() {
+  local target_path="$1"
+
+  if command -v xattr >/dev/null 2>&1; then
+    xattr -dr com.apple.quarantine "$target_path" >/dev/null 2>&1 || true
+  fi
+}
+
 copy_package_payload() {
   local resources_root="$INSTALL_ROOT/Contents/Resources/CourseForge"
   local macos_root="$INSTALL_ROOT/Contents/MacOS"
@@ -175,6 +183,7 @@ install_mode() {
   write_log "Installing CourseForge to ${INSTALL_ROOT}."
   rm -rf "$INSTALL_ROOT"
   copy_package_payload
+  clear_quarantine "$INSTALL_ROOT"
   mkdir -p "$SUPPORT_ROOT/data" "$SUPPORT_ROOT/updater"
   write_metadata
   write_log "Install completed."
@@ -195,6 +204,7 @@ repair_mode() {
   restore_critical_file "$PACKAGE_ROOT/AutoUpdate-CourseForge.sh" "$resources_root/AutoUpdate-CourseForge.sh"
   chmod +x "$resources_root/AutoUpdate-CourseForge.sh" || true
   restore_critical_file "$PACKAGE_ROOT/courseforge-serve.js" "$resources_root/courseforge-serve.js"
+  clear_quarantine "$INSTALL_ROOT"
 
   if [[ -d "$PACKAGE_ROOT/webapp" && ! -d "$resources_root/webapp" ]]; then
     write_log "Repair restoring webapp payload."

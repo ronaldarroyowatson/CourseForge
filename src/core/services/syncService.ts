@@ -44,6 +44,7 @@ const DEFAULT_RETRY_LIMIT = 3;
 const WRITE_BUDGET_WARNING = "Cloud sync paused to prevent excessive writes. Please review your data or try again later.";
 const WRITE_BUDGET_STORAGE_KEY = "courseforge.sync.writeBudgetDaily";
 const READ_BUDGET_STORAGE_KEY = "courseforge.sync.readBudgetDaily";
+const CLOUD_SYNC_TOKEN_STORAGE_KEY = "courseforge.sync.cloudTokenByUser";
 
 const recentWrites = new Map<string, number>();
 let lastSyncAttemptAt = 0;
@@ -57,6 +58,8 @@ let readBudgetDateKey = "";
 let syncRunWriteCount = 0;
 let writeBatchLimitReached = false;
 let syncContext: { uid: string | null; isAdmin: boolean | null } = { uid: null, isAdmin: null };
+const usersNeedingCloudTokenRefresh = new Set<string>();
+let cloudSyncTokenByUser = readCloudSyncTokenState();
 
 // Number of consecutive batch-limit windows before a textbook is considered stalled.
 const BATCH_STALL_WINDOW_COUNT = 3;
@@ -206,6 +209,88 @@ function persistDailyReadBudgetState(): void {
   }
 }
 
+function readCloudSyncTokenState(): Map<string, string> {
+  if (typeof window === "undefined") {
+    return new Map();
+  }
+
+  try {
+    const raw = window.localStorage.getItem(CLOUD_SYNC_TOKEN_STORAGE_KEY);
+    if (!raw) {
+      return new Map();
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const entries = Object.entries(parsed).flatMap(([userId, token]) => {
+      if (typeof token === "string" && token.length > 0) {
+        return [[userId, token] as const];
+      }
+
+      return [] as Array<readonly [string, string]>;
+    });
+
+    return new Map(entries);
+  } catch {
+    return new Map();
+  }
+}
+
+function persistCloudSyncTokenState(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      CLOUD_SYNC_TOKEN_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(cloudSyncTokenByUser.entries()))
+    );
+  } catch {
+    // Best effort persistence only.
+  }
+}
+
+function getCachedCloudSyncToken(userId: string): string | null {
+  return cloudSyncTokenByUser.get(userId) ?? null;
+}
+
+function setCachedCloudSyncToken(userId: string, token: string | null): void {
+  if (!userId.trim()) {
+    return;
+  }
+
+  if (token && token.length > 0) {
+    cloudSyncTokenByUser.set(userId, token);
+  } else {
+    cloudSyncTokenByUser.delete(userId);
+  }
+
+  persistCloudSyncTokenState();
+}
+
+function markUserForCloudTokenRefresh(userId: string): void {
+  if (userId.trim()) {
+    usersNeedingCloudTokenRefresh.add(userId);
+  }
+}
+
+async function flushCloudSyncTokenRefreshes(): Promise<void> {
+  const userIds = [...usersNeedingCloudTokenRefresh];
+  if (userIds.length === 0) {
+    return;
+  }
+
+  usersNeedingCloudTokenRefresh.clear();
+  const syncToken = new Date().toISOString();
+
+  await Promise.all(
+    userIds.map(async (userId) => {
+      await setDoc(doc(firestoreDb, `users/${userId}`), { syncToken }, { merge: true });
+      setCachedCloudSyncToken(userId, syncToken);
+    })
+  );
+}
+
 function refreshDailyReadBudgetState(): void {
   const currentDateKey = getUtcDateKey();
   if (readBudgetDateKey === currentDateKey) {
@@ -229,6 +314,7 @@ function refreshDailyReadBudgetState(): void {
 interface UserCloudSyncPolicy {
   isBlocked: boolean;
   reason: string | null;
+  syncToken: string | null;
 }
 
 interface SyncErrorLike {
@@ -241,6 +327,7 @@ interface SyncNowDependencies {
   nowFn?: () => number;
   getCurrentUserFn?: () => { uid?: string | null } | null;
   getPendingSyncDiagnosticsFn?: () => Promise<{ pendingCount: number; byStore: Partial<Record<SyncStoreName, number>> }>;
+  getCloudSyncPolicyFn?: (userId: string) => Promise<UserCloudSyncPolicy>;
   syncUserDataFn?: typeof syncUserData;
 }
 
@@ -364,6 +451,18 @@ function hasWriteBudgetCapacity(path: string, payload: unknown): boolean {
   return true;
 }
 
+function hasReadBudgetCapacity(): boolean {
+  refreshDailyReadBudgetState();
+
+  if (readBudgetExceeded || sessionReadCount >= DEFAULT_READ_BUDGET_LIMIT) {
+    readBudgetExceeded = true;
+    persistDailyReadBudgetState();
+    return false;
+  }
+
+  return true;
+}
+
 async function trackedGetDocs<T>(request: Promise<{ docs: T[] }>): Promise<{ docs: T[] }> {
   const snapshot = await request;
   refreshDailyReadBudgetState();
@@ -405,6 +504,9 @@ export function resetSyncSafetyStateForTests(): void {
   syncRunWriteCount = 0;
   writeBatchLimitReached = false;
   textbookStalledWindowCount.clear();
+  usersNeedingCloudTokenRefresh.clear();
+  cloudSyncTokenByUser.clear();
+  persistCloudSyncTokenState();
 }
 
 /**
@@ -445,6 +547,15 @@ export function setWriteBudgetStateForTests(exceeded: boolean, writeCount = DEFA
   writeBudgetDateKey = getUtcDateKey();
   writeBudgetExceeded = exceeded;
   sessionWriteCount = writeCount;
+}
+
+/**
+ * Test-only helper to simulate read-budget exhaustion without mutating Firestore.
+ */
+export function setReadBudgetStateForTests(exceeded: boolean, readCount = DEFAULT_READ_BUDGET_LIMIT): void {
+  readBudgetDateKey = getUtcDateKey();
+  readBudgetExceeded = exceeded;
+  sessionReadCount = readCount;
 }
 
 export async function getPendingSyncDiagnostics(): Promise<{ pendingCount: number; byStore: Record<SyncStoreName, number> }> {
@@ -1085,16 +1196,17 @@ async function getUserCloudSyncPolicy(userId: string): Promise<UserCloudSyncPoli
     const snapshot = await trackedGetDocs(getDocs(query(collection(firestoreDb, "users"), where("uid", "==", userId))));
     const userDoc = snapshot.docs[0];
     if (!userDoc) {
-      return { isBlocked: false, reason: null };
+      return { isBlocked: false, reason: null, syncToken: null };
     }
 
     const data = userDoc.data() as Record<string, unknown>;
     return {
       isBlocked: data.isContentBlocked === true,
       reason: typeof data.contentBlockReason === "string" ? data.contentBlockReason : null,
+      syncToken: typeof data.syncToken === "string" && data.syncToken.length > 0 ? data.syncToken : null,
     };
   } catch {
-    return { isBlocked: false, reason: null };
+    return { isBlocked: false, reason: null, syncToken: null };
   }
 }
 
@@ -1173,6 +1285,7 @@ async function deleteCloudStoreItem<T extends SyncStoreName>(
     sessionWriteCount += 1;
     syncRunWriteCount += 1;
     persistDailyWriteBudgetState();
+    markUserForCloudTokenRefresh(item.userId ?? "");
     logSyncEvent("delete:success", path, { id: item.id, storeName });
     return true;
   } catch (error) {
@@ -1253,6 +1366,7 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
     sessionWriteCount += 1;
     syncRunWriteCount += 1;
     persistDailyWriteBudgetState();
+    markUserForCloudTokenRefresh(creatorUserId);
     logSyncEvent("write:success", path, { id: item.id });
     return true;
   } catch (error) {
@@ -1483,6 +1597,8 @@ export async function uploadLocalChanges(userId: string): Promise<void> {
         await saveLocalStoreItem(storeName, synced);
       }
     }
+
+    await flushCloudSyncTokenRefreshes();
   } catch (error) {
     logSyncEvent("upload:error", "textbooks/*", { userId }, error);
     console.error("uploadLocalChanges failed", error);
@@ -1739,6 +1855,7 @@ export async function syncUserData(userId: string): Promise<void> {
       })
     );
 
+    await flushCloudSyncTokenRefreshes();
     const after = await getPendingSyncDiagnostics();
     logSyncEvent("sync:success", "textbooks/*", { userId, pendingAfter: after.pendingCount, byStore: after.byStore });
   } catch (error) {
@@ -1771,6 +1888,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
   const now = deps.nowFn ? deps.nowFn() : Date.now();
   const getPending = deps.getPendingSyncDiagnosticsFn ?? getPendingSyncDiagnostics;
   const getUser = deps.getCurrentUserFn ?? getCurrentUser;
+  const getCloudSyncPolicyFn = deps.getCloudSyncPolicyFn ?? getUserCloudSyncPolicy;
   const runSyncUserData = deps.syncUserDataFn ?? syncUserData;
   refreshDailyWriteBudgetState();
   refreshDailyReadBudgetState();
@@ -1851,9 +1969,83 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
     };
   }
 
+  const pending = await getPending();
+
+  if (!hasReadBudgetCapacity()) {
+    return {
+      success: false,
+      message: "Cloud sync paused to prevent excessive reads. Please review your data or try again later.",
+      retryable: false,
+      permissionDenied: false,
+      throttled: false,
+      writeLoopTriggered: consumeWriteLoopTriggered(),
+      writeBudgetExceeded,
+      writeCount: sessionWriteCount,
+      writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      syncRunWriteCount,
+      writeBatchLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      writeBatchLimitReached,
+      readCount: sessionReadCount,
+      readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
+      readBudgetExceeded: true,
+      retryLimit: DEFAULT_RETRY_LIMIT,
+      errorCode: null,
+      pendingCount: pending.pendingCount,
+    };
+  }
+
+  let cloudPolicy: UserCloudSyncPolicy | null = null;
+  try {
+    cloudPolicy = await getCloudSyncPolicyFn(user.uid);
+  } catch {
+    cloudPolicy = null;
+  }
+
+  const cachedCloudToken = getCachedCloudSyncToken(user.uid);
+  const currentCloudToken = cloudPolicy?.syncToken ?? null;
+
+  let hasLocalTextbooks = true;
+  if (typeof indexedDB !== "undefined") {
+    try {
+      const localTextbooks = await fetchLocalStore(STORE_NAMES.textbooks);
+      hasLocalTextbooks = localTextbooks.some((textbook) => !textbook.isDeleted);
+    } catch {
+      hasLocalTextbooks = true;
+    }
+  }
+
+  if (pending.pendingCount === 0 && currentCloudToken && cachedCloudToken === currentCloudToken && hasLocalTextbooks) {
+    return {
+      success: true,
+      message: "Cloud sync skipped because no cloud changes were detected.",
+      retryable: false,
+      permissionDenied: false,
+      throttled: false,
+      writeLoopTriggered: consumeWriteLoopTriggered(),
+      writeBudgetExceeded,
+      writeCount: sessionWriteCount,
+      writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
+      syncRunWriteCount,
+      writeBatchLimit: DEFAULT_WRITE_BATCH_LIMIT,
+      writeBatchLimitReached,
+      readCount: sessionReadCount,
+      readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
+      readBudgetExceeded,
+      retryLimit: DEFAULT_RETRY_LIMIT,
+      errorCode: null,
+      pendingCount: pending.pendingCount,
+    };
+  }
+
   try {
     await runSyncUserData(user.uid);
-    const pending = await getPending();
+
+    const cachedCloudTokenAfterSync = getCachedCloudSyncToken(user.uid);
+    if (currentCloudToken && cachedCloudTokenAfterSync === cachedCloudToken) {
+      setCachedCloudSyncToken(user.uid, currentCloudToken);
+    }
+
+    const postSyncPending = await getPending();
 
     if (writeBudgetExceeded) {
       return {
@@ -1874,7 +2066,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
         readBudgetExceeded,
         retryLimit: DEFAULT_RETRY_LIMIT,
         errorCode: null,
-        pendingCount: pending.pendingCount,
+        pendingCount: postSyncPending.pendingCount,
       };
     }
 
@@ -1896,7 +2088,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       readBudgetExceeded,
       retryLimit: DEFAULT_RETRY_LIMIT,
       errorCode: null,
-      pendingCount: pending.pendingCount,
+      pendingCount: postSyncPending.pendingCount,
     };
   } catch (error) {
     const pending = await getPending();

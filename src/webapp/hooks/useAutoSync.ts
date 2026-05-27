@@ -12,7 +12,7 @@ const WRITE_BUDGET_WARNING = "Cloud sync paused to prevent excessive writes. Ple
 function shouldSkipAutoSyncRun(): boolean {
   const ui = useUIStore.getState();
 
-  if (ui.isSyncing || ui.permissionDeniedSyncBlocked || ui.writeLoopBlocked || ui.writeBudgetExceeded) {
+  if (ui.isSyncing || ui.permissionDeniedSyncBlocked || ui.writeLoopBlocked || ui.writeBudgetExceeded || ui.readBudgetExceeded) {
     return true;
   }
 

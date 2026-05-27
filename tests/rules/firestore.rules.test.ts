@@ -8,7 +8,7 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, setLogLevel } from "firebase/firestore";
 import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
 
 const PROJECT_ID = "courseforge-rules-test";
@@ -98,6 +98,10 @@ function baseSyncFields() {
 }
 
 beforeAll(async () => {
+  // Rules tests intentionally assert denied writes/reads; silence SDK transport
+  // logs so stderr only reflects unexpected failures.
+  setLogLevel("silent");
+
   const rulesPath = path.resolve(process.cwd(), "firestore.rules");
   const firestoreRules = readFileSync(rulesPath, "utf8");
   const emulator = getEmulatorConnection();

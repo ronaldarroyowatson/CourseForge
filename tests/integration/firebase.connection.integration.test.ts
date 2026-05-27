@@ -957,7 +957,9 @@ describe("Cross-surface pipeline communication", () => {
 
     await syncModule.uploadLocalChanges("teacher-batch");
 
-    expect(mocks.setDoc).toHaveBeenCalledTimes(7);
+    expect(mocks.setDoc).toHaveBeenCalledTimes(8);
+    const docPaths = mocks.setDoc.mock.calls.map((call) => ((call as unknown[])[0] as { path: string }).path);
+    expect(docPaths).toContain("users/teacher-batch");
   });
 
   it("uploads document-ingest records with canonical hierarchy paths so they are ready for cloud sync", async () => {
@@ -1080,13 +1082,16 @@ describe("Cross-surface pipeline communication", () => {
 
     await syncModule.uploadLocalChanges("teacher-doc-ingest");
 
-    expect(mocks.setDoc).toHaveBeenCalledTimes(9);
+    expect(mocks.setDoc).toHaveBeenCalledTimes(10);
     const docPaths = mocks.setDoc.mock.calls.map((call) => ((call as unknown[])[0] as { path: string }).path);
+    expect(docPaths).toContain("users/teacher-doc-ingest");
     expect(docPaths).toContain("textbooks/tb-doc-ingest/chapters/ch-doc-ingest/sections/sec-doc-ingest/vocab/v-doc-ingest-1");
     expect(docPaths).toContain("textbooks/tb-doc-ingest/chapters/ch-doc-ingest/sections/sec-doc-ingest/equations/eq-doc-ingest-1");
     expect(docPaths).toContain("textbooks/tb-doc-ingest/chapters/ch-doc-ingest/sections/sec-doc-ingest/keyIdeas/ki-doc-ingest-2");
 
-    const uploadedPayloads = mocks.setDoc.mock.calls.map((call) => (call as unknown[])[1] as Record<string, unknown>);
+    const uploadedPayloads = mocks.setDoc.mock.calls
+      .map((call) => (call as unknown[])[1] as Record<string, unknown>)
+      .filter((payload) => "pendingSync" in payload);
     expect(uploadedPayloads.every((payload) => payload.pendingSync === false)).toBe(true);
     expect(uploadedPayloads.every((payload) => payload.source === "cloud")).toBe(true);
     expect(uploadedPayloads.every((payload) => payload.ownerId === "teacher-doc-ingest" && payload.userId === "teacher-doc-ingest")).toBe(true);
@@ -1134,8 +1139,12 @@ describe("Cross-surface pipeline communication", () => {
 
     await expect(syncModule.uploadLocalChanges("teacher-translated-fields")).resolves.toBeUndefined();
 
-    expect(mocks.setDoc).toHaveBeenCalledTimes(1);
-    const textbookPayload = (mocks.setDoc.mock.calls[0] as unknown[])[1] as {
+    expect(mocks.setDoc).toHaveBeenCalledTimes(2);
+    const textbookCall = mocks.setDoc.mock.calls.find(
+      (call) => ((call as unknown[])[0] as { path: string }).path === "textbooks/tb-translated-fields"
+    );
+    expect(textbookCall).toBeDefined();
+    const textbookPayload = ((textbookCall as unknown[])[1] ?? {}) as {
       translatedFields?: {
         es?: {
           title?: string;

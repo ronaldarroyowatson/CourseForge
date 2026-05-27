@@ -21,6 +21,8 @@ const textbookRepositoryMocks = vi.hoisted(() => ({
 
 const repositoryHookMocks = vi.hoisted(() => ({
   removeTextbook: vi.fn<(id: string) => Promise<void>>(async () => undefined),
+  scheduleTextbookDelete: vi.fn<(id: string, retentionMs: number) => Promise<void>>(async () => undefined),
+  purgeExpiredTextbookDeletions: vi.fn<() => Promise<number>>(async () => 0),
   toggleTextbookFavorite: vi.fn<(id: string, isFavorite: boolean) => Promise<void>>(async () => undefined),
   toggleTextbookArchive: vi.fn<(id: string, isArchived: boolean) => Promise<void>>(async () => undefined),
   fetchChaptersByTextbookId: vi.fn<(textbookId: string) => Promise<any[]>>(async () => []),
@@ -49,6 +51,8 @@ vi.mock("../../src/core/services/repositories/textbookRepository", () => ({
 vi.mock("../../src/webapp/hooks/useRepositories", () => ({
   useRepositories: () => ({
     removeTextbook: repositoryHookMocks.removeTextbook,
+    scheduleTextbookDelete: repositoryHookMocks.scheduleTextbookDelete,
+    purgeExpiredTextbookDeletions: repositoryHookMocks.purgeExpiredTextbookDeletions,
     toggleTextbookFavorite: repositoryHookMocks.toggleTextbookFavorite,
     toggleTextbookArchive: repositoryHookMocks.toggleTextbookArchive,
     fetchChaptersByTextbookId: repositoryHookMocks.fetchChaptersByTextbookId,
@@ -169,6 +173,10 @@ describe("textbook deletion integration", () => {
   beforeEach(() => {
     repositoryHookMocks.removeTextbook.mockReset();
     repositoryHookMocks.removeTextbook.mockResolvedValue(undefined);
+    repositoryHookMocks.scheduleTextbookDelete.mockReset();
+    repositoryHookMocks.scheduleTextbookDelete.mockResolvedValue(undefined);
+    repositoryHookMocks.purgeExpiredTextbookDeletions.mockReset();
+    repositoryHookMocks.purgeExpiredTextbookDeletions.mockResolvedValue(0);
     repositoryHookMocks.toggleTextbookFavorite.mockClear();
     repositoryHookMocks.toggleTextbookArchive.mockClear();
     repositoryHookMocks.fetchChaptersByTextbookId.mockClear();
@@ -191,7 +199,8 @@ describe("textbook deletion integration", () => {
 
   it("removes a deleted textbook from the UI immediately after clicking delete", async () => {
     const deferred = createDeferred<void>();
-    repositoryHookMocks.removeTextbook.mockReturnValueOnce(deferred.promise);
+    repositoryHookMocks.scheduleTextbookDelete.mockReturnValueOnce(deferred.promise);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     render(<TextbookListHarness />);
 
@@ -199,10 +208,13 @@ describe("textbook deletion integration", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
-    expect(screen.queryByText("Live Biology")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("Live Biology")).not.toBeInTheDocument();
+    });
 
     deferred.resolve(undefined);
     await deferred.promise;
+    confirmSpy.mockRestore();
   });
 
   it("does not rehydrate deleted textbooks on reload when cached rows are marked deleted", async () => {
@@ -266,7 +278,7 @@ describe("textbook deletion integration", () => {
       expect(screen.getByText("Best Data")).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/Captured: 2 chapters/i)).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Captured content summary")[0]).toHaveTextContent(/Chapter\s*2/i);
     expect(screen.getAllByLabelText(/Data status:/i).length).toBeGreaterThan(0);
   });
 });

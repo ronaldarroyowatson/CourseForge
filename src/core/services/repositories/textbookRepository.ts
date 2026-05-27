@@ -1,6 +1,7 @@
 import type { Textbook } from "../../models";
 import { delete as deleteRecord, getAll as getAllRecords, getById, save, STORE_NAMES } from "../db";
 import { normalizeISBN } from "../isbnService";
+import { getCurrentUser } from "../../../firebase/auth";
 
 const LOCALHOST_SHARED_TEXTBOOK_ENDPOINT = "/api/local-textbooks-state";
 const LOCALHOST_SHARED_REQUEST_TIMEOUT_MS = 1200;
@@ -110,7 +111,11 @@ async function publishLocalhostSharedSnapshotBestEffort(): Promise<void> {
 }
 
 export async function saveTextbook(textbook: Textbook): Promise<string> {
-  const id = await save(STORE_NAMES.textbooks, textbook);
+  const userId = textbook.userId?.trim() || getCurrentUser()?.uid?.trim() || undefined;
+  const id = await save(STORE_NAMES.textbooks, {
+    ...textbook,
+    userId,
+  });
   void publishLocalhostSharedSnapshotBestEffort();
   return id;
 }
@@ -330,6 +335,155 @@ export function computeMetadataRichness(textbook: Textbook): { filled: number; t
   }
 
   return { filled, total: METADATA_RICHNESS_FIELDS.length };
+}
+
+export interface TextbookContentStats {
+  chapters: number;
+  sections: number;
+  vocab: number;
+  equations: number;
+  concepts: number;
+  keyIdeas: number;
+}
+
+function createEmptyTextbookContentStats(): TextbookContentStats {
+  return {
+    chapters: 0,
+    sections: 0,
+    vocab: 0,
+    equations: 0,
+    concepts: 0,
+    keyIdeas: 0,
+  };
+}
+
+function ensureTextbookStats(
+  statsByTextbookId: Record<string, TextbookContentStats>,
+  textbookId: string,
+): TextbookContentStats {
+  if (!statsByTextbookId[textbookId]) {
+    statsByTextbookId[textbookId] = createEmptyTextbookContentStats();
+  }
+
+  return statsByTextbookId[textbookId];
+}
+
+/**
+ * Returns per-textbook content counts in a single pass across each store.
+ * Useful for ranking and comparing duplicate or partially captured textbooks.
+ */
+export async function getTextbookContentStatsMap(textbookIds: string[]): Promise<Record<string, TextbookContentStats>> {
+  const requestedIds = new Set(
+    textbookIds
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0),
+  );
+
+  const statsByTextbookId: Record<string, TextbookContentStats> = {};
+  for (const id of requestedIds) {
+    statsByTextbookId[id] = createEmptyTextbookContentStats();
+  }
+
+  if (requestedIds.size === 0) {
+    return statsByTextbookId;
+  }
+
+  const [chapters, sections, vocabTerms, equations, concepts, keyIdeas] = await Promise.all([
+    getAllRecords(STORE_NAMES.chapters),
+    getAllRecords(STORE_NAMES.sections),
+    getAllRecords(STORE_NAMES.vocabTerms),
+    getAllRecords(STORE_NAMES.equations),
+    getAllRecords(STORE_NAMES.concepts),
+    getAllRecords(STORE_NAMES.keyIdeas),
+  ]);
+
+  const chapterToTextbook = new Map<string, string>();
+  for (const chapter of chapters) {
+    if (!chapter || chapter.isDeleted) {
+      continue;
+    }
+
+    if (typeof chapter.id !== "string" || typeof chapter.textbookId !== "string") {
+      continue;
+    }
+
+    chapterToTextbook.set(chapter.id, chapter.textbookId);
+    if (requestedIds.has(chapter.textbookId)) {
+      ensureTextbookStats(statsByTextbookId, chapter.textbookId).chapters += 1;
+    }
+  }
+
+  const sectionToTextbook = new Map<string, string>();
+  for (const section of sections) {
+    if (!section || section.isDeleted || typeof section.id !== "string") {
+      continue;
+    }
+
+    const textbookId = typeof section.textbookId === "string"
+      ? section.textbookId
+      : chapterToTextbook.get(section.chapterId);
+    if (!textbookId) {
+      continue;
+    }
+
+    sectionToTextbook.set(section.id, textbookId);
+    if (requestedIds.has(textbookId)) {
+      ensureTextbookStats(statsByTextbookId, textbookId).sections += 1;
+    }
+  }
+
+  function resolveTextbookId(entity: { textbookId?: string; sectionId: string }): string | undefined {
+    if (typeof entity.textbookId === "string" && entity.textbookId.length > 0) {
+      return entity.textbookId;
+    }
+    return sectionToTextbook.get(entity.sectionId);
+  }
+
+  for (const item of vocabTerms) {
+    if (!item || item.isDeleted || typeof item.sectionId !== "string") {
+      continue;
+    }
+
+    const textbookId = resolveTextbookId(item);
+    if (textbookId && requestedIds.has(textbookId)) {
+      ensureTextbookStats(statsByTextbookId, textbookId).vocab += 1;
+    }
+  }
+
+  for (const item of equations) {
+    if (!item || item.isDeleted || typeof item.sectionId !== "string") {
+      continue;
+    }
+
+    const textbookId = resolveTextbookId(item);
+    if (textbookId && requestedIds.has(textbookId)) {
+      ensureTextbookStats(statsByTextbookId, textbookId).equations += 1;
+    }
+  }
+
+  for (const item of concepts) {
+    if (!item || item.isDeleted || typeof item.sectionId !== "string") {
+      continue;
+    }
+
+    const textbookId = resolveTextbookId(item);
+    if (textbookId && requestedIds.has(textbookId)) {
+      ensureTextbookStats(statsByTextbookId, textbookId).concepts += 1;
+    }
+  }
+
+  for (const item of keyIdeas) {
+    if (!item || item.isDeleted || typeof item.sectionId !== "string") {
+      continue;
+    }
+
+    const textbookId = resolveTextbookId(item);
+    if (textbookId && requestedIds.has(textbookId)) {
+      ensureTextbookStats(statsByTextbookId, textbookId).keyIdeas += 1;
+    }
+  }
+
+  return statsByTextbookId;
 }
 
 export async function deleteTextbook(id: string): Promise<void> {

@@ -1,12 +1,12 @@
 # Test Index
 
-Generated: 2026-05-25T22:49:22.890Z
+Generated: 2026-05-27T04:06:10.428Z
 
 ## Summary
 
-- Total test files: 68
-- Unit test files: 46
-- Integration test files: 20
+- Total test files: 71
+- Unit test files: 47
+- Integration test files: 22
 - Rules test files: 2
 - Canonical sample files: 5
 
@@ -28,8 +28,8 @@ Generated: 2026-05-25T22:49:22.890Z
 - tests/core/findAllDuplicatePairs.test.ts
 - tests/core/gameTextService.test.ts
 - tests/core/glossaryService.test.ts
-- tests/core/hybridIngestionPipeline.test.ts
 - tests/core/i18nService.test.ts
+- tests/core/installerLifecycle.macos.matrix.test.ts
 - tests/core/installerLifecycle.matrix.test.ts
 - tests/core/installerLifecycle.test.ts
 - tests/core/masonryLayoutService.test.ts
@@ -55,6 +55,7 @@ Generated: 2026-05-25T22:49:22.890Z
 - tests/core/translationReviewService.test.ts
 - tests/core/translationWorkflowService.test.ts
 - tests/core/uiStore.preferences.test.ts
+- tests/core/writeTextbookMetadata.test.ts
 - tests/core/xml.escapeXml.test.ts
 - tests/core/xml.exportXml.integration.test.ts
 - tests/core/xml.formatXml.test.ts
@@ -73,6 +74,8 @@ Generated: 2026-05-25T22:49:22.890Z
 - tests/integration/extension.repositories.integration.test.ts
 - tests/integration/firebase.connection.integration.test.ts
 - tests/integration/functions.communication.integration.test.ts
+- tests/integration/macos-auto-update-launcher.integration.test.ts
+- tests/integration/macos.installer.template.integration.test.ts
 - tests/integration/package-integrity.integration.test.ts
 - tests/integration/settings.updater.integration.test.tsx
 - tests/integration/startupSync.probe.test.tsx

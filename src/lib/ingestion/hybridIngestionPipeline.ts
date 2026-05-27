@@ -102,7 +102,10 @@ export async function runHybridIngestion(
   options: HybridIngestionOptions = {},
 ): Promise<HybridIngestionResult> {
   const user = getCurrentUser();
-  const uploadedBy = user?.uid ?? "anonymous";
+  const uploadedBy = user?.uid?.trim();
+  if (!uploadedBy) {
+    throw new Error("Ingestion requires an authenticated user so uploaded records include uploader identity.");
+  }
 
   onTextbookUploadStart({ textbookId: parsed.id });
 
@@ -170,8 +173,13 @@ export async function runIncrementalUpdate(
   textbookId: string,
   updates: UpdateChunk[],
 ): Promise<void> {
+  const uploadedBy = getCurrentUser()?.uid?.trim();
+  if (!uploadedBy) {
+    throw new Error("Incremental updates require an authenticated user so uploaded records include uploader identity.");
+  }
+
   try {
-    await applyIncrementalUpdates(textbookId, updates);
+    await applyIncrementalUpdates(textbookId, updates, uploadedBy);
     onIncrementalUpdateApplied({ textbookId, updateCount: updates.length });
   } catch (err) {
     const msg = `Incremental update aborted for textbook ${textbookId}: ${String(err)}`;

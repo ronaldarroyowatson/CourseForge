@@ -582,9 +582,31 @@ function buildExtractedSignature(data: ExtractedDocumentData): string {
 
 async function computeFileHash(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
-  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  const input = normalizeDigestInput(buffer);
+  const digestInput = typeof Buffer !== "undefined"
+    ? Buffer.from(new Uint8Array(input))
+    : input;
+  const digest = await crypto.subtle.digest("SHA-256", digestInput);
   const bytes = new Uint8Array(digest);
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function normalizeDigestInput(value: unknown): ArrayBuffer {
+  if (value instanceof ArrayBuffer) {
+    return value.slice(0);
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    const bytes = new Uint8Array(value.byteLength);
+    bytes.set(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    return bytes.buffer;
+  }
+
+  if (typeof value === "string") {
+    return new TextEncoder().encode(value).buffer;
+  }
+
+  return new TextEncoder().encode(String(value)).buffer;
 }
 
 export async function listFingerprintsBySection(sectionId: string): Promise<DocumentIngestFingerprint[]> {

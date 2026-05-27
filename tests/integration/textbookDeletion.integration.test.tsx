@@ -9,6 +9,14 @@ import { TextbookList } from "../../src/webapp/components/textbooks/TextbookList
 
 const textbookRepositoryMocks = vi.hoisted(() => ({
   getAllTextbooks: vi.fn<() => Promise<Textbook[]>>(async () => []),
+  getTextbookContentStatsMap: vi.fn<(ids: string[]) => Promise<Record<string, {
+    chapters: number;
+    sections: number;
+    vocab: number;
+    equations: number;
+    concepts: number;
+    keyIdeas: number;
+  }>>>(async () => ({})),
 }));
 
 const repositoryHookMocks = vi.hoisted(() => ({
@@ -33,6 +41,8 @@ vi.mock("../../src/core/services/repositories/textbookRepository", () => ({
     const rows = await textbookRepositoryMocks.getAllTextbooks();
     return rows.filter((textbook) => !textbook.isDeleted);
   },
+  computeMetadataRichness: () => ({ filled: 0, total: 10 }),
+  getTextbookContentStatsMap: (ids: string[]) => textbookRepositoryMocks.getTextbookContentStatsMap(ids),
   findAllDuplicatePairs: () => [],
 }));
 
@@ -165,6 +175,17 @@ describe("textbook deletion integration", () => {
     repositoryHookMocks.fetchSectionsByChapterId.mockClear();
     textbookRepositoryMocks.getAllTextbooks.mockReset();
     textbookRepositoryMocks.getAllTextbooks.mockResolvedValue([]);
+    textbookRepositoryMocks.getTextbookContentStatsMap.mockReset();
+    textbookRepositoryMocks.getTextbookContentStatsMap.mockResolvedValue({
+      "tb-live": {
+        chapters: 0,
+        sections: 0,
+        vocab: 0,
+        equations: 0,
+        concepts: 0,
+        keyIdeas: 0,
+      },
+    });
     window.history.pushState({}, "", "/textbooks");
   });
 
@@ -201,5 +222,51 @@ describe("textbook deletion integration", () => {
     });
 
     expect(screen.queryByText("Deleted Chemistry")).not.toBeInTheDocument();
+  });
+
+  it("shows no-image placeholder, data status chip, captured stats, and best-data marker", async () => {
+    textbookRepositoryMocks.getTextbookContentStatsMap.mockResolvedValueOnce({
+      "tb-live": {
+        chapters: 2,
+        sections: 3,
+        vocab: 9,
+        equations: 1,
+        concepts: 2,
+        keyIdeas: 4,
+      },
+      "tb-other": {
+        chapters: 1,
+        sections: 1,
+        vocab: 1,
+        equations: 0,
+        concepts: 0,
+        keyIdeas: 0,
+      },
+    });
+
+    render(
+      <TextbookList
+        textbooks={[
+          buildTextbook("tb-live", { title: "Live Biology" }),
+          buildTextbook("tb-other", { title: "Older Biology Copy" }),
+        ]}
+        isLoading={false}
+        loadError={null}
+        selectedTextbookId={null}
+        onSelectTextbook={() => undefined}
+        onContinueToSections={() => undefined}
+        onDeleted={() => undefined}
+        onRefresh={() => undefined}
+      />
+    );
+
+    expect(screen.getAllByLabelText("No cover image available").length).toBeGreaterThan(0);
+
+    await waitFor(() => {
+      expect(screen.getByText("Best Data")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/Captured: 2 chapters/i)).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/Data status:/i).length).toBeGreaterThan(0);
   });
 });

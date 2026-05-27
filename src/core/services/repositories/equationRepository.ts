@@ -1,8 +1,12 @@
 import type { Equation } from "../../models";
 import { delete as deleteRecord, getAll, getById, save, STORE_NAMES } from "../db";
+import { getCurrentUser } from "../../../firebase/auth";
 
 export async function saveEquation(equation: Equation): Promise<string> {
-  return save(STORE_NAMES.equations, equation);
+  return save(STORE_NAMES.equations, {
+    ...equation,
+    userId: equation.userId?.trim() || getCurrentUser()?.uid?.trim() || undefined,
+  });
 }
 
 export async function getEquationById(id: string): Promise<Equation | undefined> {

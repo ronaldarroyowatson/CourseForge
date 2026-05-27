@@ -129,11 +129,20 @@ export interface CreateKeyIdeaInput {
   text: string;
 }
 
-function buildTextbookFromInput(input: CreateTextbookInput, resolvedCoverUrl?: string | null): Textbook {
+function resolveCurrentUserId(): string | undefined {
+  return getCurrentUser()?.uid?.trim() || undefined;
+}
+
+function buildTextbookFromInput(
+  input: CreateTextbookInput,
+  creatorUserId?: string,
+  resolvedCoverUrl?: string | null
+): Textbook {
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
     sourceType: input.sourceType,
+    userId: creatorUserId,
     originalLanguage: input.originalLanguage ?? "en",
     translatedFields: input.translatedFields,
     title: input.title,
@@ -171,11 +180,12 @@ function buildTextbookFromInput(input: CreateTextbookInput, resolvedCoverUrl?: s
   };
 }
 
-function buildChapterFromInput(input: CreateChapterInput): Chapter {
+function buildChapterFromInput(input: CreateChapterInput, creatorUserId?: string): Chapter {
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
     sourceType: input.sourceType ?? "manual",
+    userId: creatorUserId,
     textbookId: input.textbookId,
     index: input.index,
     name: input.name,
@@ -186,11 +196,12 @@ function buildChapterFromInput(input: CreateChapterInput): Chapter {
   };
 }
 
-function buildSectionFromInput(input: CreateSectionInput, textbookId: string): Section {
+function buildSectionFromInput(input: CreateSectionInput, textbookId: string, creatorUserId?: string): Section {
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
     sourceType: input.sourceType ?? "manual",
+    userId: creatorUserId,
     textbookId,
     chapterId: input.chapterId,
     index: input.index,
@@ -202,10 +213,16 @@ function buildSectionFromInput(input: CreateSectionInput, textbookId: string): S
   };
 }
 
-function buildVocabTermFromInput(input: CreateVocabTermInput, chapterId: string, textbookId: string): VocabTerm {
+function buildVocabTermFromInput(
+  input: CreateVocabTermInput,
+  chapterId: string,
+  textbookId: string,
+  creatorUserId?: string
+): VocabTerm {
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    userId: creatorUserId,
     textbookId,
     chapterId,
     sectionId: input.sectionId,
@@ -225,10 +242,16 @@ function buildVocabTermFromInput(input: CreateVocabTermInput, chapterId: string,
   };
 }
 
-function buildEquationFromInput(input: CreateEquationInput, chapterId: string, textbookId: string): Equation {
+function buildEquationFromInput(
+  input: CreateEquationInput,
+  chapterId: string,
+  textbookId: string,
+  creatorUserId?: string
+): Equation {
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    userId: creatorUserId,
     textbookId,
     chapterId,
     sectionId: input.sectionId,
@@ -241,10 +264,16 @@ function buildEquationFromInput(input: CreateEquationInput, chapterId: string, t
   };
 }
 
-function buildConceptFromInput(input: CreateConceptInput, chapterId: string, textbookId: string): Concept {
+function buildConceptFromInput(
+  input: CreateConceptInput,
+  chapterId: string,
+  textbookId: string,
+  creatorUserId?: string
+): Concept {
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    userId: creatorUserId,
     textbookId,
     chapterId,
     sectionId: input.sectionId,
@@ -264,10 +293,16 @@ function buildConceptFromInput(input: CreateConceptInput, chapterId: string, tex
   };
 }
 
-function buildKeyIdeaFromInput(input: CreateKeyIdeaInput, chapterId: string, textbookId: string): KeyIdea {
+function buildKeyIdeaFromInput(
+  input: CreateKeyIdeaInput,
+  chapterId: string,
+  textbookId: string,
+  creatorUserId?: string
+): KeyIdea {
   const timestamp = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    userId: creatorUserId,
     textbookId,
     chapterId,
     sectionId: input.sectionId,
@@ -289,7 +324,8 @@ export function useRepositories() {
   }, []);
 
   const createTextbook = useCallback(async (input: CreateTextbookInput): Promise<string> => {
-    const textbook = buildTextbookFromInput(input);
+    const creatorUserId = resolveCurrentUserId();
+    const textbook = buildTextbookFromInput(input, creatorUserId);
 
     const id = await saveTextbook(textbook);
     markLocalChange();
@@ -423,7 +459,7 @@ export function useRepositories() {
   }, []);
 
   const createChapter = useCallback(async (input: CreateChapterInput): Promise<string> => {
-    const chapter = buildChapterFromInput(input);
+    const chapter = buildChapterFromInput(input, resolveCurrentUserId());
     const id = await saveChapter(chapter);
     markLocalChange();
     return id;
@@ -450,7 +486,7 @@ export function useRepositories() {
       throw new Error("Cannot create section because the parent chapter is missing textbookId.");
     }
 
-    const section = buildSectionFromInput(input, chapter.textbookId);
+    const section = buildSectionFromInput(input, chapter.textbookId, resolveCurrentUserId());
     const id = await saveSection(section);
     markLocalChange();
     return id;
@@ -477,7 +513,12 @@ export function useRepositories() {
       throw new Error("Cannot create vocab because the parent section is missing hierarchy IDs.");
     }
 
-    const term = buildVocabTermFromInput(input, section.chapterId, section.textbookId);
+    const term = buildVocabTermFromInput(
+      input,
+      section.chapterId,
+      section.textbookId,
+      resolveCurrentUserId()
+    );
     const id = await saveVocabTerm(term);
     markLocalChange();
     return id;
@@ -498,7 +539,12 @@ export function useRepositories() {
       throw new Error("Cannot create equation because the parent section is missing hierarchy IDs.");
     }
 
-    const equation = buildEquationFromInput(input, section.chapterId, section.textbookId);
+    const equation = buildEquationFromInput(
+      input,
+      section.chapterId,
+      section.textbookId,
+      resolveCurrentUserId()
+    );
     const id = await saveEquation(equation);
     markLocalChange();
     return id;
@@ -519,7 +565,12 @@ export function useRepositories() {
       throw new Error("Cannot create concept because the parent section is missing hierarchy IDs.");
     }
 
-    const concept = buildConceptFromInput(input, section.chapterId, section.textbookId);
+    const concept = buildConceptFromInput(
+      input,
+      section.chapterId,
+      section.textbookId,
+      resolveCurrentUserId()
+    );
     const id = await saveConcept(concept);
     markLocalChange();
     return id;
@@ -540,7 +591,12 @@ export function useRepositories() {
       throw new Error("Cannot create key idea because the parent section is missing hierarchy IDs.");
     }
 
-    const keyIdea = buildKeyIdeaFromInput(input, section.chapterId, section.textbookId);
+    const keyIdea = buildKeyIdeaFromInput(
+      input,
+      section.chapterId,
+      section.textbookId,
+      resolveCurrentUserId()
+    );
     const id = await saveKeyIdea(keyIdea);
     markLocalChange();
     return id;

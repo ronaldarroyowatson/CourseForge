@@ -1226,10 +1226,13 @@ async function saveCloudStoreItem<T extends SyncStoreName>(
     return false;
   }
 
+  const creatorUserId = item.userId?.trim() || userId;
+
   const cloudRecord = {
     ...resolved.payload,
-    userId,
-    ownerId: userId,
+    userId: creatorUserId,
+    ownerId: creatorUserId,
+    uploadedBy: userId,
     pendingSync: false,
     source: "cloud",
     lastModified: item.lastModified ?? toIsoNow(),

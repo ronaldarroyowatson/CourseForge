@@ -2660,9 +2660,133 @@ button.cf-ds-color-wheel__dot:active {
   border: 1px solid var(--border-default);
 }
 
+.textbook-row__cover--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  text-align: center;
+  padding: 0.2rem;
+}
+
 .textbook-row__info {
   flex: 1;
   min-width: 0;
+}
+
+.textbook-row__title-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.55rem;
+  align-items: flex-start;
+}
+
+.textbook-row__status-group {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.textbook-quality-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.1rem 0.48rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.textbook-quality-chip__icon {
+  width: 0.46rem;
+  height: 0.46rem;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.textbook-quality-chip--complete {
+  color: #0f5a38;
+  border-color: #2f8b5c;
+  background: rgba(58, 185, 118, 0.2);
+}
+
+.textbook-quality-chip--partial {
+  color: #7a5400;
+  border-color: #c39b2f;
+  background: rgba(245, 204, 88, 0.26);
+}
+
+.textbook-quality-chip--empty {
+  color: #8b1c1c;
+  border-color: #c05656;
+  background: rgba(230, 98, 98, 0.2);
+}
+
+.textbook-best-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #4a6fa5 50%, var(--border-default));
+  background: color-mix(in srgb, #4a6fa5 16%, var(--bg-panel));
+  color: color-mix(in srgb, #4a6fa5 76%, #000);
+  padding: 0.1rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.dup-dialog__preferred {
+  display: inline-flex;
+  margin: 0 0 0.45rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #4a6fa5 50%, var(--border-default));
+  background: color-mix(in srgb, #4a6fa5 16%, var(--bg-panel));
+  color: color-mix(in srgb, #4a6fa5 76%, #000);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.dup-dialog__quality {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.08rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.dup-dialog__quality--complete {
+  color: #0f5a38;
+  border-color: #2f8b5c;
+  background: rgba(58, 185, 118, 0.2);
+}
+
+.dup-dialog__quality--partial {
+  color: #7a5400;
+  border-color: #c39b2f;
+  background: rgba(245, 204, 88, 0.26);
+}
+
+.dup-dialog__quality--empty {
+  color: #8b1c1c;
+  border-color: #c05656;
+  background: rgba(230, 98, 98, 0.2);
+}
+
+@media (max-width: 720px) {
+  .textbook-row__title-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 /* Cover image form UI */

@@ -1,8 +1,12 @@
 import type { VocabTerm } from "../../models";
 import { delete as deleteRecord, getAll, getById, save, STORE_NAMES } from "../db";
+import { getCurrentUser } from "../../../firebase/auth";
 
 export async function saveVocabTerm(vocabTerm: VocabTerm): Promise<string> {
-  return save(STORE_NAMES.vocabTerms, vocabTerm);
+  return save(STORE_NAMES.vocabTerms, {
+    ...vocabTerm,
+    userId: vocabTerm.userId?.trim() || getCurrentUser()?.uid?.trim() || undefined,
+  });
 }
 
 export async function getVocabTermById(id: string): Promise<VocabTerm | undefined> {

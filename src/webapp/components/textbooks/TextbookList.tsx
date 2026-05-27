@@ -11,6 +11,11 @@ import {
   getSyncWriteBatchLimit,
   syncNow,
 } from "../../../core/services/syncService";
+import {
+  computeMetadataRichness,
+  getTextbookContentStatsMap,
+  type TextbookContentStats,
+} from "../../../core/services/repositories/textbookRepository";
 import { useRepositories } from "../../hooks/useRepositories";
 import { useUIStore } from "../../store/uiStore";
 
@@ -34,6 +39,65 @@ interface TextbookListProps {
   onContinueToSections: () => void;
   onDeleted: (id: string) => void;
   onRefresh: () => void;
+}
+
+type TextbookQualityKind = "complete" | "partial" | "empty";
+
+interface TextbookQuality {
+  kind: TextbookQualityKind;
+  label: string;
+  hint: string;
+}
+
+const EMPTY_TEXTBOOK_CONTENT_STATS: TextbookContentStats = {
+  chapters: 0,
+  sections: 0,
+  vocab: 0,
+  equations: 0,
+  concepts: 0,
+  keyIdeas: 0,
+};
+
+function computeTextbookQuality(textbook: Textbook, stats: TextbookContentStats): TextbookQuality {
+  const richness = computeMetadataRichness(textbook);
+  const hasCover = Boolean(textbook.coverImageUrl);
+  const hasStructure = stats.chapters > 0 && stats.sections > 0;
+  const capturedItems = stats.vocab + stats.equations + stats.concepts + stats.keyIdeas;
+
+  if (!hasCover && !hasStructure && capturedItems === 0 && richness.filled <= 2) {
+    return {
+      kind: "empty",
+      label: "Empty",
+      hint: "Missing cover, structure, and captured content.",
+    };
+  }
+
+  if (hasCover && hasStructure && capturedItems > 0) {
+    return {
+      kind: "complete",
+      label: "Complete",
+      hint: "Has cover, chapter/section structure, and captured learning content.",
+    };
+  }
+
+  return {
+    kind: "partial",
+    label: "Partial",
+    hint: "Contains some data, but key capture fields are still missing.",
+  };
+}
+
+function computeTextbookStrengthScore(textbook: Textbook, stats: TextbookContentStats): number {
+  const richness = computeMetadataRichness(textbook);
+  const coverBonus = textbook.coverImageUrl ? 4 : 0;
+  return (stats.chapters * 5)
+    + (stats.sections * 3)
+    + stats.vocab
+    + stats.equations
+    + stats.concepts
+    + stats.keyIdeas
+    + (richness.filled * 2)
+    + coverBonus;
 }
 
 function getSyncBadge(textbook: Textbook): { label: string; className: string } {
@@ -75,6 +139,37 @@ export function TextbookList({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [retrySyncInProgress, setRetrySyncInProgress] = useState<Set<string>>(new Set());
   const [retrySyncProgress, setRetrySyncProgress] = useState<Map<string, RetrySyncProgressState>>(new Map());
+  const [contentStatsById, setContentStatsById] = useState<Record<string, TextbookContentStats>>({});
+
+  React.useEffect(() => {
+    let isActive = true;
+    const textbookIds = textbooks.map((textbook) => textbook.id);
+
+    if (textbookIds.length === 0) {
+      setContentStatsById({});
+      return () => {
+        isActive = false;
+      };
+    }
+
+    void getTextbookContentStatsMap(textbookIds)
+      .then((result) => {
+        if (!isActive) {
+          return;
+        }
+        setContentStatsById(result);
+      })
+      .catch(() => {
+        if (!isActive) {
+          return;
+        }
+        setContentStatsById({});
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [textbooks]);
 
   function updateRetrySyncProgress(textbookId: string, percent: number, detail: string, tone: RetrySyncProgressTone): void {
     setRetrySyncProgress((prev) => {
@@ -256,6 +351,33 @@ export function TextbookList({
   }
 
   const sorted = sortTextbooks(textbooks);
+  const bestTextbookId = React.useMemo(() => {
+    if (sorted.length < 2) {
+      return null;
+    }
+
+    let winnerId: string | null = null;
+    let winnerScore = Number.NEGATIVE_INFINITY;
+
+    for (const textbook of sorted) {
+      if (textbook.isArchived) {
+        continue;
+      }
+
+      const stats = contentStatsById[textbook.id] ?? EMPTY_TEXTBOOK_CONTENT_STATS;
+      const score = computeTextbookStrengthScore(textbook, stats);
+      if (score > winnerScore) {
+        winnerScore = score;
+        winnerId = textbook.id;
+      }
+    }
+
+    if (winnerId) {
+      return winnerId;
+    }
+
+    return sorted.find((textbook) => !textbook.isArchived)?.id ?? null;
+  }, [contentStatsById, sorted]);
 
   return (
     <section className="panel">
@@ -282,11 +404,15 @@ export function TextbookList({
         {sorted.map((textbook) => {
           const syncBadge = getSyncBadge(textbook);
           const retryProgress = retrySyncProgress.get(textbook.id);
+          const stats = contentStatsById[textbook.id] ?? EMPTY_TEXTBOOK_CONTENT_STATS;
+          const quality = computeTextbookQuality(textbook, stats);
+          const isBestDataCandidate = bestTextbookId === textbook.id;
 
           return (<li
             key={textbook.id}
             className={[
               "textbook-row",
+              quality.kind === "complete" ? "textbook-row--complete" : "textbook-row--needs-attention",
               textbook.isArchived ? "textbook-row--archived" : "",
               textbook.isFavorite ? "textbook-row--favorite" : "",
             ].filter(Boolean).join(" ")}
@@ -297,10 +423,35 @@ export function TextbookList({
                 alt={`${textbook.title} cover`}
                 className="textbook-row__cover"
               />
-            ) : null}
+            ) : (
+              <div
+                className="textbook-row__cover textbook-row__cover--placeholder"
+                role="img"
+                aria-label="No cover image available"
+              >
+                No Image
+              </div>
+            )}
 
             <div className="textbook-row__info">
-              <strong>{textbook.title}</strong>
+              <div className="textbook-row__title-row">
+                <strong>{textbook.title}</strong>
+                <div className="textbook-row__status-group">
+                  {isBestDataCandidate ? (
+                    <span className="textbook-best-badge" title="This textbook currently has the strongest captured data footprint.">
+                      Best Data
+                    </span>
+                  ) : null}
+                  <span
+                    className={`textbook-quality-chip textbook-quality-chip--${quality.kind}`}
+                    title={quality.hint}
+                    aria-label={`Data status: ${quality.label}`}
+                  >
+                    <span className="textbook-quality-chip__icon" aria-hidden="true" />
+                    {quality.label}
+                  </span>
+                </div>
+              </div>
               {textbook.subtitle ? <p className="textbook-row__meta">{textbook.subtitle}</p> : null}
               <p>
                 Grade {textbook.grade} &bull; {textbook.subject} &bull; {textbook.publicationYear}
@@ -321,6 +472,9 @@ export function TextbookList({
                     {" "}+{textbook.relatedIsbns.length} related
                   </span>
                 ) : null}
+              </p>
+              <p className="textbook-row__meta">
+                Captured: {stats.chapters} chapters &bull; {stats.sections} sections &bull; {stats.vocab} vocab &bull; {stats.equations} equations &bull; {stats.concepts} concepts &bull; {stats.keyIdeas} key ideas
               </p>
               <p className="textbook-row__meta">
                 <span className={syncBadge.className}>{syncBadge.label}</span>

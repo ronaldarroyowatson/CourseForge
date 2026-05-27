@@ -110,6 +110,17 @@ UI renders as color-coded dots beside each form field:
 | Red | < 0.45 | `--low` |
 | Grey | not scored | `--unknown` |
 
+### 1.7 Textbook Data Quality and Duplicate Triage
+
+To help teachers quickly decide whether a textbook record is usable or redundant, textbook cards now expose capture completeness signals at login/workspace load:
+
+- **Cover availability signal:** cards always reserve a cover slot; missing covers render an explicit `No Image` placeholder instead of collapsing space.
+- **Data status chip:** right-aligned summary state (`Complete`, `Partial`, `Empty`) based on structure presence and captured content depth.
+- **Captured stats row:** per-textbook counts for chapters, sections, vocab, equations, concepts, and key ideas.
+- **Best candidate marker:** when multiple textbooks are visible, one card is marked `Best Data` using a deterministic strength score so users can remove weaker duplicates with confidence.
+
+The same stats and quality heuristics are also shown in the startup duplicate-resolution dialog to keep comparison criteria consistent between list view and duplicate cleanup workflows.
+
 ---
 
 ## 2. Architecture
@@ -195,6 +206,10 @@ client: uploadAndClearDebugLogs(userId)
     │
     └── clear local IDB entries on success
 ```
+
+  ### 2.5 Textbook Ownership Repair
+
+  Canonical textbook visibility depends on `userId` or `ownerId` being present on `/textbooks/{textbookId}` documents. If older ingestion metadata exists with only `uploadedBy`, run `npm run repair:textbook-ownership` first in dry-run mode, then rerun with `-- --apply` once the candidate updates look correct. The repair script only backfills missing ownership fields when `uploadedBy` is present and does not overwrite conflicting owner values.
 
 ---
 

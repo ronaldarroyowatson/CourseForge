@@ -34,6 +34,7 @@ CourseForge consists of three main layers:
 7. During sync reconciliation, tombstones with pending delete intent take precedence over timestamp drift so deleted textbooks cannot rehydrate as ghost records on refresh.
 8. When requested, the XML exporter reads from the database and generates a schema‑compliant XML document.
 9. The game engine and AI tutor consume the XML.
+10. Textbook list and duplicate-resolution surfaces compute per-textbook content stats (chapters, sections, vocab, equations, concepts, key ideas) to classify data quality (`Complete`, `Partial`, `Empty`) and surface a strongest-record hint (`Best Data`) for quick duplicate triage.
 
 ---
 
@@ -68,6 +69,16 @@ CourseForge consists of three main layers:
 - Textbooks marked `pending-admin-review` or `blocked-explicit-content` are excluded from cloud upload.
 - Users marked content-blocked by admin cannot upload any curriculum entities to cloud until unblocked.
 - Local-first persistence remains available even when cloud upload is blocked.
+
+### Textbook quality comparison signals
+
+- The repository helper `getTextbookContentStatsMap(textbookIds)` performs a single-pass aggregation over hierarchy stores and returns per-textbook counts for structure and captured learning entities.
+- UI consumers (`TextbookList`, `DuplicateResolutionDialog`) avoid per-card N+1 counting queries by requesting stats for all visible textbooks at once.
+- Quality classification is intentionally user-facing and conservative:
+  - `Complete`: cover image present, chapter/section structure present, and at least one captured content entity.
+  - `Partial`: some captured data exists, but one or more core capture dimensions are still missing.
+  - `Empty`: no cover, no structure, no captured entities, and minimal metadata richness.
+- The `Best Data` hint uses a deterministic strength score based on structure depth, captured entity totals, metadata richness, and cover presence, so users can eliminate weaker duplicates quickly during cleanup.
 
 See `DB_SCHEMA.md` for details.
 

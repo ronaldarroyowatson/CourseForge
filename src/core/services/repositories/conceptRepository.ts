@@ -1,8 +1,12 @@
 import type { Concept } from "../../models";
 import { delete as deleteRecord, getAll, getById, save, STORE_NAMES } from "../db";
+import { getCurrentUser } from "../../../firebase/auth";
 
 export async function saveConcept(concept: Concept): Promise<string> {
-  return save(STORE_NAMES.concepts, concept);
+  return save(STORE_NAMES.concepts, {
+    ...concept,
+    userId: concept.userId?.trim() || getCurrentUser()?.uid?.trim() || undefined,
+  });
 }
 
 export async function getConceptById(id: string): Promise<Concept | undefined> {

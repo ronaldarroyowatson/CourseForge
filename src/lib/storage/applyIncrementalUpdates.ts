@@ -15,12 +15,12 @@
  */
 
 import {
-  collection,
   doc,
   writeBatch,
   type WriteBatch,
 } from "firebase/firestore";
 import { firestoreDb } from "../../firebase/firestore";
+import { getCurrentUser } from "../../firebase/auth";
 
 // ---------------------------------------------------------------------------
 // Constants — Safety Valves
@@ -134,8 +134,14 @@ async function commitWithBackoff(batch: WriteBatch, attempt: number): Promise<vo
 export async function applyIncrementalUpdates(
   textbookId: string,
   updates: UpdateChunk[],
+  uploadedBy?: string,
 ): Promise<void> {
   if (updates.length === 0) return;
+
+  const uploaderId = uploadedBy?.trim() || getCurrentUser()?.uid?.trim();
+  if (!uploaderId) {
+    throw new Error("applyIncrementalUpdates requires an authenticated user so records include uploader identity.");
+  }
 
   const cycles = chunkArray(updates, HARD_CAP_PER_CYCLE);
   let consecutiveCapHits = 0;
@@ -162,7 +168,20 @@ export async function applyIncrementalUpdates(
     const batch = writeBatch(firestoreDb);
     for (const chunk of cycle) {
       const docRef = resolveDocRef(textbookId, chunk.path);
-      batch.set(docRef, chunk.data, { merge: true });
+      const chunkUserId = typeof chunk.data.userId === "string"
+        ? chunk.data.userId.trim()
+        : "";
+      const ownerUserId = chunkUserId || uploaderId;
+      batch.set(
+        docRef,
+        {
+          ...chunk.data,
+          userId: ownerUserId,
+          ownerId: ownerUserId,
+          uploadedBy: uploaderId,
+        },
+        { merge: true }
+      );
     }
 
     let attempt = 0;

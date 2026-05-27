@@ -13,6 +13,7 @@ import {
   saveKeyIdea,
   saveVocabTerm,
 } from "../../core/services/repositories";
+import { getCurrentUser } from "../../firebase/auth";
 
 export interface QuickVocabInput {
   sectionId: string;
@@ -38,11 +39,21 @@ export interface QuickKeyIdeaInput {
   text: string;
 }
 
-function buildVocabTerm(input: QuickVocabInput, chapterId: string, textbookId: string): VocabTerm {
+function resolveCurrentUserId(): string | undefined {
+  return getCurrentUser()?.uid?.trim() || undefined;
+}
+
+function buildVocabTerm(
+  input: QuickVocabInput,
+  chapterId: string,
+  textbookId: string,
+  creatorUserId?: string
+): VocabTerm {
   const timestamp = new Date().toISOString();
 
   return {
     id: crypto.randomUUID(),
+    userId: creatorUserId,
     textbookId,
     chapterId,
     sectionId: input.sectionId,
@@ -54,11 +65,12 @@ function buildVocabTerm(input: QuickVocabInput, chapterId: string, textbookId: s
   };
 }
 
-function buildEquation(input: QuickEquationInput): Equation {
+function buildEquation(input: QuickEquationInput, creatorUserId?: string): Equation {
   const timestamp = new Date().toISOString();
 
   return {
     id: crypto.randomUUID(),
+    userId: creatorUserId,
     sectionId: input.sectionId,
     name: input.name,
     latex: input.latex,
@@ -69,11 +81,12 @@ function buildEquation(input: QuickEquationInput): Equation {
   };
 }
 
-function buildConcept(input: QuickConceptInput): Concept {
+function buildConcept(input: QuickConceptInput, creatorUserId?: string): Concept {
   const timestamp = new Date().toISOString();
 
   return {
     id: crypto.randomUUID(),
+    userId: creatorUserId,
     sectionId: input.sectionId,
     name: input.name,
     explanation: input.explanation,
@@ -83,11 +96,12 @@ function buildConcept(input: QuickConceptInput): Concept {
   };
 }
 
-function buildKeyIdea(input: QuickKeyIdeaInput): KeyIdea {
+function buildKeyIdea(input: QuickKeyIdeaInput, creatorUserId?: string): KeyIdea {
   const timestamp = new Date().toISOString();
 
   return {
     id: crypto.randomUUID(),
+    userId: creatorUserId,
     sectionId: input.sectionId,
     text: input.text,
     lastModified: timestamp,
@@ -130,7 +144,7 @@ export function useRepositories() {
       throw new Error("Cannot create vocab because the parent section is missing hierarchy IDs.");
     }
 
-    return saveVocabTerm(buildVocabTerm(input, section.chapterId, section.textbookId));
+    return saveVocabTerm(buildVocabTerm(input, section.chapterId, section.textbookId, resolveCurrentUserId()));
   }, []);
 
   const createEquation = useCallback(async (input: QuickEquationInput): Promise<string> => {
@@ -140,7 +154,7 @@ export function useRepositories() {
     }
 
     return saveEquation({
-      ...buildEquation(input),
+      ...buildEquation(input, resolveCurrentUserId()),
       chapterId: section.chapterId,
       textbookId: section.textbookId,
     });
@@ -153,7 +167,7 @@ export function useRepositories() {
     }
 
     return saveConcept({
-      ...buildConcept(input),
+      ...buildConcept(input, resolveCurrentUserId()),
       chapterId: section.chapterId,
       textbookId: section.textbookId,
     });
@@ -166,7 +180,7 @@ export function useRepositories() {
     }
 
     return saveKeyIdea({
-      ...buildKeyIdea(input),
+      ...buildKeyIdea(input, resolveCurrentUserId()),
       chapterId: section.chapterId,
       textbookId: section.textbookId,
     });

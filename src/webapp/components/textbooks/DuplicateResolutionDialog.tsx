@@ -2,14 +2,22 @@ import React from "react";
 import { createPortal } from "react-dom";
 
 import type { Textbook } from "../../../core/models";
-import { countChaptersByTextbookId } from "../../../core/services/repositories/chapterRepository";
-import { countSectionsByTextbookId } from "../../../core/services/repositories/sectionRepository";
-import { computeMetadataRichness } from "../../../core/services/repositories/textbookRepository";
+import {
+  computeMetadataRichness,
+  getTextbookContentStatsMap,
+  type TextbookContentStats,
+} from "../../../core/services/repositories/textbookRepository";
 
 interface TextbookStats {
-  chapters: number | null;
-  sections: number | null;
+  content: TextbookContentStats;
   richness: { filled: number; total: number };
+}
+
+type TextbookQualityKind = "complete" | "partial" | "empty";
+
+interface TextbookQuality {
+  kind: TextbookQualityKind;
+  label: string;
 }
 
 interface DuplicateResolutionDialogProps {
@@ -56,21 +64,57 @@ function StatsCell({ value }: { value: number | null }): React.JSX.Element {
   return <>{value}</>;
 }
 
+function computeTextbookQuality(textbook: Textbook, stats: TextbookContentStats): TextbookQuality {
+  const richness = computeMetadataRichness(textbook);
+  const hasCover = Boolean(textbook.coverImageUrl);
+  const hasStructure = stats.chapters > 0 && stats.sections > 0;
+  const capturedItems = stats.vocab + stats.equations + stats.concepts + stats.keyIdeas;
+
+  if (!hasCover && !hasStructure && capturedItems === 0 && richness.filled <= 2) {
+    return { kind: "empty", label: "Empty" };
+  }
+
+  if (hasCover && hasStructure && capturedItems > 0) {
+    return { kind: "complete", label: "Complete" };
+  }
+
+  return { kind: "partial", label: "Partial" };
+}
+
+function computeTextbookStrengthScore(textbook: Textbook, stats: TextbookContentStats): number {
+  const richness = computeMetadataRichness(textbook);
+  const coverBonus = textbook.coverImageUrl ? 4 : 0;
+  return (stats.chapters * 5)
+    + (stats.sections * 3)
+    + stats.vocab
+    + stats.equations
+    + stats.concepts
+    + stats.keyIdeas
+    + (richness.filled * 2)
+    + coverBonus;
+}
+
 function TextbookCard({
   textbook,
   stats,
+  isPreferred,
   onDelete,
   deleteLabel,
 }: {
   textbook: Textbook;
   stats: TextbookStats | null;
+  isPreferred: boolean;
   onDelete: () => void;
   deleteLabel: string;
 }): React.JSX.Element {
   const richness = stats ? stats.richness : computeMetadataRichness(textbook);
+  const quality = stats ? computeTextbookQuality(textbook, stats.content) : null;
 
   return (
     <div className="dup-dialog__card">
+      {isPreferred ? (
+        <p className="dup-dialog__preferred">Best captured data</p>
+      ) : null}
       {textbook.coverImageUrl ? (
         <img
           src={textbook.coverImageUrl}
@@ -78,7 +122,7 @@ function TextbookCard({
           className="dup-dialog__cover"
         />
       ) : (
-        <div className="dup-dialog__cover dup-dialog__cover--placeholder" aria-hidden="true" />
+        <div className="dup-dialog__cover dup-dialog__cover--placeholder" role="img" aria-label="No cover image available">No Image</div>
       )}
 
       <table className="dup-dialog__table">
@@ -113,15 +157,35 @@ function TextbookCard({
           </tr>
           <tr>
             <th scope="row">Chapters</th>
-            <td><StatsCell value={stats?.chapters ?? null} /></td>
+            <td><StatsCell value={stats?.content.chapters ?? null} /></td>
           </tr>
           <tr>
             <th scope="row">Sections</th>
-            <td><StatsCell value={stats?.sections ?? null} /></td>
+            <td><StatsCell value={stats?.content.sections ?? null} /></td>
+          </tr>
+          <tr>
+            <th scope="row">Vocab</th>
+            <td><StatsCell value={stats?.content.vocab ?? null} /></td>
+          </tr>
+          <tr>
+            <th scope="row">Equations</th>
+            <td><StatsCell value={stats?.content.equations ?? null} /></td>
+          </tr>
+          <tr>
+            <th scope="row">Concepts</th>
+            <td><StatsCell value={stats?.content.concepts ?? null} /></td>
+          </tr>
+          <tr>
+            <th scope="row">Key ideas</th>
+            <td><StatsCell value={stats?.content.keyIdeas ?? null} /></td>
           </tr>
           <tr>
             <th scope="row">Metadata</th>
             <td>{richness.filled} / {richness.total} fields</td>
+          </tr>
+          <tr>
+            <th scope="row">Data status</th>
+            <td>{quality ? <span className={`dup-dialog__quality dup-dialog__quality--${quality.kind}`}>{quality.label}</span> : <StatsCell value={null} />}</td>
           </tr>
         </tbody>
       </table>
@@ -152,19 +216,51 @@ export function DuplicateResolutionDialog({
   React.useEffect(() => {
     let active = true;
 
-    async function loadStats(textbook: Textbook): Promise<TextbookStats> {
-      const [chapters, sections] = await Promise.all([
-        countChaptersByTextbookId(textbook.id),
-        countSectionsByTextbookId(textbook.id),
-      ]);
-      return { chapters, sections, richness: computeMetadataRichness(textbook) };
-    }
+    void getTextbookContentStatsMap([left.id, right.id]).then((map) => {
+      if (!active) {
+        return;
+      }
 
-    void loadStats(left).then((stats) => { if (active) setLeftStats(stats); });
-    void loadStats(right).then((stats) => { if (active) setRightStats(stats); });
+      setLeftStats({
+        content: map[left.id] ?? {
+          chapters: 0,
+          sections: 0,
+          vocab: 0,
+          equations: 0,
+          concepts: 0,
+          keyIdeas: 0,
+        },
+        richness: computeMetadataRichness(left),
+      });
+      setRightStats({
+        content: map[right.id] ?? {
+          chapters: 0,
+          sections: 0,
+          vocab: 0,
+          equations: 0,
+          concepts: 0,
+          keyIdeas: 0,
+        },
+        richness: computeMetadataRichness(right),
+      });
+    });
 
     return () => { active = false; };
   }, [left.id, right.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const preferredTextbookId = React.useMemo(() => {
+    if (!leftStats || !rightStats) {
+      return null;
+    }
+
+    const leftScore = computeTextbookStrengthScore(left, leftStats.content);
+    const rightScore = computeTextbookStrengthScore(right, rightStats.content);
+    if (leftScore === rightScore) {
+      return null;
+    }
+
+    return leftScore > rightScore ? left.id : right.id;
+  }, [left, leftStats, right, rightStats]);
 
   React.useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
@@ -211,6 +307,7 @@ export function DuplicateResolutionDialog({
           <TextbookCard
             textbook={left}
             stats={leftStats}
+            isPreferred={preferredTextbookId === left.id}
             onDelete={() => onDelete(left.id)}
             deleteLabel="Delete This Entry"
           />
@@ -220,6 +317,7 @@ export function DuplicateResolutionDialog({
           <TextbookCard
             textbook={right}
             stats={rightStats}
+            isPreferred={preferredTextbookId === right.id}
             onDelete={() => onDelete(right.id)}
             deleteLabel="Delete This Entry"
           />

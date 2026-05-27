@@ -221,6 +221,48 @@ describe("Firebase connection + sync integration flows", () => {
     expect(mocks.save).toHaveBeenCalled();
   });
 
+  it("Firestore read path downloads ownerId-backed textbooks after ownership backfill", async () => {
+    const cloudTextbookDoc = createMockDoc("textbooks/tb-owner-1", "tb-owner-1", {
+      id: "tb-owner-1",
+      ownerId: "teacher-owner-read",
+      uploadedBy: "teacher-owner-read",
+      title: "Owner-backed Textbook",
+      grade: "10",
+      subject: "Science",
+      edition: "2",
+      publicationYear: 2026,
+      isbnRaw: "9999999999999",
+      isbnNormalized: "9999999999999",
+      createdAt: "2026-03-12T00:00:00.000Z",
+      updatedAt: "2026-03-12T00:00:00.000Z",
+      lastModified: "2026-03-12T00:00:00.000Z",
+      pendingSync: false,
+      source: "cloud",
+      isFavorite: false,
+      isArchived: false,
+    });
+
+    const { syncModule, mocks } = await importSyncServiceModule({
+      currentUid: "teacher-owner-read",
+      cloudQueryDocs: {
+        "collection:textbooks:ownerId": [cloudTextbookDoc],
+      },
+    });
+
+    await expect(syncModule.downloadCloudData("teacher-owner-read")).resolves.toBeUndefined();
+
+    expect(mocks.getDocs).toHaveBeenCalled();
+    expect(mocks.save).toHaveBeenCalledWith(
+      "textbooks",
+      expect.objectContaining({
+        id: "tb-owner-1",
+        title: "Owner-backed Textbook",
+        userId: "teacher-owner-read",
+        ownerId: "teacher-owner-read",
+      })
+    );
+  });
+
   it("Firestore write success path uploads minimal local payload", async () => {
     const { syncModule, mocks } = await importSyncServiceModule({
       localByStore: {

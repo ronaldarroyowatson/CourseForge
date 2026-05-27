@@ -35,6 +35,20 @@ const uiStoreMock = vi.hoisted(() => ({
   setSelectedTextbook: vi.fn(),
 }));
 
+const textbookRepositoryMock = vi.hoisted(() => ({
+  computeMetadataRichness: vi.fn(() => ({ filled: 4, total: 10 })),
+  getTextbookContentStatsMap: vi.fn(async (ids: string[]) => Object.fromEntries(
+    ids.map((id) => [id, {
+      chapters: 1,
+      sections: 2,
+      vocab: 3,
+      equations: 1,
+      concepts: 1,
+      keyIdeas: 0,
+    }])
+  )),
+}));
+
 vi.mock("../../src/core/services/syncService", () => ({
   syncNow: syncNowMock,
   clearWriteBudgetForManualRetry: vi.fn(),
@@ -60,6 +74,11 @@ vi.mock("../../src/webapp/hooks/useRepositories", () => ({
 
 vi.mock("../../src/webapp/store/uiStore", () => ({
   useUIStore: () => uiStoreMock,
+}));
+
+vi.mock("../../src/core/services/repositories/textbookRepository", () => ({
+  computeMetadataRichness: () => textbookRepositoryMock.computeMetadataRichness(),
+  getTextbookContentStatsMap: (ids: string[]) => textbookRepositoryMock.getTextbookContentStatsMap(ids),
 }));
 
 function buildTextbook(overrides: Partial<Textbook> = {}): Textbook {
@@ -114,6 +133,8 @@ describe("textbook retry sync metrics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
+    textbookRepositoryMock.getTextbookContentStatsMap.mockClear();
+    textbookRepositoryMock.computeMetadataRichness.mockClear();
   });
 
   it("shows upload progress metrics while retry sync is running and after completion", async () => {

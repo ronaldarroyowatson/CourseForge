@@ -1,8 +1,12 @@
 import type { Section } from "../../models";
 import { delete as deleteRecord, getAll, getById, save, STORE_NAMES } from "../db";
+import { getCurrentUser } from "../../../firebase/auth";
 
 export async function saveSection(section: Section): Promise<string> {
-  return save(STORE_NAMES.sections, section);
+  return save(STORE_NAMES.sections, {
+    ...section,
+    userId: section.userId?.trim() || getCurrentUser()?.uid?.trim() || undefined,
+  });
 }
 
 export async function getSectionById(id: string): Promise<Section | undefined> {

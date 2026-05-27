@@ -135,6 +135,7 @@ describe("textbook deletion persistence", () => {
       expect.objectContaining({
         title: "Inspire Physical Science",
         coverImageUrl: null,
+        userId: "user-1",
       })
     );
 

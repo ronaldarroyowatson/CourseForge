@@ -1,8 +1,12 @@
 import type { KeyIdea } from "../../models";
 import { delete as deleteRecord, getAll, getById, save, STORE_NAMES } from "../db";
+import { getCurrentUser } from "../../../firebase/auth";
 
 export async function saveKeyIdea(keyIdea: KeyIdea): Promise<string> {
-  return save(STORE_NAMES.keyIdeas, keyIdea);
+  return save(STORE_NAMES.keyIdeas, {
+    ...keyIdea,
+    userId: keyIdea.userId?.trim() || getCurrentUser()?.uid?.trim() || undefined,
+  });
 }
 
 export async function getKeyIdeaById(id: string): Promise<KeyIdea | undefined> {

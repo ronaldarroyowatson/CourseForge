@@ -38,7 +38,12 @@ const repositoryMocks = vi.hoisted(() => {
   };
 });
 
+const authMocks = vi.hoisted(() => ({
+  getCurrentUser: vi.fn(() => ({ uid: "teacher-extension" })),
+}));
+
 vi.mock("../../src/core/services/repositories", () => repositoryMocks);
+vi.mock("../../src/firebase/auth", () => authMocks);
 
 import { useRepositories } from "../../src/extension/hooks/useRepositories";
 
@@ -109,6 +114,7 @@ describe("extension useRepositories — section-scoped create guards", () => {
       expect(savedArgs.sectionId).toBe("sec-1");
       expect(savedArgs.chapterId).toBe("ch-1");
       expect(savedArgs.textbookId).toBe("tb-1");
+      expect(savedArgs.userId).toBe("teacher-extension");
       expect(savedArgs.pendingSync).toBe(true);
       expect(savedArgs.source).toBe("local");
       expect(savedArgs.lastModified).toBeTruthy();
@@ -144,6 +150,7 @@ describe("extension useRepositories — section-scoped create guards", () => {
       expect(savedArgs.sectionId).toBe("sec-2");
       expect(savedArgs.chapterId).toBe("ch-2");
       expect(savedArgs.textbookId).toBe("tb-2");
+      expect(savedArgs.userId).toBe("teacher-extension");
       expect(savedArgs.pendingSync).toBe(true);
       expect(savedArgs.source).toBe("local");
     });
@@ -178,6 +185,7 @@ describe("extension useRepositories — section-scoped create guards", () => {
       expect(savedArgs.sectionId).toBe("sec-3");
       expect(savedArgs.chapterId).toBe("ch-3");
       expect(savedArgs.textbookId).toBe("tb-3");
+      expect(savedArgs.userId).toBe("teacher-extension");
       expect(savedArgs.pendingSync).toBe(true);
       expect(savedArgs.source).toBe("local");
     });

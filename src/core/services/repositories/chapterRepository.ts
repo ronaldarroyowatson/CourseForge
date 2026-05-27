@@ -1,8 +1,12 @@
 import type { Chapter } from "../../models";
 import { delete as deleteRecord, getAll, getById, save, STORE_NAMES } from "../db";
+import { getCurrentUser } from "../../../firebase/auth";
 
 export async function saveChapter(chapter: Chapter): Promise<string> {
-  return save(STORE_NAMES.chapters, chapter);
+  return save(STORE_NAMES.chapters, {
+    ...chapter,
+    userId: chapter.userId?.trim() || getCurrentUser()?.uid?.trim() || undefined,
+  });
 }
 
 export async function getChapterById(id: string): Promise<Chapter | undefined> {

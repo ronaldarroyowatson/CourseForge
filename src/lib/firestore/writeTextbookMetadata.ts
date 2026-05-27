@@ -39,6 +39,9 @@ export interface TextbookMetadata {
   uploadedAt: string;
   /** UID of the user who triggered the upload. */
   uploadedBy: string;
+  /** Canonical owner fields used by sync and Firestore rules. */
+  userId?: string;
+  ownerId?: string;
   /** Set when a newer/stronger version supersedes this document. */
   supersededBy?: string;
 }
@@ -55,10 +58,15 @@ export interface TextbookMetadata {
  */
 export async function writeTextbookMetadata(meta: TextbookMetadata): Promise<void> {
   const docRef = doc(firestoreDb, "textbooks", meta.textbookId);
+  const ownerUid = meta.userId?.trim() || meta.ownerId?.trim() || meta.uploadedBy.trim();
 
   // Strip undefined fields so Firestore doesn't store explicit nulls.
   const payload: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(meta)) {
+  for (const [key, value] of Object.entries({
+    ...meta,
+    userId: ownerUid,
+    ownerId: ownerUid,
+  })) {
     if (value !== undefined) {
       payload[key] = value;
     }

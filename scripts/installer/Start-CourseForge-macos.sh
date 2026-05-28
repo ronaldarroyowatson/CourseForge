@@ -321,7 +321,29 @@ clear_quarantine() {
   fi
 }
 
+ensure_bundle_icon_metadata() {
+  local plist_path="$SCRIPT_DIR/../Info.plist"
+  local icon_path="$SCRIPT_DIR/../Resources/CourseForge.icns"
+
+  if [[ ! -f "$plist_path" || ! -f "$icon_path" ]]; then
+    return
+  fi
+
+  if ! command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
+    return
+  fi
+
+  if ! /usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$plist_path" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string CourseForge.icns" "$plist_path" >/dev/null 2>&1 || true
+  fi
+
+  if ! /usr/libexec/PlistBuddy -c "Print :CFBundleIconName" "$plist_path" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string CourseForge" "$plist_path" >/dev/null 2>&1 || true
+  fi
+}
+
 apply_staged_update
+ensure_bundle_icon_metadata
 prompt_move_to_applications
 NODE_BIN="$(resolve_node)"
 if [[ -z "$NODE_BIN" ]]; then

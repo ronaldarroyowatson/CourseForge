@@ -20,16 +20,21 @@ describe("MemPalace startup isolation", () => {
     expect(devCommand.toLowerCase()).not.toContain("preflight");
   });
 
-  it("starts MemPalace from workspace task with at most one retry", () => {
+  it("lets VS Code own MemPalace MCP startup without a watchdog task on folder open", () => {
+    const settingsJson = readJson<{
+      tasks?: { runOnFolderOpen?: string };
+      mcpServers?: Record<string, { command?: string; args?: string[] }>;
+    }>(".vscode/settings.json");
     const tasksJson = readJson<{ tasks?: Array<{ label?: string; command?: string }> }>(".vscode/tasks.json");
     const task = tasksJson.tasks?.find((entry) => entry.label === "Start MemPalace MCP Server");
 
+    expect(settingsJson["tasks.runOnFolderOpen" as keyof typeof settingsJson]).toBe("noop");
+    expect(settingsJson.mcpServers?.mempalace?.command).toBe("mempalace");
+    expect(settingsJson.mcpServers?.mempalace?.args).toEqual(["mcp"]);
     expect(task).toBeDefined();
     const command = task?.command ?? "";
 
-    expect(command.toLowerCase()).toContain("mempalace_watchdog.js --once");
-
-    const onceCount = (command.match(/mempalace_watchdog\.js --once/g) ?? []).length;
-    expect(onceCount).toBeLessThanOrEqual(2);
+    expect(command).toBe("mempalace mcp");
+    expect(command.toLowerCase()).not.toContain("watchdog");
   });
 });

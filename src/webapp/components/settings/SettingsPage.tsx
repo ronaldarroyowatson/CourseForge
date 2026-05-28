@@ -28,6 +28,9 @@ import {
   uninstallPlugin,
   uploadAndClearDebugLogs,
   refreshPluginStatus as refreshPluginLifecycleStatus,
+  listSchoolDirectory,
+  setUserSchoolAffiliation,
+  type SchoolDirectoryRow,
 } from "../../../core/services";
 import { readMetadataPipelineRuntimeStatus, type MetadataPipelineRuntimeStatus } from "../../../core/services/metadataExtractionPipelineService";
 import { readMetadataCorrectionSyncRuntimeState, type MetadataCorrectionSyncRuntimeState } from "../../../core/services/metadataCorrectionSyncService";
@@ -39,6 +42,7 @@ import { FloatingDesignSystemCard } from "./FloatingDesignSystemCard";
 
 interface SettingsPageProps {
   onBack?: () => void;
+  onNavigate?: (path: string) => void;
 }
 
 function parseSemver(value: string): number[] | null {
@@ -284,8 +288,24 @@ function SyncDonutChart({
 /**
  * Centralized user preferences for sync safety and appearance.
  */
-export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element {
+export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
+  function navigateTo(path: string): void {
+    if (props.onNavigate) {
+      props.onNavigate(path);
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      window.location.assign(path);
+    }
+  }
+
   const userId = useAuthStore((state) => state.userId);
+  const isAdmin = useAuthStore((state) => state.isAdmin);
+  const isSchoolAdmin = useAuthStore((state) => state.isSchoolAdmin);
+  const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
+  const schoolName = useAuthStore((state) => state.schoolName);
+  const districtName = useAuthStore((state) => state.districtName);
   const language = useUIStore((state) => state.language);
   const setLanguage = useUIStore((state) => state.setLanguage);
   const accessibility = useUIStore((state) => state.accessibility);
@@ -329,6 +349,11 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
   const [updaterDiagnostics, setUpdaterDiagnostics] = React.useState<UpdaterDiagnostics | null>(null);
   const [showUpdaterDiagnostics, setShowUpdaterDiagnostics] = React.useState(false);
   const [isLoadingUpdaterDiagnostics, setIsLoadingUpdaterDiagnostics] = React.useState(false);
+  const [schoolSearch, setSchoolSearch] = React.useState("");
+  const [districtInput, setDistrictInput] = React.useState("");
+  const [schoolDirectory, setSchoolDirectory] = React.useState<SchoolDirectoryRow[]>([]);
+  const [schoolDirectoryStatus, setSchoolDirectoryStatus] = React.useState<string | null>(null);
+  const [isSavingSchool, setIsSavingSchool] = React.useState(false);
   const [showSyncPreferences, setShowSyncPreferences] = React.useState(false);
   const [showLanguageSettings, setShowLanguageSettings] = React.useState(false);
   const [showAccessibilitySettings, setShowAccessibilitySettings] = React.useState(false);
@@ -488,6 +513,64 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     );
   }
 
+  React.useEffect(() => {
+    if (!schoolName) {
+      return;
+    }
+
+    setSchoolSearch((current) => current || schoolName);
+  }, [schoolName]);
+
+  React.useEffect(() => {
+    if (!districtName) {
+      return;
+    }
+
+    setDistrictInput((current) => current || districtName);
+  }, [districtName]);
+
+  async function handleSchoolDirectoryLookup(query: string): Promise<void> {
+    try {
+      const rows = await listSchoolDirectory(query);
+      setSchoolDirectory(rows);
+      if (!rows.length) {
+        setSchoolDirectoryStatus("No matching schools found. You can save a new school name manually.");
+      } else {
+        setSchoolDirectoryStatus(`Found ${rows.length} school option${rows.length === 1 ? "" : "s"}.`);
+      }
+    } catch {
+      setSchoolDirectory([]);
+      setSchoolDirectoryStatus("Unable to load school directory right now.");
+    }
+  }
+
+  async function handleSaveSchoolAffiliation(preferred?: { schoolName?: string; schoolId?: string }): Promise<void> {
+    const nextSchoolName = (preferred?.schoolName ?? schoolSearch).trim();
+    if (!nextSchoolName) {
+      setSchoolDirectoryStatus("Enter or select a school name before saving.");
+      return;
+    }
+
+    setIsSavingSchool(true);
+    try {
+      const result = await setUserSchoolAffiliation({
+        schoolName: nextSchoolName,
+        districtName: districtInput.trim() || undefined,
+        schoolId: preferred?.schoolId,
+      });
+
+      setSchoolSearch(result.schoolName);
+      setDistrictInput(result.districtName ?? districtInput);
+      setSchoolDirectoryStatus(result.assignedSchoolAdmin
+        ? "School saved. You are now the first school admin for this school."
+        : "School saved. Your account is now linked to this school/district.");
+    } catch {
+      setSchoolDirectoryStatus("Unable to save school affiliation right now.");
+    } finally {
+      setIsSavingSchool(false);
+    }
+  }
+
   async function handleLanguageChange(nextLanguage: string): Promise<void> {
     setLanguage(nextLanguage as "en" | "es" | "pt" | "zm" | "fr" | "de");
     try {
@@ -595,6 +678,7 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
     void (async () => {
       const effectiveOrder = await getEffectiveAutoOcrProviderOrder();
       setOcrProviderOrderState(effectiveOrder);
+      await handleSchoolDirectoryLookup("");
       await refreshOcrProviderHealth(false);
       await refreshDebugStats();
       refreshMetadataTrainingStats();
@@ -1233,6 +1317,67 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           ) : null}
         </article>
 
+        <article className="settings-card settings-card--school-affiliation" aria-live="polite">
+          <h3>School / District Affiliation</h3>
+          <p className="settings-meta">
+            {schoolName
+              ? `Current school: ${schoolName}${districtName ? ` (${districtName})` : ""}`
+              : "First-time setup: add your school so CourseForge can group your district data and permissions."}
+          </p>
+          <div className="admin-filter-bar">
+            <label>
+              School Name
+              <input
+                value={schoolSearch}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setSchoolSearch(value);
+                  void handleSchoolDirectoryLookup(value);
+                }}
+                placeholder="Type School Name Here"
+              />
+            </label>
+            <label>
+              District (optional)
+              <input
+                value={districtInput}
+                onChange={(event) => setDistrictInput(event.target.value)}
+                placeholder="Type School District Here"
+              />
+            </label>
+          </div>
+          {schoolDirectory.length > 0 ? (
+            <div className="settings-school-suggestions" role="list" aria-label="School suggestions">
+              {schoolDirectory.slice(0, 8).map((row) => (
+                <button
+                  key={row.schoolId}
+                  type="button"
+                  className="btn-secondary settings-school-suggestion"
+                  onClick={() => {
+                    setSchoolSearch(row.schoolName);
+                    setDistrictInput(row.districtName ?? districtInput);
+                    void handleSaveSchoolAffiliation({ schoolName: row.schoolName, schoolId: row.schoolId });
+                  }}
+                  disabled={isSavingSchool}
+                >
+                  {row.schoolName}
+                  {row.districtName ? ` • ${row.districtName}` : ""}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className="form-actions">
+            <button
+              type="button"
+              onClick={() => { void handleSaveSchoolAffiliation(); }}
+              disabled={isSavingSchool}
+            >
+              {isSavingSchool ? "Saving..." : "Save School Affiliation"}
+            </button>
+          </div>
+          {schoolDirectoryStatus ? <p className="settings-meta">{schoolDirectoryStatus}</p> : null}
+        </article>
+
         <article className="settings-card">
           <h3>Sync Safety Status</h3>
           <p className="settings-meta">Sync status: {syncStatus}</p>
@@ -1554,6 +1699,35 @@ export function SettingsPage(_props: SettingsPageProps = {}): React.JSX.Element 
           ) : null}
         </article>
       </div>
+
+      <div className="settings-admin-access" aria-label="Administrative navigation">
+        <h3>Admin Access</h3>
+        <p className="settings-meta">
+          Roles: {isSchoolAdmin || isAdmin ? "School Admin enabled" : "School Admin not granted"}
+          {" | "}
+          {isSuperAdmin || isAdmin ? "Super Admin enabled" : "Super Admin not granted"}
+        </p>
+        <div className="settings-admin-actions">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => { navigateTo("/school-admin"); }}
+            disabled={!isSchoolAdmin && !isAdmin}
+            title={!isSchoolAdmin && !isAdmin ? "School admin permission required" : "Open school admin"}
+          >
+            Admin
+          </button>
+          <button
+            type="button"
+            onClick={() => { navigateTo("/super-admin"); }}
+            disabled={!isSuperAdmin && !isAdmin}
+            title={!isSuperAdmin && !isAdmin ? "Super admin permission required" : "Open super admin"}
+          >
+            Super Admin
+          </button>
+        </div>
+      </div>
+
       <FloatingDesignSystemCard
         open={dscPluginInstalled && showFloatingDesignSystemCard}
         userId={userId}

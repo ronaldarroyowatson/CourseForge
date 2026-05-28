@@ -91,6 +91,7 @@ const repositoryMocks = vi.hoisted(() => ({
 
 const coverServiceMocks = vi.hoisted(() => ({
   uploadTextbookCoverFromDataUrl: vi.fn<(textbookId: string, dataUrl: string) => Promise<string>>(async (textbookId) => `cover://${textbookId}`),
+  uploadTextbookOwnershipProofFromDataUrl: vi.fn<(textbookId: string, dataUrl: string) => Promise<string>>(async (textbookId) => `ownership://${textbookId}`),
 }));
 
 const syncServiceMocks = vi.hoisted(() => ({
@@ -124,6 +125,7 @@ const authMocks = vi.hoisted(() => ({
 
 vi.mock("../../src/core/services/coverImageService", () => ({
   uploadTextbookCoverFromDataUrl: (textbookId: string, dataUrl: string) => coverServiceMocks.uploadTextbookCoverFromDataUrl(textbookId, dataUrl),
+  uploadTextbookOwnershipProofFromDataUrl: (textbookId: string, dataUrl: string) => coverServiceMocks.uploadTextbookOwnershipProofFromDataUrl(textbookId, dataUrl),
   uploadTextbookCoverImage: vi.fn(async () => "cover://mock"),
 }));
 
@@ -204,6 +206,7 @@ describe("auto textbook flow integration", () => {
     repositoryMocks.removeSection.mockClear();
     repositoryMocks.removeChapter.mockClear();
     coverServiceMocks.uploadTextbookCoverFromDataUrl.mockClear();
+    coverServiceMocks.uploadTextbookOwnershipProofFromDataUrl.mockClear();
 
     useUIStore.setState({
       selectedTextbook: null,
@@ -582,7 +585,7 @@ describe("auto textbook flow integration", () => {
     }
   });
 
-  it("persists textbook, chapters, and sections while only storing cover image data", async () => {
+  it("persists textbook, chapters, and sections while only storing image references", async () => {
     const toc: TocChapter[] = [
       {
         chapterNumber: "1",
@@ -612,6 +615,7 @@ describe("auto textbook flow integration", () => {
           tocExtractionConfidence: 0.84,
         },
         coverDataUrl: "data:image/jpeg;base64,AAAA",
+        ownershipProofDataUrl: "data:image/jpeg;base64,BBBB",
         tocChapters: toc,
       },
       {
@@ -627,6 +631,7 @@ describe("auto textbook flow integration", () => {
         title: "Foundations of Algebra",
         sourceType: "auto",
         coverDataUrl: "data:image/jpeg;base64,AAAA",
+        ownershipProofDataUrl: "data:image/jpeg;base64,BBBB",
       })
     );
 
@@ -700,6 +705,7 @@ describe("auto textbook flow integration", () => {
   it("prompts for duplicate resolution and applies merge/dedupe choice in auto flow", async () => {
     const onSaved = vi.fn();
     const validCoverDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=";
+    const validOwnershipProofDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=";
 
     repositoryMocks.findDuplicateTextbook.mockResolvedValue({
       id: "tb-existing",
@@ -741,6 +747,7 @@ describe("auto textbook flow integration", () => {
         testingSeedState={{
           step: "toc-editor",
           coverImageDataUrl: validCoverDataUrl,
+          ownershipProofDataUrl: validOwnershipProofDataUrl,
           tocResult: {
             confidence: 0.9,
             chapters: [
@@ -801,6 +808,7 @@ describe("auto textbook flow integration", () => {
     expect(repositoryMocks.removeChapter).not.toHaveBeenCalled();
     expect(repositoryMocks.removeSection).not.toHaveBeenCalled();
     expect(coverServiceMocks.uploadTextbookCoverFromDataUrl).toHaveBeenCalledWith("tb-existing", validCoverDataUrl);
+    expect(coverServiceMocks.uploadTextbookOwnershipProofFromDataUrl).toHaveBeenCalledWith("tb-existing", validOwnershipProofDataUrl);
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 

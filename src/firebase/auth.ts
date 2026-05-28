@@ -220,6 +220,44 @@ export async function getAdminClaim(): Promise<boolean> {
   }
 }
 
+export interface RoleClaims {
+  isAdmin: boolean;
+  isSchoolAdmin: boolean;
+  isSuperAdmin: boolean;
+  schoolId: string | null;
+}
+
+export async function getRoleClaims(): Promise<RoleClaims> {
+  const auth = await initializePersistentAuth();
+  const user = auth.currentUser;
+  if (!user) {
+    return {
+      isAdmin: false,
+      isSchoolAdmin: false,
+      isSuperAdmin: false,
+      schoolId: null,
+    };
+  }
+
+  try {
+    const tokenResult = await user.getIdTokenResult(true);
+    const schoolIdClaim = tokenResult.claims["schoolId"];
+    return {
+      isAdmin: tokenResult.claims["admin"] === true,
+      isSchoolAdmin: tokenResult.claims["schoolAdmin"] === true,
+      isSuperAdmin: tokenResult.claims["superAdmin"] === true,
+      schoolId: typeof schoolIdClaim === "string" && schoolIdClaim.trim() ? schoolIdClaim.trim() : null,
+    };
+  } catch {
+    return {
+      isAdmin: false,
+      isSchoolAdmin: false,
+      isSuperAdmin: false,
+      schoolId: null,
+    };
+  }
+}
+
 /**
  * Convenience wrapper around getAdminClaim.
  */
@@ -241,9 +279,16 @@ export async function saveUserProfileToFirestore(user: User): Promise<void> {
   const userRef = doc(firestoreDb, "users", user.uid);
 
   let isAdmin = false;
+  let isSchoolAdmin = false;
+  let isSuperAdmin = false;
+  let claimedSchoolId: string | null = null;
   try {
     const tokenResult = await user.getIdTokenResult();
     isAdmin = tokenResult.claims["admin"] === true;
+    isSchoolAdmin = tokenResult.claims["schoolAdmin"] === true;
+    isSuperAdmin = tokenResult.claims["superAdmin"] === true;
+    const schoolIdClaim = tokenResult.claims["schoolId"];
+    claimedSchoolId = typeof schoolIdClaim === "string" && schoolIdClaim.trim() ? schoolIdClaim.trim() : null;
   } catch {
     // Non-critical — proceed without claim info.
   }
@@ -253,6 +298,9 @@ export async function saveUserProfileToFirestore(user: User): Promise<void> {
     displayName: user.displayName ?? "",
     email: user.email ?? "",
     isAdmin,
+    isSchoolAdmin,
+    isSuperAdmin,
+    ...(claimedSchoolId ? { schoolId: claimedSchoolId } : {}),
     preferences: {
       language: detectBrowserLanguageTag(),
       accessibility: {

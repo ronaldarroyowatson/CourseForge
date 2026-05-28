@@ -53,6 +53,7 @@ const uiStoreMocks = vi.hoisted(() => ({
 const coverImageServiceMocks = vi.hoisted(() => ({
   uploadTextbookCoverFromDataUrl: vi.fn(async () => "https://example.invalid/cover.png"),
   uploadTextbookCoverImage: vi.fn(async () => "https://example.invalid/cover.png"),
+  uploadTextbookOwnershipProofFromDataUrl: vi.fn(async () => "https://example.invalid/ownership-proof.png"),
 }));
 
 vi.mock("../../src/core/services/repositories", () => repositoryMocks);
@@ -60,6 +61,7 @@ vi.mock("../../src/core/services/repositories", () => repositoryMocks);
 vi.mock("../../src/core/services/coverImageService", () => ({
   uploadTextbookCoverFromDataUrl: (...args: Parameters<typeof coverImageServiceMocks.uploadTextbookCoverFromDataUrl>) => coverImageServiceMocks.uploadTextbookCoverFromDataUrl(...args),
   uploadTextbookCoverImage: (...args: Parameters<typeof coverImageServiceMocks.uploadTextbookCoverImage>) => coverImageServiceMocks.uploadTextbookCoverImage(...args),
+  uploadTextbookOwnershipProofFromDataUrl: (...args: Parameters<typeof coverImageServiceMocks.uploadTextbookOwnershipProofFromDataUrl>) => coverImageServiceMocks.uploadTextbookOwnershipProofFromDataUrl(...args),
 }));
 
 vi.mock("../../src/core/services/syncService", () => syncMocks);
@@ -155,6 +157,60 @@ describe("textbook deletion persistence", () => {
       savedTextbook.id,
       expect.objectContaining({
         coverImageUrl: "https://example.invalid/deferred-cover.png",
+      })
+    );
+  });
+
+  it("persists textbook locally before ownership proof upload resolves", async () => {
+    let resolveUpload: ((value: string) => void) | undefined;
+    coverImageServiceMocks.uploadTextbookOwnershipProofFromDataUrl.mockImplementationOnce(
+      () => new Promise<string>((resolve) => {
+        resolveUpload = resolve;
+      })
+    );
+
+    const { result } = renderHook(() => useRepositories());
+
+    const createPromise = result.current.createTextbook({
+      sourceType: "auto",
+      originalLanguage: "en",
+      title: "Inspire Physical Science",
+      grade: "8",
+      subject: "Science",
+      edition: "Student",
+      publicationYear: 2026,
+      isbnRaw: "9780076716852",
+      isbnNormalized: "9780076716852",
+      ownershipProofDataUrl: "data:image/png;base64,BBBB",
+    });
+
+    await Promise.resolve();
+
+    expect(repositoryMocks.saveTextbook).toHaveBeenCalledTimes(1);
+    expect(repositoryMocks.saveTextbook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Inspire Physical Science",
+        ownershipProofImageUrl: null,
+        userId: "user-1",
+      })
+    );
+
+    expect(repositoryMocks.updateTextbook).not.toHaveBeenCalled();
+
+    expect(resolveUpload).toBeDefined();
+    resolveUpload!("https://example.invalid/deferred-ownership-proof.png");
+    await createPromise;
+
+    const savedTextbook = repositoryMocks.saveTextbook.mock.lastCall?.[0] as Textbook | undefined;
+    expect(savedTextbook).toBeDefined();
+    if (!savedTextbook) {
+      throw new Error("Expected saveTextbook to receive a textbook payload.");
+    }
+
+    expect(repositoryMocks.updateTextbook).toHaveBeenCalledWith(
+      savedTextbook.id,
+      expect.objectContaining({
+        ownershipProofImageUrl: "https://example.invalid/deferred-ownership-proof.png",
       })
     );
   });

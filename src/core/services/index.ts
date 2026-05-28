@@ -9,6 +9,7 @@ export {
 } from "./db";
 
 export * from "./adminFirestoreService";
+export * from "./schoolAdminService";
 export * from "./accessibilityService";
 export * from "./autoOcrService";
 export * from "./ocrCorrectionLearningService";

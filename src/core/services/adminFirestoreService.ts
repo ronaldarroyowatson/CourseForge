@@ -13,6 +13,11 @@ export interface AdminUserRecord {
   createdAt: string | null;
   lastLoginAt: string | null;
   isAdmin: boolean;
+  isSchoolAdmin?: boolean;
+  isSuperAdmin?: boolean;
+  schoolId?: string | null;
+  schoolName?: string | null;
+  districtName?: string | null;
   isContentBlocked?: boolean;
   contentBlockReason?: string | null;
 }

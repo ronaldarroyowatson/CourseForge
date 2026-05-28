@@ -6,6 +6,8 @@ import { useAutoSync } from "./hooks/useAutoSync";
 import { LoginPage } from "./components/auth/LoginPage";
 import { RequireAdmin } from "./components/auth/RequireAdmin";
 import { RequireAuth } from "./components/auth/RequireAuth";
+import { RequireSchoolAdmin } from "./components/auth/RequireSchoolAdmin";
+import { RequireSuperAdmin } from "./components/auth/RequireSuperAdmin";
 import { TextbookWorkspace } from "./components/app/TextbookWorkspace";
 import { useAuthStore } from "./store/authStore";
 
@@ -206,6 +208,14 @@ export function App(): React.JSX.Element | null {
         <Route path="/textbooks/:id/chapters/:chapterId/sections/:sectionId" element={<TextbookWorkspace />} />
         <Route path="/textbooks/:id/chapters/:chapterId/sections/:sectionId/:contentTab" element={<TextbookWorkspace />} />
         <Route path="/settings" element={<TextbookWorkspace showSettingsPage />} />
+
+        <Route element={<RequireSchoolAdmin />}>
+          <Route path="/school-admin" element={<TextbookWorkspace showSchoolAdminPage />} />
+        </Route>
+
+        <Route element={<RequireSuperAdmin />}>
+          <Route path="/super-admin" element={<TextbookWorkspace showSuperAdminPage />} />
+        </Route>
 
         <Route element={<RequireAdmin />}>
           <Route path="/admin" element={<TextbookWorkspace showAdminPage />} />

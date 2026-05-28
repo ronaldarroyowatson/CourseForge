@@ -87,8 +87,91 @@ interface AdminUserRecord {
   createdAt: string | null;
   lastLoginAt: string | null;
   isAdmin: boolean;
+  isSchoolAdmin?: boolean;
+  isSuperAdmin?: boolean;
+  schoolId?: string | null;
+  schoolName?: string | null;
+  districtName?: string | null;
   isContentBlocked?: boolean;
   contentBlockReason?: string | null;
+}
+
+interface SchoolDirectoryRow {
+  schoolId: string;
+  schoolName: string;
+  districtName?: string | null;
+  memberCount: number;
+}
+
+interface SchoolUserRow {
+  uid: string;
+  email: string;
+  displayName: string;
+  isAdmin: boolean;
+  isSchoolAdmin: boolean;
+  schoolId?: string | null;
+  schoolName?: string | null;
+  districtName?: string | null;
+  lastLoginAt?: string | null;
+}
+
+interface SchoolTextbookRow {
+  id: string;
+  docPath: string;
+  ownerId: string;
+  ownerEmail: string | null;
+  title: string;
+  subject?: string;
+  grade?: string;
+  isDeleted: boolean;
+  recycleBinDeletedAt?: string | null;
+  recycleBinExpiresAt?: string | null;
+  lastModified?: string | null;
+}
+
+interface SchoolInviteRow {
+  id: string;
+  email: string;
+  schoolId: string;
+  schoolName: string;
+  districtName?: string | null;
+  invitedByUid: string;
+  invitedByEmail?: string | null;
+  createdAt: string | null;
+  status: "pending" | "accepted" | "revoked";
+}
+
+interface SchoolDashboardResult {
+  schoolId: string;
+  schoolName: string;
+  districtName?: string | null;
+  users: SchoolUserRow[];
+  textbooks: SchoolTextbookRow[];
+  invites: SchoolInviteRow[];
+}
+
+interface PromotionRequestRow {
+  id: string;
+  uid: string;
+  email: string;
+  displayName: string;
+  schoolId: string;
+  schoolName: string;
+  districtName?: string | null;
+  reason?: string | null;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string | null;
+  reviewedAt?: string | null;
+  reviewedBy?: string | null;
+}
+
+interface SuperAdminDashboardStats {
+  usersCount: number;
+  schoolsCount: number;
+  textbooksCount: number;
+  pendingPromotionRequests: number;
+  trackedReadsToday: number | null;
+  trackedWritesToday: number | null;
 }
 
 interface PremiumUsageState {
@@ -519,6 +602,47 @@ function assertAdmin(authData: { token?: Record<string, unknown> } | null | unde
   if (authData.token?.admin !== true) {
     throw new HttpsError("permission-denied", "Admin privileges are required for this action.");
   }
+}
+
+function assertSignedIn(authData: { uid?: string; token?: Record<string, unknown> } | null | undefined): asserts authData is { uid: string; token?: Record<string, unknown> } {
+  if (!authData?.uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+}
+
+function isSuperAdminToken(authData: { token?: Record<string, unknown> } | null | undefined): boolean {
+  return authData?.token?.superAdmin === true || authData?.token?.admin === true;
+}
+
+function assertSuperAdmin(authData: { token?: Record<string, unknown> } | null | undefined): void {
+  if (!authData) {
+    throw new HttpsError("unauthenticated", "You must be signed in to use super admin functions.");
+  }
+
+  if (!isSuperAdminToken(authData)) {
+    throw new HttpsError("permission-denied", "Super admin privileges are required for this action.");
+  }
+}
+
+function assertSchoolAdmin(authData: { token?: Record<string, unknown> } | null | undefined): void {
+  if (!authData) {
+    throw new HttpsError("unauthenticated", "You must be signed in to use school admin functions.");
+  }
+
+  if (authData.token?.admin === true || authData.token?.superAdmin === true || authData.token?.schoolAdmin === true) {
+    return;
+  }
+
+  throw new HttpsError("permission-denied", "School admin privileges are required for this action.");
+}
+
+function normalizeSchoolId(raw: string): string {
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
 }
 
 function toIsoString(value: unknown): string | null {
@@ -1500,6 +1624,11 @@ function toAdminUserRecord(snapshot: FirebaseFirestore.QueryDocumentSnapshot): A
     createdAt: toIsoString(data.createdAt),
     lastLoginAt: toIsoString(data.lastLoginAt),
     isAdmin: data.isAdmin === true,
+    isSchoolAdmin: data.isSchoolAdmin === true,
+    isSuperAdmin: data.isSuperAdmin === true,
+    schoolId: typeof data.schoolId === "string" ? data.schoolId : null,
+    schoolName: typeof data.schoolName === "string" ? data.schoolName : null,
+    districtName: typeof data.districtName === "string" ? data.districtName : null,
     isContentBlocked: data.isContentBlocked === true,
     contentBlockReason: typeof data.contentBlockReason === "string" ? data.contentBlockReason : null,
   };
@@ -1636,6 +1765,541 @@ export const listAdminUsers = onCall(async (request) => {
 
   const snapshot = await firestore.collection("users").orderBy("email").get();
   return success("Loaded users.", snapshot.docs.map(toAdminUserRecord));
+});
+
+export const listSchoolDirectory = onCall(async (request) => {
+  assertSignedIn(request.auth);
+
+  const query = typeof request.data?.query === "string" ? request.data.query.trim().toLowerCase() : "";
+  const snapshot = await firestore.collection("schools").orderBy("schoolName").limit(120).get();
+  const rows = snapshot.docs
+    .map((docSnap): SchoolDirectoryRow => {
+      const data = docSnap.data();
+      return {
+        schoolId: docSnap.id,
+        schoolName: typeof data.schoolName === "string" ? data.schoolName : docSnap.id,
+        districtName: typeof data.districtName === "string" ? data.districtName : null,
+        memberCount: typeof data.memberCount === "number" ? data.memberCount : 0,
+      };
+    })
+    .filter((row) => !query || row.schoolName.toLowerCase().includes(query) || (row.districtName ?? "").toLowerCase().includes(query))
+    .sort((left, right) => left.schoolName.localeCompare(right.schoolName))
+    .slice(0, 30);
+
+  return success("Loaded school directory.", rows);
+});
+
+export const setUserSchoolAffiliation = onCall(async (request) => {
+  assertSignedIn(request.auth);
+
+  const uid = request.auth.uid;
+  const schoolName = typeof request.data?.schoolName === "string" ? request.data.schoolName.trim() : "";
+  const districtName = typeof request.data?.districtName === "string" ? request.data.districtName.trim() : "";
+  const requestedSchoolId = typeof request.data?.schoolId === "string" ? request.data.schoolId.trim() : "";
+
+  if (!schoolName) {
+    throw new HttpsError("invalid-argument", "School name is required.");
+  }
+
+  const schoolId = normalizeSchoolId(requestedSchoolId || schoolName);
+  if (!schoolId) {
+    throw new HttpsError("invalid-argument", "Unable to normalize school id from school name.");
+  }
+
+  const schoolRef = firestore.doc(`schools/${schoolId}`);
+  const usersRef = firestore.collection("users");
+  const currentSchoolAdmins = await usersRef.where("schoolId", "==", schoolId).where("isSchoolAdmin", "==", true).limit(1).get();
+  const shouldAssignSchoolAdmin = currentSchoolAdmins.empty;
+
+  await schoolRef.set(
+    {
+      schoolId,
+      schoolName,
+      districtName: districtName || null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  const userRef = firestore.doc(`users/${uid}`);
+  await userRef.set(
+    {
+      uid,
+      schoolId,
+      schoolName,
+      districtName: districtName || null,
+      isSchoolAdmin: shouldAssignSchoolAdmin,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  const userRecord = await auth.getUser(uid);
+  const claims = { ...(userRecord.customClaims ?? {}) } as Record<string, unknown>;
+  claims.schoolId = schoolId;
+  if (shouldAssignSchoolAdmin) {
+    claims.schoolAdmin = true;
+  }
+  await auth.setCustomUserClaims(uid, claims);
+
+  const membersSnapshot = await usersRef.where("schoolId", "==", schoolId).get();
+  await schoolRef.set(
+    {
+      memberCount: membersSnapshot.size,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return success("School affiliation saved.", {
+    schoolId,
+    schoolName,
+    districtName: districtName || null,
+    assignedSchoolAdmin: shouldAssignSchoolAdmin,
+  });
+});
+
+function resolveSchoolIdForRequest(authData: { uid?: string; token?: Record<string, unknown> } | null | undefined, requestedSchoolId: unknown): string {
+  const schoolIdFromInput = typeof requestedSchoolId === "string" ? requestedSchoolId.trim() : "";
+  const schoolIdFromClaim = typeof authData?.token?.schoolId === "string" ? String(authData.token.schoolId).trim() : "";
+  const schoolId = schoolIdFromInput || schoolIdFromClaim;
+  if (!schoolId) {
+    throw new HttpsError("failed-precondition", "No school is associated with this account yet.");
+  }
+  return schoolId;
+}
+
+async function ensureSchoolAccess(authData: { uid?: string; token?: Record<string, unknown> } | null | undefined, schoolId: string): Promise<void> {
+  assertSignedIn(authData);
+  if (isSuperAdminToken(authData) || authData.token?.schoolAdmin === true) {
+    return;
+  }
+
+  const userSnapshot = await firestore.doc(`users/${authData.uid}`).get();
+  const userSchoolId = typeof userSnapshot.data()?.schoolId === "string" ? userSnapshot.data()?.schoolId : "";
+  if (!userSchoolId || userSchoolId !== schoolId) {
+    throw new HttpsError("permission-denied", "You are not authorized for this school.");
+  }
+}
+
+export const getSchoolAdminDashboard = onCall(async (request) => {
+  assertSchoolAdmin(request.auth);
+  assertSignedIn(request.auth);
+  const schoolId = resolveSchoolIdForRequest(request.auth, request.data?.schoolId);
+  await ensureSchoolAccess(request.auth, schoolId);
+
+  const usersSnapshot = await firestore.collection("users").where("schoolId", "==", schoolId).get();
+  const ownerEmailMap = new Map<string, string>();
+  const users: SchoolUserRow[] = usersSnapshot.docs.map((docSnap) => {
+    const row = toAdminUserRecord(docSnap);
+    ownerEmailMap.set(row.uid, row.email || "");
+    return {
+      uid: row.uid,
+      email: row.email,
+      displayName: row.displayName,
+      isAdmin: row.isAdmin,
+      isSchoolAdmin: row.isSchoolAdmin === true,
+      schoolId: row.schoolId ?? null,
+      schoolName: row.schoolName ?? null,
+      districtName: row.districtName ?? null,
+      lastLoginAt: row.lastLoginAt ?? null,
+    };
+  });
+  const ownerIds = new Set(users.map((row) => row.uid));
+
+  const textbookSnapshot = await firestore.collectionGroup("textbooks").limit(800).get();
+  const textbooks: SchoolTextbookRow[] = textbookSnapshot.docs
+    .map((docSnap) => {
+      const data = docSnap.data();
+      const ownerId = typeof data.ownerId === "string" ? data.ownerId : typeof data.userId === "string" ? data.userId : "";
+      if (!ownerId || !ownerIds.has(ownerId)) {
+        return null;
+      }
+
+      return {
+        id: docSnap.id,
+        docPath: docSnap.ref.path,
+        ownerId,
+        ownerEmail: ownerEmailMap.get(ownerId) ?? null,
+        title: typeof data.title === "string" ? data.title : docSnap.id,
+        subject: typeof data.subject === "string" ? data.subject : undefined,
+        grade: typeof data.grade === "string" ? data.grade : undefined,
+        isDeleted: data.isDeleted === true,
+        recycleBinDeletedAt: toIsoString(data.recycleBinDeletedAt),
+        recycleBinExpiresAt: toIsoString(data.recycleBinExpiresAt),
+        lastModified: toIsoString(data.lastModified),
+      } satisfies SchoolTextbookRow;
+    })
+    .filter((row): row is SchoolTextbookRow => Boolean(row))
+    .sort((left, right) => (right.lastModified ?? "").localeCompare(left.lastModified ?? ""));
+
+  const invitesSnapshot = await firestore.collection("schoolInvites").where("schoolId", "==", schoolId).orderBy("createdAt", "desc").limit(200).get();
+  const invites: SchoolInviteRow[] = invitesSnapshot.docs.map((docSnap) => {
+    const data = docSnap.data();
+    return {
+      id: docSnap.id,
+      email: typeof data.email === "string" ? data.email : "",
+      schoolId,
+      schoolName: typeof data.schoolName === "string" ? data.schoolName : users[0]?.schoolName ?? schoolId,
+      districtName: typeof data.districtName === "string" ? data.districtName : null,
+      invitedByUid: typeof data.invitedByUid === "string" ? data.invitedByUid : "",
+      invitedByEmail: typeof data.invitedByEmail === "string" ? data.invitedByEmail : null,
+      createdAt: toIsoString(data.createdAt),
+      status: data.status === "accepted" || data.status === "revoked" ? data.status : "pending",
+    };
+  });
+
+  const schoolSnapshot = await firestore.doc(`schools/${schoolId}`).get();
+  const schoolData = schoolSnapshot.data() ?? {};
+  const result: SchoolDashboardResult = {
+    schoolId,
+    schoolName: typeof schoolData.schoolName === "string" ? schoolData.schoolName : users[0]?.schoolName ?? schoolId,
+    districtName: typeof schoolData.districtName === "string" ? schoolData.districtName : users[0]?.districtName ?? null,
+    users,
+    textbooks,
+    invites,
+  };
+
+  return success("Loaded school admin dashboard.", result);
+});
+
+export const inviteSchoolUser = onCall(async (request) => {
+  assertSchoolAdmin(request.auth);
+  assertSignedIn(request.auth);
+  const schoolId = resolveSchoolIdForRequest(request.auth, request.data?.schoolId);
+  await ensureSchoolAccess(request.auth, schoolId);
+
+  const email = typeof request.data?.email === "string" ? request.data.email.trim().toLowerCase() : "";
+  if (!email) {
+    throw new HttpsError("invalid-argument", "Invite email is required.");
+  }
+
+  const schoolSnapshot = await firestore.doc(`schools/${schoolId}`).get();
+  const schoolData = schoolSnapshot.data() ?? {};
+  const inviteRef = firestore.collection("schoolInvites").doc();
+  const row: SchoolInviteRow = {
+    id: inviteRef.id,
+    email,
+    schoolId,
+    schoolName: typeof schoolData.schoolName === "string" ? schoolData.schoolName : schoolId,
+    districtName: typeof schoolData.districtName === "string" ? schoolData.districtName : null,
+    invitedByUid: request.auth.uid,
+    invitedByEmail: typeof request.auth.token?.email === "string" ? String(request.auth.token.email) : null,
+    createdAt: new Date().toISOString(),
+    status: "pending",
+  };
+
+  await inviteRef.set({
+    ...row,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return success("Invite created.", row);
+});
+
+export const removeSchoolUser = onCall(async (request) => {
+  assertSchoolAdmin(request.auth);
+  assertSignedIn(request.auth);
+  const schoolId = resolveSchoolIdForRequest(request.auth, request.data?.schoolId);
+  await ensureSchoolAccess(request.auth, schoolId);
+
+  const uid = typeof request.data?.uid === "string" ? request.data.uid.trim() : "";
+  if (!uid) {
+    throw new HttpsError("invalid-argument", "User id is required.");
+  }
+
+  const targetRef = firestore.doc(`users/${uid}`);
+  const targetSnapshot = await targetRef.get();
+  if (!targetSnapshot.exists) {
+    throw new HttpsError("not-found", "User not found.");
+  }
+
+  const targetSchoolId = typeof targetSnapshot.data()?.schoolId === "string" ? targetSnapshot.data()?.schoolId : "";
+  if (targetSchoolId !== schoolId && !isSuperAdminToken(request.auth)) {
+    throw new HttpsError("permission-denied", "User is not a member of your school.");
+  }
+
+  await targetRef.set({
+    schoolId: admin.firestore.FieldValue.delete(),
+    schoolName: admin.firestore.FieldValue.delete(),
+    districtName: admin.firestore.FieldValue.delete(),
+    isSchoolAdmin: false,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  const userRecord = await auth.getUser(uid);
+  const claims = { ...(userRecord.customClaims ?? {}) } as Record<string, unknown>;
+  delete claims.schoolId;
+  delete claims.schoolAdmin;
+  await auth.setCustomUserClaims(uid, claims);
+
+  const remainingMembers = await firestore.collection("users").where("schoolId", "==", schoolId).get();
+  await firestore.doc(`schools/${schoolId}`).set({
+    memberCount: remainingMembers.size,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  return success("User removed from school.", "User removed from school.");
+});
+
+export const setSchoolTextbookDeletionState = onCall(async (request) => {
+  assertSchoolAdmin(request.auth);
+  assertSignedIn(request.auth);
+  const schoolId = resolveSchoolIdForRequest(request.auth, request.data?.schoolId);
+  await ensureSchoolAccess(request.auth, schoolId);
+
+  const textbookId = typeof request.data?.textbookId === "string" ? request.data.textbookId.trim() : "";
+  const isDeleted = request.data?.isDeleted === true;
+
+  if (!textbookId) {
+    throw new HttpsError("invalid-argument", "Textbook id is required.");
+  }
+
+  const textbookRef = firestore.doc(`textbooks/${textbookId}`);
+  const textbookSnapshot = await textbookRef.get();
+  if (!textbookSnapshot.exists) {
+    throw new HttpsError("not-found", "Textbook not found.");
+  }
+
+  const textbookData = textbookSnapshot.data() ?? {};
+  const ownerId = typeof textbookData.ownerId === "string" ? textbookData.ownerId : typeof textbookData.userId === "string" ? textbookData.userId : "";
+  if (!ownerId) {
+    throw new HttpsError("failed-precondition", "Textbook owner metadata is missing.");
+  }
+
+  const ownerSnapshot = await firestore.doc(`users/${ownerId}`).get();
+  const ownerSchoolId = typeof ownerSnapshot.data()?.schoolId === "string" ? ownerSnapshot.data()?.schoolId : "";
+  if (ownerSchoolId !== schoolId && !isSuperAdminToken(request.auth)) {
+    throw new HttpsError("permission-denied", "This textbook does not belong to your school.");
+  }
+
+  const now = new Date();
+  const expireAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+  await textbookRef.set({
+    isDeleted,
+    recycleBinDeletedAt: isDeleted ? now.toISOString() : null,
+    recycleBinExpiresAt: isDeleted ? expireAt.toISOString() : null,
+    pendingSync: false,
+    lastModified: now.toISOString(),
+  }, { merge: true });
+
+  await touchOwnerSyncTokenFromDocPath(`textbooks/${textbookId}`);
+
+  return success(isDeleted ? "Textbook moved to recycle bin." : "Textbook restored.", isDeleted ? "Textbook moved to recycle bin." : "Textbook restored.");
+});
+
+export const requestSchoolAdminPromotion = onCall(async (request) => {
+  assertSignedIn(request.auth);
+
+  const uid = request.auth.uid;
+  const userSnapshot = await firestore.doc(`users/${uid}`).get();
+  if (!userSnapshot.exists) {
+    throw new HttpsError("not-found", "User profile not found.");
+  }
+
+  const userData = userSnapshot.data() ?? {};
+  const schoolId = typeof userData.schoolId === "string" ? userData.schoolId : "";
+  if (!schoolId) {
+    throw new HttpsError("failed-precondition", "Set your school affiliation before requesting promotion.");
+  }
+
+  const reason = typeof request.data?.reason === "string" ? request.data.reason.trim() : "";
+  const existingPending = await firestore.collection("schoolAdminPromotionRequests")
+    .where("uid", "==", uid)
+    .where("schoolId", "==", schoolId)
+    .where("status", "==", "pending")
+    .limit(1)
+    .get();
+  if (!existingPending.empty) {
+    return success("A promotion request is already pending.", "A promotion request is already pending.");
+  }
+
+  const requestRef = firestore.collection("schoolAdminPromotionRequests").doc();
+  await requestRef.set({
+    uid,
+    email: typeof userData.email === "string" ? userData.email : "",
+    displayName: typeof userData.displayName === "string" ? userData.displayName : "",
+    schoolId,
+    schoolName: typeof userData.schoolName === "string" ? userData.schoolName : schoolId,
+    districtName: typeof userData.districtName === "string" ? userData.districtName : null,
+    reason: reason || null,
+    status: "pending",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return success("Promotion request submitted.", "Promotion request submitted.");
+});
+
+export const listSchoolAdminPromotionRequests = onCall(async (request) => {
+  assertSuperAdmin(request.auth);
+
+  const status = typeof request.data?.status === "string" ? request.data.status : "pending";
+  let query: FirebaseFirestore.Query = firestore.collection("schoolAdminPromotionRequests");
+  if (status !== "all") {
+    query = query.where("status", "==", status);
+  }
+
+  const snapshot = await query.orderBy("createdAt", "desc").limit(300).get();
+  const rows: PromotionRequestRow[] = snapshot.docs.map((docSnap) => {
+    const data = docSnap.data();
+    return {
+      id: docSnap.id,
+      uid: typeof data.uid === "string" ? data.uid : "",
+      email: typeof data.email === "string" ? data.email : "",
+      displayName: typeof data.displayName === "string" ? data.displayName : "",
+      schoolId: typeof data.schoolId === "string" ? data.schoolId : "",
+      schoolName: typeof data.schoolName === "string" ? data.schoolName : "",
+      districtName: typeof data.districtName === "string" ? data.districtName : null,
+      reason: typeof data.reason === "string" ? data.reason : null,
+      status: data.status === "approved" || data.status === "rejected" ? data.status : "pending",
+      createdAt: toIsoString(data.createdAt),
+      reviewedAt: toIsoString(data.reviewedAt),
+      reviewedBy: typeof data.reviewedBy === "string" ? data.reviewedBy : null,
+    };
+  });
+
+  return success("Loaded promotion requests.", rows);
+});
+
+export const resolveSchoolAdminPromotionRequest = onCall(async (request) => {
+  assertSuperAdmin(request.auth);
+  assertSignedIn(request.auth);
+
+  const requestId = typeof request.data?.requestId === "string" ? request.data.requestId.trim() : "";
+  const approve = request.data?.approve === true;
+  if (!requestId) {
+    throw new HttpsError("invalid-argument", "Promotion request id is required.");
+  }
+
+  const requestRef = firestore.doc(`schoolAdminPromotionRequests/${requestId}`);
+  const requestSnapshot = await requestRef.get();
+  if (!requestSnapshot.exists) {
+    throw new HttpsError("not-found", "Promotion request not found.");
+  }
+
+  const data = requestSnapshot.data() ?? {};
+  const targetUid = typeof data.uid === "string" ? data.uid : "";
+  const schoolId = typeof data.schoolId === "string" ? data.schoolId : "";
+  if (!targetUid || !schoolId) {
+    throw new HttpsError("failed-precondition", "Promotion request is missing user or school metadata.");
+  }
+
+  if (approve) {
+    const userRecord = await auth.getUser(targetUid);
+    const claims = { ...(userRecord.customClaims ?? {}) } as Record<string, unknown>;
+    claims.schoolAdmin = true;
+    claims.schoolId = schoolId;
+    await auth.setCustomUserClaims(targetUid, claims);
+    await firestore.doc(`users/${targetUid}`).set({
+      isSchoolAdmin: true,
+      schoolId,
+      lastClaimsUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+
+  await requestRef.set({
+    status: approve ? "approved" : "rejected",
+    reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
+    reviewedBy: request.auth.uid,
+  }, { merge: true });
+
+  return success(approve ? "Promotion approved." : "Promotion rejected.", approve ? "Promotion approved." : "Promotion rejected.");
+});
+
+export const setUserSuperAdminStatus = onCall(async (request) => {
+  assertAdmin(request.auth);
+
+  const uid = typeof request.data?.uid === "string" ? request.data.uid.trim() : "";
+  const isSuperAdmin = request.data?.isSuperAdmin === true;
+  if (!uid) {
+    throw new HttpsError("invalid-argument", "A user id is required.");
+  }
+
+  const userRecord = await auth.getUser(uid);
+  const nextClaims = { ...(userRecord.customClaims ?? {}) } as Record<string, unknown>;
+  if (isSuperAdmin) {
+    nextClaims.superAdmin = true;
+  } else {
+    delete nextClaims.superAdmin;
+  }
+
+  await auth.setCustomUserClaims(uid, nextClaims);
+  await firestore.doc(`users/${uid}`).set(
+    {
+      uid,
+      email: userRecord.email ?? "",
+      displayName: userRecord.displayName ?? "",
+      isSuperAdmin,
+      lastClaimsUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return success(isSuperAdmin ? "Granted super admin access." : "Removed super admin access.", isSuperAdmin ? "Granted super admin access." : "Removed super admin access.");
+});
+
+export const listAllSchoolsForSuperAdmin = onCall(async (request) => {
+  assertSuperAdmin(request.auth);
+
+  const snapshot = await firestore.collection("schools").orderBy("schoolName").limit(500).get();
+  const rows: SchoolDirectoryRow[] = snapshot.docs.map((docSnap) => {
+    const data = docSnap.data();
+    return {
+      schoolId: docSnap.id,
+      schoolName: typeof data.schoolName === "string" ? data.schoolName : docSnap.id,
+      districtName: typeof data.districtName === "string" ? data.districtName : null,
+      memberCount: typeof data.memberCount === "number" ? data.memberCount : 0,
+    };
+  });
+
+  return success("Loaded schools.", rows);
+});
+
+export const getSuperAdminDashboardStats = onCall(async (request) => {
+  assertSuperAdmin(request.auth);
+
+  const [schoolsSnapshot, textbooksSnapshot, promotionSnapshot, ocrUsageSnapshot, premiumUsageSnapshot] = await Promise.all([
+    firestore.collection("schools").count().get(),
+    firestore.collectionGroup("textbooks").count().get(),
+    firestore.collection("schoolAdminPromotionRequests").where("status", "==", "pending").count().get(),
+    firestore.collectionGroup("ocrUsage").get(),
+    firestore.collectionGroup("premiumUsage").get(),
+  ]);
+
+  let usersCount = 0;
+  let nextPageToken: string | undefined;
+  do {
+    const page = await auth.listUsers(1000, nextPageToken);
+    usersCount += page.users.length;
+    nextPageToken = page.pageToken;
+  } while (nextPageToken);
+
+  let trackedReadsToday = 0;
+  let trackedWritesToday = 0;
+  ocrUsageSnapshot.docs.forEach((docSnap) => {
+    const data = docSnap.data();
+    const usedCount = typeof data.usedCount === "number" ? data.usedCount : 0;
+    trackedReadsToday += usedCount;
+  });
+
+  premiumUsageSnapshot.docs.forEach((docSnap) => {
+    const data = docSnap.data();
+    const premiumReadsToday = typeof data.premiumRequestsUsedToday === "number" ? data.premiumRequestsUsedToday : 0;
+    trackedReadsToday += premiumReadsToday;
+    trackedWritesToday += premiumReadsToday;
+  });
+
+  const stats: SuperAdminDashboardStats = {
+    usersCount,
+    schoolsCount: schoolsSnapshot.data().count,
+    textbooksCount: textbooksSnapshot.data().count,
+    pendingPromotionRequests: promotionSnapshot.data().count,
+    trackedReadsToday,
+    trackedWritesToday,
+  };
+
+  return success("Loaded super admin stats.", stats);
 });
 
 export const getModerationQueue = onCall(async (request) => {

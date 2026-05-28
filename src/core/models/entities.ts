@@ -140,6 +140,8 @@ export interface Textbook {
   platformUrl?: string;
   /** Firebase Storage download URL for the cover image. */
   coverImageUrl?: string | null;
+  /** Firebase Storage download URL for the copyright-page ownership proof image. */
+  ownershipProofImageUrl?: string | null;
   createdAt: string;
   updatedAt: string;
   lastModified: string;

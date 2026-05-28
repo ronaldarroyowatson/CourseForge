@@ -15,7 +15,7 @@ Quick release note: v1.4.3 adds end-to-end trace IDs and OCR debug sink logging 
 - Build textbook hierarchies with textbooks, chapters, sections, vocab, equations, concepts, and key ideas.
 - Save data locally first, then sync per-user content to Firebase.
 - Restore sessions automatically with browser-local Firebase Auth persistence.
-- Support direct routes such as `/textbooks`, `/textbooks/:id`, and `/admin`.
+- Support direct routes such as `/textbooks`, `/textbooks/:id`, `/admin`, `/school-admin`, and `/super-admin`.
 - Promote admins and moderate shared content through secured callable Cloud Functions.
 - Export curriculum data to XML for downstream game and tutor pipelines.
 
@@ -35,6 +35,13 @@ Quick release note: v1.4.3 adds end-to-end trace IDs and OCR debug sink logging 
 - Keeps flagged textbooks local-only by setting moderation hold metadata and preventing cloud writes until admin approval.
 - Adds admin user controls to block or restore cloud content sync access for specific users.
 - Expands tests for moderation decisions and sync hold enforcement.
+
+## v1.6.0 highlights
+
+- Adds School / District affiliation setup in Settings with school search and manual district entry.
+- Adds dedicated School Admin and Super Admin pages with role-gated navigation from Settings.
+- Adds super-admin promotion request queue and global role management controls.
+- Uses authoritative global stats sources for Super Admin dashboard (Auth users, collection-group textbook totals, and aggregated usage counters).
 
 ## v1.2.2 highlights
 

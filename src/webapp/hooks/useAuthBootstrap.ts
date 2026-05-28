@@ -5,6 +5,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { syncNow } from "../../core/services/syncService";
 import {
   getAdminClaim,
+  getRoleClaims,
   initializePersistentAuth,
   saveUserProfileToFirestore,
   subscribeToAuthTokenChanges,
@@ -58,8 +59,11 @@ export function useAuthBootstrap(): void {
       const shouldRetryAdminBootstrap =
         options?.allowAdminRetry === true &&
         bootstrapAdminRetryUserId !== user.uid &&
-        uiState.lastSyncErrorCode === "permission-denied" &&
-        uiState.permissionDeniedSyncBlocked;
+        (
+          uiState.lastSyncErrorCode === "permission-denied"
+          || uiState.permissionDeniedSyncBlocked
+          || bootstrapSyncAttemptedUserId === user.uid
+        );
 
       if (bootstrapSyncAttemptedUserId === user.uid) {
         if (shouldRetryAdminBootstrap) {
@@ -195,14 +199,39 @@ export function useAuthBootstrap(): void {
         return;
       }
 
-      let isAdmin = false;
+      let adminClaim = false;
       try {
-        isAdmin = await getAdminClaim();
+        adminClaim = await getAdminClaim();
       } catch {
-        isAdmin = false;
+        adminClaim = false;
       }
 
-      if (isAdmin) {
+      let claims = {
+        isAdmin: adminClaim,
+        isSchoolAdmin: false,
+        isSuperAdmin: false,
+        schoolId: null as string | null,
+      };
+      try {
+        if (typeof getRoleClaims === "function") {
+          const roleClaims = await getRoleClaims();
+          claims = {
+            isAdmin: roleClaims.isAdmin || adminClaim,
+            isSchoolAdmin: roleClaims.isSchoolAdmin,
+            isSuperAdmin: roleClaims.isSuperAdmin,
+            schoolId: roleClaims.schoolId,
+          };
+        }
+      } catch {
+        claims = {
+          isAdmin: adminClaim,
+          isSchoolAdmin: false,
+          isSuperAdmin: false,
+          schoolId: null,
+        };
+      }
+
+      if (claims.isAdmin || claims.isSchoolAdmin || claims.isSuperAdmin) {
         try {
           await user.getIdToken(true);
         } catch {
@@ -214,14 +243,40 @@ export function useAuthBootstrap(): void {
         return;
       }
 
+      let profileSchoolId: string | null = claims.schoolId;
+      let profileSchoolName: string | null = null;
+      let profileDistrictName: string | null = null;
+      try {
+        const profileSnapshot = await getDoc(doc(firestoreDb, "users", user.uid));
+        const schoolIdField = profileSnapshot.get("schoolId");
+        const schoolNameField = profileSnapshot.get("schoolName");
+        const districtNameField = profileSnapshot.get("districtName");
+        if (typeof schoolIdField === "string" && schoolIdField.trim()) {
+          profileSchoolId = schoolIdField.trim();
+        }
+        if (typeof schoolNameField === "string" && schoolNameField.trim()) {
+          profileSchoolName = schoolNameField.trim();
+        }
+        if (typeof districtNameField === "string" && districtNameField.trim()) {
+          profileDistrictName = districtNameField.trim();
+        }
+      } catch {
+        // Non-critical metadata read.
+      }
+
       useAuthStore.getState().setAuthenticated({
         userId: user.uid,
         userEmail: user.email ?? null,
         userDisplayName: user.displayName ?? null,
-        isAdmin,
+        isAdmin: claims.isAdmin,
+        isSchoolAdmin: claims.isSchoolAdmin,
+        isSuperAdmin: claims.isSuperAdmin,
+        schoolId: profileSchoolId,
+        schoolName: profileSchoolName,
+        districtName: profileDistrictName,
       });
 
-      await syncAuthenticatedUser(user, { allowAdminRetry: isAdmin });
+      await syncAuthenticatedUser(user, { allowAdminRetry: claims.isAdmin });
     }
 
     void initializePersistentAuth()

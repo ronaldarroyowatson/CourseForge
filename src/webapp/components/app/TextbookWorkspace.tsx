@@ -29,6 +29,16 @@ const AdminToolsPage = React.lazy(async () => {
   return { default: module.AdminToolsPage };
 });
 
+const SchoolAdminPage = React.lazy(async () => {
+  const module = await import("../admin/SchoolAdminPage");
+  return { default: module.SchoolAdminPage };
+});
+
+const SuperAdminPage = React.lazy(async () => {
+  const module = await import("../admin/SuperAdminPage");
+  return { default: module.SuperAdminPage };
+});
+
 const DISMISSED_PAIRS_KEY = "courseforge.dismissed_duplicate_pairs";
 
 function makePairKey(idA: string, idB: string): string {
@@ -66,9 +76,16 @@ function saveDismissedDuplicatePair(key: string): void {
 interface TextbookWorkspaceProps {
   showAdminPage?: boolean;
   showSettingsPage?: boolean;
+  showSchoolAdminPage?: boolean;
+  showSuperAdminPage?: boolean;
 }
 
-export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = false }: TextbookWorkspaceProps): React.JSX.Element {
+export function TextbookWorkspace({
+  showAdminPage = false,
+  showSettingsPage = false,
+  showSchoolAdminPage = false,
+  showSuperAdminPage = false,
+}: TextbookWorkspaceProps): React.JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
   const params = useParams<{ id: string; chapterId?: string; sectionId?: string; contentTab?: string }>();
@@ -219,7 +236,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
   }, [syncStatus, lastSyncTime]);
 
   React.useEffect(() => {
-    if (showAdminPage || showSettingsPage) {
+    if (showAdminPage || showSettingsPage || showSchoolAdminPage || showSuperAdminPage) {
       return;
     }
 
@@ -275,7 +292,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
     setSelectedSectionId(null);
     setActiveWorkflowTab("chapters");
     setExpandedTile("chapters");
-  }, [params.id, params.chapterId, params.sectionId, params.contentTab, isLoadingTextbooks, navigate, showAdminPage, showSettingsPage, textbooks]);
+  }, [params.id, params.chapterId, params.sectionId, params.contentTab, isLoadingTextbooks, navigate, showAdminPage, showSchoolAdminPage, showSettingsPage, showSuperAdminPage, textbooks]);
 
   React.useEffect(() => {
     let isMounted = true;
@@ -335,7 +352,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
   }, [fetchSectionsByChapterId, selectedChapterId, selectedSectionId, sectionRefreshKey]);
 
   React.useEffect(() => {
-    if (showAdminPage || showSettingsPage) {
+    if (showAdminPage || showSettingsPage || showSchoolAdminPage || showSuperAdminPage) {
       return;
     }
 
@@ -364,7 +381,7 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
     if (location.pathname !== targetPath) {
       navigate(targetPath, { replace: true });
     }
-  }, [activeContentPanel, activeWorkflowTab, location.pathname, navigate, selectedChapterId, selectedSectionId, selectedTextbookId, showAdminPage, showSettingsPage]);
+  }, [activeContentPanel, activeWorkflowTab, location.pathname, navigate, selectedChapterId, selectedSectionId, selectedTextbookId, showAdminPage, showSchoolAdminPage, showSettingsPage, showSuperAdminPage]);
 
   React.useEffect(() => {
     if (!selectedTextbookId) {
@@ -798,6 +815,22 @@ export function TextbookWorkspace({ showAdminPage = false, showSettingsPage = fa
               currentUserEmail={currentUserEmail}
               onBack={() => {
                 navigate("/textbooks");
+              }}
+            />
+          </React.Suspense>
+        ) : showSchoolAdminPage ? (
+          <React.Suspense fallback={<section className="placeholder-panel"><p>Loading school admin dashboard...</p></section>}>
+            <SchoolAdminPage
+              onBack={() => {
+                navigate("/settings");
+              }}
+            />
+          </React.Suspense>
+        ) : showSuperAdminPage ? (
+          <React.Suspense fallback={<section className="placeholder-panel"><p>Loading super admin dashboard...</p></section>}>
+            <SuperAdminPage
+              onBack={() => {
+                navigate("/settings");
               }}
             />
           </React.Suspense>

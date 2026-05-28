@@ -1,12 +1,11 @@
 {
   "task.allowAutomaticTasks": "on",
-  "tasks.runOnFolderOpen": "Start MemPalace MCP Server",
+  "tasks.runOnFolderOpen": "noop",
   "mcpServers": {
     "mempalace": {
       "command": "mempalace",
       "args": [
-        "serve",
-        ".mempalace"
+        "mcp"
       ]
     },
     "filesystem": {
@@ -18,8 +17,10 @@
       ]
     },
     "terminal": {
-      "command": ".\\node_modules\\.bin\\mcp-terminal.cmd",
+      "command": "npx",
       "args": [
+        "-y",
+        "@dillip285/mcp-terminal",
         "--allowed-paths",
         "./"
       ]

@@ -36,7 +36,12 @@ import {
   updateTextbook,
   updateTextbookFlags,
 } from "../../core/services/repositories";
-import { uploadTextbookCoverFromDataUrl, uploadTextbookCoverImage, extractAndUploadCoverFromBlob } from "../../core/services/coverImageService";
+import {
+  uploadTextbookCoverFromDataUrl,
+  uploadTextbookCoverImage,
+  uploadTextbookOwnershipProofFromDataUrl,
+  extractAndUploadCoverFromBlob,
+} from "../../core/services/coverImageService";
 import { hardDeleteTextbookFromCloud } from "../../core/services/syncService";
 import { getCurrentUser } from "../../firebase/auth";
 import { useUIStore } from "../store/uiStore";
@@ -70,10 +75,13 @@ export interface CreateTextbookInput {
   requiresAdminReview?: boolean;
   platformUrl?: string;
   coverImageUrl?: string | null;
+  ownershipProofImageUrl?: string | null;
   /** Pass a File to have it uploaded during createTextbook. */
   coverFile?: File;
   /** Pass a data-URL to have it uploaded during createTextbook. */
   coverDataUrl?: string;
+  /** Pass a data-URL copyright page capture to persist ownership proof. */
+  ownershipProofDataUrl?: string;
 }
 
 export interface CreateChapterInput {
@@ -173,6 +181,7 @@ function buildTextbookFromInput(
     requiresAdminReview: input.requiresAdminReview,
     platformUrl: input.platformUrl,
     coverImageUrl: resolvedCoverUrl ?? input.coverImageUrl ?? null,
+    ownershipProofImageUrl: input.ownershipProofImageUrl ?? null,
     createdAt: timestamp,
     updatedAt: timestamp,
     lastModified: timestamp,
@@ -354,6 +363,20 @@ export function useRepositories() {
         })
         .catch((error) => {
           console.warn("[CourseForge][TextbookCreate] Cover upload failed after local save.", {
+            textbookId: textbook.id,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
+    }
+
+    if (input.ownershipProofDataUrl) {
+      void uploadTextbookOwnershipProofFromDataUrl(textbook.id, input.ownershipProofDataUrl)
+        .then(async (ownershipProofImageUrl) => {
+          await updateTextbook(textbook.id, { ownershipProofImageUrl });
+          markLocalChange();
+        })
+        .catch((error) => {
+          console.warn("[CourseForge][TextbookCreate] Ownership proof upload failed after local save.", {
             textbookId: textbook.id,
             message: error instanceof Error ? error.message : String(error),
           });

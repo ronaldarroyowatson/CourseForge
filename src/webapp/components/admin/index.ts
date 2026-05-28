@@ -7,3 +7,5 @@ export { PremiumUsagePanel } from "./PremiumUsagePanel";
 export { TranslationMemoryPanel } from "./TranslationMemoryPanel";
 export { TranslationReviewPanel } from "./TranslationReviewPanel";
 export { UserManagement } from "./UserManagement";
+export { SchoolAdminPage } from "./SchoolAdminPage";
+export { SuperAdminPage } from "./SuperAdminPage";

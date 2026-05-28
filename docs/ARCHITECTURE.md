@@ -135,3 +135,26 @@ See `XML_SCHEMA.md` for details.
 ## 8. MemPalace governance
 
 From now on, every architectural change, new file, refactor, plugin addition, plugin removal, loader update, installer/uninstaller change, CLI command, or design decision MUST be written into MemPalace using add_memory. MemPalace is the authoritative source of truth for the CourseForge architecture.
+
+---
+
+## 9. School Admin and Super Admin Governance
+
+- Settings now includes school affiliation capture (search existing school entries or create a manual school name + district).
+- School identity is persisted on `/users/{uid}` (`schoolId`, `schoolName`, `districtName`) and mirrored to `/schools/{schoolId}` for directory and membership counts.
+- First-member bootstrap: when a school has no existing school-admin users, the first user to save affiliation is auto-assigned school-admin (`schoolAdmin` custom claim + `isSchoolAdmin` user profile flag).
+- New school-admin surface (`/school-admin`) is scoped to one school/district and supports:
+  - school member visibility
+  - invite creation by email (stored in `schoolInvites`)
+  - user removal from school membership
+  - textbook delete/undelete control within recycle window metadata
+- New super-admin surface (`/super-admin`) is global and supports:
+  - all-schools directory and counts
+  - global user role controls (admin and super-admin)
+  - promotion request queue (`schoolAdminPromotionRequests`) with approve/reject workflow
+  - global usage/stats snapshot for core collections
+- Super-admin global stats source-of-truth:
+  - user totals from Firebase Auth user records (not only mirrored Firestore user docs)
+  - textbook totals from Firestore collection-group `textbooks`
+  - tracked activity totals aggregated from `ocrUsage` and `premiumUsage` collection-group docs
+- Existing `/admin` route remains global admin tooling; super-admins are also allowed through this route.

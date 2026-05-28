@@ -32,6 +32,7 @@ interface AutoCreateTextbookInput {
   status?: "draft" | "submitted" | "approved" | "rejected";
   platformUrl?: string;
   coverDataUrl?: string;
+  ownershipProofDataUrl?: string;
 }
 
 export interface AutoPersistenceMetadata {
@@ -67,6 +68,7 @@ export interface AutoPersistenceMetadata {
 export interface PersistAutoTextbookInput {
   metadata: AutoPersistenceMetadata;
   coverDataUrl: string;
+  ownershipProofDataUrl?: string;
   tocChapters: TocChapter[];
 }
 
@@ -163,6 +165,7 @@ export async function persistAutoTextbook(
     status: input.metadata.status,
     platformUrl: input.metadata.platformUrl,
     coverDataUrl: input.coverDataUrl,
+    ownershipProofDataUrl: input.ownershipProofDataUrl,
   });
 
   for (let chapterIndex = 0; chapterIndex < input.tocChapters.length; chapterIndex += 1) {

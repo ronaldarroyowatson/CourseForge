@@ -1049,6 +1049,39 @@ body {
   color: var(--text-secondary);
 }
 
+.settings-card--school-affiliation {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.settings-school-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.settings-school-suggestion {
+  max-width: 100%;
+}
+
+.settings-admin-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.settings-admin-access {
+  margin-top: 0.95rem;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  padding: 0.8rem;
+}
+
+.settings-admin-access h3 {
+  margin: 0 0 0.4rem;
+}
+
 .settings-toggle {
   display: inline-flex;
   align-items: center;

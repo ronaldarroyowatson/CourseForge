@@ -8,7 +8,7 @@ import {
 import { extractTextFromImageWithFallback } from "../../../core/services/autoOcrService";
 import { appendDebugLogEntry } from "../../../core/services";
 import { persistAutoTextbook } from "../../../core/services/autoTextbookPersistenceService";
-import { uploadTextbookCoverFromDataUrl } from "../../../core/services/coverImageService";
+import { uploadTextbookCoverFromDataUrl, uploadTextbookOwnershipProofFromDataUrl } from "../../../core/services/coverImageService";
 import {
   AUTO_MODE_SCOPE_MESSAGE,
   createInitialAutoCaptureUsage,
@@ -71,6 +71,7 @@ interface AutoTextbookSetupFlowProps {
     metadataConfidence?: AutoMetadataConfidenceMap;
     metadataForm?: Partial<MetadataFormState>;
     coverImageDataUrl?: string | null;
+    ownershipProofDataUrl?: string | null;
     ocrDraft?: string;
     tocResult?: ParsedTocResult;
     tocPages?: TocPage[];
@@ -274,6 +275,8 @@ interface AutoSessionDraft {
   savedAt: number;
   /** Compact base64 data URL; may be null if cover not yet captured. */
   coverImageDataUrl: string | null;
+  /** Compact base64 data URL for the copyright-page ownership proof capture. */
+  ownershipProofDataUrl?: string | null;
   /** Original raw OCR text (before any user editing). */
   rawOcrText: string;
   /** Snapshot of key metadata fields so the resume card is informative. */
@@ -297,6 +300,7 @@ function isAutoSessionDraft(value: unknown): value is AutoSessionDraft {
     && draft.version === 1
     && typeof draft.savedAt === "number"
     && (typeof draft.coverImageDataUrl === "string" || draft.coverImageDataUrl === null)
+    && (draft.ownershipProofDataUrl === undefined || typeof draft.ownershipProofDataUrl === "string" || draft.ownershipProofDataUrl === null)
     && typeof draft.rawOcrText === "string"
     && typeof draft.metadataTitle === "string"
     && typeof draft.metadataSubject === "string"
@@ -976,7 +980,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     ...(testingSeedState?.metadataForm ?? {}),
   }));
   const [coverImageDataUrl, setCoverImageDataUrl] = useState<string | null>(testingSeedState?.coverImageDataUrl ?? null);
-  const [lastMetadataImageDataUrl, setLastMetadataImageDataUrl] = useState<string | null>(testingSeedState?.coverImageDataUrl ?? null);
+  const [ownershipProofDataUrl, setOwnershipProofDataUrl] = useState<string | null>(testingSeedState?.ownershipProofDataUrl ?? null);
+  const [lastMetadataImageDataUrl, setLastMetadataImageDataUrl] = useState<string | null>(
+    testingSeedState?.ownershipProofDataUrl ?? testingSeedState?.coverImageDataUrl ?? null
+  );
   const [relatedIsbns, setRelatedIsbns] = useState<RelatedIsbn[]>(testingSeedState?.metadataDraft?.relatedIsbns ?? []);
   const [ocrDraft, setOcrDraft] = useState(testingSeedState?.ocrDraft ?? "");
   const [tocResult, setTocResult] = useState<ParsedTocResult>(testingSeedState?.tocResult ?? INITIAL_TOC_RESULT);
@@ -1042,7 +1049,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   // â”€â”€ Resumable sessions (max 3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [resumableDrafts, setResumableDrafts] = useState<AutoSessionDraft[]>(() => readAutoSessionDrafts());
-  const currentSessionHasWork = Boolean(coverImageDataUrl || rawOcrText || metadataForm.title.trim());
+  const currentSessionHasWork = Boolean(coverImageDataUrl || ownershipProofDataUrl || rawOcrText || metadataForm.title.trim());
   const isSessionCapacityReached = resumableDrafts.length >= MAX_AUTO_SESSION_DRAFTS && !currentSessionHasWork;
 
   useEffect(() => {
@@ -1109,7 +1116,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   // Persist a lightweight session snapshot so the user can resume after a
   // page reload.  Only save when there is something meaningful to recover.
   useEffect(() => {
-    if (!coverImageDataUrl && !rawOcrText && !metadataForm.title) {
+    if (!coverImageDataUrl && !ownershipProofDataUrl && !rawOcrText && !metadataForm.title) {
       const remaining = deleteAutoSessionDraft(activeSessionDraftIdRef.current);
       setResumableDrafts(remaining);
       return;
@@ -1120,6 +1127,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       version: 1,
       savedAt: Date.now(),
       coverImageDataUrl,
+      ownershipProofDataUrl,
       rawOcrText,
       metadataTitle: metadataForm.title,
       metadataSubject: metadataForm.subject,
@@ -1135,7 +1143,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
     const nextDrafts = saveAutoSessionDraft(draft);
     setResumableDrafts(nextDrafts.filter((entry) => entry.id !== activeSessionDraftIdRef.current));
-  }, [coverImageDataUrl, rawOcrText, metadataForm, relatedIsbns, step]);
+  }, [coverImageDataUrl, ownershipProofDataUrl, rawOcrText, metadataForm, relatedIsbns, step]);
 
   const canFinishToc = tocResult.chapters.length > 0;
 
@@ -2054,6 +2062,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     }
     if (targetStep === "cover") {
       setCoverImageDataUrl(imageDataUrl);
+    } else {
+      setOwnershipProofDataUrl(imageDataUrl);
     }
     setLastMetadataImageDataUrl(imageDataUrl);
     lastMetadataCaptureStepRef.current = targetStep;
@@ -2194,6 +2204,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     }
 
     lastCapturedOcrByStepRef.current.title = captured.ocrText;
+  setOwnershipProofDataUrl(captured.imageDataUrl);
     setLastMetadataImageDataUrl(captured.imageDataUrl);
     setRawOcrText(captured.ocrText);
     setOcrDraft(captured.ocrText);
@@ -2560,15 +2571,18 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           existingSectionsByChapterId: sectionsByChapterId,
         });
 
+        const imageChanges: Record<string, unknown> = {};
         if (coverImageDataUrl) {
-          const coverImageUrl = await uploadTextbookCoverFromDataUrl(duplicateMatch.id, coverImageDataUrl);
-          await editTextbook(duplicateMatch.id, {
-            ...nextTextbookChanges,
-            coverImageUrl,
-          });
-        } else {
-          await editTextbook(duplicateMatch.id, nextTextbookChanges);
+          imageChanges.coverImageUrl = await uploadTextbookCoverFromDataUrl(duplicateMatch.id, coverImageDataUrl);
         }
+        if (ownershipProofDataUrl) {
+          imageChanges.ownershipProofImageUrl = await uploadTextbookOwnershipProofFromDataUrl(duplicateMatch.id, ownershipProofDataUrl);
+        }
+
+        await editTextbook(duplicateMatch.id, {
+          ...nextTextbookChanges,
+          ...imageChanges,
+        });
 
         for (const sectionId of plan.sectionIdsToDelete) {
           const vocabTerms = await fetchVocabTermsBySectionId(sectionId);
@@ -2662,6 +2676,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
               ...nextTextbookChanges,
             },
             coverDataUrl: coverImageDataUrl,
+            ownershipProofDataUrl: ownershipProofDataUrl ?? undefined,
             tocChapters: tocResult.chapters,
           },
           {
@@ -2867,7 +2882,8 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
                     onClick={() => {
                       activeSessionDraftIdRef.current = draft.id;
                       setCoverImageDataUrl(draft.coverImageDataUrl);
-                      setLastMetadataImageDataUrl(draft.coverImageDataUrl);
+                      setOwnershipProofDataUrl(draft.ownershipProofDataUrl ?? null);
+                      setLastMetadataImageDataUrl(draft.ownershipProofDataUrl ?? draft.coverImageDataUrl);
                       setRawOcrText(draft.rawOcrText);
                       setOcrDraft(draft.rawOcrText);
                       const nextMetadataForm: MetadataFormState = draft.metadataFormSnapshot

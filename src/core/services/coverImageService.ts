@@ -2,6 +2,13 @@ import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { firebaseStorage } from "../../firebase/storage";
 import type { ParsedTextbook } from "../../lib/storage/uploadTextbookBlob";
 
+async function uploadTextbookDataUrl(storagePath: string, dataUrl: string): Promise<string> {
+  const blob = dataUrlToBlob(dataUrl);
+  const storageRef = ref(firebaseStorage, storagePath);
+  const snapshot = await uploadBytes(storageRef, blob, { contentType: blob.type });
+  return getDownloadURL(snapshot.ref);
+}
+
 /**
  * Upload a File object to Firebase Storage under /textbookCovers/{textbookId}
  * and return the public download URL.
@@ -25,10 +32,14 @@ export async function uploadTextbookCoverFromDataUrl(
   textbookId: string,
   dataUrl: string
 ): Promise<string> {
-  const blob = dataUrlToBlob(dataUrl);
-  const storageRef = ref(firebaseStorage, `textbookCovers/${textbookId}`);
-  const snapshot = await uploadBytes(storageRef, blob, { contentType: blob.type });
-  return getDownloadURL(snapshot.ref);
+  return uploadTextbookDataUrl(`textbookCovers/${textbookId}`, dataUrl);
+}
+
+export async function uploadTextbookOwnershipProofFromDataUrl(
+  textbookId: string,
+  dataUrl: string
+): Promise<string> {
+  return uploadTextbookDataUrl(`textbookOwnershipProofs/${textbookId}`, dataUrl);
 }
 
 function dataUrlToBlob(dataUrl: string): Blob {

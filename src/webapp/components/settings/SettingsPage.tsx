@@ -524,9 +524,10 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
       } else {
         setSchoolDirectoryStatus(`Found ${rows.length} school option${rows.length === 1 ? "" : "s"}.`);
       }
-    } catch {
+    } catch (error) {
       setSchoolDirectory([]);
-      setSchoolDirectoryStatus("Unable to load school directory right now.");
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setSchoolDirectoryStatus(`Unable to load school directory right now. (${message})`);
     }
   }
 
@@ -550,8 +551,9 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
       setSchoolDirectoryStatus(result.assignedSchoolAdmin
         ? "School saved. You are now the first school admin for this school."
         : "School saved. Your account is now linked to this school/district.");
-    } catch {
-      setSchoolDirectoryStatus("Unable to save school affiliation right now.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setSchoolDirectoryStatus(`Unable to save school affiliation right now. (${message})`);
     } finally {
       setIsSavingSchool(false);
     }

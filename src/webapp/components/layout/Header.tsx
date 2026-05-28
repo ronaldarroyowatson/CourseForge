@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { doc, setDoc } from "firebase/firestore";
-import { syncNow } from "../../../core/services/syncService";
+import { clearWriteBudgetForManualRetry, syncNow } from "../../../core/services/syncService";
 import { firestoreDb } from "../../../firebase/firestore";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
@@ -45,6 +45,7 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
   const [showDebugPanel, setShowDebugPanel] = React.useState(false);
 
   async function handleSyncNow(): Promise<void> {
+    clearWriteBudgetForManualRetry();
     setSyncStatus("syncing", "Manual sync in progress...");
 
     try {

@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-05-28
+
+### Fixed
+
+- Stopped stale pending-update metadata from overriding the true latest GitHub release in the settings page.
+- Let the manual Sync Now path clear stale write-budget blocks before retrying the sync.
+
 ## [1.6.2] - 2026-05-28
 
 ### Fixed

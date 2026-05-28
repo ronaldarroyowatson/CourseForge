@@ -688,9 +688,6 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
           }
           const availableVersion = data.available && data.version ? data.version : null;
           setPendingUpdateVersion(availableVersion);
-          if (availableVersion) {
-            setLatestAvailableVersion(availableVersion);
-          }
         }
       } catch {
         // The endpoint only exists in packaged launcher mode.

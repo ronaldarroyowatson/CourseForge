@@ -289,21 +289,7 @@ function SyncDonutChart({
  * Centralized user preferences for sync safety and appearance.
  */
 export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
-  function navigateTo(path: string): void {
-    if (props.onNavigate) {
-      props.onNavigate(path);
-      return;
-    }
-
-    if (typeof window !== "undefined") {
-      window.location.assign(path);
-    }
-  }
-
   const userId = useAuthStore((state) => state.userId);
-  const isAdmin = useAuthStore((state) => state.isAdmin);
-  const isSchoolAdmin = useAuthStore((state) => state.isSchoolAdmin);
-  const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
   const schoolName = useAuthStore((state) => state.schoolName);
   const districtName = useAuthStore((state) => state.districtName);
   const language = useUIStore((state) => state.language);
@@ -1698,34 +1684,6 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
             </p>
           ) : null}
         </article>
-      </div>
-
-      <div className="settings-admin-access" aria-label="Administrative navigation">
-        <h3>Admin Access</h3>
-        <p className="settings-meta">
-          Roles: {isSchoolAdmin || isAdmin ? "School Admin enabled" : "School Admin not granted"}
-          {" | "}
-          {isSuperAdmin || isAdmin ? "Super Admin enabled" : "Super Admin not granted"}
-        </p>
-        <div className="settings-admin-actions">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => { navigateTo("/school-admin"); }}
-            disabled={!isSchoolAdmin && !isAdmin}
-            title={!isSchoolAdmin && !isAdmin ? "School admin permission required" : "Open school admin"}
-          >
-            Admin
-          </button>
-          <button
-            type="button"
-            onClick={() => { navigateTo("/super-admin"); }}
-            disabled={!isSuperAdmin && !isAdmin}
-            title={!isSuperAdmin && !isAdmin ? "Super admin permission required" : "Open super admin"}
-          >
-            Super Admin
-          </button>
-        </div>
       </div>
 
       <FloatingDesignSystemCard

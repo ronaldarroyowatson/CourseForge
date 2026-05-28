@@ -13,6 +13,8 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
   const navigate = useNavigate();
   const userId = useAuthStore((state) => state.userId);
   const isAdmin = useAuthStore((state) => state.isAdmin);
+  const isSchoolAdmin = useAuthStore((state) => state.isSchoolAdmin);
+  const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
   const theme = useUIStore((state) => state.theme);
   const toggleTheme = useUIStore((state) => state.toggleTheme);
   const isSyncing = useUIStore((state) => state.isSyncing);
@@ -207,6 +209,28 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
               <span>{isSyncing ? "Syncing..." : "Sync Now"}</span>
             </button>
           </div>
+          {isSettingsView ? (
+            <div className="app-header__admin-actions" aria-label="Administrative navigation">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => { navigate("/school-admin"); }}
+                disabled={!isSchoolAdmin && !isAdmin}
+                title={!isSchoolAdmin && !isAdmin ? "School admin permission required" : "Open school admin"}
+              >
+                Admin
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => { navigate("/super-admin"); }}
+                disabled={!isSuperAdmin && !isAdmin}
+                title={!isSuperAdmin && !isAdmin ? "Super admin permission required" : "Open super admin"}
+              >
+                Super Admin
+              </button>
+            </div>
+          ) : null}
           <div className="sync-cluster">
             <p className={`sync-indicator ${syncStatus === "synced" ? "sync-indicator--synced" : ""}`}>{getStatusLabel()}</p>
           </div>

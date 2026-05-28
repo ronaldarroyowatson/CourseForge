@@ -254,6 +254,14 @@ body {
   gap: 0.5rem;
 }
 
+.app-header__admin-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
 .app-gear-button {
   border: none;
   background: transparent;

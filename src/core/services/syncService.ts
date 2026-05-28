@@ -1,10 +1,10 @@
-import { collection, collectionGroup, deleteDoc, doc, getDocs, query, setDoc, where } from "firebase/firestore";
+import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, setDoc, where } from "firebase/firestore";
 
 import type { CourseForgeEntityMap } from "../models";
 import { delete as deleteLocalRecord, getAll, save, STORE_NAMES } from "./db";
 import { normalizeISBN } from "./isbnService";
 import { firestoreDb } from "../../firebase/firestore";
-import { getAdminClaim, getCurrentUser } from "../../firebase/auth";
+import { getAdminClaim, getCurrentUser, getRoleClaims } from "../../firebase/auth";
 import { useUIStore } from "../../webapp/store/uiStore";
 
 type ViteEnvLike = {
@@ -45,6 +45,7 @@ const WRITE_BUDGET_WARNING = "Cloud sync paused to prevent excessive writes. Ple
 const WRITE_BUDGET_STORAGE_KEY = "courseforge.sync.writeBudgetDaily";
 const READ_BUDGET_STORAGE_KEY = "courseforge.sync.readBudgetDaily";
 const CLOUD_SYNC_TOKEN_STORAGE_KEY = "courseforge.sync.cloudTokenByUser";
+const CLOUD_SYNC_USAGE_DOC_ID = "current";
 
 const recentWrites = new Map<string, number>();
 let lastSyncAttemptAt = 0;
@@ -57,9 +58,11 @@ let sessionReadCount = 0;
 let readBudgetDateKey = "";
 let syncRunWriteCount = 0;
 let writeBatchLimitReached = false;
+let superAdminSyncBypass = false;
 let syncContext: { uid: string | null; isAdmin: boolean | null } = { uid: null, isAdmin: null };
 const usersNeedingCloudTokenRefresh = new Set<string>();
 let cloudSyncTokenByUser = readCloudSyncTokenState();
+const syncUsageHydratedDateByUser = new Map<string, string>();
 
 // Number of consecutive batch-limit windows before a textbook is considered stalled.
 const BATCH_STALL_WINDOW_COUNT = 3;
@@ -311,6 +314,67 @@ function refreshDailyReadBudgetState(): void {
   persistDailyReadBudgetState();
 }
 
+function getCloudSyncUsageDocRef(userId: string) {
+  return doc(firestoreDb, "users", userId, "syncUsage", CLOUD_SYNC_USAGE_DOC_ID);
+}
+
+async function hydrateDailySyncUsageFromCloud(userId: string): Promise<void> {
+  const currentDateKey = getUtcDateKey();
+  if (!userId.trim() || syncUsageHydratedDateByUser.get(userId) === currentDateKey) {
+    return;
+  }
+
+  try {
+    const snapshot = await getDoc(getCloudSyncUsageDocRef(userId));
+    const data = snapshot.data();
+    if (!snapshot.exists() || !data || data.dateKey !== currentDateKey) {
+      syncUsageHydratedDateByUser.set(userId, currentDateKey);
+      return;
+    }
+
+    const cloudWriteCount = typeof data.writeCount === "number" && data.writeCount >= 0
+      ? Math.floor(data.writeCount)
+      : 0;
+    const cloudReadCount = typeof data.readCount === "number" && data.readCount >= 0
+      ? Math.floor(data.readCount)
+      : 0;
+
+    sessionWriteCount = Math.max(sessionWriteCount, cloudWriteCount);
+    sessionReadCount = Math.max(sessionReadCount, cloudReadCount);
+    writeBudgetExceeded = sessionWriteCount >= DEFAULT_WRITE_BUDGET_LIMIT;
+    readBudgetExceeded = sessionReadCount >= DEFAULT_READ_BUDGET_LIMIT;
+    persistDailyWriteBudgetState();
+    persistDailyReadBudgetState();
+  } catch {
+    // Best effort hydration only.
+  } finally {
+    syncUsageHydratedDateByUser.set(userId, currentDateKey);
+  }
+}
+
+async function persistDailySyncUsageToCloud(userId: string): Promise<void> {
+  if (!userId.trim()) {
+    return;
+  }
+
+  try {
+    await setDoc(
+      getCloudSyncUsageDocRef(userId),
+      {
+        dateKey: getUtcDateKey(),
+        writeCount: sessionWriteCount,
+        readCount: sessionReadCount,
+        writeBudgetExceeded,
+        readBudgetExceeded,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch {
+    // Best effort persistence only.
+  }
+}
+
 interface UserCloudSyncPolicy {
   isBlocked: boolean;
   reason: string | null;
@@ -425,6 +489,10 @@ function shouldSkipWriteForLoop(path: string): boolean {
 }
 
 function hasWriteBudgetCapacity(path: string, payload: unknown): boolean {
+  if (superAdminSyncBypass) {
+    return true;
+  }
+
   refreshDailyWriteBudgetState();
 
   if (writeBatchLimitReached || syncRunWriteCount >= DEFAULT_WRITE_BATCH_LIMIT) {
@@ -452,6 +520,10 @@ function hasWriteBudgetCapacity(path: string, payload: unknown): boolean {
 }
 
 function hasReadBudgetCapacity(): boolean {
+  if (superAdminSyncBypass) {
+    return true;
+  }
+
   refreshDailyReadBudgetState();
 
   if (readBudgetExceeded || sessionReadCount >= DEFAULT_READ_BUDGET_LIMIT) {
@@ -465,6 +537,10 @@ function hasReadBudgetCapacity(): boolean {
 
 async function trackedGetDocs<T>(request: Promise<{ docs: T[] }>): Promise<{ docs: T[] }> {
   const snapshot = await request;
+  if (superAdminSyncBypass) {
+    return snapshot;
+  }
+
   refreshDailyReadBudgetState();
   sessionReadCount += snapshot.docs.length;
   readBudgetExceeded = sessionReadCount >= DEFAULT_READ_BUDGET_LIMIT;
@@ -503,6 +579,7 @@ export function resetSyncSafetyStateForTests(): void {
   readBudgetDateKey = getUtcDateKey();
   syncRunWriteCount = 0;
   writeBatchLimitReached = false;
+  superAdminSyncBypass = false;
   textbookStalledWindowCount.clear();
   usersNeedingCloudTokenRefresh.clear();
   cloudSyncTokenByUser.clear();
@@ -1890,6 +1967,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
   const getUser = deps.getCurrentUserFn ?? getCurrentUser;
   const getCloudSyncPolicyFn = deps.getCloudSyncPolicyFn ?? getUserCloudSyncPolicy;
   const runSyncUserData = deps.syncUserDataFn ?? syncUserData;
+  superAdminSyncBypass = false;
   refreshDailyWriteBudgetState();
   refreshDailyReadBudgetState();
   beginWriteBatchRun();
@@ -1922,6 +2000,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
   const user = getUser();
 
   if (!user?.uid) {
+    superAdminSyncBypass = false;
     const pending = await getPending();
     return {
       success: false,
@@ -1945,7 +2024,16 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
     };
   }
 
-  if (writeBudgetExceeded) {
+  try {
+    const claims = await getRoleClaims();
+    superAdminSyncBypass = claims.isSuperAdmin;
+  } catch {
+    superAdminSyncBypass = false;
+  }
+
+  await hydrateDailySyncUsageFromCloud(user.uid);
+
+  if (!superAdminSyncBypass && writeBudgetExceeded) {
     const pending = await getPending();
     return {
       success: false,
@@ -2022,7 +2110,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       permissionDenied: false,
       throttled: false,
       writeLoopTriggered: consumeWriteLoopTriggered(),
-      writeBudgetExceeded,
+      writeBudgetExceeded: superAdminSyncBypass ? false : writeBudgetExceeded,
       writeCount: sessionWriteCount,
       writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
       syncRunWriteCount,
@@ -2030,7 +2118,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBatchLimitReached,
       readCount: sessionReadCount,
       readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
-      readBudgetExceeded,
+      readBudgetExceeded: superAdminSyncBypass ? false : readBudgetExceeded,
       retryLimit: DEFAULT_RETRY_LIMIT,
       errorCode: null,
       pendingCount: pending.pendingCount,
@@ -2039,6 +2127,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
 
   try {
     await runSyncUserData(user.uid);
+    await persistDailySyncUsageToCloud(user.uid);
 
     const cachedCloudTokenAfterSync = getCachedCloudSyncToken(user.uid);
     if (currentCloudToken && cachedCloudTokenAfterSync === cachedCloudToken) {
@@ -2047,7 +2136,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
 
     const postSyncPending = await getPending();
 
-    if (writeBudgetExceeded) {
+    if (!superAdminSyncBypass && writeBudgetExceeded) {
       return {
         success: false,
         message: WRITE_BUDGET_WARNING,
@@ -2063,7 +2152,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
         writeBatchLimitReached,
         readCount: sessionReadCount,
         readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
-        readBudgetExceeded,
+        readBudgetExceeded: superAdminSyncBypass ? false : readBudgetExceeded,
         retryLimit: DEFAULT_RETRY_LIMIT,
         errorCode: null,
         pendingCount: postSyncPending.pendingCount,
@@ -2085,12 +2174,13 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBatchLimitReached,
       readCount: sessionReadCount,
       readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
-      readBudgetExceeded,
+      readBudgetExceeded: superAdminSyncBypass ? false : readBudgetExceeded,
       retryLimit: DEFAULT_RETRY_LIMIT,
       errorCode: null,
       pendingCount: postSyncPending.pendingCount,
     };
   } catch (error) {
+    await persistDailySyncUsageToCloud(user.uid);
     const pending = await getPending();
     const permissionDenied = isPermissionDenied(error);
     const retryable = isNetworkFailure(error);
@@ -2103,7 +2193,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       permissionDenied,
       throttled: false,
       writeLoopTriggered: consumeWriteLoopTriggered(),
-      writeBudgetExceeded,
+      writeBudgetExceeded: superAdminSyncBypass ? false : writeBudgetExceeded,
       writeCount: sessionWriteCount,
       writeBudgetLimit: DEFAULT_WRITE_BUDGET_LIMIT,
       syncRunWriteCount,
@@ -2111,7 +2201,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
       writeBatchLimitReached,
       readCount: sessionReadCount,
       readBudgetLimit: DEFAULT_READ_BUDGET_LIMIT,
-      readBudgetExceeded,
+      readBudgetExceeded: superAdminSyncBypass ? false : readBudgetExceeded,
       retryLimit: DEFAULT_RETRY_LIMIT,
       errorCode,
       pendingCount: pending.pendingCount,

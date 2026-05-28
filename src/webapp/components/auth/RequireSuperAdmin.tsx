@@ -5,7 +5,6 @@ import { useAuthStore } from "../../store/authStore";
 
 export function RequireSuperAdmin(): React.JSX.Element {
   const authStatus = useAuthStore((state) => state.authStatus);
-  const isAdmin = useAuthStore((state) => state.isAdmin);
   const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
 
   if (authStatus === "loading") {
@@ -16,7 +15,7 @@ export function RequireSuperAdmin(): React.JSX.Element {
     return <Navigate to="/login" replace />;
   }
 
-  if (!isSuperAdmin && !isAdmin) {
+  if (!isSuperAdmin) {
     return <Navigate to="/settings" replace />;
   }
 

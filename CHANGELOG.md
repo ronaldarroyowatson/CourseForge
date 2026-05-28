@@ -6,15 +6,10 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
-### Added
-
-- Added School Admin and Super Admin upgrade flow, including Settings-based school/district affiliation, school-scoped admin controls, and global super-admin role/promotion tooling.
-
-### Changed
-
-- Super Admin dashboard stats now use authoritative sources: Firebase Auth user totals, collection-group textbook totals, and aggregated OCR/premium usage counters.
-- Settings school affiliation placeholders now use generic helper text for first-time setup guidance.
+## [1.6.2] - 2026-05-28
 
 ### Fixed
 
-- Improved dark-mode text visibility for textbook card status badges (for example `Partial`, `Best Data`, and duplicate-resolution quality chips) by using high-contrast dark-theme color overrides.
+- Hardened super-admin access so only the owner allowlist can promote or manage global privileges.
+- Persisted daily sync usage to Firestore so admin and super-admin dashboards show stable read/write totals.
+- Added a Super Admin global quota view and sync bypass for operational troubleshooting.

@@ -96,6 +96,24 @@ export interface SuperAdminDashboardStats {
   trackedWritesToday: number | null;
 }
 
+export interface SuperAdminGlobalQuotaDetails {
+  metric: string;
+  displayName: string | null;
+  unit: string | null;
+  effectiveLimit: number | null;
+  defaultLimit: number | null;
+}
+
+export interface SuperAdminGlobalQuota {
+  projectId: string;
+  fetchedAt: string;
+  source: "serviceusage" | "fallback";
+  readLimitPerDay: number | null;
+  writeLimitPerDay: number | null;
+  message: string | null;
+  details: SuperAdminGlobalQuotaDetails[];
+}
+
 export async function listSchoolDirectory(query = ""): Promise<SchoolDirectoryRow[]> {
   return callFunction<{ query?: string }, SchoolDirectoryRow[]>("listSchoolDirectory", { query });
 }
@@ -137,6 +155,10 @@ export async function requestSchoolAdminPromotion(reason?: string): Promise<stri
 
 export async function getSuperAdminDashboardStats(): Promise<SuperAdminDashboardStats> {
   return callFunction<Record<string, never>, SuperAdminDashboardStats>("getSuperAdminDashboardStats", {});
+}
+
+export async function getSuperAdminGlobalQuota(): Promise<SuperAdminGlobalQuota> {
+  return callFunction<Record<string, never>, SuperAdminGlobalQuota>("getSuperAdminGlobalQuota", {});
 }
 
 export async function listSchoolAdminPromotionRequests(status: "pending" | "approved" | "rejected" | "all" = "pending"): Promise<PromotionRequestRow[]> {

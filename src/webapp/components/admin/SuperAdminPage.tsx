@@ -9,9 +9,11 @@ import {
   listSchoolAdminPromotionRequests,
   resolveSchoolAdminPromotionRequest,
   setUserSuperAdminStatus,
+  getSuperAdminGlobalQuota,
   type PromotionRequestRow,
   type SchoolDirectoryRow,
   type SuperAdminDashboardStats,
+  type SuperAdminGlobalQuota,
 } from "../../../core/services";
 import { useAuthStore } from "../../store/authStore";
 
@@ -25,6 +27,7 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
   const [schools, setSchools] = React.useState<SchoolDirectoryRow[]>([]);
   const [promotions, setPromotions] = React.useState<PromotionRequestRow[]>([]);
   const [stats, setStats] = React.useState<SuperAdminDashboardStats | null>(null);
+  const [globalQuota, setGlobalQuota] = React.useState<SuperAdminGlobalQuota | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -34,16 +37,18 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
     setIsLoading(true);
     setError(null);
     try {
-      const [statsData, usersData, schoolsData, promotionsData] = await Promise.all([
+      const [statsData, usersData, schoolsData, promotionsData, quotaData] = await Promise.all([
         getSuperAdminDashboardStats(),
         getAllUsers(),
         listAllSchoolsForSuperAdmin(),
         listSchoolAdminPromotionRequests("pending"),
+        getSuperAdminGlobalQuota(),
       ]);
       setStats(statsData);
       setUsers(usersData);
       setSchools(schoolsData);
       setPromotions(promotionsData);
+      setGlobalQuota(quotaData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load super admin dashboard.");
     } finally {
@@ -122,6 +127,20 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
           <p className="settings-meta">Tracked reads today: <strong>{stats?.trackedReadsToday ?? 0}</strong></p>
           <p className="settings-meta">Tracked writes today: <strong>{stats?.trackedWritesToday ?? 0}</strong></p>
         </div>
+      </section>
+
+      <section className="admin-section">
+        <div className="admin-section__header">
+          <h3>Global Firestore Quota (Super Admin)</h3>
+        </div>
+        <div className="metadata-training-grid">
+          <p className="settings-meta">Source: <strong>{globalQuota?.source ?? "-"}</strong></p>
+          <p className="settings-meta">Project: <strong>{globalQuota?.projectId || "-"}</strong></p>
+          <p className="settings-meta">Read limit/day: <strong>{globalQuota?.readLimitPerDay ?? "Unknown"}</strong></p>
+          <p className="settings-meta">Write limit/day: <strong>{globalQuota?.writeLimitPerDay ?? "Unknown"}</strong></p>
+          <p className="settings-meta">Fetched at: <strong>{globalQuota?.fetchedAt ? new Date(globalQuota.fetchedAt).toLocaleString() : "-"}</strong></p>
+        </div>
+        {globalQuota?.message ? <p className="admin-note">{globalQuota.message}</p> : null}
       </section>
 
       <section className="admin-section">

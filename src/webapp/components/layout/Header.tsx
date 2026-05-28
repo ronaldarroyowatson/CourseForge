@@ -224,8 +224,8 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
                 type="button"
                 className="btn-secondary"
                 onClick={() => { navigate("/super-admin"); }}
-                disabled={!isSuperAdmin && !isAdmin}
-                title={!isSuperAdmin && !isAdmin ? "Super admin permission required" : "Open super admin"}
+                disabled={!isSuperAdmin}
+                title={!isSuperAdmin ? "Super admin permission required" : "Open super admin"}
               >
                 Super Admin
               </button>

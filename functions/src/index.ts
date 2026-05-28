@@ -174,6 +174,24 @@ interface SuperAdminDashboardStats {
   trackedWritesToday: number | null;
 }
 
+interface SuperAdminGlobalQuotaDetails {
+  metric: string;
+  displayName: string | null;
+  unit: string | null;
+  effectiveLimit: number | null;
+  defaultLimit: number | null;
+}
+
+interface SuperAdminGlobalQuotaResult {
+  projectId: string;
+  fetchedAt: string;
+  source: "serviceusage" | "fallback";
+  readLimitPerDay: number | null;
+  writeLimitPerDay: number | null;
+  message: string | null;
+  details: SuperAdminGlobalQuotaDetails[];
+}
+
 interface PremiumUsageState {
   premiumRequestsUsedToday: number;
   premiumRequestsUsedThisWeek: number;
@@ -599,7 +617,7 @@ function assertAdmin(authData: { token?: Record<string, unknown> } | null | unde
     throw new HttpsError("unauthenticated", "You must be signed in to use admin functions.");
   }
 
-  if (authData.token?.admin !== true) {
+  if (authData.token?.admin !== true && authData.token?.superAdmin !== true) {
     throw new HttpsError("permission-denied", "Admin privileges are required for this action.");
   }
 }
@@ -611,7 +629,72 @@ function assertSignedIn(authData: { uid?: string; token?: Record<string, unknown
 }
 
 function isSuperAdminToken(authData: { token?: Record<string, unknown> } | null | undefined): boolean {
-  return authData?.token?.superAdmin === true || authData?.token?.admin === true;
+  return authData?.token?.superAdmin === true;
+}
+
+function normalizeIdentity(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function getConfiguredOwnerSuperAdminEmails(): Set<string> {
+  const values = new Set<string>();
+  const csv = typeof process.env.COURSEFORGE_OWNER_SUPERADMIN_EMAILS === "string"
+    ? process.env.COURSEFORGE_OWNER_SUPERADMIN_EMAILS
+    : "";
+
+  csv.split(",").forEach((entry) => {
+    const normalized = normalizeIdentity(entry);
+    if (normalized) {
+      values.add(normalized);
+    }
+  });
+
+  const fallback = normalizeIdentity(process.env.COURSEFORGE_OWNER_EMAIL);
+  if (fallback) {
+    values.add(fallback);
+  }
+
+  return values;
+}
+
+function getConfiguredOwnerSuperAdminUids(): Set<string> {
+  const values = new Set<string>();
+  const csv = typeof process.env.COURSEFORGE_OWNER_SUPERADMIN_UIDS === "string"
+    ? process.env.COURSEFORGE_OWNER_SUPERADMIN_UIDS
+    : "";
+
+  csv.split(",").forEach((entry) => {
+    const normalized = entry.trim();
+    if (normalized) {
+      values.add(normalized);
+    }
+  });
+
+  return values;
+}
+
+function assertOwnerSuperAdminOperator(authData: { uid?: string; token?: Record<string, unknown> } | null | undefined): asserts authData is { uid: string; token?: Record<string, unknown> } {
+  assertSignedIn(authData);
+
+  const ownerEmails = getConfiguredOwnerSuperAdminEmails();
+  const ownerUids = getConfiguredOwnerSuperAdminUids();
+  if (ownerEmails.size === 0 && ownerUids.size === 0) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Owner super-admin allowlist is not configured. Set COURSEFORGE_OWNER_SUPERADMIN_EMAILS and/or COURSEFORGE_OWNER_SUPERADMIN_UIDS."
+    );
+  }
+
+  const callerUid = authData.uid.trim();
+  const callerEmail = normalizeIdentity(authData.token?.email);
+  const callerAllowed = ownerUids.has(callerUid) || (callerEmail ? ownerEmails.has(callerEmail) : false);
+  if (!callerAllowed) {
+    throw new HttpsError("permission-denied", "Only the owner account may manage super admin access.");
+  }
+
+  if (authData.token?.superAdmin !== true && authData.token?.admin !== true) {
+    throw new HttpsError("permission-denied", "Owner account must hold admin privileges to manage super admin access.");
+  }
 }
 
 function assertSuperAdmin(authData: { token?: Record<string, unknown> } | null | undefined): void {
@@ -1377,6 +1460,10 @@ function getDateKey(now = new Date()): string {
   return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
 }
 
+function getUtcDateKey(now = new Date()): string {
+  return `${now.getUTCFullYear()}-${pad2(now.getUTCMonth() + 1)}-${pad2(now.getUTCDate())}`;
+}
+
 function getDaysInMonth(year: number, monthIndex: number): number {
   return new Date(year, monthIndex + 1, 0).getDate();
 }
@@ -1412,6 +1499,99 @@ function getIsoWeekKey(now = new Date()): string {
   const week = Math.ceil((((utcDate.getTime() - yearStart.getTime()) / dayMs) + 1) / 7);
 
   return `${isoYear}-W${pad2(week)}`;
+}
+
+function toQuotaNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.floor(parsed);
+    }
+  }
+
+  return null;
+}
+
+function getBestQuotaBucketLimit(limit: Record<string, unknown>): number | null {
+  const buckets = Array.isArray(limit.quotaBuckets) ? limit.quotaBuckets : [];
+  const fromBuckets = buckets
+    .map((bucket) => {
+      if (!bucket || typeof bucket !== "object") {
+        return null;
+      }
+
+      const record = bucket as Record<string, unknown>;
+      return toQuotaNumber(record.effectiveLimit) ?? toQuotaNumber(record.defaultLimit);
+    })
+    .filter((value): value is number => typeof value === "number");
+
+  if (fromBuckets.length > 0) {
+    return Math.max(...fromBuckets);
+  }
+
+  return toQuotaNumber(limit.effectiveLimit) ?? toQuotaNumber(limit.defaultLimit);
+}
+
+function parseFirestoreQuotaResponse(payload: unknown): {
+  readLimitPerDay: number | null;
+  writeLimitPerDay: number | null;
+  details: SuperAdminGlobalQuotaDetails[];
+} {
+  const metrics = payload && typeof payload === "object" && Array.isArray((payload as Record<string, unknown>).consumerQuotaMetrics)
+    ? (payload as Record<string, unknown>).consumerQuotaMetrics as Array<Record<string, unknown>>
+    : [];
+
+  const details: SuperAdminGlobalQuotaDetails[] = [];
+  let readLimitPerDay: number | null = null;
+  let writeLimitPerDay: number | null = null;
+
+  metrics.forEach((metric) => {
+    const metricName = typeof metric.metric === "string" ? metric.metric : "";
+    const limitRows = Array.isArray(metric.consumerQuotaLimits)
+      ? metric.consumerQuotaLimits as Array<Record<string, unknown>>
+      : [];
+
+    limitRows.forEach((limit) => {
+      const unit = typeof limit.unit === "string" ? limit.unit : null;
+      const displayName = typeof limit.displayName === "string" ? limit.displayName : null;
+      const effectiveLimit = getBestQuotaBucketLimit(limit);
+      const defaultLimit = toQuotaNumber(limit.defaultLimit);
+
+      details.push({
+        metric: metricName,
+        displayName,
+        unit,
+        effectiveLimit,
+        defaultLimit,
+      });
+
+      const lowerMetric = metricName.toLowerCase();
+      const lowerDisplayName = (displayName ?? "").toLowerCase();
+      const isDaily = (unit ?? "").toLowerCase().includes("/d") || lowerDisplayName.includes("per day");
+      const candidateLimit = effectiveLimit ?? defaultLimit;
+
+      if (!isDaily || candidateLimit === null) {
+        return;
+      }
+
+      const isRead = lowerMetric.includes("read") || lowerDisplayName.includes("read");
+      const isWrite = lowerMetric.includes("write") || lowerDisplayName.includes("write");
+
+      if (isRead) {
+        readLimitPerDay = readLimitPerDay === null ? candidateLimit : Math.max(readLimitPerDay, candidateLimit);
+      }
+
+      if (isWrite) {
+        writeLimitPerDay = writeLimitPerDay === null ? candidateLimit : Math.max(writeLimitPerDay, candidateLimit);
+      }
+    });
+  });
+
+  return { readLimitPerDay, writeLimitPerDay, details };
 }
 
 function createDefaultPremiumUsage(now = new Date()): PremiumUsageState {
@@ -2225,7 +2405,8 @@ export const resolveSchoolAdminPromotionRequest = onCall(async (request) => {
 });
 
 export const setUserSuperAdminStatus = onCall(async (request) => {
-  assertAdmin(request.auth);
+  assertOwnerSuperAdminOperator(request.auth);
+  assertSignedIn(request.auth);
 
   const uid = typeof request.data?.uid === "string" ? request.data.uid.trim() : "";
   const isSuperAdmin = request.data?.isSuperAdmin === true;
@@ -2233,7 +2414,17 @@ export const setUserSuperAdminStatus = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "A user id is required.");
   }
 
+  if (uid !== request.auth.uid) {
+    throw new HttpsError("permission-denied", "Owner super admin changes are restricted to the owner account only.");
+  }
+
   const userRecord = await auth.getUser(uid);
+  const callerEmail = normalizeIdentity(request.auth.token?.email);
+  const targetEmail = normalizeIdentity(userRecord.email);
+  if (callerEmail && targetEmail && callerEmail !== targetEmail) {
+    throw new HttpsError("permission-denied", "Owner super admin changes must target the signed-in owner account.");
+  }
+
   const nextClaims = { ...(userRecord.customClaims ?? {}) } as Record<string, unknown>;
   if (isSuperAdmin) {
     nextClaims.superAdmin = true;
@@ -2276,12 +2467,12 @@ export const listAllSchoolsForSuperAdmin = onCall(async (request) => {
 export const getSuperAdminDashboardStats = onCall(async (request) => {
   assertSuperAdmin(request.auth);
 
-  const [schoolsSnapshot, textbooksSnapshot, promotionSnapshot, ocrUsageSnapshot, premiumUsageSnapshot] = await Promise.all([
+  const todayKey = getUtcDateKey();
+  const [schoolsSnapshot, textbooksSnapshot, promotionSnapshot, syncUsageSnapshot] = await Promise.all([
     firestore.collection("schools").count().get(),
     firestore.collectionGroup("textbooks").count().get(),
     firestore.collection("schoolAdminPromotionRequests").where("status", "==", "pending").count().get(),
-    firestore.collectionGroup("ocrUsage").get(),
-    firestore.collectionGroup("premiumUsage").get(),
+    firestore.collectionGroup("syncUsage").where("dateKey", "==", todayKey).get(),
   ]);
 
   let usersCount = 0;
@@ -2294,17 +2485,12 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
 
   let trackedReadsToday = 0;
   let trackedWritesToday = 0;
-  ocrUsageSnapshot.docs.forEach((docSnap) => {
+  syncUsageSnapshot.docs.forEach((docSnap) => {
     const data = docSnap.data();
-    const usedCount = typeof data.usedCount === "number" ? data.usedCount : 0;
-    trackedReadsToday += usedCount;
-  });
-
-  premiumUsageSnapshot.docs.forEach((docSnap) => {
-    const data = docSnap.data();
-    const premiumReadsToday = typeof data.premiumRequestsUsedToday === "number" ? data.premiumRequestsUsedToday : 0;
-    trackedReadsToday += premiumReadsToday;
-    trackedWritesToday += premiumReadsToday;
+    const reads = typeof data.readCount === "number" ? Math.max(0, Math.floor(data.readCount)) : 0;
+    const writes = typeof data.writeCount === "number" ? Math.max(0, Math.floor(data.writeCount)) : 0;
+    trackedReadsToday += reads;
+    trackedWritesToday += writes;
   });
 
   const stats: SuperAdminDashboardStats = {
@@ -2317,6 +2503,66 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
   };
 
   return success("Loaded super admin stats.", stats);
+});
+
+export const getSuperAdminGlobalQuota = onCall(async (request) => {
+  assertSuperAdmin(request.auth);
+
+  const projectId = process.env.GCLOUD_PROJECT ?? "";
+  if (!projectId) {
+    const fallback: SuperAdminGlobalQuotaResult = {
+      projectId: "",
+      fetchedAt: new Date().toISOString(),
+      source: "fallback",
+      readLimitPerDay: null,
+      writeLimitPerDay: null,
+      message: "Unable to determine project id in runtime. Check Firestore quota in Google Cloud Console > IAM & Admin > Quotas.",
+      details: [],
+    };
+
+    return success("Loaded global quota fallback.", fallback);
+  }
+
+  try {
+    const accessToken = await admin.credential.applicationDefault().getAccessToken();
+    const url = `https://serviceusage.googleapis.com/v1/projects/${projectId}/services/firestore.googleapis.com/consumerQuotaMetrics?view=FULL`;
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken.access_token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Service Usage API returned ${response.status}`);
+    }
+
+    const payload = await response.json() as unknown;
+    const parsed = parseFirestoreQuotaResponse(payload);
+
+    const result: SuperAdminGlobalQuotaResult = {
+      projectId,
+      fetchedAt: new Date().toISOString(),
+      source: "serviceusage",
+      readLimitPerDay: parsed.readLimitPerDay,
+      writeLimitPerDay: parsed.writeLimitPerDay,
+      message: null,
+      details: parsed.details,
+    };
+
+    return success("Loaded global Firestore quota.", result);
+  } catch {
+    const fallback: SuperAdminGlobalQuotaResult = {
+      projectId,
+      fetchedAt: new Date().toISOString(),
+      source: "fallback",
+      readLimitPerDay: null,
+      writeLimitPerDay: null,
+      message: "Global quota API data unavailable. Check Firebase Console > Firestore Database > Usage, or Google Cloud Console > IAM & Admin > Quotas (filter Firestore API).",
+      details: [],
+    };
+
+    return success("Loaded global quota fallback.", fallback);
+  }
 });
 
 export const getModerationQueue = onCall(async (request) => {

@@ -34,6 +34,30 @@ const DEFAULT_GLOBAL_DELETE_LIMIT_PER_DAY = 20000;
 const DEFAULT_GLOBAL_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH = 2000000;
 const SUPER_ADMIN_QUOTA_OVERRIDES_KEY = "courseforge.superAdminQuotaOverrides.v1";
 
+function getSecondsUntilUtcMidnight(): number {
+  const now = new Date();
+  const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  return Math.max(0, Math.floor((midnight.getTime() - now.getTime()) / 1000));
+}
+
+function formatCountdown(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}
+
+function useUtcMidnightCountdown(): string {
+  const [secondsLeft, setSecondsLeft] = React.useState(getSecondsUntilUtcMidnight);
+  React.useEffect(() => {
+    const tick = (): void => { setSecondsLeft(getSecondsUntilUtcMidnight()); };
+    const id = window.setInterval(tick, 1000);
+    return () => { window.clearInterval(id); };
+  }, []);
+  return formatCountdown(secondsLeft);
+}
+
 function parsePositiveIntegerInput(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -54,6 +78,7 @@ function formatInputNumber(value: number | null | undefined): string {
 
 export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Element {
   const currentUserEmail = useAuthStore((state) => state.userEmail);
+  const utcResetCountdown = useUtcMidnightCountdown();
   const [users, setUsers] = React.useState<AdminUserRecord[]>([]);
   const [schools, setSchools] = React.useState<SchoolDirectoryRow[]>([]);
   const [promotions, setPromotions] = React.useState<PromotionRequestRow[]>([]);
@@ -256,6 +281,9 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
       <section className="admin-section">
         <div className="admin-section__header">
           <h3>Global Firestore Quota (Super Admin)</h3>
+          <span className="admin-note" style={{ margin: 0, fontVariantNumeric: "tabular-nums" }}>
+            Daily reset in <strong>{utcResetCountdown}</strong> (UTC midnight)
+          </span>
         </div>
         <div className="metadata-training-grid">
           <p className="settings-meta">Source: <strong>{globalQuota?.source ?? "fallback"}</strong></p>

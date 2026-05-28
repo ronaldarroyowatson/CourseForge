@@ -110,6 +110,8 @@ export interface SuperAdminGlobalQuota {
   source: "serviceusage" | "fallback";
   readLimitPerDay: number | null;
   writeLimitPerDay: number | null;
+  deleteLimitPerDay: number | null;
+  functionInvocationsLimitPerMonth: number | null;
   message: string | null;
   details: SuperAdminGlobalQuotaDetails[];
 }

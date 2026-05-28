@@ -155,6 +155,8 @@ From now on, every architectural change, new file, refactor, plugin addition, pl
   - global usage/stats snapshot for core collections
 - Super-admin global stats source-of-truth:
   - user totals from Firebase Auth user records (not only mirrored Firestore user docs)
-  - textbook totals from Firestore collection-group `textbooks`
-  - tracked activity totals aggregated from `ocrUsage` and `premiumUsage` collection-group docs
+  - textbook totals from top-level Firestore `textbooks` documents
+  - tracked activity totals aggregated from user `syncUsage` docs filtered by UTC `dateKey`
+  - dashboard query paths avoid brittle composite-index requirements by doing status/date filtering in memory where needed
+  - super-admin dashboard UI uses partial-load behavior (all-settled) so one callable failure does not blank all metrics/tables
 - Existing `/admin` route remains global admin tooling; super-admins are also allowed through this route.

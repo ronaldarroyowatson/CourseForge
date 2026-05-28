@@ -21,6 +21,37 @@ interface SuperAdminPageProps {
   onBack: () => void;
 }
 
+interface SuperAdminQuotaOverrides {
+  readLimitPerDay: number | null;
+  writeLimitPerDay: number | null;
+  deleteLimitPerDay: number | null;
+  functionInvocationsLimitPerMonth: number | null;
+}
+
+const DEFAULT_GLOBAL_READ_LIMIT_PER_DAY = 50000;
+const DEFAULT_GLOBAL_WRITE_LIMIT_PER_DAY = 20000;
+const DEFAULT_GLOBAL_DELETE_LIMIT_PER_DAY = 20000;
+const DEFAULT_GLOBAL_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH = 2000000;
+const SUPER_ADMIN_QUOTA_OVERRIDES_KEY = "courseforge.superAdminQuotaOverrides.v1";
+
+function parsePositiveIntegerInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return Math.floor(parsed);
+}
+
+function formatInputNumber(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+}
+
 export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Element {
   const currentUserEmail = useAuthStore((state) => state.userEmail);
   const [users, setUsers] = React.useState<AdminUserRecord[]>([]);
@@ -28,6 +59,46 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
   const [promotions, setPromotions] = React.useState<PromotionRequestRow[]>([]);
   const [stats, setStats] = React.useState<SuperAdminDashboardStats | null>(null);
   const [globalQuota, setGlobalQuota] = React.useState<SuperAdminGlobalQuota | null>(null);
+  const [quotaOverrides, setQuotaOverrides] = React.useState<SuperAdminQuotaOverrides>(() => {
+    if (typeof window === "undefined") {
+      return {
+        readLimitPerDay: null,
+        writeLimitPerDay: null,
+        deleteLimitPerDay: null,
+        functionInvocationsLimitPerMonth: null,
+      };
+    }
+
+    try {
+      const raw = window.localStorage.getItem(SUPER_ADMIN_QUOTA_OVERRIDES_KEY);
+      if (!raw) {
+        return {
+          readLimitPerDay: null,
+          writeLimitPerDay: null,
+          deleteLimitPerDay: null,
+          functionInvocationsLimitPerMonth: null,
+        };
+      }
+
+      const parsed = JSON.parse(raw) as Partial<SuperAdminQuotaOverrides>;
+      return {
+        readLimitPerDay: typeof parsed.readLimitPerDay === "number" ? parsed.readLimitPerDay : null,
+        writeLimitPerDay: typeof parsed.writeLimitPerDay === "number" ? parsed.writeLimitPerDay : null,
+        deleteLimitPerDay: typeof parsed.deleteLimitPerDay === "number" ? parsed.deleteLimitPerDay : null,
+        functionInvocationsLimitPerMonth:
+          typeof parsed.functionInvocationsLimitPerMonth === "number"
+            ? parsed.functionInvocationsLimitPerMonth
+            : null,
+      };
+    } catch {
+      return {
+        readLimitPerDay: null,
+        writeLimitPerDay: null,
+        deleteLimitPerDay: null,
+        functionInvocationsLimitPerMonth: null,
+      };
+    }
+  });
   const [isLoading, setIsLoading] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -37,18 +108,50 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
     setIsLoading(true);
     setError(null);
     try {
-      const [statsData, usersData, schoolsData, promotionsData, quotaData] = await Promise.all([
+      const [statsResult, usersResult, schoolsResult, promotionsResult, quotaResult] = await Promise.allSettled([
         getSuperAdminDashboardStats(),
         getAllUsers(),
         listAllSchoolsForSuperAdmin(),
         listSchoolAdminPromotionRequests("pending"),
         getSuperAdminGlobalQuota(),
       ]);
-      setStats(statsData);
-      setUsers(usersData);
-      setSchools(schoolsData);
-      setPromotions(promotionsData);
-      setGlobalQuota(quotaData);
+
+      const failures: string[] = [];
+
+      if (statsResult.status === "fulfilled") {
+        setStats(statsResult.value);
+      } else {
+        failures.push(`stats: ${statsResult.reason instanceof Error ? statsResult.reason.message : String(statsResult.reason)}`);
+      }
+
+      if (usersResult.status === "fulfilled") {
+        setUsers(usersResult.value);
+      } else {
+        failures.push(`users: ${usersResult.reason instanceof Error ? usersResult.reason.message : String(usersResult.reason)}`);
+      }
+
+      if (schoolsResult.status === "fulfilled") {
+        setSchools(schoolsResult.value);
+      } else {
+        failures.push(`schools: ${schoolsResult.reason instanceof Error ? schoolsResult.reason.message : String(schoolsResult.reason)}`);
+      }
+
+      if (promotionsResult.status === "fulfilled") {
+        setPromotions(promotionsResult.value);
+      } else {
+        failures.push(`promotions: ${promotionsResult.reason instanceof Error ? promotionsResult.reason.message : String(promotionsResult.reason)}`);
+      }
+
+      if (quotaResult.status === "fulfilled") {
+        setGlobalQuota(quotaResult.value);
+      } else {
+        failures.push(`quota: ${quotaResult.reason instanceof Error ? quotaResult.reason.message : String(quotaResult.reason)}`);
+      }
+
+      if (failures.length > 0) {
+        console.error("[super-admin] dashboard partial load failure", failures);
+        setError(`Some dashboard data failed to load (${failures.join(" | ")}).`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load super admin dashboard.");
     } finally {
@@ -59,6 +162,27 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
   React.useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(SUPER_ADMIN_QUOTA_OVERRIDES_KEY, JSON.stringify(quotaOverrides));
+  }, [quotaOverrides]);
+
+  const effectiveReadLimitPerDay = quotaOverrides.readLimitPerDay
+    ?? globalQuota?.readLimitPerDay
+    ?? DEFAULT_GLOBAL_READ_LIMIT_PER_DAY;
+  const effectiveWriteLimitPerDay = quotaOverrides.writeLimitPerDay
+    ?? globalQuota?.writeLimitPerDay
+    ?? DEFAULT_GLOBAL_WRITE_LIMIT_PER_DAY;
+  const effectiveDeleteLimitPerDay = quotaOverrides.deleteLimitPerDay
+    ?? globalQuota?.deleteLimitPerDay
+    ?? DEFAULT_GLOBAL_DELETE_LIMIT_PER_DAY;
+  const effectiveFunctionInvocationsLimitPerMonth = quotaOverrides.functionInvocationsLimitPerMonth
+    ?? globalQuota?.functionInvocationsLimitPerMonth
+    ?? DEFAULT_GLOBAL_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH;
 
   async function handlePromotionResolution(requestId: string, approve: boolean): Promise<void> {
     setIsSaving(true);
@@ -134,11 +258,88 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
           <h3>Global Firestore Quota (Super Admin)</h3>
         </div>
         <div className="metadata-training-grid">
-          <p className="settings-meta">Source: <strong>{globalQuota?.source ?? "-"}</strong></p>
-          <p className="settings-meta">Project: <strong>{globalQuota?.projectId || "-"}</strong></p>
-          <p className="settings-meta">Read limit/day: <strong>{globalQuota?.readLimitPerDay ?? "Unknown"}</strong></p>
-          <p className="settings-meta">Write limit/day: <strong>{globalQuota?.writeLimitPerDay ?? "Unknown"}</strong></p>
+          <p className="settings-meta">Source: <strong>{globalQuota?.source ?? "fallback"}</strong></p>
+          <p className="settings-meta">Project: <strong>{globalQuota?.projectId || "courseforge-prod"}</strong></p>
+          <p className="settings-meta">Read limit/day: <strong>{effectiveReadLimitPerDay.toLocaleString()}</strong></p>
+          <p className="settings-meta">Write limit/day: <strong>{effectiveWriteLimitPerDay.toLocaleString()}</strong></p>
+          <p className="settings-meta">Delete limit/day: <strong>{effectiveDeleteLimitPerDay.toLocaleString()}</strong></p>
+          <p className="settings-meta">Functions invocations/month: <strong>{effectiveFunctionInvocationsLimitPerMonth.toLocaleString()}</strong></p>
           <p className="settings-meta">Fetched at: <strong>{globalQuota?.fetchedAt ? new Date(globalQuota.fetchedAt).toLocaleString() : "-"}</strong></p>
+        </div>
+        <div className="admin-filter-bar" style={{ marginTop: "0.75rem" }}>
+          <label>
+            Read limit/day
+            <input
+              type="number"
+              min={1}
+              value={formatInputNumber(quotaOverrides.readLimitPerDay)}
+              onChange={(event) => {
+                const next = parsePositiveIntegerInput(event.target.value);
+                setQuotaOverrides((current) => ({ ...current, readLimitPerDay: next }));
+              }}
+              placeholder={String(globalQuota?.readLimitPerDay ?? DEFAULT_GLOBAL_READ_LIMIT_PER_DAY)}
+            />
+          </label>
+          <label>
+            Write limit/day
+            <input
+              type="number"
+              min={1}
+              value={formatInputNumber(quotaOverrides.writeLimitPerDay)}
+              onChange={(event) => {
+                const next = parsePositiveIntegerInput(event.target.value);
+                setQuotaOverrides((current) => ({ ...current, writeLimitPerDay: next }));
+              }}
+              placeholder={String(globalQuota?.writeLimitPerDay ?? DEFAULT_GLOBAL_WRITE_LIMIT_PER_DAY)}
+            />
+          </label>
+          <label>
+            Delete limit/day
+            <input
+              type="number"
+              min={1}
+              value={formatInputNumber(quotaOverrides.deleteLimitPerDay)}
+              onChange={(event) => {
+                const next = parsePositiveIntegerInput(event.target.value);
+                setQuotaOverrides((current) => ({ ...current, deleteLimitPerDay: next }));
+              }}
+              placeholder={String(globalQuota?.deleteLimitPerDay ?? DEFAULT_GLOBAL_DELETE_LIMIT_PER_DAY)}
+            />
+          </label>
+          <label>
+            Functions invocations/month
+            <input
+              type="number"
+              min={1}
+              value={formatInputNumber(quotaOverrides.functionInvocationsLimitPerMonth)}
+              onChange={(event) => {
+                const next = parsePositiveIntegerInput(event.target.value);
+                setQuotaOverrides((current) => ({ ...current, functionInvocationsLimitPerMonth: next }));
+              }}
+              placeholder={String(globalQuota?.functionInvocationsLimitPerMonth ?? DEFAULT_GLOBAL_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH)}
+            />
+          </label>
+        </div>
+        <p className="admin-note">
+          Leave a field blank to use the live API value (or fallback default). Changes are saved locally on this device for super-admin tuning.
+        </p>
+        <div className="admin-section__header" style={{ marginTop: "0.5rem", marginBottom: 0 }}>
+          <div />
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              setQuotaOverrides({
+                readLimitPerDay: null,
+                writeLimitPerDay: null,
+                deleteLimitPerDay: null,
+                functionInvocationsLimitPerMonth: null,
+              });
+              setStatus("Quota overrides reset to API/fallback defaults.");
+            }}
+          >
+            Reset Quota Overrides
+          </button>
         </div>
         {globalQuota?.message ? <p className="admin-note">{globalQuota.message}</p> : null}
       </section>

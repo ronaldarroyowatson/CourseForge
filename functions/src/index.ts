@@ -188,9 +188,16 @@ interface SuperAdminGlobalQuotaResult {
   source: "serviceusage" | "fallback";
   readLimitPerDay: number | null;
   writeLimitPerDay: number | null;
+  deleteLimitPerDay: number | null;
+  functionInvocationsLimitPerMonth: number | null;
   message: string | null;
   details: SuperAdminGlobalQuotaDetails[];
 }
+
+const DEFAULT_FIRESTORE_READ_LIMIT_PER_DAY = 50000;
+const DEFAULT_FIRESTORE_WRITE_LIMIT_PER_DAY = 20000;
+const DEFAULT_FIRESTORE_DELETE_LIMIT_PER_DAY = 20000;
+const DEFAULT_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH = 2000000;
 
 interface PremiumUsageState {
   premiumRequestsUsedToday: number;
@@ -2332,12 +2339,8 @@ export const listSchoolAdminPromotionRequests = onCall(async (request) => {
   assertSuperAdmin(request.auth);
 
   const status = typeof request.data?.status === "string" ? request.data.status : "pending";
-  let query: FirebaseFirestore.Query = firestore.collection("schoolAdminPromotionRequests");
-  if (status !== "all") {
-    query = query.where("status", "==", status);
-  }
-
-  const snapshot = await query.orderBy("createdAt", "desc").limit(300).get();
+  // Avoid composite-index requirements (status + createdAt) by sorting in memory.
+  const snapshot = await firestore.collection("schoolAdminPromotionRequests").limit(600).get();
   const rows: PromotionRequestRow[] = snapshot.docs.map((docSnap) => {
     const data = docSnap.data();
     return {
@@ -2354,7 +2357,10 @@ export const listSchoolAdminPromotionRequests = onCall(async (request) => {
       reviewedAt: toIsoString(data.reviewedAt),
       reviewedBy: typeof data.reviewedBy === "string" ? data.reviewedBy : null,
     };
-  });
+  })
+    .filter((row) => status === "all" || row.status === status)
+    .sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? ""))
+    .slice(0, 300);
 
   return success("Loaded promotion requests.", rows);
 });
@@ -2468,12 +2474,31 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
   assertSuperAdmin(request.auth);
 
   const todayKey = getUtcDateKey();
-  const [schoolsSnapshot, textbooksSnapshot, promotionSnapshot, syncUsageSnapshot] = await Promise.all([
-    firestore.collection("schools").count().get(),
-    firestore.collectionGroup("textbooks").count().get(),
-    firestore.collection("schoolAdminPromotionRequests").where("status", "==", "pending").count().get(),
-    firestore.collectionGroup("syncUsage").where("dateKey", "==", todayKey).get(),
-  ]);
+
+  let schoolsCount = 0;
+  try {
+    schoolsCount = (await firestore.collection("schools").count().get()).data().count;
+  } catch {
+    schoolsCount = (await firestore.collection("schools").get()).size;
+  }
+
+  let textbooksCount = 0;
+  try {
+    // Textbooks are stored in top-level /textbooks documents.
+    textbooksCount = (await firestore.collection("textbooks").count().get()).data().count;
+  } catch {
+    textbooksCount = (await firestore.collection("textbooks").get()).size;
+  }
+
+  let pendingPromotionRequests = 0;
+  try {
+    pendingPromotionRequests = (await firestore.collection("schoolAdminPromotionRequests").where("status", "==", "pending").count().get()).data().count;
+  } catch {
+    pendingPromotionRequests = (await firestore.collection("schoolAdminPromotionRequests").where("status", "==", "pending").get()).size;
+  }
+
+  // Avoid collection-group index requirements by filtering dateKey in memory.
+  const syncUsageSnapshot = await firestore.collectionGroup("syncUsage").get();
 
   let usersCount = 0;
   let nextPageToken: string | undefined;
@@ -2487,17 +2512,31 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
   let trackedWritesToday = 0;
   syncUsageSnapshot.docs.forEach((docSnap) => {
     const data = docSnap.data();
+    if (typeof data.dateKey !== "string" || data.dateKey !== todayKey) {
+      return;
+    }
     const reads = typeof data.readCount === "number" ? Math.max(0, Math.floor(data.readCount)) : 0;
     const writes = typeof data.writeCount === "number" ? Math.max(0, Math.floor(data.writeCount)) : 0;
     trackedReadsToday += reads;
     trackedWritesToday += writes;
   });
 
+  console.info("[super-admin] dashboard stats computed", {
+    usersCount,
+    schoolsCount,
+    textbooksCount,
+    pendingPromotionRequests,
+    trackedReadsToday,
+    trackedWritesToday,
+    syncUsageDocsScanned: syncUsageSnapshot.size,
+    todayKey,
+  });
+
   const stats: SuperAdminDashboardStats = {
     usersCount,
-    schoolsCount: schoolsSnapshot.data().count,
-    textbooksCount: textbooksSnapshot.data().count,
-    pendingPromotionRequests: promotionSnapshot.data().count,
+    schoolsCount,
+    textbooksCount,
+    pendingPromotionRequests,
     trackedReadsToday,
     trackedWritesToday,
   };
@@ -2514,9 +2553,11 @@ export const getSuperAdminGlobalQuota = onCall(async (request) => {
       projectId: "",
       fetchedAt: new Date().toISOString(),
       source: "fallback",
-      readLimitPerDay: null,
-      writeLimitPerDay: null,
-      message: "Unable to determine project id in runtime. Check Firestore quota in Google Cloud Console > IAM & Admin > Quotas.",
+      readLimitPerDay: DEFAULT_FIRESTORE_READ_LIMIT_PER_DAY,
+      writeLimitPerDay: DEFAULT_FIRESTORE_WRITE_LIMIT_PER_DAY,
+      deleteLimitPerDay: DEFAULT_FIRESTORE_DELETE_LIMIT_PER_DAY,
+      functionInvocationsLimitPerMonth: DEFAULT_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH,
+      message: "Using fallback quota defaults. Set project/runtime access to read live global limits from Service Usage API.",
       details: [],
     };
 
@@ -2545,6 +2586,8 @@ export const getSuperAdminGlobalQuota = onCall(async (request) => {
       source: "serviceusage",
       readLimitPerDay: parsed.readLimitPerDay,
       writeLimitPerDay: parsed.writeLimitPerDay,
+      deleteLimitPerDay: DEFAULT_FIRESTORE_DELETE_LIMIT_PER_DAY,
+      functionInvocationsLimitPerMonth: DEFAULT_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH,
       message: null,
       details: parsed.details,
     };
@@ -2555,9 +2598,11 @@ export const getSuperAdminGlobalQuota = onCall(async (request) => {
       projectId,
       fetchedAt: new Date().toISOString(),
       source: "fallback",
-      readLimitPerDay: null,
-      writeLimitPerDay: null,
-      message: "Global quota API data unavailable. Check Firebase Console > Firestore Database > Usage, or Google Cloud Console > IAM & Admin > Quotas (filter Firestore API).",
+      readLimitPerDay: DEFAULT_FIRESTORE_READ_LIMIT_PER_DAY,
+      writeLimitPerDay: DEFAULT_FIRESTORE_WRITE_LIMIT_PER_DAY,
+      deleteLimitPerDay: DEFAULT_FIRESTORE_DELETE_LIMIT_PER_DAY,
+      functionInvocationsLimitPerMonth: DEFAULT_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH,
+      message: "Global quota API data unavailable. Using fallback defaults until Service Usage API access succeeds.",
       details: [],
     };
 

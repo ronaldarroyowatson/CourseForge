@@ -917,15 +917,32 @@ function sanitizeMetadataResult(value: unknown, source: MetadataResultRecord["so
         }).filter((x): x is string => x !== null)
       : undefined,
     relatedIsbns: Array.isArray(data.relatedIsbns)
-      ? data.relatedIsbns
-          .filter((entry): entry is { isbn: string; type: string; note?: string } => Boolean(entry) && typeof (entry as { isbn?: unknown }).isbn === "string" && typeof (entry as { type?: unknown }).type === "string")
-          .map((entry) => {
-            const normalizedIsbn = entry.isbn.replace(/[^0-9Xx]/g, "").toUpperCase();
-            return (normalizedIsbn.length === 10 || normalizedIsbn.length === 13) 
-              ? { isbn: normalizedIsbn, type: entry.type.trim(), note: typeof entry.note === "string" && entry.note.trim() ? entry.note.trim() : undefined }
-              : null;
-          })
-          .filter((x): x is { isbn: string; type: string; note?: string } => x !== null)
+      ? data.relatedIsbns.reduce<Array<{ isbn: string; type: string; note?: string }>>((accumulator, entry) => {
+          if (!entry || typeof entry !== "object") {
+            return accumulator;
+          }
+
+          const typedEntry = entry as { isbn?: unknown; type?: unknown; note?: unknown };
+          if (typeof typedEntry.isbn !== "string" || typeof typedEntry.type !== "string") {
+            return accumulator;
+          }
+
+          const normalizedIsbn = typedEntry.isbn.replace(/[^0-9Xx]/g, "").toUpperCase();
+          if (normalizedIsbn.length !== 10 && normalizedIsbn.length !== 13) {
+            return accumulator;
+          }
+
+          const note = typeof typedEntry.note === "string" && typedEntry.note.trim().length > 0
+            ? typedEntry.note.trim()
+            : undefined;
+
+          accumulator.push({
+            isbn: normalizedIsbn,
+            type: typedEntry.type.trim(),
+            note,
+          });
+          return accumulator;
+        }, [])
       : undefined,
     platformUrl: platformUrlValue,
     mhid: mhidValue,
@@ -1909,14 +1926,14 @@ export const getSchoolAdminDashboard = onCall(async (request) => {
 
   const textbookSnapshot = await firestore.collectionGroup("textbooks").limit(800).get();
   const textbooks: SchoolTextbookRow[] = textbookSnapshot.docs
-    .map((docSnap) => {
+    .reduce<SchoolTextbookRow[]>((rows, docSnap) => {
       const data = docSnap.data();
       const ownerId = typeof data.ownerId === "string" ? data.ownerId : typeof data.userId === "string" ? data.userId : "";
       if (!ownerId || !ownerIds.has(ownerId)) {
-        return null;
+        return rows;
       }
 
-      return {
+      rows.push({
         id: docSnap.id,
         docPath: docSnap.ref.path,
         ownerId,
@@ -1928,9 +1945,9 @@ export const getSchoolAdminDashboard = onCall(async (request) => {
         recycleBinDeletedAt: toIsoString(data.recycleBinDeletedAt),
         recycleBinExpiresAt: toIsoString(data.recycleBinExpiresAt),
         lastModified: toIsoString(data.lastModified),
-      } satisfies SchoolTextbookRow;
-    })
-    .filter((row): row is SchoolTextbookRow => Boolean(row))
+      } satisfies SchoolTextbookRow);
+      return rows;
+    }, [])
     .sort((left, right) => (right.lastModified ?? "").localeCompare(left.lastModified ?? ""));
 
   const invitesSnapshot = await firestore.collection("schoolInvites").where("schoolId", "==", schoolId).orderBy("createdAt", "desc").limit(200).get();

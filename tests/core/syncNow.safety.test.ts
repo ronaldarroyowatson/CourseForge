@@ -81,6 +81,42 @@ describe("syncNow safety controls", () => {
     expect(syncUserDataFn).not.toHaveBeenCalled();
   });
 
+  it("keeps budget limits enforced for regular users when bypass is explicitly false", async () => {
+    setWriteBudgetStateForTests(true, 500);
+    const syncUserDataFn = vi.fn(async () => Promise.resolve());
+
+    const result = await syncNow({
+      nowFn: () => 8100,
+      getCurrentUserFn: () => ({ uid: "user-regular" }),
+      getPendingSyncDiagnosticsFn: async () => createPendingDiagnostics(),
+      syncUserDataFn,
+      superAdminSyncBypass: false,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.writeBudgetExceeded).toBe(true);
+    expect(syncUserDataFn).not.toHaveBeenCalled();
+  });
+
+  it("only bypasses budget limits when superAdminSyncBypass is true", async () => {
+    setWriteBudgetStateForTests(true, 500);
+    setReadBudgetStateForTests(true, 5000);
+    const syncUserDataFn = vi.fn(async () => Promise.resolve());
+
+    const result = await syncNow({
+      nowFn: () => 8200,
+      getCurrentUserFn: () => ({ uid: "user-super-admin" }),
+      getPendingSyncDiagnosticsFn: async () => createPendingDiagnostics(),
+      syncUserDataFn,
+      superAdminSyncBypass: true,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.writeBudgetExceeded).toBe(false);
+    expect(result.readBudgetExceeded).toBe(false);
+    expect(syncUserDataFn).toHaveBeenCalledTimes(1);
+  });
+
   it("marks permission denied errors correctly", async () => {
     const result = await syncNow({
       nowFn: () => 10000,

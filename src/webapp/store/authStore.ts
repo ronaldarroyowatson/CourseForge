@@ -28,6 +28,12 @@ interface AuthStore {
   authError: string | null;
   setLoading: () => void;
   setAuthenticated: (session: AuthSession) => void;
+  setRoleClaims: (claims: {
+    isAdmin: boolean;
+    isSchoolAdmin: boolean;
+    isSuperAdmin: boolean;
+    schoolId: string | null;
+  }) => void;
   setUnauthenticated: (error?: string | null) => void;
   setAdminFlag: (isAdmin: boolean) => void;
 }
@@ -59,6 +65,13 @@ export const useAuthStore = create<AuthStore>((set) => ({
       districtName: session.districtName,
       authError: null,
     }),
+  setRoleClaims: (claims) =>
+    set(() => ({
+      isAdmin: claims.isAdmin,
+      isSchoolAdmin: claims.isSchoolAdmin,
+      isSuperAdmin: claims.isSuperAdmin,
+      schoolId: claims.schoolId,
+    })),
   setUnauthenticated: (error = null) =>
     set({
       authStatus: "unauthenticated",

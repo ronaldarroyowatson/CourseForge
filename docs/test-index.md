@@ -1,12 +1,12 @@
 # Test Index
 
-Generated: 2026-05-28T04:40:56.669Z
+Generated: 2026-05-28T15:38:19.122Z
 
 ## Summary
 
-- Total test files: 71
+- Total test files: 72
 - Unit test files: 47
-- Integration test files: 22
+- Integration test files: 23
 - Rules test files: 2
 - Canonical sample files: 5
 
@@ -74,6 +74,7 @@ Generated: 2026-05-28T04:40:56.669Z
 - tests/integration/extension.repositories.integration.test.ts
 - tests/integration/firebase.connection.integration.test.ts
 - tests/integration/functions.communication.integration.test.ts
+- tests/integration/header.superadmin-repair.integration.test.tsx
 - tests/integration/macos-auto-update-launcher.integration.test.ts
 - tests/integration/macos.installer.template.integration.test.ts
 - tests/integration/package-integrity.integration.test.ts

@@ -2,6 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { doc, setDoc } from "firebase/firestore";
 import { clearReadBudgetForManualRetry, clearWriteBudgetForManualRetry, syncNow } from "../../../core/services/syncService";
+import { setUserSuperAdminStatus } from "../../../core/services/schoolAdminService";
 import { firestoreDb } from "../../../firebase/firestore";
 import { getRoleClaims } from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
@@ -41,17 +42,36 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
   const setRetryCount = useUIStore((state) => state.setRetryCount);
   const setPermissionDeniedSyncBlocked = useUIStore((state) => state.setPermissionDeniedSyncBlocked);
   const setWriteLoopBlocked = useUIStore((state) => state.setWriteLoopBlocked);
+  const addSyncDebugEvent = useUIStore((state) => state.addSyncDebugEvent);
   const syncDebugEvents = useUIStore((state) => state.syncDebugEvents);
+  const setRoleClaims = useAuthStore((state) => state.setRoleClaims);
 
   const [showDebugPanel, setShowDebugPanel] = React.useState(false);
 
   async function handleSyncNow(): Promise<void> {
     clearWriteBudgetForManualRetry();
     clearReadBudgetForManualRetry();
+    addSyncDebugEvent("sync:manual-start - cleared local read/write budget flags");
     setSyncStatus("syncing", "Manual sync in progress...");
 
     try {
-      const claims = await getRoleClaims();
+      let claims = await getRoleClaims();
+      setRoleClaims(claims);
+      addSyncDebugEvent(`sync:manual-claims - admin=${claims.isAdmin} schoolAdmin=${claims.isSchoolAdmin} superAdmin=${claims.isSuperAdmin}`);
+
+      if (!claims.isSuperAdmin && claims.isAdmin && userId) {
+        addSyncDebugEvent("sync:manual-superadmin-repair-attempt");
+        try {
+          await setUserSuperAdminStatus(userId, true);
+          claims = await getRoleClaims();
+          setRoleClaims(claims);
+          addSyncDebugEvent(`sync:manual-superadmin-repair-result - superAdmin=${claims.isSuperAdmin}`);
+        } catch (repairError) {
+          const message = repairError instanceof Error ? repairError.message : "unknown repair error";
+          addSyncDebugEvent(`sync:manual-superadmin-repair-failed - ${message}`);
+        }
+      }
+
       const result = await syncNow({ superAdminSyncBypass: claims.isSuperAdmin });
       setPendingSyncCount(result.pendingCount);
       setWriteBudget(result.writeCount, result.writeBudgetLimit, result.writeBudgetExceeded);
@@ -113,9 +133,27 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
   }
 
   async function handleOpenSuperAdmin(): Promise<void> {
+    addSyncDebugEvent("superadmin:open-clicked");
     try {
-      const claims = await getRoleClaims();
+      let claims = await getRoleClaims();
+      setRoleClaims(claims);
+      addSyncDebugEvent(`superadmin:claims-before-repair - admin=${claims.isAdmin} schoolAdmin=${claims.isSchoolAdmin} superAdmin=${claims.isSuperAdmin}`);
+
+      if (!claims.isSuperAdmin && claims.isAdmin && userId) {
+        addSyncDebugEvent("superadmin:repair-attempt");
+        try {
+          await setUserSuperAdminStatus(userId, true);
+          claims = await getRoleClaims();
+          setRoleClaims(claims);
+          addSyncDebugEvent(`superadmin:repair-result - superAdmin=${claims.isSuperAdmin}`);
+        } catch (repairError) {
+          const message = repairError instanceof Error ? repairError.message : "unknown repair error";
+          addSyncDebugEvent(`superadmin:repair-failed - ${message}`);
+        }
+      }
+
       if (claims.isSuperAdmin) {
+        addSyncDebugEvent("superadmin:open-success");
         navigate("/super-admin");
         return;
       }
@@ -124,10 +162,12 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
     }
 
     if (isSuperAdmin) {
+      addSyncDebugEvent("superadmin:open-success-local-store");
       navigate("/super-admin");
       return;
     }
 
+    addSyncDebugEvent("superadmin:open-denied");
     setSyncStatus("error", "Super admin access required.");
   }
 

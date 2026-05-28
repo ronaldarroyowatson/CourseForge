@@ -51,7 +51,8 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
     setSyncStatus("syncing", "Manual sync in progress...");
 
     try {
-      const result = await syncNow();
+      const claims = await getRoleClaims();
+      const result = await syncNow({ superAdminSyncBypass: claims.isSuperAdmin });
       setPendingSyncCount(result.pendingCount);
       setWriteBudget(result.writeCount, result.writeBudgetLimit, result.writeBudgetExceeded);
       setReadBudget(result.readCount, result.readBudgetLimit, result.readBudgetExceeded);
@@ -237,8 +238,8 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
                 type="button"
                 className="btn-secondary"
                 onClick={() => { navigate("/school-admin"); }}
-                disabled={!isSchoolAdmin && !isAdmin}
-                title={!isSchoolAdmin && !isAdmin ? "School admin permission required" : "Open school admin"}
+                disabled={!isSchoolAdmin && !isAdmin && !isSuperAdmin}
+                title={!isSchoolAdmin && !isAdmin && !isSuperAdmin ? "School admin permission required" : "Open school admin"}
               >
                 Admin
               </button>

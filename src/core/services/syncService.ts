@@ -393,6 +393,7 @@ interface SyncNowDependencies {
   getPendingSyncDiagnosticsFn?: () => Promise<{ pendingCount: number; byStore: Partial<Record<SyncStoreName, number>> }>;
   getCloudSyncPolicyFn?: (userId: string) => Promise<UserCloudSyncPolicy>;
   syncUserDataFn?: typeof syncUserData;
+  superAdminSyncBypass?: boolean;
 }
 
 function getErrorCode(error: unknown): string {
@@ -1976,7 +1977,7 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
   const getUser = deps.getCurrentUserFn ?? getCurrentUser;
   const getCloudSyncPolicyFn = deps.getCloudSyncPolicyFn ?? getUserCloudSyncPolicy;
   const runSyncUserData = deps.syncUserDataFn ?? syncUserData;
-  superAdminSyncBypass = false;
+  superAdminSyncBypass = deps.superAdminSyncBypass ?? false;
   refreshDailyWriteBudgetState();
   refreshDailyReadBudgetState();
   beginWriteBatchRun();
@@ -2034,10 +2035,12 @@ export async function syncNow(deps: SyncNowDependencies = {}): Promise<{
   }
 
   try {
-    const claims = await getRoleClaims();
-    superAdminSyncBypass = claims.isSuperAdmin;
+    if (deps.superAdminSyncBypass === undefined) {
+      const claims = await getRoleClaims();
+      superAdminSyncBypass = claims.isSuperAdmin;
+    }
   } catch {
-    superAdminSyncBypass = false;
+    superAdminSyncBypass = deps.superAdminSyncBypass ?? false;
   }
 
   await hydrateDailySyncUsageFromCloud(user.uid);

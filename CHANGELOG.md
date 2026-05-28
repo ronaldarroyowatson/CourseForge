@@ -6,13 +6,21 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.6.5] - 2026-05-28
+
+### Fixed
+
+- Passed the current super-admin claim into manual sync so super-admins can bypass sync budget gates deterministically.
+- Allowed Super Admins to open the Admin area as well as the Super Admin area.
+- Kept the updater banner tied to the actual GitHub latest release instead of stale pending-update metadata.
+
 ## [1.6.4] - 2026-05-28
 
 ### Fixed
 
 - Cleared stale read/write budget blocks when retrying Sync Now manually.
 - Let the Super Admin navigation re-check claims at click time so a stale store state cannot hide the button.
-- Kept the update banner anchored to the real GitHub release instead of pending-update metadata.
+- Kept the update banner anchored to GitHub's actual latest release instead of the local pending-update metadata.
 
 ## [1.6.3] - 2026-05-28
 

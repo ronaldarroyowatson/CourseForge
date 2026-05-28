@@ -40,6 +40,7 @@ import {
   onUploadAborted,
   onIncrementalUpdateApplied,
 } from "./textbookIngestionEvents";
+import { uploadTextbookCoverFromDataUrl } from "../../core/services/coverImageService";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -53,6 +54,8 @@ export interface HybridIngestionOptions {
 export interface HybridIngestionResult {
   textbookId: string;
   storagePath: string;
+  /** Firebase Storage download URL for the separately-uploaded cover image, if available. */
+  coverImageUrl?: string;
   /** Present when an older/weaker duplicate was found and superseded. */
   supersededId?: string;
 }
@@ -155,11 +158,27 @@ export async function runHybridIngestion(
   const finalMeta = buildMetadata(parsed, storagePath, uploadedBy);
   await writeTextbookMetadata(finalMeta);
 
+  // Step 5 — If the blob contained a cover image, upload it separately so the
+  // textbook card can display it without re-downloading the full blob.
+  let coverImageUrl: string | undefined;
+  if (parsed.coverImageBase64) {
+    try {
+      const dataUrl = parsed.coverImageBase64.startsWith("data:")
+        ? parsed.coverImageBase64
+        : `data:image/jpeg;base64,${parsed.coverImageBase64}`;
+      coverImageUrl = await uploadTextbookCoverFromDataUrl(parsed.id, dataUrl);
+    } catch (err) {
+      // Non-fatal: cover upload failure must not block ingestion.
+      console.warn("[runHybridIngestion] Cover image extraction failed (non-fatal):", err);
+    }
+  }
+
   onTextbookUploadComplete({ textbookId: parsed.id, storagePath });
 
   return {
     textbookId: parsed.id,
     storagePath,
+    coverImageUrl,
     supersededId: duplicateResult?.isWeakerVersion === false ? duplicateResult.duplicateId : undefined,
   };
 }

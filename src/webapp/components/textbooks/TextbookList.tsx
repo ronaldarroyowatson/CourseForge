@@ -147,12 +147,15 @@ export function TextbookList({
   const scheduleTextbookDelete = repositories.scheduleTextbookDelete ?? repositories.removeTextbook;
   const toggleTextbookFavorite = repositories.toggleTextbookFavorite;
   const toggleTextbookArchive = repositories.toggleTextbookArchive;
+  const recoverTextbookCover = repositories.recoverTextbookCover;
   const { setSelectedTextbook } = useUIStore();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [deleteRetentionMs, setDeleteRetentionMs] = useState<number>(DEFAULT_DELETE_RETENTION_MS);
   const [retrySyncInProgress, setRetrySyncInProgress] = useState<Set<string>>(new Set());
   const [retrySyncProgress, setRetrySyncProgress] = useState<Map<string, RetrySyncProgressState>>(new Map());
   const [contentStatsById, setContentStatsById] = useState<Record<string, TextbookContentStats>>({});
+  const [recoverCoverInProgress, setRecoverCoverInProgress] = useState<Set<string>>(new Set());
+  const [recoverCoverFailed, setRecoverCoverFailed] = useState<Set<string>>(new Set());
 
   React.useEffect(() => {
     let isActive = true;
@@ -350,6 +353,23 @@ export function TextbookList({
         next.delete(textbookId);
         return next;
       });
+    }
+  }
+
+  async function handleRecoverCover(textbookId: string): Promise<void> {
+    setRecoverCoverFailed((prev) => { const next = new Set(prev); next.delete(textbookId); return next; });
+    setRecoverCoverInProgress((prev) => new Set(prev).add(textbookId));
+    try {
+      const recovered = await recoverTextbookCover(textbookId);
+      if (!recovered) {
+        setRecoverCoverFailed((prev) => new Set(prev).add(textbookId));
+      } else {
+        onRefresh();
+      }
+    } catch {
+      setRecoverCoverFailed((prev) => new Set(prev).add(textbookId));
+    } finally {
+      setRecoverCoverInProgress((prev) => { const next = new Set(prev); next.delete(textbookId); return next; });
     }
   }
 
@@ -576,7 +596,21 @@ export function TextbookList({
                   role="img"
                   aria-label="No cover image available"
                 >
-                  No Image
+                  <span className="textbook-row__cover-no-image">NO IMAGE</span>
+                  <button
+                    type="button"
+                    className={`textbook-row__cover-recover${recoverCoverFailed.has(textbook.id) ? " textbook-row__cover-recover--failed" : ""}`}
+                    onClick={() => void handleRecoverCover(textbook.id)}
+                    disabled={recoverCoverInProgress.has(textbook.id)}
+                    title="Try to recover cover image from stored blob"
+                    aria-label="Recover cover image from blob"
+                  >
+                    {recoverCoverInProgress.has(textbook.id)
+                      ? "Recovering…"
+                      : recoverCoverFailed.has(textbook.id)
+                        ? "No image in blob"
+                        : "Recover Image"}
+                  </button>
                 </div>
               )}
               {retryProgress ? (

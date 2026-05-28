@@ -2812,15 +2812,50 @@ button.cf-ds-color-wheel__dot:active {
 
 .textbook-row__cover--placeholder {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 0.3rem;
   background: var(--bg-subtle);
   color: var(--text-secondary);
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
   text-align: center;
-  padding: 0.2rem;
+  padding: 0.25rem 0.2rem;
+}
+
+.textbook-row__cover-no-image {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+
+.textbook-row__cover-recover {
+  background: var(--button-bg);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.58rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0.2rem 0.3rem;
+  text-align: center;
+  white-space: normal;
+  width: 100%;
+}
+
+.textbook-row__cover-recover:hover:not(:disabled) {
+  background: var(--button-bg-hover);
+}
+
+.textbook-row__cover-recover:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.textbook-row__cover-recover--failed {
+  color: var(--text-secondary);
+  font-style: italic;
 }
 
 .textbook-row__info {

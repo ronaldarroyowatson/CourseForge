@@ -36,7 +36,7 @@ import {
   updateTextbook,
   updateTextbookFlags,
 } from "../../core/services/repositories";
-import { uploadTextbookCoverFromDataUrl, uploadTextbookCoverImage } from "../../core/services/coverImageService";
+import { uploadTextbookCoverFromDataUrl, uploadTextbookCoverImage, extractAndUploadCoverFromBlob } from "../../core/services/coverImageService";
 import { hardDeleteTextbookFromCloud } from "../../core/services/syncService";
 import { getCurrentUser } from "../../firebase/auth";
 import { useUIStore } from "../store/uiStore";
@@ -664,6 +664,16 @@ export function useRepositories() {
     markLocalChange();
   }, [markLocalChange]);
 
+  const recoverTextbookCover = useCallback(async (textbookId: string): Promise<boolean> => {
+    const coverImageUrl = await extractAndUploadCoverFromBlob(textbookId);
+    if (!coverImageUrl) {
+      return false;
+    }
+    await updateTextbook(textbookId, { coverImageUrl });
+    markLocalChange();
+    return true;
+  }, [markLocalChange]);
+
   return {
     fetchTextbooks,
     createTextbook,
@@ -695,5 +705,6 @@ export function useRepositories() {
     fetchKeyIdeasBySectionId,
     createKeyIdea,
     removeKeyIdea,
+    recoverTextbookCover,
   };
 }

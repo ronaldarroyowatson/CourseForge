@@ -565,6 +565,15 @@ export function clearWriteBudgetForManualRetry(): void {
 }
 
 /**
+ * Clears the read-budget-exceeded flag to allow a manual retry after a budget block.
+ * The accumulated read count is preserved for accurate daily accounting.
+ */
+export function clearReadBudgetForManualRetry(): void {
+  readBudgetExceeded = false;
+  persistDailyReadBudgetState();
+}
+
+/**
  * Test-only helper to keep sync safety tests deterministic.
  */
 export function resetSyncSafetyStateForTests(): void {

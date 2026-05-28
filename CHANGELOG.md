@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-05-28
+
+### Fixed
+
+- Cleared stale read/write budget blocks when retrying Sync Now manually.
+- Let the Super Admin navigation re-check claims at click time so a stale store state cannot hide the button.
+- Kept the update banner anchored to the real GitHub release instead of pending-update metadata.
+
 ## [1.6.3] - 2026-05-28
 
 ### Fixed

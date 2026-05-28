@@ -1,8 +1,9 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { doc, setDoc } from "firebase/firestore";
-import { clearWriteBudgetForManualRetry, syncNow } from "../../../core/services/syncService";
+import { clearReadBudgetForManualRetry, clearWriteBudgetForManualRetry, syncNow } from "../../../core/services/syncService";
 import { firestoreDb } from "../../../firebase/firestore";
+import { getRoleClaims } from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 
@@ -46,6 +47,7 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
 
   async function handleSyncNow(): Promise<void> {
     clearWriteBudgetForManualRetry();
+    clearReadBudgetForManualRetry();
     setSyncStatus("syncing", "Manual sync in progress...");
 
     try {
@@ -107,6 +109,25 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
         console.warn("Unable to persist theme preference:", error);
       }
     }
+  }
+
+  async function handleOpenSuperAdmin(): Promise<void> {
+    try {
+      const claims = await getRoleClaims();
+      if (claims.isSuperAdmin) {
+        navigate("/super-admin");
+        return;
+      }
+    } catch {
+      // Fall through to the local store state below.
+    }
+
+    if (isSuperAdmin) {
+      navigate("/super-admin");
+      return;
+    }
+
+    setSyncStatus("error", "Super admin access required.");
   }
 
   function getStatusLabel(): string {
@@ -224,9 +245,10 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => { navigate("/super-admin"); }}
-                disabled={!isSuperAdmin}
-                title={!isSuperAdmin ? "Super admin permission required" : "Open super admin"}
+                onClick={() => {
+                  void handleOpenSuperAdmin();
+                }}
+                title="Open super admin"
               >
                 Super Admin
               </button>

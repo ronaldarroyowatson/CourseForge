@@ -77,8 +77,47 @@ write_status() {
 JSON
 }
 
+resolve_node() {
+  local bundled="$PACKAGE_ROOT/node-runtime/bin/node"
+  if [[ -x "$bundled" ]]; then
+    printf '%s' "$bundled"
+    return
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    command -v node
+    return
+  fi
+
+  for candidate in \
+    "/opt/homebrew/bin/node" \
+    "/usr/local/bin/node" \
+    "/usr/bin/node"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s' "$candidate"
+      return
+    fi
+  done
+
+  local nvm_node=""
+  nvm_node="$(ls -1dt "$HOME/.nvm/versions/node"/v*/bin/node 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$nvm_node" && -x "$nvm_node" ]]; then
+    printf '%s' "$nvm_node"
+    return
+  fi
+
+  echo ""
+}
+
+NODE_BIN="$(resolve_node)"
+if [[ -z "$NODE_BIN" ]]; then
+  write_status "failed" "Node runtime is unavailable for updater helpers."
+  write_log "Node runtime was not found; updater cannot parse release metadata."
+  exit 1
+fi
+
 if [[ -z "$CURRENT_VERSION" && -f "$PACKAGE_ROOT/package-manifest.json" ]]; then
-  CURRENT_VERSION="$(node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(String(p.version||''));" "$PACKAGE_ROOT/package-manifest.json")"
+  CURRENT_VERSION="$("$NODE_BIN" -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(String(p.version||''));" "$PACKAGE_ROOT/package-manifest.json")"
 fi
 
 if [[ -z "$CURRENT_VERSION" ]]; then
@@ -95,9 +134,9 @@ LATEST_JSON="$(curl -fsSL "$LATEST_ENDPOINT")" || {
   exit 1
 }
 
-LATEST_VERSION="$(node -e "const data=JSON.parse(process.argv[1]);const tag=String(data.tag_name||'');process.stdout.write(tag.replace(/^v/,''));" "$LATEST_JSON")"
+LATEST_VERSION="$("$NODE_BIN" -e "const data=JSON.parse(process.argv[1]);const tag=String(data.tag_name||'');process.stdout.write(tag.replace(/^v/,''));" "$LATEST_JSON")"
 
-IS_NEWER="$(node -e "const a=process.argv[1].split('.').map(Number);const b=process.argv[2].split('.').map(Number);let newer=false;for(let i=0;i<3;i+=1){const av=Number.isFinite(a[i])?a[i]:0;const bv=Number.isFinite(b[i])?b[i]:0;if(av>bv){newer=true;break;}if(av<bv){break;}}process.stdout.write(newer?'1':'0');" "$LATEST_VERSION" "$CURRENT_VERSION")"
+IS_NEWER="$("$NODE_BIN" -e "const a=process.argv[1].split('.').map(Number);const b=process.argv[2].split('.').map(Number);let newer=false;for(let i=0;i<3;i+=1){const av=Number.isFinite(a[i])?a[i]:0;const bv=Number.isFinite(b[i])?b[i]:0;if(av>bv){newer=true;break;}if(av<bv){break;}}process.stdout.write(newer?'1':'0');" "$LATEST_VERSION" "$CURRENT_VERSION")"
 
 if [[ "$IS_NEWER" != "1" ]]; then
   write_status "idle" "No update available." "$LATEST_VERSION"
@@ -112,7 +151,7 @@ if [[ "$CHECK_ONLY" == "true" && "$STAGE_ONLY" != "true" ]]; then
 fi
 
 ASSET_NAME="${ASSET_NAME_TEMPLATE//\{version\}/$LATEST_VERSION}"
-ASSET_URL="$(node -e "const data=JSON.parse(process.argv[1]);const name=process.argv[2];const asset=(Array.isArray(data.assets)?data.assets:[]).find((item)=>String(item.name||'')===name);process.stdout.write(asset?String(asset.browser_download_url||''):'');" "$LATEST_JSON" "$ASSET_NAME")"
+ASSET_URL="$("$NODE_BIN" -e "const data=JSON.parse(process.argv[1]);const name=process.argv[2];const asset=(Array.isArray(data.assets)?data.assets:[]).find((item)=>String(item.name||'')===name);process.stdout.write(asset?String(asset.browser_download_url||''):'');" "$LATEST_JSON" "$ASSET_NAME")"
 
 if [[ -z "$ASSET_URL" ]]; then
   write_status "failed" "Update asset not found in latest release." "$LATEST_VERSION"

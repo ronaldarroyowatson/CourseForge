@@ -181,6 +181,23 @@ function isUpdaterActiveState(state) {
   return ["checking", "downloading", "extracting", "staging"].includes(String(state || "").toLowerCase());
 }
 
+function isStaleUpdaterActiveProgress(progress) {
+  if (!progress || typeof progress !== "object") {
+    return false;
+  }
+
+  if (!isUpdaterActiveState(progress.state)) {
+    return false;
+  }
+
+  const updatedAtMs = Date.parse(String(progress.updatedAt || ""));
+  if (!Number.isFinite(updatedAtMs)) {
+    return false;
+  }
+
+  return (Date.now() - updatedAtMs) > 90_000;
+}
+
 function getAutoUpdateScriptPath() {
   const candidates = [
     path.join(packageRoot, "AutoUpdate-CourseForge.ps1"),
@@ -230,6 +247,9 @@ function launchManualStageUpdate(checkPayload, options = {}) {
 
   const progress = readUpdaterProgress();
   if (isUpdaterActiveState(progress?.state)) {
+    if (isStaleUpdaterActiveProgress(progress)) {
+      writeUpdaterLog(`Manual update stage ignored stale updater-active state (${progress.state}) and continued.`);
+    } else {
     writeUpdaterLog(`Manual update stage request ignored because updater is already active (state=${progress.state}).`);
     return {
       stageRequested: true,
@@ -238,6 +258,7 @@ function launchManualStageUpdate(checkPayload, options = {}) {
       stageMessage: `Updater is already running (${progress.state}).`,
       stagePid: null,
     };
+    }
   }
 
   if (manualStageProcess && manualStageProcess.exitCode === null && !manualStageProcess.killed) {

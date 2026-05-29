@@ -174,11 +174,11 @@ jobs:
 
       - name: Build portable package (Linux host)
         shell: pwsh
-        run: npm run package:portable
+        run: pwsh -ExecutionPolicy Bypass -File scripts/create-portable-package.ps1
 
       - name: Verify portable package (Linux host)
         shell: pwsh
-        run: npm run verify:portable
+        run: pwsh -ExecutionPolicy Bypass -File scripts/verify-portable-package.ps1
 
       - name: Run installer lifecycle guardrails
         run: npm run test:installer:lifecycle

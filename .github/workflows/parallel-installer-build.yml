@@ -1,4 +1,4 @@
-name: Parallel Installer Build
+name: Parallel Installer Matrix Build
 
 on:
   workflow_dispatch:
@@ -15,10 +15,15 @@ on:
       buildMacos:
         description: Build macOS artifacts
         required: false
-        default: true
+        default: false
         type: boolean
       buildWindows:
         description: Build Windows artifacts
+        required: false
+        default: true
+        type: boolean
+      buildLinux:
+        description: Run Linux installer/package verification
         required: false
         default: true
         type: boolean
@@ -142,20 +147,76 @@ jobs:
             release/checksums/windows-zip.sha256
             release/checksums/windows-installer.sha256
 
+  linux-installer-tests:
+    if: ${{ inputs.buildLinux }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.gitRef }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve version
+        id: version
+        run: |
+          echo "value=$(node -p \"JSON.parse(require('fs').readFileSync('package.json','utf8')).version\")" >> "$GITHUB_OUTPUT"
+
+      - name: Build portable package (Linux host)
+        shell: pwsh
+        run: npm run package:portable
+
+      - name: Verify portable package (Linux host)
+        shell: pwsh
+        run: npm run verify:portable
+
+      - name: Run installer lifecycle guardrails
+        run: npm run test:installer:lifecycle
+
+      - name: Generate checksum
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.value }}'
+          New-Item -ItemType Directory -Force -Path release/checksums | Out-Null
+          $portableZip = "release/CourseForge-$version-portable.zip"
+          if (Test-Path $portableZip) {
+            (Get-FileHash -Path $portableZip -Algorithm SHA256).Hash + "  " + (Split-Path $portableZip -Leaf) | Set-Content -Path "release/checksums/linux-portable.sha256" -Encoding ascii
+          }
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-installer-${{ steps.version.outputs.value }}
+          if-no-files-found: error
+          path: |
+            release/CourseForge-${{ steps.version.outputs.value }}-portable.zip
+            release/CourseForge-${{ steps.version.outputs.value }}-portable/**
+            release/checksums/linux-portable.sha256
+
   summarize:
     runs-on: ubuntu-latest
     needs:
       - macos-installer
       - windows-installer
+      - linux-installer-tests
     if: ${{ always() }}
     steps:
       - name: Build summary
         run: |
-          echo "# Parallel Installer Build" >> "$GITHUB_STEP_SUMMARY"
+          echo "# Parallel Installer Matrix Build" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- Release description: ${{ inputs.releaseDescription }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Git ref: ${{ inputs.gitRef }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- macOS job result: ${{ needs.macos-installer.result }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Windows job result: ${{ needs.windows-installer.result }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Linux job result: ${{ needs.linux-installer-tests.result }}" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Download artifacts from this workflow run to collect all installer outputs." >> "$GITHUB_STEP_SUMMARY"

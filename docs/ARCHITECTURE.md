@@ -129,6 +129,8 @@ See `XML_SCHEMA.md` for details.
 ## 7. Updater maintenance
 
 - For updater architecture, pipeline, diagnostics files, and extension conventions, see `updater-maintainer-guide.md`.
+- Bugfix release pipeline now includes a GitHub Actions installer matrix (`.github/workflows/parallel-installer-build.yml`) where Windows and Linux installer/package validation run remotely while macOS packaging remains local on the release-authority machine by default.
+- Release automation (`scripts/bugfix-release.ps1`) dispatches and waits for the installer matrix, then downloads Windows/Linux artifacts for final GitHub release packaging.
 
 ---
 

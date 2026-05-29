@@ -16,9 +16,10 @@
 #   4. Bump PATCH version in package.json (e.g. 1.4.10 -> 1.4.11)
 #   5. Create docs/releases/<version>.md  (release notes)
 #   6. Update CHANGELOG.md
-#   7. npm run package:portable + package:windows + package:macos  (build release artifacts)
+#   7. npm run package:portable + package:macos (build local artifacts)
 #   8. git add -A, commit, tag, push
-#   9. gh release create with platform assets
+#   9. GitHub Actions installer matrix (Windows/Linux, optional macOS) via npm run orchestrate:installers -- --wait
+#  10. gh release create with platform assets
 
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Scope = 'Function', Target = '*', Justification = 'Helper names; suppress stale analyzer warnings.')]
 param(
@@ -40,6 +41,12 @@ param(
   # Skip creating the GitHub release (still commits and tags)
   [switch]$SkipGitHub,
 
+  # Skip GitHub Actions installer matrix (Windows/Linux) orchestration
+  [switch]$SkipRemoteInstallerMatrix,
+
+  # Include macOS lane in remote installer matrix (default keeps macOS local)
+  [switch]$IncludeRemoteMacOS,
+
   # Skip only the Firestore rules tests (use when emulator port is occupied by a stale process)
   [switch]$SkipRules,
 
@@ -59,6 +66,7 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $MainChangelogReleaseCount = 12  # recent releases kept in CHANGELOG.md
 $ArchivePageReleaseCount   = 50  # releases per CHANGELOG-page-N.md archive file
 $MaxChangelogSizeKB        = 300 # hard ceiling for CHANGELOG.md; older entries overflow to archive pages
+$IsWindowsHost = ($PSVersionTable.Platform -eq "Win32NT") -or ($env:OS -eq "Windows_NT")
 
 function Read-Utf8File {
   param([Parameter(Mandatory = $true)][string]$Path)
@@ -252,30 +260,34 @@ Write-Host ""
 # ---- Quality Gate ----
 if (-not $SkipTests) {
   Push-Location $RepoRoot
-
-  Write-Host "--- [1/3] Typecheck ALL (VS Code Problems pane) ---" -ForegroundColor Cyan
-  npm run typecheck:all
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host ""
-    Write-Error "TYPECHECK FAILED. Fix all TypeScript errors before releasing."
-    Pop-Location; exit 1
-  }
-
-  Write-Host ""
-  Write-Host "--- [2/3] Build ---" -ForegroundColor Cyan
-  npm run build
-  if ($LASTEXITCODE -ne 0) {
-    Write-Error "BUILD FAILED."
-    Pop-Location; exit 1
-  }
-
-  Write-Host ""
-  Write-Host "--- [3/3] Full test battery (test:e2e:comprehensive) ---" -ForegroundColor Cyan
   if ($SkipRules) {
+    Write-Host "--- Running fallback gate (rules skipped) ---" -ForegroundColor Cyan
     Write-Host "[WARNING] Skipping Firestore rules tests (-SkipRules). Ensure rules are unchanged." -ForegroundColor Yellow
+    npm run typecheck:all
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host ""
+      Write-Error "TYPECHECK FAILED. Fix all TypeScript errors before releasing."
+      Pop-Location; exit 1
+    }
+    npm run build
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "BUILD FAILED."
+      Pop-Location; exit 1
+    }
+    npm run test:index
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "TEST INDEX GENERATION FAILED."
+      Pop-Location; exit 1
+    }
+    npm run test:samples:validate
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "SAMPLE VALIDATION FAILED."
+      Pop-Location; exit 1
+    }
     npm run test:e2e:no-rules
   } else {
-    npm run test:e2e:comprehensive
+    Write-Host "--- Running canonical bugfix quality gate (bugfix:test) ---" -ForegroundColor Cyan
+    npm run bugfix:test
   }
   if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -319,9 +331,8 @@ $Description
 
 ## Validation
 
-- ``npm run typecheck:all``
-- ``npm run build``
-- ``npm run test:e2e:comprehensive``
+- ``npm run bugfix:test``
+- ``npm run orchestrate:installers:wait -- --description \"...\" --ref v$newVersion``
 
 ## Verified
 
@@ -373,10 +384,15 @@ if (-not $SkipPackage) {
   npm run package:portable
   if ($LASTEXITCODE -ne 0) { Write-Error "Portable package build failed."; Pop-Location; exit 1 }
 
-  Write-Host ""
-  Write-Host "--- Building Windows installer package ---" -ForegroundColor Cyan
-  npm run package:windows
-  if ($LASTEXITCODE -ne 0) { Write-Error "Windows installer package build failed."; Pop-Location; exit 1 }
+  if ($IsWindowsHost) {
+    Write-Host ""
+    Write-Host "--- Building Windows installer package ---" -ForegroundColor Cyan
+    npm run package:windows
+    if ($LASTEXITCODE -ne 0) { Write-Error "Windows installer package build failed."; Pop-Location; exit 1 }
+  } else {
+    Write-Host ""
+    Write-Host "[INFO] Skipping local Windows packaging on non-Windows host. Expecting GitHub Actions matrix artifacts." -ForegroundColor Yellow
+  }
 
   Write-Host ""
   Write-Host "--- Building macOS package artifacts ---" -ForegroundColor Cyan
@@ -427,7 +443,25 @@ Write-Host ""
 Write-Host "--- Git: commit + tag v$newVersion ---" -ForegroundColor Cyan
 Push-Location $RepoRoot
 
-git add -A
+git add -u
+
+$untrackedPaths = git ls-files --others --exclude-standard
+foreach ($relativePath in $untrackedPaths) {
+  if (-not $relativePath) {
+    continue
+  }
+
+  if ($relativePath -like "release/*") {
+    continue
+  }
+
+  if (($relativePath -like "docs/releases/*") -and ($relativePath -ne "docs/releases/$newVersion.md")) {
+    continue
+  }
+
+  git add -- $relativePath
+}
+
 git commit -m "fix: release v$newVersion - $Description"
 if ($LASTEXITCODE -ne 0) { Write-Error "git commit failed."; Pop-Location; exit 1 }
 
@@ -442,6 +476,84 @@ if ($LASTEXITCODE -ne 0) { Write-Error "git push --tags failed."; Pop-Location; 
 
 Pop-Location
 Write-Host "Git sync complete." -ForegroundColor Green
+
+# ---- Remote installer matrix (GitHub Actions Windows/Linux) ----
+if (-not $SkipRemoteInstallerMatrix) {
+  Write-Host ""
+  Write-Host "--- Running remote installer matrix (GitHub Actions) ---" -ForegroundColor Cyan
+  Push-Location $RepoRoot
+
+  $matrixArgs = @("run", "orchestrate:installers", "--", "--description", "Bugfix release v$newVersion - $Description", "--ref", "v$newVersion", "--wait")
+  if (-not $IncludeRemoteMacOS) {
+    $matrixArgs += "--no-macos"
+  } else {
+    $matrixArgs += "--with-macos"
+  }
+
+  & npm @matrixArgs
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error "Remote installer matrix failed. Aborting release."
+    Pop-Location
+    exit 1
+  }
+
+  $runMetaRaw = gh run list --workflow "parallel-installer-build.yml" --limit 1 --json databaseId,headSha,status,conclusion 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error "Failed to resolve installer matrix run metadata: $runMetaRaw"
+    Pop-Location
+    exit 1
+  }
+
+  $runMeta = $runMetaRaw | ConvertFrom-Json
+  if (-not $runMeta -or $runMeta.Count -eq 0) {
+    Write-Error "Installer matrix run metadata was empty."
+    Pop-Location
+    exit 1
+  }
+
+  $runId = $runMeta[0].databaseId
+  $downloadDir = Join-Path $RepoRoot ".tmp-installer-matrix-$newVersion"
+  if (Test-Path $downloadDir) {
+    Remove-Item -Recurse -Force $downloadDir
+  }
+  New-Item -ItemType Directory -Path $downloadDir | Out-Null
+
+  gh run download $runId -D $downloadDir
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error "Failed to download installer matrix artifacts for run $runId."
+    Pop-Location
+    exit 1
+  }
+
+  foreach ($artifactName in @(
+      "CourseForge-$newVersion-installer.exe",
+      "CourseForge-$newVersion-windows.zip",
+      "CourseForge-$newVersion-portable.zip"
+    )) {
+    $source = Get-ChildItem -Path $downloadDir -Recurse -File -Filter $artifactName | Select-Object -First 1
+    if ($source) {
+      Copy-Item -Force $source.FullName (Join-Path $ReleaseDir $artifactName)
+      Write-Host "  Synced remote artifact: $artifactName"
+    }
+  }
+
+  $shaFiles = Get-ChildItem -Path $downloadDir -Recurse -File -Filter "*.sha256"
+  if ($shaFiles.Count -gt 0) {
+    $checksumDir = Join-Path $ReleaseDir "checksums"
+    if (-not (Test-Path $checksumDir)) {
+      New-Item -ItemType Directory -Path $checksumDir | Out-Null
+    }
+    foreach ($shaFile in $shaFiles) {
+      Copy-Item -Force $shaFile.FullName (Join-Path $checksumDir $shaFile.Name)
+    }
+    Write-Host "  Synced $($shaFiles.Count) checksum file(s) from installer matrix."
+  }
+
+  Remove-Item -Recurse -Force $downloadDir
+  Pop-Location
+} else {
+  Write-Host "[INFO] Remote installer matrix skipped (-SkipRemoteInstallerMatrix)." -ForegroundColor Yellow
+}
 
 # ---- GitHub release ----
 if (-not $SkipGitHub) {

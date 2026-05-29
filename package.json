@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-  "version": "1.6.11",
+  "version": "1.6.12",
   "private": true,
   "type": "module",
   "engines": {
@@ -76,7 +76,8 @@
     "test": "npm run test:core && npm run test:unit && npm run test:integration && npm run test:rules",
     "bugfix:test": "npm run typecheck:all && npm run test:index && npm run test:samples:validate && npm run build && npm run test:e2e:comprehensive && npm run test:smoke:ocr:cloud:gate",
     "bugfix:release": "powershell -ExecutionPolicy Bypass -File scripts/bugfix-release.ps1",
-    "orchestrate:installers": "node scripts/dispatch-parallel-installer-build.mjs"
+    "orchestrate:installers": "node scripts/dispatch-parallel-installer-build.mjs",
+    "orchestrate:installers:wait": "node scripts/dispatch-parallel-installer-build.mjs --wait"
   },
   "dependencies": {
     "@azure/cosmos": "^4.9.1",

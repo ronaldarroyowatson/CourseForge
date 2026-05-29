@@ -1,11 +1,12 @@
-# Work PC Agent - Windows Installer Handoff
+# Work PC Agent - Windows Installer Handoff (Fallback Path)
 
-Use this brief when the remote Windows agent is running without the release authority laptop present.
+Use this brief when manual Windows execution is required. Default path is GitHub Actions installer matrix (`parallel-installer-build.yml`).
 
 ## Scope
 
 - Build and verify Windows installer artifacts only.
 - Do not bump version, create tags, or publish releases.
+- Use this path only when the GitHub Actions Windows lane is unavailable or blocked.
 
 ## Branch and Sync Rules
 

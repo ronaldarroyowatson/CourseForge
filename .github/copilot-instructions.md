@@ -8,7 +8,9 @@ When fixing a bug, complete ALL steps in this order before finishing:
 2. **Run `npm run bugfix:test`** — typecheck + build + full test battery.
 3. **Fix any failures** — TypeScript errors (VS Code Problems pane), failing tests.
 4. **Update docs** — if the fix changes behavior, update relevant docs in `docs/`.
-5. **Run the release script**: `npm run bugfix:release -- -Description "Short description of fix"`
+5. **Run installer matrix validation**: `npm run orchestrate:installers:wait -- --description "Short description of fix" --ref <branch-or-tag>`
+   - This runs Windows + Linux installer/package verification in GitHub Actions while local macOS release authority stays on this laptop.
+6. **Run the release script**: `npm run bugfix:release -- -Description "Short description of fix"`
    - This bumps patch version, commits, tags, pushes, packages, and publishes.
 
 ### Quick manual release (if needed):
@@ -74,6 +76,7 @@ Completion gate:
 | `npm run test:e2e:comprehensive` | Complete end-to-end + unit + integration battery |
 | `npm run test:rules` | Firestore rules tests (Java or static fallback) |
 | `npm run test:smoke:ocr:cloud` | Cloud OCR smoke test |
+| `npm run orchestrate:installers:wait -- --description "..." --ref <ref>` | Blocks until GitHub Actions Windows/Linux installer matrix finishes |
 
 ---
 
@@ -87,6 +90,7 @@ Before marking any bug fix complete, confirm:
 - [ ] `npm run test:e2e:comprehensive` passes
 - [ ] VS Code Problems pane shows no new errors
 - [ ] Relevant docs updated (if behavior changed)
+- [ ] GitHub Actions installer matrix passed (Windows + Linux)
 - [ ] `npm run bugfix:release` completed (version bumped, git synced, GitHub release published)
 - [ ] Auto-updater can discover new release (`gh api repos/ronaldarroyowatson/CourseForge/releases/latest`)
 

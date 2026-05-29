@@ -47,6 +47,14 @@ const authMocks = vi.hoisted(() => {
   const signInWithGoogle = vi.fn(async () => mockUser);
   const signOutCurrentUser = vi.fn(async () => undefined);
   const getAdminClaim = vi.fn(async () => false);
+  const getRoleClaims = vi.fn(async () => ({
+    isAdmin: false,
+    isSchoolAdmin: false,
+    isSuperAdmin: false,
+    schoolId: null,
+    schoolName: null,
+    districtName: null,
+  }));
   const saveUserProfileToFirestore = vi.fn(async () => undefined);
 
   return {
@@ -57,6 +65,7 @@ const authMocks = vi.hoisted(() => {
     signInWithGoogle,
     signOutCurrentUser,
     getAdminClaim,
+    getRoleClaims,
     saveUserProfileToFirestore,
   };
 });
@@ -91,6 +100,7 @@ vi.mock("../../src/firebase/auth", () => ({
   signInWithGoogle: authMocks.signInWithGoogle,
   signOutCurrentUser: authMocks.signOutCurrentUser,
   getAdminClaim: authMocks.getAdminClaim,
+  getRoleClaims: authMocks.getRoleClaims,
   saveUserProfileToFirestore: authMocks.saveUserProfileToFirestore,
 }));
 
@@ -101,8 +111,28 @@ vi.mock("../../src/core/services/syncService", () => ({
 }));
 
 vi.mock("../../src/webapp/components/app/TextbookWorkspace", () => ({
-  TextbookWorkspace: ({ showAdminPage = false }: { showAdminPage?: boolean }) => (
-    <div>{showAdminPage ? "ADMIN_PAGE" : "WORKSPACE_PAGE"}</div>
+  TextbookWorkspace: ({
+    showAdminPage = false,
+    showSettingsPage = false,
+    showSchoolAdminPage = false,
+    showSuperAdminPage = false,
+  }: {
+    showAdminPage?: boolean;
+    showSettingsPage?: boolean;
+    showSchoolAdminPage?: boolean;
+    showSuperAdminPage?: boolean;
+  }) => (
+    <div>
+      {showAdminPage
+        ? "ADMIN_PAGE"
+        : showSettingsPage
+          ? "SETTINGS_PAGE"
+          : showSchoolAdminPage
+            ? "SCHOOL_ADMIN_PAGE"
+            : showSuperAdminPage
+              ? "SUPER_ADMIN_PAGE"
+              : "WORKSPACE_PAGE"}
+    </div>
   ),
 }));
 
@@ -160,6 +190,15 @@ describe("App admin/auth integration", () => {
     authMocks.signOutCurrentUser.mockClear();
     authMocks.getAdminClaim.mockReset();
     authMocks.getAdminClaim.mockResolvedValue(false);
+    authMocks.getRoleClaims.mockReset();
+    authMocks.getRoleClaims.mockResolvedValue({
+      isAdmin: false,
+      isSchoolAdmin: false,
+      isSuperAdmin: false,
+      schoolId: null,
+      schoolName: null,
+      districtName: null,
+    });
     authMocks.mockUser.getIdToken.mockClear();
     authMocks.saveUserProfileToFirestore.mockClear();
     syncMocks.syncUserData.mockClear();

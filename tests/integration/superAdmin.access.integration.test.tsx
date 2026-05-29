@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,6 +14,7 @@ import { useUIStore } from "../../src/webapp/store/uiStore";
 
 const serviceMocks = vi.hoisted(() => ({
   getAllUsers: vi.fn(async () => []),
+  getAllTextbooksAdmin: vi.fn(async () => []),
   setUserAdminStatus: vi.fn(async () => "ok"),
   getSuperAdminDashboardStats: vi.fn(async () => ({
     usersCount: 0,
@@ -46,6 +47,7 @@ const authMocks = vi.hoisted(() => ({
 
 vi.mock("../../src/core/services", () => ({
   getAllUsers: serviceMocks.getAllUsers,
+  getAllTextbooksAdmin: serviceMocks.getAllTextbooksAdmin,
   setUserAdminStatus: serviceMocks.setUserAdminStatus,
   getSuperAdminDashboardStats: serviceMocks.getSuperAdminDashboardStats,
   listAllSchoolsForSuperAdmin: serviceMocks.listAllSchoolsForSuperAdmin,
@@ -269,5 +271,44 @@ describe("Super admin access and data flow", () => {
     expect(serviceMocks.getSuperAdminDashboardStats).toHaveBeenCalledTimes(2);
     expect(getIdToken).toHaveBeenCalledWith(true);
     expect(useUIStore.getState().syncDebugEvents.some((event) => event.includes("superadmin:dashboard-stats:permission-denied-retry:success"))).toBe(true);
+  });
+
+  it("keeps the user on /super-admin when pressing Global Stats Refresh", async () => {
+    setSuperAdminAuth();
+
+    serviceMocks.getSuperAdminDashboardStats
+      .mockResolvedValueOnce({
+        usersCount: 1,
+        schoolsCount: 1,
+        textbooksCount: 4,
+        pendingPromotionRequests: 0,
+        trackedReadsToday: 0,
+        trackedWritesToday: 0,
+      })
+      .mockResolvedValueOnce({
+        usersCount: 1,
+        schoolsCount: 1,
+        textbooksCount: 4,
+        pendingPromotionRequests: 0,
+        trackedReadsToday: 0,
+        trackedWritesToday: 0,
+      });
+
+    renderSuperAdminRoute();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+      expect(screen.getByText("4")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(serviceMocks.getSuperAdminDashboardStats).toHaveBeenCalledTimes(2);
+    });
+
+    expect(screen.queryByText("SETTINGS_PAGE")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Super Admin", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument();
   });
 });

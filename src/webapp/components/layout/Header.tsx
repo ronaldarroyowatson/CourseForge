@@ -4,7 +4,7 @@ import { doc, setDoc } from "firebase/firestore";
 import { clearReadBudgetForManualRetry, clearWriteBudgetForManualRetry, syncNow } from "../../../core/services/syncService";
 import { setUserSuperAdminStatus } from "../../../core/services/schoolAdminService";
 import { firestoreDb } from "../../../firebase/firestore";
-import { getRoleClaims } from "../../../firebase/auth";
+import { getCurrentUser, getRoleClaims } from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 
@@ -55,7 +55,25 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
     setSyncStatus("syncing", "Manual sync in progress...");
 
     try {
+      const currentUser = getCurrentUser();
+      if (currentUser) {
+        try {
+          await currentUser.getIdToken(true);
+        } catch {
+          // Best effort only; we still proceed with the current auth state.
+        }
+      }
+
+      const previousClaims = useAuthStore.getState();
       let claims = await getRoleClaims();
+      if (previousClaims.isSuperAdmin && !claims.isSuperAdmin) {
+        claims = {
+          ...claims,
+          isAdmin: claims.isAdmin || previousClaims.isAdmin,
+          isSchoolAdmin: claims.isSchoolAdmin || previousClaims.isSchoolAdmin,
+          isSuperAdmin: true,
+        };
+      }
       setRoleClaims(claims);
       addSyncDebugEvent(`sync:manual-claims - admin=${claims.isAdmin} schoolAdmin=${claims.isSchoolAdmin} superAdmin=${claims.isSuperAdmin}`);
 

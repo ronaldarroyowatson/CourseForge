@@ -45,6 +45,7 @@ import { useUIStore } from "../../src/webapp/store/uiStore";
 
 const serviceMocks = vi.hoisted(() => ({
   getAllUsers: vi.fn(async () => [] as Array<{ uid: string; email: string; displayName: string; createdAt: string | null; lastLoginAt: string | null; isAdmin: boolean; isSuperAdmin?: boolean; isSchoolAdmin?: boolean; schoolId?: string | null; schoolName?: string | null; districtName?: string | null; isContentBlocked?: boolean; contentBlockReason?: string | null }>),
+  getAllTextbooksAdmin: vi.fn(async () => [] as Array<{ id: string }>),
   setUserAdminStatus: vi.fn(async () => "ok"),
   getSuperAdminDashboardStats: vi.fn(async () => ({
     usersCount: 0,
@@ -77,6 +78,7 @@ const authMocks = vi.hoisted(() => ({
 
 vi.mock("../../src/core/services", () => ({
   getAllUsers: serviceMocks.getAllUsers,
+  getAllTextbooksAdmin: serviceMocks.getAllTextbooksAdmin,
   setUserAdminStatus: serviceMocks.setUserAdminStatus,
   getSuperAdminDashboardStats: serviceMocks.getSuperAdminDashboardStats,
   listAllSchoolsForSuperAdmin: serviceMocks.listAllSchoolsForSuperAdmin,

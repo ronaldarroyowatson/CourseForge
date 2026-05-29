@@ -2,6 +2,7 @@ import React from "react";
 
 import {
   getAllUsers,
+  getAllTextbooksAdmin,
   setUserAdminStatus,
   type AdminUserRecord,
   getSuperAdminDashboardStats,
@@ -149,6 +150,15 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
     setError(null);
     addSyncDebugEvent("superadmin:dashboard-load:start");
     try {
+      const currentUser = getCurrentUser();
+      if (currentUser) {
+        try {
+          await currentUser.getIdToken(true);
+        } catch {
+          // Claim refresh is best-effort; the callable retry path still handles failures.
+        }
+      }
+
       let statsPromise = getSuperAdminDashboardStats();
       if (isSuperAdmin) {
         statsPromise = statsPromise.catch(async (error) => {
@@ -168,9 +178,10 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
         });
       }
 
-      const [statsResult, usersResult, schoolsResult, promotionsResult, quotaResult] = await Promise.allSettled([
+      const [statsResult, usersResult, textbooksResult, schoolsResult, promotionsResult, quotaResult] = await Promise.allSettled([
         statsPromise,
         getAllUsers(),
+        getAllTextbooksAdmin({ collectionName: "textbooks" }),
         listAllSchoolsForSuperAdmin(),
         listSchoolAdminPromotionRequests("pending"),
         getSuperAdminGlobalQuota(),
@@ -188,12 +199,25 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
         addSyncDebugEvent(
           `superadmin:dashboard-stats:failed ${statsResult.reason instanceof Error ? statsResult.reason.message : String(statsResult.reason)}`
         );
+        const fallbackStats: SuperAdminDashboardStats = {
+          usersCount: usersResult.status === "fulfilled" ? usersResult.value.length : 0,
+          schoolsCount: schoolsResult.status === "fulfilled" ? schoolsResult.value.length : 0,
+          textbooksCount: textbooksResult.status === "fulfilled" ? textbooksResult.value.length : 0,
+          pendingPromotionRequests: promotionsResult.status === "fulfilled" ? promotionsResult.value.length : 0,
+          trackedReadsToday: 0,
+          trackedWritesToday: 0,
+        };
+        setStats(fallbackStats);
       }
 
       if (usersResult.status === "fulfilled") {
         setUsers(usersResult.value);
       } else {
         failures.push(`users: ${usersResult.reason instanceof Error ? usersResult.reason.message : String(usersResult.reason)}`);
+      }
+
+      if (textbooksResult.status !== "fulfilled") {
+        failures.push(`textbooks: ${textbooksResult.reason instanceof Error ? textbooksResult.reason.message : String(textbooksResult.reason)}`);
       }
 
       if (schoolsResult.status === "fulfilled") {

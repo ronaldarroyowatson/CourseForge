@@ -199,16 +199,21 @@ export function useAuthBootstrap(): void {
         return;
       }
 
+      const previousSession = useAuthStore.getState();
+      const preserveExistingClaims =
+        previousSession.userId === user.uid
+        && (previousSession.isAdmin || previousSession.isSchoolAdmin || previousSession.isSuperAdmin);
+
       useAuthStore.getState().setAuthenticated({
         userId: user.uid,
         userEmail: user.email ?? null,
         userDisplayName: user.displayName ?? null,
-          isAdmin: false,
-          isSchoolAdmin: false,
-          isSuperAdmin: false,
-          schoolId: null,
-        schoolName: null,
-        districtName: null,
+        isAdmin: preserveExistingClaims ? previousSession.isAdmin : false,
+        isSchoolAdmin: preserveExistingClaims ? previousSession.isSchoolAdmin : false,
+        isSuperAdmin: preserveExistingClaims ? previousSession.isSuperAdmin : false,
+        schoolId: preserveExistingClaims ? previousSession.schoolId : null,
+        schoolName: preserveExistingClaims ? previousSession.schoolName : null,
+        districtName: preserveExistingClaims ? previousSession.districtName : null,
       });
 
       void (async () => {

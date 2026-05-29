@@ -1,0 +1,194 @@
+{
+  "name": "CourseForge",
+  "version": "1.6.15",
+  "generatedAtUtc": "2026-05-29T15:33:55.8212850Z",
+  "dependencyVersions": {
+    "node": ">=20 <25"
+  },
+  "requiredNodeVersion": ">=20 <25",
+  "requiredConfigSchemaVersion": "1",
+  "requiredDatabaseSchemaVersion": "1",
+  "requiredExtensionSchemaVersion": "1",
+  "files": [
+    {
+      "path": "/AutoUpdate-CourseForge.ps1",
+      "sizeBytes": 26242,
+      "sha256": "e0ad8832955b9d45e3d5bc288f9d0fe0e549190ed0f62e0ffa1516d3e43258d2"
+    },
+    {
+      "path": "/webapp/CourseForge.ico",
+      "sizeBytes": 26399,
+      "sha256": "6874b78913251da0e05dc6f304835a6b0720e466fe77e276d977c8aaf2cc175d"
+    },
+    {
+      "path": "/webapp/index.html",
+      "sizeBytes": 647,
+      "sha256": "b6e2d833c4f9458e6d1ffeb9716cbcece7e38b8da1d447dda16107567a841ab0"
+    },
+    {
+      "path": "/webapp/sw.js",
+      "sizeBytes": 2064,
+      "sha256": "5320f3f0e738dc968327e4c21f8ae519a8b814e1739722226d298fd49ebb4b26"
+    },
+    {
+      "path": "/webapp/placeholder-icons/coderabbit-placeholder.svg",
+      "sizeBytes": 2325,
+      "sha256": "a435874a86cfa8dc2df9e717faab6600044a54bd4b4204eb012f0fe3d27bb682"
+    },
+    {
+      "path": "/webapp/assets/__vite-browser-external-BIHI7g3E.js",
+      "sizeBytes": 33,
+      "sha256": "82507b0bb9ac4affaeb17c40968d830cbd6d14a2ffa04d8994faf1a78e58e1b5"
+    },
+    {
+      "path": "/webapp/assets/adminFirestoreService-BUVzWwJf.js",
+      "sizeBytes": 1913,
+      "sha256": "48eac8738a65fd684ce7917580b3231c40577c8a6634c2e48d8d7e67cd0eaff8"
+    },
+    {
+      "path": "/extension/assets/main-DAG1bfMl.js",
+      "sizeBytes": 871269,
+      "sha256": "4fa1eaef2ebb2c4ccb9d63bad609eb5589da95ae66bf17c51676f9fdbc6e8552"
+    },
+    {
+      "path": "/webapp/assets/AdminToolsPage-DTZz2ncZ.js",
+      "sizeBytes": 50335,
+      "sha256": "afdf43e0b9aa8bf51e5fbecb5851cce8e836427bd2f44e53f0242d2af0c5839a"
+    },
+    {
+      "path": "/webapp/assets/index-4DnKkxvB.css",
+      "sizeBytes": 71245,
+      "sha256": "117f753f7e8c375b3848b1e54699eaae799e430dfe01cac1a824951883ea5c07"
+    },
+    {
+      "path": "/webapp/assets/index-CcfuugrG.js",
+      "sizeBytes": 1369,
+      "sha256": "543fb3e9e316842a98da8d6c33bda7c47c63a085f8e0c837adf9e9efc5800613"
+    },
+    {
+      "path": "/webapp/assets/index-Ct4yRdYq.js",
+      "sizeBytes": 459049,
+      "sha256": "b293a6bc22295b2a7d6a3322845329e7a6261d929adad5e9f02f64ec3c9f195e"
+    },
+    {
+      "path": "/webapp/assets/SchoolAdminPage-1soGPy_1.js",
+      "sizeBytes": 5052,
+      "sha256": "6821dfac7e6526e64d57301f4aa442f753e638257e712947346a86650d1ea631"
+    },
+    {
+      "path": "/webapp/assets/SuperAdminPage-CtzGo-CK.js",
+      "sizeBytes": 12029,
+      "sha256": "139c6890285ca7a0e558002b4ac6cf2e2295b8618318e53c700db7e4ce4e4df0"
+    },
+    {
+      "path": "/webapp/assets/vendor-BK6TbG7K.js",
+      "sizeBytes": 397077,
+      "sha256": "8746cb583d731511bc2f711dfed407bdc21aec7f17d98ac543c3e14caaac5c5c"
+    },
+    {
+      "path": "/webapp/assets/CourseForge-kqQSdGZZ.ico",
+      "sizeBytes": 26399,
+      "sha256": "6874b78913251da0e05dc6f304835a6b0720e466fe77e276d977c8aaf2cc175d"
+    },
+    {
+      "path": "/extension/assets/main-B4_gyoV-.css",
+      "sizeBytes": 7557,
+      "sha256": "a5e5b9fd47adca8b0d06cde1045a78fbe814d0af65ac7644ea9551f2123a1d20"
+    },
+    {
+      "path": "/extension/assets/index.esm-BwabCWJL.js",
+      "sizeBytes": 94981,
+      "sha256": "8b7a753fc5ddf0b3551683c4512ecf3f34eeb03245e92e3391e6c5140e2bc676"
+    },
+    {
+      "path": "/extension/assets/index-Cp7Z-gPj.js",
+      "sizeBytes": 15674,
+      "sha256": "26f9bc40e0fe0457cdff72305b3ae866b38a703517de74d20265240e434b4be7"
+    },
+    {
+      "path": "/boot-splash.html",
+      "sizeBytes": 10019,
+      "sha256": "1a492d7ba7eb592ebcc17bcf0996bb7fc9733a32f7e9002a1cf939ffd7e2b7ca"
+    },
+    {
+      "path": "/CHANGELOG.md",
+      "sizeBytes": 194,
+      "sha256": "e3530cd3051518ba7338d2a851500e88d1c47bde13e3befd9db7d6d9b4e31c23"
+    },
+    {
+      "path": "/Check-For-CourseForge-Updates.cmd",
+      "sizeBytes": 572,
+      "sha256": "5d61d173e4d0bd0e18ded38142e997343b8e1c68a16312ffd105d145fdbb4fa8"
+    },
+    {
+      "path": "/courseforge-serve.cjs",
+      "sizeBytes": 30195,
+      "sha256": "07c68ef3039d7215557fd249d9f307a6e13d203a2df3225b6978ec35cbc26186"
+    },
+    {
+      "path": "/courseforge-serve.js",
+      "sizeBytes": 31074,
+      "sha256": "bffad2e16fc8a82a390be4ca59ae7b1ab8e283fb192e4c8e17b66bff3cd38206"
+    },
+    {
+      "path": "/CourseForge-Start.url",
+      "sizeBytes": 82,
+      "sha256": "347eebb740e9c9ff15f100ee88514e8e67d9905635a080734c6f8af0928b9f08"
+    },
+    {
+      "path": "/CourseForge.ico",
+      "sizeBytes": 26399,
+      "sha256": "6874b78913251da0e05dc6f304835a6b0720e466fe77e276d977c8aaf2cc175d"
+    },
+    {
+      "path": "/LICENSE",
+      "sizeBytes": 1075,
+      "sha256": "fd8a37124ffdffc70783abbe67200040cade47b9a2cfad0a2ecb03cb05038ab8"
+    },
+    {
+      "path": "/package-manifest.json",
+      "sizeBytes": 862,
+      "sha256": "d486b2ece7bd3b7a6642e5b3443c2f42bd90c59d975fc98355da25ac1ec1824b"
+    },
+    {
+      "path": "/README.md",
+      "sizeBytes": 15763,
+      "sha256": "81ba5a11be54eceb295cb78414661d45a93290437418535ddd2d12a408a680f8"
+    },
+    {
+      "path": "/Start-CourseForge.cmd",
+      "sizeBytes": 1340,
+      "sha256": "f0b6a459569bd3273148eb563772bcebec959d2ee9bfb923ddb82d43a14c6931"
+    },
+    {
+      "path": "/Start-CourseForge.ps1",
+      "sizeBytes": 29072,
+      "sha256": "0cc36677a15e8c07e0e1298e5814de4dca1534e38be362c7dd7217b9a4aa070d"
+    },
+    {
+      "path": "/Test-CourseForge-Integrity.ps1",
+      "sizeBytes": 4210,
+      "sha256": "d7eea4a3f6a1051573781b0c446af0c28d7f444ffcb6018d49afbe6ffb1f09ff"
+    },
+    {
+      "path": "/extension/background.js",
+      "sizeBytes": 680,
+      "sha256": "83e83e466ffafbf361680f9899333770595e095076bcba29814a8fc6eae25952"
+    },
+    {
+      "path": "/extension/index.html",
+      "sizeBytes": 1169,
+      "sha256": "afb905e7488d7f4ecb4e6135bc798f0eebe667a520ddfab5891061e489ae67dd"
+    },
+    {
+      "path": "/webapp/assets/vendor-firebase-CVLJ8xCB.js",
+      "sizeBytes": 580791,
+      "sha256": "29b79971d528a3fbff568f16e2f488db4cc3cc11ff4863cb15ca4fbaf945ab13"
+    },
+    {
+      "path": "/webapp/assets/vendor-react-DxvqLYyX.js",
+      "sizeBytes": 176088,
+      "sha256": "6f5d855171d45593cb0c4203e486a8171a8cefa8600e339eb935d6bfee1c892c"
+    }
+  ]
+}

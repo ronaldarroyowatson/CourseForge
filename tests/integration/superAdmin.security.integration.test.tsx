@@ -67,9 +67,12 @@ const serviceMocks = vi.hoisted(() => ({
     writeLimitPerDay: 20000,
     deleteLimitPerDay: 20000,
     functionInvocationsLimitPerMonth: 2000000,
+    currentUsageSource: "none" as const,
+    currentReadsToday: 0,
+    currentWritesToday: 0,
     message: null,
     details: [],
-  })),
+  }) as any),
 }));
 
 const authMocks = vi.hoisted(() => ({

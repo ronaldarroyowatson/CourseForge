@@ -66,6 +66,8 @@ export function useAutoSync(): void {
   const localChangeVersion = useUIStore((state) => state.localChangeVersion);
 
   React.useEffect(() => {
+    let isCancelled = false;
+
     if (authStatus !== "authenticated") {
       return;
     }
@@ -186,6 +188,8 @@ export function useAutoSync(): void {
   }, [authStatus]);
 
   React.useEffect(() => {
+    let isCancelled = false;
+
     if (authStatus !== "authenticated") {
       return;
     }
@@ -202,46 +206,63 @@ export function useAutoSync(): void {
     void (async () => {
       const ui = useUIStore.getState();
 
-      ui.setSyncStatus("syncing", "Syncing local changes...");
-      const result = await syncNow();
-      applySyncMetrics(result);
+      try {
+        ui.setSyncStatus("syncing", "Syncing local changes...");
+        const result = await syncNow();
+        if (isCancelled) {
+          return;
+        }
 
-      if (result.throttled) {
-        ui.setSyncStatus("idle", result.message);
-        return;
+        applySyncMetrics(result);
+
+        if (result.throttled) {
+          ui.setSyncStatus("idle", result.message);
+          return;
+        }
+
+        if (result.writeLoopTriggered) {
+          ui.setWriteLoopBlocked(true);
+          ui.setSyncStatus("error", "Sync paused due to write-loop protection.");
+          return;
+        }
+
+        if (result.writeBudgetExceeded) {
+          ui.setAutomaticRetriesEnabled(false);
+          ui.setSyncStatus("error", WRITE_BUDGET_WARNING);
+          return;
+        }
+
+        if (result.success) {
+          ui.setWriteLoopBlocked(false);
+          ui.setPermissionDeniedSyncBlocked(false);
+          ui.setRetryCount(0);
+          ui.setLastSyncErrorCode(null);
+          ui.setSyncStatus("synced", "Local changes synced.");
+          return;
+        }
+
+        if (result.permissionDenied) {
+          ui.setPermissionDeniedSyncBlocked(true);
+        }
+
+        if (result.retryable && !ui.automaticRetriesEnabled) {
+          ui.setSyncStatus("error", `${result.message} Automatic retries are disabled.`);
+          return;
+        }
+
+        ui.setSyncStatus("error", result.message);
+      } catch (error) {
+        if (isCancelled) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : "Unexpected sync error while syncing local changes.";
+        ui.setSyncStatus("error", message);
       }
-
-      if (result.writeLoopTriggered) {
-        ui.setWriteLoopBlocked(true);
-        ui.setSyncStatus("error", "Sync paused due to write-loop protection.");
-        return;
-      }
-
-      if (result.writeBudgetExceeded) {
-        ui.setAutomaticRetriesEnabled(false);
-        ui.setSyncStatus("error", WRITE_BUDGET_WARNING);
-        return;
-      }
-
-      if (result.success) {
-        ui.setWriteLoopBlocked(false);
-        ui.setPermissionDeniedSyncBlocked(false);
-        ui.setRetryCount(0);
-        ui.setLastSyncErrorCode(null);
-        ui.setSyncStatus("synced", "Local changes synced.");
-        return;
-      }
-
-      if (result.permissionDenied) {
-        ui.setPermissionDeniedSyncBlocked(true);
-      }
-
-      if (result.retryable && !ui.automaticRetriesEnabled) {
-        ui.setSyncStatus("error", `${result.message} Automatic retries are disabled.`);
-        return;
-      }
-
-      ui.setSyncStatus("error", result.message);
     })();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [authStatus, localChangeVersion]);
 }

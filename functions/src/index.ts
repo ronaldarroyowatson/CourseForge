@@ -185,11 +185,14 @@ interface SuperAdminGlobalQuotaDetails {
 interface SuperAdminGlobalQuotaResult {
   projectId: string;
   fetchedAt: string;
-  source: "serviceusage" | "fallback";
+  source: "serviceusage" | "monitoring" | "sync-usage" | "fallback";
   readLimitPerDay: number | null;
   writeLimitPerDay: number | null;
   deleteLimitPerDay: number | null;
   functionInvocationsLimitPerMonth: number | null;
+  currentUsageSource: "monitoring" | "sync-usage" | "none";
+  currentReadsToday: number | null;
+  currentWritesToday: number | null;
   message: string | null;
   details: SuperAdminGlobalQuotaDetails[];
 }
@@ -1601,6 +1604,186 @@ function parseFirestoreQuotaResponse(payload: unknown): {
   return { readLimitPerDay, writeLimitPerDay, details };
 }
 
+function toMonitoringPointValueNumber(value: unknown): number | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (typeof record.int64Value === "string" && record.int64Value.trim()) {
+    const parsed = Number(record.int64Value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  if (typeof record.doubleValue === "number" && Number.isFinite(record.doubleValue)) {
+    return record.doubleValue;
+  }
+
+  return null;
+}
+
+function parseMonitoringTimeSeriesSum(payload: unknown): { sum: number; hasPoints: boolean } {
+  if (!payload || typeof payload !== "object") {
+    return { sum: 0, hasPoints: false };
+  }
+
+  const timeSeries = Array.isArray((payload as Record<string, unknown>).timeSeries)
+    ? (payload as Record<string, unknown>).timeSeries as Array<Record<string, unknown>>
+    : [];
+
+  let sum = 0;
+  let hasPoints = false;
+
+  timeSeries.forEach((series) => {
+    const points = Array.isArray(series.points) ? series.points as Array<Record<string, unknown>> : [];
+    points.forEach((point) => {
+      const value = toMonitoringPointValueNumber(point.value);
+      if (value === null) {
+        return;
+      }
+
+      hasPoints = true;
+      sum += value;
+    });
+  });
+
+  return { sum: Math.max(0, Math.floor(sum)), hasPoints };
+}
+
+function getPacificDayStartIso(now = new Date()): string {
+  // Firestore daily quota resets at midnight Pacific Time (America/Los_Angeles).
+  const tz = "America/Los_Angeles";
+  const dateFmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = dateFmt.formatToParts(now);
+  const year = parseInt(parts.find((p) => p.type === "year")!.value, 10);
+  const month = parseInt(parts.find((p) => p.type === "month")!.value, 10) - 1;
+  const day = parseInt(parts.find((p) => p.type === "day")!.value, 10);
+  // Determine UTC offset by probing noon UTC on this Pacific date.
+  const probe = new Date(Date.UTC(year, month, day, 12, 0, 0));
+  const hourFmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false });
+  const pacificHourAtProbe = parseInt(hourFmt.format(probe), 10);
+  const offsetHours = 12 - pacificHourAtProbe; // e.g. PDT=7, PST=8
+  const midnightUtcMs = Date.UTC(year, month, day) + offsetHours * 3600 * 1000;
+  return new Date(midnightUtcMs).toISOString();
+}
+
+async function fetchMonitoringMetricDailySum(params: {
+  projectId: string;
+  accessToken: string;
+  metricType: string;
+}): Promise<{ value: number | null; hasPoints: boolean }> {
+  const intervalStart = getPacificDayStartIso();
+  const intervalEnd = new Date().toISOString();
+  let pageToken = "";
+  let total = 0;
+  let hasPoints = false;
+
+  do {
+    const query = new URLSearchParams({
+      filter: `metric.type=\"${params.metricType}\"`,
+      "interval.startTime": intervalStart,
+      "interval.endTime": intervalEnd,
+      view: "FULL",
+      pageSize: "1000",
+    });
+    if (pageToken) {
+      query.set("pageToken", pageToken);
+    }
+
+    const url = `https://monitoring.googleapis.com/v3/projects/${params.projectId}/timeSeries?${query.toString()}`;
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${params.accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      const snippet = await readResponseSnippet(response);
+      throw new Error(`Monitoring API ${params.metricType} returned ${response.status}${snippet ? `: ${snippet}` : ""}`);
+    }
+
+    const payload = await response.json() as unknown;
+    const parsed = parseMonitoringTimeSeriesSum(payload);
+    total += parsed.sum;
+    hasPoints = hasPoints || parsed.hasPoints;
+
+    if (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).nextPageToken === "string") {
+      pageToken = ((payload as Record<string, unknown>).nextPageToken as string).trim();
+    } else {
+      pageToken = "";
+    }
+  } while (pageToken);
+
+  return {
+    value: hasPoints ? Math.max(0, Math.floor(total)) : null,
+    hasPoints,
+  };
+}
+
+async function fetchFirestoreDailyUsageFromMonitoring(projectId: string, accessToken: string): Promise<{
+  reads: number | null;
+  writes: number | null;
+  readMetric: string | null;
+  writeMetric: string | null;
+}> {
+  const readMetricCandidates = [
+    "firestore.googleapis.com/document/read_count",
+  ];
+  const writeMetricCandidates = [
+    "firestore.googleapis.com/document/write_count",
+  ];
+
+  let reads: number | null = null;
+  let writes: number | null = null;
+  let readMetric: string | null = null;
+  let writeMetric: string | null = null;
+
+  for (const metricType of readMetricCandidates) {
+    try {
+      const result = await fetchMonitoringMetricDailySum({ projectId, accessToken, metricType });
+      if (!result.hasPoints) {
+        continue;
+      }
+
+      reads = result.value;
+      readMetric = metricType;
+      break;
+    } catch (err) {
+      console.warn("[super-admin] monitoring read metric fetch failed", {
+        metricType,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  for (const metricType of writeMetricCandidates) {
+    try {
+      const result = await fetchMonitoringMetricDailySum({ projectId, accessToken, metricType });
+      if (!result.hasPoints) {
+        continue;
+      }
+
+      writes = result.value;
+      writeMetric = metricType;
+      break;
+    } catch (err) {
+      console.warn("[super-admin] monitoring write metric fetch failed", {
+        metricType,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return { reads, writes, readMetric, writeMetric };
+}
+
 function createDefaultPremiumUsage(now = new Date()): PremiumUsageState {
   return {
     premiumRequestsUsedToday: 0,
@@ -2339,30 +2522,35 @@ export const listSchoolAdminPromotionRequests = onCall(async (request) => {
   assertSuperAdmin(request.auth);
 
   const status = typeof request.data?.status === "string" ? request.data.status : "pending";
-  // Avoid composite-index requirements (status + createdAt) by sorting in memory.
-  const snapshot = await firestore.collection("schoolAdminPromotionRequests").limit(600).get();
-  const rows: PromotionRequestRow[] = snapshot.docs.map((docSnap) => {
-    const data = docSnap.data();
-    return {
-      id: docSnap.id,
-      uid: typeof data.uid === "string" ? data.uid : "",
-      email: typeof data.email === "string" ? data.email : "",
-      displayName: typeof data.displayName === "string" ? data.displayName : "",
-      schoolId: typeof data.schoolId === "string" ? data.schoolId : "",
-      schoolName: typeof data.schoolName === "string" ? data.schoolName : "",
-      districtName: typeof data.districtName === "string" ? data.districtName : null,
-      reason: typeof data.reason === "string" ? data.reason : null,
-      status: data.status === "approved" || data.status === "rejected" ? data.status : "pending",
-      createdAt: toIsoString(data.createdAt),
-      reviewedAt: toIsoString(data.reviewedAt),
-      reviewedBy: typeof data.reviewedBy === "string" ? data.reviewedBy : null,
-    };
-  })
-    .filter((row) => status === "all" || row.status === status)
-    .sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? ""))
-    .slice(0, 300);
+  try {
+    // Avoid composite-index requirements (status + createdAt) by sorting in memory.
+    const snapshot = await firestore.collection("schoolAdminPromotionRequests").limit(600).get();
+    const rows: PromotionRequestRow[] = snapshot.docs.map((docSnap) => {
+      const data = docSnap.data();
+      return {
+        id: docSnap.id,
+        uid: typeof data.uid === "string" ? data.uid : "",
+        email: typeof data.email === "string" ? data.email : "",
+        displayName: typeof data.displayName === "string" ? data.displayName : "",
+        schoolId: typeof data.schoolId === "string" ? data.schoolId : "",
+        schoolName: typeof data.schoolName === "string" ? data.schoolName : "",
+        districtName: typeof data.districtName === "string" ? data.districtName : null,
+        reason: typeof data.reason === "string" ? data.reason : null,
+        status: data.status === "approved" || data.status === "rejected" ? data.status : "pending",
+        createdAt: toIsoString(data.createdAt),
+        reviewedAt: toIsoString(data.reviewedAt),
+        reviewedBy: typeof data.reviewedBy === "string" ? data.reviewedBy : null,
+      };
+    })
+      .filter((row) => status === "all" || row.status === status)
+      .sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? ""))
+      .slice(0, 300);
 
-  return success("Loaded promotion requests.", rows);
+    return success("Loaded promotion requests.", rows);
+  } catch (error) {
+    console.error("[super-admin] promotion requests query failed", error);
+    return success("Loaded promotion requests with fallback.", [] as PromotionRequestRow[]);
+  }
 });
 
 export const resolveSchoolAdminPromotionRequest = onCall(async (request) => {
@@ -2512,12 +2700,21 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
   }
 
   let usersCount = 0;
-  let nextPageToken: string | undefined;
-  do {
-    const page = await auth.listUsers(1000, nextPageToken);
-    usersCount += page.users.length;
-    nextPageToken = page.pageToken;
-  } while (nextPageToken);
+  try {
+    let nextPageToken: string | undefined;
+    do {
+      const page = await auth.listUsers(1000, nextPageToken);
+      usersCount += page.users.length;
+      nextPageToken = page.pageToken;
+    } while (nextPageToken);
+  } catch (listUsersError) {
+    console.error("[super-admin] auth.listUsers failed, falling back to users collection count", listUsersError);
+    try {
+      usersCount = (await firestore.collection("users").count().get()).data().count;
+    } catch {
+      usersCount = (await firestore.collection("users").get()).size;
+    }
+  }
 
   let trackedReadsToday = 0;
   let trackedWritesToday = 0;
@@ -2558,6 +2755,40 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
 export const getSuperAdminGlobalQuota = onCall(async (request) => {
   assertSuperAdmin(request.auth);
 
+  const todayKey = getUtcDateKey();
+  let syncUsageReadsToday: number | null = null;
+  let syncUsageWritesToday: number | null = null;
+  try {
+    const syncUsageSnapshot = await firestore.collectionGroup("syncUsage").get();
+    let reads = 0;
+    let writes = 0;
+    syncUsageSnapshot.docs.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (typeof data.dateKey !== "string" || data.dateKey !== todayKey) {
+        return;
+      }
+
+      const readCount = typeof data.readCount === "number" && Number.isFinite(data.readCount)
+        ? Math.max(0, Math.floor(data.readCount))
+        : 0;
+      const writeCount = typeof data.writeCount === "number" && Number.isFinite(data.writeCount)
+        ? Math.max(0, Math.floor(data.writeCount))
+        : 0;
+      reads += readCount;
+      writes += writeCount;
+    });
+
+    syncUsageReadsToday = reads;
+    syncUsageWritesToday = writes;
+  } catch (syncUsageErr) {
+    console.error("[super-admin] global quota syncUsage scan failed", syncUsageErr);
+  }
+
+  let currentReadsToday: number | null = syncUsageReadsToday;
+  let currentWritesToday: number | null = syncUsageWritesToday;
+  let currentUsageSource: "monitoring" | "sync-usage" | "none" =
+    syncUsageReadsToday !== null && syncUsageWritesToday !== null ? "sync-usage" : "none";
+
   const projectId = process.env.GCLOUD_PROJECT ?? "";
   if (!projectId) {
     const fallback: SuperAdminGlobalQuotaResult = {
@@ -2568,6 +2799,9 @@ export const getSuperAdminGlobalQuota = onCall(async (request) => {
       writeLimitPerDay: DEFAULT_FIRESTORE_WRITE_LIMIT_PER_DAY,
       deleteLimitPerDay: DEFAULT_FIRESTORE_DELETE_LIMIT_PER_DAY,
       functionInvocationsLimitPerMonth: DEFAULT_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH,
+      currentUsageSource,
+      currentReadsToday,
+      currentWritesToday,
       message: "Using fallback quota defaults. Set project/runtime access to read live global limits from Service Usage API.",
       details: [],
     };
@@ -2575,50 +2809,111 @@ export const getSuperAdminGlobalQuota = onCall(async (request) => {
     return success("Loaded global quota fallback.", fallback);
   }
 
+  let accessTokenValue = "";
   try {
     const accessToken = await admin.credential.applicationDefault().getAccessToken();
-    const url = `https://serviceusage.googleapis.com/v1/projects/${projectId}/services/firestore.googleapis.com/consumerQuotaMetrics?view=FULL`;
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken.access_token}`,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Service Usage API returned ${response.status}`);
-    }
-
-    const payload = await response.json() as unknown;
-    const parsed = parseFirestoreQuotaResponse(payload);
-
-    const result: SuperAdminGlobalQuotaResult = {
-      projectId,
-      fetchedAt: new Date().toISOString(),
-      source: "serviceusage",
-      readLimitPerDay: parsed.readLimitPerDay,
-      writeLimitPerDay: parsed.writeLimitPerDay,
-      deleteLimitPerDay: DEFAULT_FIRESTORE_DELETE_LIMIT_PER_DAY,
-      functionInvocationsLimitPerMonth: DEFAULT_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH,
-      message: null,
-      details: parsed.details,
-    };
-
-    return success("Loaded global Firestore quota.", result);
-  } catch {
-    const fallback: SuperAdminGlobalQuotaResult = {
-      projectId,
-      fetchedAt: new Date().toISOString(),
-      source: "fallback",
-      readLimitPerDay: DEFAULT_FIRESTORE_READ_LIMIT_PER_DAY,
-      writeLimitPerDay: DEFAULT_FIRESTORE_WRITE_LIMIT_PER_DAY,
-      deleteLimitPerDay: DEFAULT_FIRESTORE_DELETE_LIMIT_PER_DAY,
-      functionInvocationsLimitPerMonth: DEFAULT_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH,
-      message: "Global quota API data unavailable. Using fallback defaults until Service Usage API access succeeds.",
-      details: [],
-    };
-
-    return success("Loaded global quota fallback.", fallback);
+    accessTokenValue = accessToken.access_token;
+  } catch (tokenErr) {
+    console.error("[super-admin] global quota access-token fetch failed", tokenErr);
   }
+
+  if (accessTokenValue) {
+    try {
+      const usage = await fetchFirestoreDailyUsageFromMonitoring(projectId, accessTokenValue);
+      if (typeof usage.reads === "number" && typeof usage.writes === "number") {
+        currentReadsToday = usage.reads;
+        currentWritesToday = usage.writes;
+        currentUsageSource = "monitoring";
+        console.info("[super-admin] monitoring usage loaded", {
+          projectId,
+          currentReadsToday,
+          currentWritesToday,
+          readMetric: usage.readMetric,
+          writeMetric: usage.writeMetric,
+        });
+      }
+    } catch (monitoringErr) {
+      console.error("[super-admin] monitoring usage fetch failed", monitoringErr);
+    }
+  }
+
+  let serviceUsageParsed: { readLimitPerDay: number | null; writeLimitPerDay: number | null; details: SuperAdminGlobalQuotaDetails[] } | null = null;
+  let serviceUsageErrorMessage: string | null = null;
+
+  if (accessTokenValue) {
+    const url = `https://serviceusage.googleapis.com/v1/projects/${projectId}/services/firestore.googleapis.com/consumerQuotaMetrics?view=FULL`;
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${accessTokenValue}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Service Usage API returned ${response.status}`);
+      }
+
+      const payload = await response.json() as unknown;
+      serviceUsageParsed = parseFirestoreQuotaResponse(payload);
+    } catch (quotaErr) {
+      serviceUsageErrorMessage = quotaErr instanceof Error ? quotaErr.message : "unknown error";
+      console.error("[super-admin] serviceusage quota fetch failed", quotaErr);
+    }
+  } else {
+    serviceUsageErrorMessage = "missing access token";
+  }
+
+  const hasMonitoringUsage = currentUsageSource === "monitoring";
+  const hasSyncUsage = currentUsageSource === "sync-usage";
+
+  const result: SuperAdminGlobalQuotaResult = {
+    projectId,
+    fetchedAt: new Date().toISOString(),
+    source: hasMonitoringUsage
+      ? "monitoring"
+      : serviceUsageParsed
+        ? "serviceusage"
+        : hasSyncUsage
+          ? "sync-usage"
+          : "fallback",
+    readLimitPerDay: serviceUsageParsed?.readLimitPerDay ?? DEFAULT_FIRESTORE_READ_LIMIT_PER_DAY,
+    writeLimitPerDay: serviceUsageParsed?.writeLimitPerDay ?? DEFAULT_FIRESTORE_WRITE_LIMIT_PER_DAY,
+    deleteLimitPerDay: DEFAULT_FIRESTORE_DELETE_LIMIT_PER_DAY,
+    functionInvocationsLimitPerMonth: DEFAULT_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH,
+    currentUsageSource,
+    currentReadsToday,
+    currentWritesToday,
+    message: null,
+    details: serviceUsageParsed?.details ?? [],
+  };
+
+  if (hasMonitoringUsage && serviceUsageParsed) {
+    result.message = "Read/write counts are project-level totals since midnight Pacific Time (matches Firebase console billable period).";
+    return success("Loaded global Firestore quota and monitoring usage.", result);
+  }
+
+  if (hasMonitoringUsage && !serviceUsageParsed) {
+    result.message = `Read/write counts are project-level totals since midnight Pacific Time. Quota limits are using fallback defaults until Service Usage API access succeeds (${serviceUsageErrorMessage ?? "unknown error"}).`;
+    return success("Loaded global usage from monitoring with fallback quota limits.", result);
+  }
+
+  if (serviceUsageParsed && hasSyncUsage) {
+    result.message = "Loaded quota limits from Service Usage API. Current usage is from sync telemetry because Cloud Monitoring usage is unavailable.";
+    return success("Loaded global quota with sync telemetry usage fallback.", result);
+  }
+
+  if (serviceUsageParsed) {
+    result.message = "Loaded quota limits from Service Usage API. Current usage is unavailable right now.";
+    return success("Loaded global Firestore quota.", result);
+  }
+
+  if (hasSyncUsage) {
+    result.message = `Cloud Monitoring and Service Usage API data unavailable (${serviceUsageErrorMessage ?? "unknown error"}). Current usage is from sync telemetry and limits are fallback defaults.`;
+    return success("Loaded global quota from sync usage telemetry fallback.", result);
+  }
+
+  result.message = `Global quota API data unavailable (${serviceUsageErrorMessage ?? "unknown error"}). Using fallback defaults until API access succeeds.`;
+  return success("Loaded global quota fallback.", result);
 });
 
 export const getModerationQueue = onCall(async (request) => {

@@ -36,11 +36,31 @@ const DEFAULT_GLOBAL_WRITE_LIMIT_PER_DAY = 20000;
 const DEFAULT_GLOBAL_DELETE_LIMIT_PER_DAY = 20000;
 const DEFAULT_GLOBAL_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH = 2000000;
 const SUPER_ADMIN_QUOTA_OVERRIDES_KEY = "courseforge.superAdminQuotaOverrides.v1";
+const QUOTA_CURRENT_USAGE_GATE_WAIT_MS = 800;
 
-function getSecondsUntilUtcMidnight(): number {
+interface CurrentUsageValue {
+  value: number;
+  source: "quota" | "monitoring" | "sync-usage" | "stats" | "sync-budget";
+}
+
+function getSecondsUntilPacificMidnight(): number {
+  // Firestore daily quota resets at midnight Pacific Time.
   const now = new Date();
-  const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-  return Math.max(0, Math.floor((midnight.getTime() - now.getTime()) / 1000));
+  const tz = "America/Los_Angeles";
+  const dateFmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  });
+  const parts = dateFmt.formatToParts(now);
+  const year = parseInt(parts.find((p) => p.type === "year")!.value, 10);
+  const month = parseInt(parts.find((p) => p.type === "month")!.value, 10) - 1;
+  const day = parseInt(parts.find((p) => p.type === "day")!.value, 10);
+  const probe = new Date(Date.UTC(year, month, day, 12, 0, 0));
+  const hourFmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false });
+  const pacificHourAtProbe = parseInt(hourFmt.format(probe), 10);
+  const offsetHours = 12 - pacificHourAtProbe;
+  // Next Pacific midnight = UTC midnight of the NEXT Pacific date
+  const nextDayPacificMidnightMs = Date.UTC(year, month, day + 1) + offsetHours * 3600 * 1000;
+  return Math.max(0, Math.floor((nextDayPacificMidnightMs - now.getTime()) / 1000));
 }
 
 function formatCountdown(totalSeconds: number): string {
@@ -51,10 +71,10 @@ function formatCountdown(totalSeconds: number): string {
   return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
 }
 
-function useUtcMidnightCountdown(): string {
-  const [secondsLeft, setSecondsLeft] = React.useState(getSecondsUntilUtcMidnight);
+function usePacificMidnightCountdown(): string {
+  const [secondsLeft, setSecondsLeft] = React.useState(getSecondsUntilPacificMidnight);
   React.useEffect(() => {
-    const tick = (): void => { setSecondsLeft(getSecondsUntilUtcMidnight()); };
+    const tick = (): void => { setSecondsLeft(getSecondsUntilPacificMidnight()); };
     const id = window.setInterval(tick, 1000);
     return () => { window.clearInterval(id); };
   }, []);
@@ -90,11 +110,56 @@ function isPermissionDeniedError(error: unknown): boolean {
   return code.includes("permission-denied") || message.includes("permission-denied") || message.includes("permission denied");
 }
 
+function isRetryableCallableError(error: unknown): boolean {
+  if (!error) {
+    return false;
+  }
+
+  const candidate = error as { code?: unknown; message?: unknown };
+  const code = typeof candidate.code === "string" ? candidate.code.toLowerCase() : "";
+  const message = typeof candidate.message === "string" ? candidate.message.toLowerCase() : "";
+
+  return (
+    code.includes("permission-denied")
+    || code.includes("internal")
+    || code.includes("unavailable")
+    || code.includes("deadline-exceeded")
+    || message.includes("permission-denied")
+    || message.includes("permission denied")
+    || message.includes("internal")
+    || message.includes("unavailable")
+    || message.includes("deadline-exceeded")
+  );
+}
+
+async function retrySuperAdminCallable<T>(loader: () => Promise<T>): Promise<T> {
+  try {
+    return await loader();
+  } catch (error) {
+    if (!isRetryableCallableError(error)) {
+      throw error;
+    }
+
+    const user = getCurrentUser();
+    if (user) {
+      try {
+        await user.getIdToken(true);
+      } catch {
+        // Token refresh is best-effort before one retry.
+      }
+    }
+
+    return loader();
+  }
+}
+
 export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Element {
   const currentUserEmail = useAuthStore((state) => state.userEmail);
   const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
   const addSyncDebugEvent = useUIStore((state) => state.addSyncDebugEvent);
-  const utcResetCountdown = useUtcMidnightCountdown();
+  const liveSyncReadCount = useUIStore((state) => state.readCount);
+  const liveSyncWriteCount = useUIStore((state) => state.writeCount);
+  const pacificResetCountdown = usePacificMidnightCountdown();
   const [users, setUsers] = React.useState<AdminUserRecord[]>([]);
   const [schools, setSchools] = React.useState<SchoolDirectoryRow[]>([]);
   const [promotions, setPromotions] = React.useState<PromotionRequestRow[]>([]);
@@ -141,6 +206,9 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
     }
   });
   const [isLoading, setIsLoading] = React.useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = React.useState(false);
+  const [isCurrentUsageGateOpen, setIsCurrentUsageGateOpen] = React.useState(false);
+  const [currentUsageLoadingFrame, setCurrentUsageLoadingFrame] = React.useState(0);
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<string | null>(null);
@@ -159,31 +227,41 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
         }
       }
 
-      let statsPromise = getSuperAdminDashboardStats();
+      let statsPromise: Promise<SuperAdminDashboardStats>;
       if (isSuperAdmin) {
-        statsPromise = statsPromise.catch(async (error) => {
-          if (!isPermissionDeniedError(error)) {
+        let shouldEmitRetrySuccess = false;
+        statsPromise = retrySuperAdminCallable(async () => {
+          try {
+            return await getSuperAdminDashboardStats();
+          } catch (error) {
+            if (isPermissionDeniedError(error)) {
+              addSyncDebugEvent("superadmin:dashboard-stats:permission-denied-retry:start");
+              shouldEmitRetrySuccess = true;
+            } else if (isRetryableCallableError(error)) {
+              addSyncDebugEvent("superadmin:dashboard-stats:retryable-error-retry:start");
+              shouldEmitRetrySuccess = true;
+            }
+
             throw error;
           }
-
-          addSyncDebugEvent("superadmin:dashboard-stats:permission-denied-retry:start");
-          const user = getCurrentUser();
-          if (user) {
-            await user.getIdToken(true);
+        }).then((value) => {
+          if (shouldEmitRetrySuccess) {
+            addSyncDebugEvent("superadmin:dashboard-stats:permission-denied-retry:success");
           }
-
-          const retried = await getSuperAdminDashboardStats();
-          addSyncDebugEvent("superadmin:dashboard-stats:permission-denied-retry:success");
-          return retried;
+          return value;
         });
+      } else {
+        statsPromise = getSuperAdminDashboardStats();
       }
+
+      const promotionsPromise = retrySuperAdminCallable(() => listSchoolAdminPromotionRequests("pending"));
 
       const [statsResult, usersResult, textbooksResult, schoolsResult, promotionsResult, quotaResult] = await Promise.allSettled([
         statsPromise,
         getAllUsers(),
         getAllTextbooksAdmin({ collectionName: "textbooks" }),
         listAllSchoolsForSuperAdmin(),
-        listSchoolAdminPromotionRequests("pending"),
+        promotionsPromise,
         getSuperAdminGlobalQuota(),
       ]);
 
@@ -249,6 +327,7 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
       setError(err instanceof Error ? err.message : "Unable to load super admin dashboard.");
       addSyncDebugEvent(`superadmin:dashboard-load:error ${err instanceof Error ? err.message : String(err)}`);
     } finally {
+      setHasLoadedOnce(true);
       setIsLoading(false);
     }
   }, [addSyncDebugEvent, isSuperAdmin]);
@@ -277,6 +356,139 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
   const effectiveFunctionInvocationsLimitPerMonth = quotaOverrides.functionInvocationsLimitPerMonth
     ?? globalQuota?.functionInvocationsLimitPerMonth
     ?? DEFAULT_GLOBAL_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH;
+  const quotaCurrentReadsToday = globalQuota?.currentReadsToday;
+  const quotaCurrentWritesToday = globalQuota?.currentWritesToday;
+  const quotaCurrentUsageSource = globalQuota?.currentUsageSource
+    ?? (globalQuota?.source === "monitoring" ? "monitoring" : globalQuota?.source === "sync-usage" ? "sync-usage" : "none");
+
+  function resolveCurrentUsageValue(
+    quotaValue: number | null | undefined,
+    quotaUsageSource: "monitoring" | "sync-usage" | "none",
+    statsValue: number | null | undefined,
+    syncBudgetValue: number,
+  ): CurrentUsageValue | null {
+    if (
+      quotaUsageSource === "monitoring"
+      && typeof quotaValue === "number"
+      && Number.isFinite(quotaValue)
+      && quotaValue >= 0
+    ) {
+      return { value: Math.floor(quotaValue), source: "monitoring" };
+    }
+
+    const candidates: CurrentUsageValue[] = [];
+    if (typeof quotaValue === "number" && Number.isFinite(quotaValue) && quotaValue >= 0) {
+      candidates.push({
+        value: Math.floor(quotaValue),
+        source: quotaUsageSource === "sync-usage" ? "sync-usage" : "quota",
+      });
+    }
+
+    if (typeof statsValue === "number" && Number.isFinite(statsValue) && statsValue >= 0) {
+      candidates.push({ value: Math.floor(statsValue), source: "stats" });
+    }
+
+    if (Number.isFinite(syncBudgetValue) && syncBudgetValue >= 0) {
+      candidates.push({ value: Math.floor(syncBudgetValue), source: "sync-budget" });
+    }
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    let best = candidates[0];
+    for (let index = 1; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      if (candidate.value > best.value) {
+        best = candidate;
+      }
+    }
+
+    return best;
+  }
+
+  const resolvedCurrentReads = resolveCurrentUsageValue(
+    quotaCurrentReadsToday,
+    quotaCurrentUsageSource,
+    stats?.trackedReadsToday,
+    liveSyncReadCount,
+  );
+  const resolvedCurrentWrites = resolveCurrentUsageValue(
+    quotaCurrentWritesToday,
+    quotaCurrentUsageSource,
+    stats?.trackedWritesToday,
+    liveSyncWriteCount,
+  );
+
+  React.useEffect(() => {
+    if (!hasLoadedOnce) {
+      setIsCurrentUsageGateOpen(false);
+      return;
+    }
+
+    const resolvedReadValue = resolvedCurrentReads?.value;
+    if (typeof resolvedReadValue === "number" && resolvedReadValue > 0) {
+      setIsCurrentUsageGateOpen(true);
+      return;
+    }
+
+    setIsCurrentUsageGateOpen(false);
+    const timeoutId = window.setTimeout(() => {
+      setIsCurrentUsageGateOpen(true);
+      addSyncDebugEvent("superadmin:quota-current-usage:gate-timeout-open");
+    }, QUOTA_CURRENT_USAGE_GATE_WAIT_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [addSyncDebugEvent, hasLoadedOnce, resolvedCurrentReads?.value]);
+
+  React.useEffect(() => {
+    if (isCurrentUsageGateOpen) {
+      setCurrentUsageLoadingFrame(0);
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setCurrentUsageLoadingFrame((frame) => (frame + 1) % 4);
+    }, 300);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isCurrentUsageGateOpen]);
+
+  function formatCurrentUsageDisplay(currentValue: CurrentUsageValue | null): string {
+    if (!isCurrentUsageGateOpen) {
+      return `Fetching${".".repeat(currentUsageLoadingFrame + 1)}`;
+    }
+
+    if (!currentValue) {
+      return "-";
+    }
+
+    if (currentValue.source === "monitoring") {
+      return `${currentValue.value.toLocaleString()} (from Cloud Monitoring)`;
+    }
+
+    if (currentValue.source === "quota") {
+      return currentValue.value.toLocaleString();
+    }
+
+    if (currentValue.source === "sync-usage") {
+      return `${currentValue.value.toLocaleString()} (from backend sync telemetry)`;
+    }
+
+    if (currentValue.source === "stats") {
+      return `${currentValue.value.toLocaleString()} (from stats)`;
+    }
+
+    return `${currentValue.value.toLocaleString()} (from local sync budget)`;
+  }
+
+  const quotaCurrentReadsDisplay = formatCurrentUsageDisplay(resolvedCurrentReads);
+  const quotaCurrentWritesDisplay = formatCurrentUsageDisplay(resolvedCurrentWrites);
+  const showReadTelemetryWarning = isCurrentUsageGateOpen && (resolvedCurrentReads?.value ?? 0) <= 0;
 
   async function handlePromotionResolution(requestId: string, approve: boolean): Promise<void> {
     setIsSaving(true);
@@ -351,7 +563,7 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
         <div className="admin-section__header">
           <h3>Global Firestore Quota (Super Admin)</h3>
           <span className="admin-note" style={{ margin: 0, fontVariantNumeric: "tabular-nums" }}>
-            Daily reset in <strong>{utcResetCountdown}</strong> (UTC midnight)
+            Daily reset in <strong>{pacificResetCountdown}</strong> (midnight Pacific Time)
           </span>
         </div>
         <div className="metadata-training-grid">
@@ -361,6 +573,8 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
           <p className="settings-meta">Write limit/day: <strong>{effectiveWriteLimitPerDay.toLocaleString()}</strong></p>
           <p className="settings-meta">Delete limit/day: <strong>{effectiveDeleteLimitPerDay.toLocaleString()}</strong></p>
           <p className="settings-meta">Functions invocations/month: <strong>{effectiveFunctionInvocationsLimitPerMonth.toLocaleString()}</strong></p>
+          <p className="settings-meta">Current reads today: <strong>{quotaCurrentReadsDisplay}</strong></p>
+          <p className="settings-meta">Current writes today: <strong>{quotaCurrentWritesDisplay}</strong></p>
           <p className="settings-meta">Fetched at: <strong>{globalQuota?.fetchedAt ? new Date(globalQuota.fetchedAt).toLocaleString() : "-"}</strong></p>
         </div>
         <div className="admin-filter-bar" style={{ marginTop: "0.75rem" }}>
@@ -420,6 +634,9 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
         <p className="admin-note">
           Leave a field blank to use the live API value (or fallback default). Changes are saved locally on this device for super-admin tuning.
         </p>
+        {showReadTelemetryWarning ? (
+          <p className="error-text">Read telemetry is still 0 after load. This indicates live read usage did not hydrate correctly.</p>
+        ) : null}
         <div className="admin-section__header" style={{ marginTop: "0.5rem", marginBottom: 0 }}>
           <div />
           <button

@@ -107,11 +107,14 @@ export interface SuperAdminGlobalQuotaDetails {
 export interface SuperAdminGlobalQuota {
   projectId: string;
   fetchedAt: string;
-  source: "serviceusage" | "fallback";
+  source: "serviceusage" | "monitoring" | "sync-usage" | "fallback";
   readLimitPerDay: number | null;
   writeLimitPerDay: number | null;
   deleteLimitPerDay: number | null;
   functionInvocationsLimitPerMonth: number | null;
+  currentUsageSource: "monitoring" | "sync-usage" | "none";
+  currentReadsToday?: number | null;
+  currentWritesToday?: number | null;
   message: string | null;
   details: SuperAdminGlobalQuotaDetails[];
 }

@@ -78,6 +78,24 @@ function New-CourseForgeIcon {
   }
 }
 
+function Get-PortableSha256 {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $stream = [System.IO.File]::OpenRead($Path)
+  try {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+      $sha.Dispose()
+    }
+  }
+  finally {
+    $stream.Dispose()
+  }
+}
+
 function New-PortableFileManifest {
   param(
     [string]$PackageRoot,
@@ -94,7 +112,7 @@ function New-PortableFileManifest {
     } |
     ForEach-Object {
       $relative = $_.FullName.Substring($PackageRoot.Length).TrimStart('\\').Replace('\\', '/')
-      $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+      $hash = Get-PortableSha256 -Path $_.FullName
       [ordered]@{
         path = $relative
         sizeBytes = [Int64]$_.Length

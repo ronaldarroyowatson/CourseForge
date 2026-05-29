@@ -199,84 +199,102 @@ export function useAuthBootstrap(): void {
         return;
       }
 
-      let adminClaim = false;
-      try {
-        adminClaim = await getAdminClaim();
-      } catch {
-        adminClaim = false;
-      }
-
-      let claims = {
-        isAdmin: adminClaim,
-        isSchoolAdmin: false,
-        isSuperAdmin: false,
-        schoolId: null as string | null,
-      };
-      try {
-        if (typeof getRoleClaims === "function") {
-          const roleClaims = await getRoleClaims();
-          claims = {
-            isAdmin: roleClaims.isAdmin || adminClaim,
-            isSchoolAdmin: roleClaims.isSchoolAdmin,
-            isSuperAdmin: roleClaims.isSuperAdmin,
-            schoolId: roleClaims.schoolId,
-          };
-        }
-      } catch {
-        claims = {
-          isAdmin: adminClaim,
-          isSchoolAdmin: false,
-          isSuperAdmin: false,
-          schoolId: null,
-        };
-      }
-
-      if (claims.isAdmin || claims.isSchoolAdmin || claims.isSuperAdmin) {
-        try {
-          await user.getIdToken(true);
-        } catch {
-          // Claim refresh is best-effort; the sync path still reports real failures.
-        }
-      }
-
-      if (!isActive) {
-        return;
-      }
-
-      let profileSchoolId: string | null = claims.schoolId;
-      let profileSchoolName: string | null = null;
-      let profileDistrictName: string | null = null;
-      try {
-        const profileSnapshot = await getDoc(doc(firestoreDb, "users", user.uid));
-        const schoolIdField = profileSnapshot.get("schoolId");
-        const schoolNameField = profileSnapshot.get("schoolName");
-        const districtNameField = profileSnapshot.get("districtName");
-        if (typeof schoolIdField === "string" && schoolIdField.trim()) {
-          profileSchoolId = schoolIdField.trim();
-        }
-        if (typeof schoolNameField === "string" && schoolNameField.trim()) {
-          profileSchoolName = schoolNameField.trim();
-        }
-        if (typeof districtNameField === "string" && districtNameField.trim()) {
-          profileDistrictName = districtNameField.trim();
-        }
-      } catch {
-        // Non-critical metadata read.
-      }
-
       useAuthStore.getState().setAuthenticated({
         userId: user.uid,
         userEmail: user.email ?? null,
         userDisplayName: user.displayName ?? null,
-        isAdmin: claims.isAdmin,
-        isSchoolAdmin: claims.isSchoolAdmin,
-        isSuperAdmin: claims.isSuperAdmin,
-        schoolId: profileSchoolId,
-        schoolName: profileSchoolName,
-        districtName: profileDistrictName,
+          isAdmin: false,
+          isSchoolAdmin: false,
+          isSuperAdmin: false,
+          schoolId: null,
+        schoolName: null,
+        districtName: null,
       });
 
-      await syncAuthenticatedUser(user, { allowAdminRetry: claims.isAdmin });
+      void (async () => {
+          let adminClaim = false;
+          try {
+            adminClaim = await getAdminClaim();
+          } catch {
+            adminClaim = false;
+          }
+
+          let claims = {
+            isAdmin: adminClaim,
+            isSchoolAdmin: false,
+            isSuperAdmin: false,
+            schoolId: null as string | null,
+          };
+          try {
+            if (typeof getRoleClaims === "function") {
+              const roleClaims = await getRoleClaims();
+              claims = {
+                isAdmin: roleClaims.isAdmin || adminClaim,
+                isSchoolAdmin: roleClaims.isSchoolAdmin,
+                isSuperAdmin: roleClaims.isSuperAdmin,
+                schoolId: roleClaims.schoolId,
+              };
+            }
+          } catch {
+            claims = {
+              isAdmin: adminClaim,
+              isSchoolAdmin: false,
+              isSuperAdmin: false,
+              schoolId: null,
+            };
+          }
+
+          if (claims.isAdmin || claims.isSchoolAdmin || claims.isSuperAdmin) {
+            try {
+              await user.getIdToken(true);
+            } catch {
+              // Claim refresh is best-effort; the sync path still reports real failures.
+            }
+          }
+
+          if (!isActive) {
+            return;
+          }
+
+          useAuthStore.getState().setAuthenticated({
+            userId: user.uid,
+            userEmail: user.email ?? null,
+            userDisplayName: user.displayName ?? null,
+            isAdmin: claims.isAdmin,
+            isSchoolAdmin: claims.isSchoolAdmin,
+            isSuperAdmin: claims.isSuperAdmin,
+            schoolId: claims.schoolId,
+            schoolName: null,
+            districtName: null,
+          });
+
+        try {
+          const profileSnapshot = await getDoc(doc(firestoreDb, "users", user.uid));
+          const schoolIdField = profileSnapshot.get("schoolId");
+          const schoolNameField = profileSnapshot.get("schoolName");
+          const districtNameField = profileSnapshot.get("districtName");
+
+          if (!isActive) {
+            return;
+          }
+
+          useAuthStore.getState().setAuthenticated({
+            userId: user.uid,
+            userEmail: user.email ?? null,
+            userDisplayName: user.displayName ?? null,
+            isAdmin: claims.isAdmin,
+            isSchoolAdmin: claims.isSchoolAdmin,
+            isSuperAdmin: claims.isSuperAdmin,
+            schoolId: typeof schoolIdField === "string" && schoolIdField.trim() ? schoolIdField.trim() : claims.schoolId,
+            schoolName: typeof schoolNameField === "string" && schoolNameField.trim() ? schoolNameField.trim() : null,
+            districtName: typeof districtNameField === "string" && districtNameField.trim() ? districtNameField.trim() : null,
+          });
+        } catch {
+          // Non-critical metadata read.
+        }
+
+        await syncAuthenticatedUser(user, { allowAdminRetry: claims.isAdmin });
+      })();
     }
 
     void initializePersistentAuth()

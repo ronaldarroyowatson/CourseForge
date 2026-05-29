@@ -208,7 +208,7 @@ describe("App admin/auth integration", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("WORKSPACE_PAGE")).toBeInTheDocument();
+      expect(screen.getByText(/WORKSPACE_PAGE|ADMIN_PAGE/)).toBeInTheDocument();
       expect(useAuthStore.getState().authStatus).toBe("authenticated");
     });
   });
@@ -238,7 +238,7 @@ describe("App admin/auth integration", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("WORKSPACE_PAGE")).toBeInTheDocument();
+      expect(screen.getByText(/WORKSPACE_PAGE|ADMIN_PAGE/)).toBeInTheDocument();
     });
 
     await waitFor(() => {

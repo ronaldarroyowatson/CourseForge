@@ -15,10 +15,25 @@ if (!rootElement) {
 // Warm the shared DB connection at startup so onboarding data can load immediately.
 void initDB();
 
+if (import.meta.env.DEV && typeof window !== "undefined" && "serviceWorker" in navigator) {
+  void navigator.serviceWorker.getRegistrations().then(async (registrations) => {
+    await Promise.all(registrations.map(async (registration) => {
+      await registration.unregister();
+    }));
+
+    if ("caches" in window) {
+      const cacheKeys = await caches.keys();
+      await Promise.all(cacheKeys.map(async (cacheKey) => {
+        await caches.delete(cacheKey);
+      }));
+    }
+  });
+}
+
 const useHashRouter = typeof window !== "undefined" && window.location.protocol === "file:";
 const Router = useHashRouter ? HashRouter : BrowserRouter;
 
-if (typeof window !== "undefined" && window.location.protocol !== "file:" && "serviceWorker" in navigator) {
+if (!import.meta.env.DEV && typeof window !== "undefined" && window.location.protocol !== "file:" && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     void navigator.serviceWorker.register("./sw.js").then((registration) => {
       // Keep registration fresh so updates are discovered quickly.

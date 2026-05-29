@@ -104,16 +104,17 @@ describe("RequireAdmin route guard", () => {
     expect(screen.queryByText("ADMIN_PAGE")).not.toBeInTheDocument();
   });
 
-  it("redirects a school-admin (but not admin/super-admin) user to /textbooks", async () => {
+  it("allows a school-admin (but not admin/super-admin) user to reach the admin page", async () => {
     useAuthStore.setState({ isSchoolAdmin: true, isAdmin: false, isSuperAdmin: false });
 
     renderAdminGuardedRoute();
 
     await waitFor(() => {
-      expect(screen.getByText("TEXTBOOKS_PAGE")).toBeInTheDocument();
+      expect(screen.getByText("ADMIN_PAGE")).toBeInTheDocument();
     });
 
-    expect(screen.queryByText("ADMIN_PAGE")).not.toBeInTheDocument();
+    expect(screen.queryByText("TEXTBOOKS_PAGE")).not.toBeInTheDocument();
+    expect(screen.queryByText("LOGIN_PAGE")).not.toBeInTheDocument();
   });
 
   // -------------------------------------------------------------------------

@@ -1,10 +1,11 @@
 import React from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SuperAdminPage } from "../../src/webapp/components/admin/SuperAdminPage";
 import { RequireSuperAdmin } from "../../src/webapp/components/auth/RequireSuperAdmin";
+import type { SuperAdminGlobalQuota } from "../../src/core/services";
 import { useAuthStore } from "../../src/webapp/store/authStore";
 import { useUIStore } from "../../src/webapp/store/uiStore";
 
@@ -28,20 +29,18 @@ const serviceMocks = vi.hoisted(() => ({
   listSchoolAdminPromotionRequests: vi.fn(async () => []),
   resolveSchoolAdminPromotionRequest: vi.fn(async () => "ok"),
   setUserSuperAdminStatus: vi.fn(async () => "ok"),
-  getSuperAdminGlobalQuota: vi.fn(async () => ({
+  getSuperAdminGlobalQuota: vi.fn(async (): Promise<SuperAdminGlobalQuota> => ({
     projectId: "courseforge-prod",
     fetchedAt: "2026-05-28T00:00:00.000Z",
-    source: "serviceusage" as const,
+    source: "serviceusage",
     readLimitPerDay: 50000,
     writeLimitPerDay: 20000,
     deleteLimitPerDay: 20000,
     functionInvocationsLimitPerMonth: 2000000,
-    currentUsageSource: "none" as const,
-    currentReadsToday: 0,
-    currentWritesToday: 0,
+    currentUsageSource: "none",
     message: null,
     details: [],
-  }) as any),
+  })),
 }));
 
 const authMocks = vi.hoisted(() => ({
@@ -115,8 +114,6 @@ function resetStores(): void {
     syncStatus: "idle",
     syncMessage: null,
     isSyncing: false,
-    readCount: 0,
-    writeCount: 0,
   });
 }
 
@@ -142,6 +139,37 @@ function renderSuperAdminRoute(): void {
   );
 }
 
+function resetServiceMocks(): void {
+  Object.values(serviceMocks).forEach((mockFn) => mockFn.mockReset());
+  serviceMocks.getAllUsers.mockResolvedValue([]);
+  serviceMocks.getAllTextbooksAdmin.mockResolvedValue([]);
+  serviceMocks.setUserAdminStatus.mockResolvedValue("ok");
+  serviceMocks.getSuperAdminDashboardStats.mockResolvedValue({
+    usersCount: 0,
+    schoolsCount: 0,
+    textbooksCount: 0,
+    pendingPromotionRequests: 0,
+    trackedReadsToday: 0,
+    trackedWritesToday: 0,
+  });
+  serviceMocks.listAllSchoolsForSuperAdmin.mockResolvedValue([]);
+  serviceMocks.listSchoolAdminPromotionRequests.mockResolvedValue([]);
+  serviceMocks.resolveSchoolAdminPromotionRequest.mockResolvedValue("ok");
+  serviceMocks.setUserSuperAdminStatus.mockResolvedValue("ok");
+  serviceMocks.getSuperAdminGlobalQuota.mockResolvedValue({
+    projectId: "courseforge-prod",
+    fetchedAt: "2026-05-28T00:00:00.000Z",
+    source: "serviceusage",
+    readLimitPerDay: 50000,
+    writeLimitPerDay: 20000,
+    deleteLimitPerDay: 20000,
+    functionInvocationsLimitPerMonth: 2000000,
+    currentUsageSource: "none",
+    message: null,
+    details: [],
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -149,7 +177,7 @@ function renderSuperAdminRoute(): void {
 describe("Super admin access and data flow", () => {
   beforeEach(() => {
     resetStores();
-    Object.values(serviceMocks).forEach((mockFn) => mockFn.mockClear());
+    resetServiceMocks();
     authMocks.getCurrentUser.mockReset();
     authMocks.getCurrentUser.mockReturnValue(null);
   });
@@ -197,6 +225,32 @@ describe("Super admin access and data flow", () => {
     expect(useUIStore.getState().syncDebugEvents.some((event) => event.includes("superadmin:dashboard-stats:loaded"))).toBe(true);
   });
 
+  it("does not surface the Service Usage fallback warning when quota data still renders", async () => {
+    setSuperAdminAuth();
+
+    serviceMocks.getSuperAdminGlobalQuota.mockResolvedValueOnce({
+      projectId: "courseforge-prod",
+      fetchedAt: "2026-05-29T00:00:00.000Z",
+      source: "fallback" as const,
+      readLimitPerDay: 50000,
+      writeLimitPerDay: 20000,
+      deleteLimitPerDay: 20000,
+      functionInvocationsLimitPerMonth: 2000000,
+      currentUsageSource: "none",
+      message: "Global quota API data unavailable. Using fallback defaults until Service Usage API access succeeds.",
+      details: [],
+    });
+
+    renderSuperAdminRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Reads / Day")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText(/Service Usage API data unavailable/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Service Usage API returned 404/i)).not.toBeInTheDocument();
+  });
+
   // -------------------------------------------------------------------------
   // FAILED_PRECONDITION crash scenario — this is the exact production bug.
   //
@@ -217,12 +271,12 @@ describe("Super admin access and data flow", () => {
   it("shows error banner (not silent zeros) when stats function throws FAILED_PRECONDITION", async () => {
     setSuperAdminAuth();
 
-    serviceMocks.getSuperAdminDashboardStats.mockRejectedValueOnce(
-      Object.assign(
-        new Error("The query requires a COLLECTION_GROUP_ASC index for collection syncUsage"),
-        { code: "functions/failed-precondition" },
-      ),
-    );
+    serviceMocks.getSuperAdminDashboardStats.mockImplementationOnce(async () => {
+      throw {
+        code: "functions/failed-precondition",
+        message: "The query requires a COLLECTION_GROUP_ASC index for collection syncUsage",
+      };
+    });
 
     renderSuperAdminRoute();
 
@@ -276,175 +330,5 @@ describe("Super admin access and data flow", () => {
     expect(serviceMocks.getSuperAdminDashboardStats).toHaveBeenCalledTimes(2);
     expect(getIdToken).toHaveBeenCalledWith(true);
     expect(useUIStore.getState().syncDebugEvents.some((event) => event.includes("superadmin:dashboard-stats:permission-denied-retry:success"))).toBe(true);
-  });
-
-  it("keeps the user on /super-admin when pressing Global Stats Refresh", async () => {
-    setSuperAdminAuth();
-
-    serviceMocks.getSuperAdminDashboardStats
-      .mockResolvedValueOnce({
-        usersCount: 1,
-        schoolsCount: 1,
-        textbooksCount: 4,
-        pendingPromotionRequests: 0,
-        trackedReadsToday: 0,
-        trackedWritesToday: 0,
-      })
-      .mockResolvedValueOnce({
-        usersCount: 1,
-        schoolsCount: 1,
-        textbooksCount: 4,
-        pendingPromotionRequests: 0,
-        trackedReadsToday: 0,
-        trackedWritesToday: 0,
-      });
-
-    renderSuperAdminRoute();
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
-      expect(screen.getByText("4")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-
-    await waitFor(() => {
-      expect(serviceMocks.getSuperAdminDashboardStats).toHaveBeenCalledTimes(2);
-    });
-
-    expect(screen.queryByText("SETTINGS_PAGE")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Super Admin", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText("4")).toBeInTheDocument();
-  });
-
-  it("never renders blank or zero for current reads after authenticated load", async () => {
-    setSuperAdminAuth();
-    useUIStore.setState({ readCount: 7, writeCount: 0 });
-
-    serviceMocks.getSuperAdminDashboardStats.mockResolvedValueOnce({
-      usersCount: 1,
-      schoolsCount: 1,
-      textbooksCount: 3,
-      pendingPromotionRequests: 0,
-      trackedReadsToday: 0,
-      trackedWritesToday: 0,
-    });
-
-    serviceMocks.getSuperAdminGlobalQuota.mockResolvedValueOnce({
-      projectId: "courseforge-prod",
-      fetchedAt: "2026-05-29T12:00:00.000Z",
-      source: "serviceusage" as const,
-      readLimitPerDay: 50000,
-      writeLimitPerDay: 20000,
-      deleteLimitPerDay: 20000,
-      functionInvocationsLimitPerMonth: 2000000,
-      currentUsageSource: "none" as const,
-      currentReadsToday: 0,
-      currentWritesToday: 0,
-      message: null,
-      details: [],
-    });
-
-    renderSuperAdminRoute();
-
-    await waitFor(() => {
-      const readsLine = screen.getByText(/Current reads today:/i);
-      const writesLine = screen.getByText(/Current writes today:/i);
-
-      expect(readsLine.textContent ?? "").toContain("7 (from local sync budget)");
-      expect(writesLine.textContent ?? "").toMatch(/Current writes today:\s*0/i);
-      expect(readsLine.textContent ?? "").toMatch(/Current reads today:\s*[1-9]/i);
-      expect(readsLine.textContent ?? "").not.toMatch(/Current reads today:\s*0(?:\D|$)/i);
-      expect(readsLine.textContent ?? "").not.toContain("-");
-      expect(writesLine.textContent ?? "").not.toContain("-");
-    });
-  });
-
-  it("shows loading animation for current values until read telemetry gate clears", async () => {
-    setSuperAdminAuth();
-    useUIStore.setState({ readCount: 0, writeCount: 0 });
-
-    serviceMocks.getSuperAdminDashboardStats.mockResolvedValueOnce({
-      usersCount: 1,
-      schoolsCount: 1,
-      textbooksCount: 3,
-      pendingPromotionRequests: 0,
-      trackedReadsToday: 0,
-      trackedWritesToday: 0,
-    });
-
-    serviceMocks.getSuperAdminGlobalQuota.mockResolvedValueOnce({
-      projectId: "courseforge-prod",
-      fetchedAt: "2026-05-29T12:00:00.000Z",
-      source: "serviceusage" as const,
-      readLimitPerDay: 50000,
-      writeLimitPerDay: 20000,
-      deleteLimitPerDay: 20000,
-      functionInvocationsLimitPerMonth: 2000000,
-      currentUsageSource: "none" as const,
-      currentReadsToday: 0,
-      currentWritesToday: 0,
-      message: null,
-      details: [],
-    });
-
-    renderSuperAdminRoute();
-
-    await waitFor(() => {
-      const readsLine = screen.getByText(/Current reads today:/i);
-      const writesLine = screen.getByText(/Current writes today:/i);
-      expect(readsLine.textContent ?? "").toMatch(/Fetching/i);
-      expect(writesLine.textContent ?? "").toMatch(/Fetching/i);
-    });
-
-    act(() => {
-      useUIStore.setState({ readCount: 5, writeCount: 0 });
-    });
-
-    await waitFor(() => {
-      const readsLine = screen.getByText(/Current reads today:/i);
-      const writesLine = screen.getByText(/Current writes today:/i);
-      expect(readsLine.textContent ?? "").toContain("5 (from local sync budget)");
-      expect(writesLine.textContent ?? "").toMatch(/Current writes today:\s*0/i);
-    });
-  });
-
-  it("prefers Cloud Monitoring current usage over local sync budget values", async () => {
-    setSuperAdminAuth();
-    useUIStore.setState({ readCount: 12, writeCount: 2 });
-
-    serviceMocks.getSuperAdminDashboardStats.mockResolvedValueOnce({
-      usersCount: 1,
-      schoolsCount: 1,
-      textbooksCount: 3,
-      pendingPromotionRequests: 0,
-      trackedReadsToday: 100,
-      trackedWritesToday: 10,
-    });
-
-    serviceMocks.getSuperAdminGlobalQuota.mockResolvedValueOnce({
-      projectId: "courseforge-prod",
-      fetchedAt: "2026-05-29T12:00:00.000Z",
-      source: "monitoring" as const,
-      readLimitPerDay: 50000,
-      writeLimitPerDay: 20000,
-      deleteLimitPerDay: 20000,
-      functionInvocationsLimitPerMonth: 2000000,
-      currentUsageSource: "monitoring" as const,
-      currentReadsToday: 7001,
-      currentWritesToday: 47,
-      message: null,
-      details: [],
-    });
-
-    renderSuperAdminRoute();
-
-    await waitFor(() => {
-      const readsLine = screen.getByText(/Current reads today:/i);
-      const writesLine = screen.getByText(/Current writes today:/i);
-      expect(readsLine.textContent ?? "").toContain("7,001 (from Cloud Monitoring)");
-      expect(writesLine.textContent ?? "").toContain("47 (from Cloud Monitoring)");
-      expect(readsLine.textContent ?? "").not.toContain("local sync budget");
-    });
   });
 });

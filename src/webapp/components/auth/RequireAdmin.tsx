@@ -12,6 +12,7 @@ export function RequireAdmin(): React.JSX.Element {
   const authStatus = useAuthStore((state) => state.authStatus);
   const isAdmin = useAuthStore((state) => state.isAdmin);
   const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
+  const isSchoolAdmin = useAuthStore((state) => state.isSchoolAdmin);
 
   if (authStatus === "loading") {
     return <section className="placeholder-panel"><p>Checking admin access...</p></section>;
@@ -21,7 +22,7 @@ export function RequireAdmin(): React.JSX.Element {
     return <Navigate to="/login" replace />;
   }
 
-  if (!isAdmin && !isSuperAdmin) {
+  if (!isAdmin && !isSuperAdmin && !isSchoolAdmin) {
     return <Navigate to="/textbooks" replace />;
   }
 

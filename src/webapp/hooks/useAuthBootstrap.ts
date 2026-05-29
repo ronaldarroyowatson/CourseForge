@@ -114,11 +114,13 @@ export function useAuthBootstrap(): void {
         }
 
         const uiStore = useUIStore.getState();
+        const isSuperAdmin = useAuthStore.getState().isSuperAdmin;
         uiStore.setSyncStatus("syncing", "Syncing your local and cloud data.");
 
         try {
           const syncResult = await syncNow({
             getCurrentUserFn: () => user,
+            superAdminSyncBypass: isSuperAdmin,
           });
 
           if (!isActive) {
@@ -156,7 +158,7 @@ export function useAuthBootstrap(): void {
             uiStore.setLastSyncErrorCode(syncResult.errorCode);
           }
 
-          if (syncResult.permissionDenied) {
+          if (syncResult.permissionDenied && !isSuperAdmin) {
             uiStore.setPermissionDeniedSyncBlocked(true);
           }
 

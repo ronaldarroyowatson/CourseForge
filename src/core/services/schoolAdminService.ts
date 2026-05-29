@@ -178,8 +178,12 @@ export async function resolveSchoolAdminPromotionRequest(input: {
   return callFunction<typeof input, string>("resolveSchoolAdminPromotionRequest", input);
 }
 
-export async function setUserSuperAdminStatus(uid: string, isSuperAdmin: boolean): Promise<string> {
-  return callFunction<{ uid: string; isSuperAdmin: boolean }, string>("setUserSuperAdminStatus", { uid, isSuperAdmin });
+export async function setUserSuperAdminStatus(uid: string, isSuperAdmin: boolean, transferToUid?: string): Promise<string> {
+  return callFunction<{ uid: string; isSuperAdmin: boolean; transferToUid?: string }, string>("setUserSuperAdminStatus", {
+    uid,
+    isSuperAdmin,
+    transferToUid,
+  });
 }
 
 export async function listAllSchoolsForSuperAdmin(): Promise<SchoolDirectoryRow[]> {

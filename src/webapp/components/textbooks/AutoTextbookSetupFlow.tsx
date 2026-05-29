@@ -49,6 +49,7 @@ import { syncNow } from "../../../core/services/syncService";
 import { TocPreviewTree } from "./tocPreview/TocPreviewTree";
 import type { TocPreviewNodeModel } from "./tocPreview/PageRangeCalculator";
 import { useRepositories } from "../../hooks/useRepositories";
+import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 import { t as translate } from "../../../core/services/i18nService";
 import { captureVisibleChromeTab, isChromeOSRuntime, isSmallChromebookViewport } from "../../utils/platform";
@@ -941,6 +942,7 @@ function buildExtractionFieldList(meta: AutoTextbookMetadata): string[] {
 
 export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToManual, testingSeedState }: AutoTextbookSetupFlowProps): React.JSX.Element {
   const language = useUIStore((state) => state.language);
+  const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
   const chromeOs = useMemo(() => runtime === "extension" && isChromeOSRuntime(), [runtime]);
   const compactChromeLayout = useMemo(() => chromeOs && isSmallChromebookViewport(), [chromeOs]);
   const {
@@ -2736,7 +2738,7 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
           try {
             const runImmediateSyncAttempt = async () => {
               return Promise.race([
-                syncNow(),
+                syncNow({ superAdminSyncBypass: isSuperAdmin }),
                 new Promise<null>((resolve) => {
                   setTimeout(() => resolve(null), IMMEDIATE_UPLOAD_SYNC_TIMEOUT_MS);
                 }),

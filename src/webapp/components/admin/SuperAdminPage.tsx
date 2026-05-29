@@ -19,6 +19,10 @@ import {
 import { getCurrentUser } from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
+import { StatCard } from "./infographics/StatCard";
+import { ProgressRing } from "./infographics/ProgressRing";
+import { CountdownBadge } from "./infographics/CountdownBadge";
+import { SkeletonBlock } from "./infographics/SkeletonBlock";
 
 interface SuperAdminPageProps {
   onBack: () => void;
@@ -71,14 +75,14 @@ function formatCountdown(totalSeconds: number): string {
   return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
 }
 
-function usePacificMidnightCountdown(): string {
+function usePacificMidnightCountdown(): { secondsLeft: number; timeString: string } {
   const [secondsLeft, setSecondsLeft] = React.useState(getSecondsUntilPacificMidnight);
   React.useEffect(() => {
     const tick = (): void => { setSecondsLeft(getSecondsUntilPacificMidnight()); };
     const id = window.setInterval(tick, 1000);
     return () => { window.clearInterval(id); };
   }, []);
-  return formatCountdown(secondsLeft);
+  return { secondsLeft, timeString: formatCountdown(secondsLeft) };
 }
 
 function parsePositiveIntegerInput(value: string): number | null {
@@ -97,6 +101,12 @@ function parsePositiveIntegerInput(value: string): number | null {
 
 function formatInputNumber(value: number | null | undefined): string {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+}
+
+function getNumericInputWidth(value: number | null | undefined, minimumDigits = 7): string {
+  const digitCount = formatInputNumber(value).length;
+  const widthDigits = Math.max(minimumDigits, digitCount || minimumDigits);
+  return `${widthDigits + 1}ch`;
 }
 
 function isPermissionDeniedError(error: unknown): boolean {
@@ -165,6 +175,7 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
   const [promotions, setPromotions] = React.useState<PromotionRequestRow[]>([]);
   const [stats, setStats] = React.useState<SuperAdminDashboardStats | null>(null);
   const [globalQuota, setGlobalQuota] = React.useState<SuperAdminGlobalQuota | null>(null);
+  const [showManualOverrides, setShowManualOverrides] = React.useState(false);
   const [quotaOverrides, setQuotaOverrides] = React.useState<SuperAdminQuotaOverrides>(() => {
     if (typeof window === "undefined") {
       return {
@@ -208,7 +219,6 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
   const [isLoading, setIsLoading] = React.useState(false);
   const [hasLoadedOnce, setHasLoadedOnce] = React.useState(false);
   const [isCurrentUsageGateOpen, setIsCurrentUsageGateOpen] = React.useState(false);
-  const [currentUsageLoadingFrame, setCurrentUsageLoadingFrame] = React.useState(0);
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<string | null>(null);
@@ -443,51 +453,6 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
     };
   }, [addSyncDebugEvent, hasLoadedOnce, resolvedCurrentReads?.value]);
 
-  React.useEffect(() => {
-    if (isCurrentUsageGateOpen) {
-      setCurrentUsageLoadingFrame(0);
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      setCurrentUsageLoadingFrame((frame) => (frame + 1) % 4);
-    }, 300);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [isCurrentUsageGateOpen]);
-
-  function formatCurrentUsageDisplay(currentValue: CurrentUsageValue | null): string {
-    if (!isCurrentUsageGateOpen) {
-      return `Fetching${".".repeat(currentUsageLoadingFrame + 1)}`;
-    }
-
-    if (!currentValue) {
-      return "-";
-    }
-
-    if (currentValue.source === "monitoring") {
-      return `${currentValue.value.toLocaleString()} (from Cloud Monitoring)`;
-    }
-
-    if (currentValue.source === "quota") {
-      return currentValue.value.toLocaleString();
-    }
-
-    if (currentValue.source === "sync-usage") {
-      return `${currentValue.value.toLocaleString()} (from backend sync telemetry)`;
-    }
-
-    if (currentValue.source === "stats") {
-      return `${currentValue.value.toLocaleString()} (from stats)`;
-    }
-
-    return `${currentValue.value.toLocaleString()} (from local sync budget)`;
-  }
-
-  const quotaCurrentReadsDisplay = formatCurrentUsageDisplay(resolvedCurrentReads);
-  const quotaCurrentWritesDisplay = formatCurrentUsageDisplay(resolvedCurrentWrites);
   const showReadTelemetryWarning = isCurrentUsageGateOpen && (resolvedCurrentReads?.value ?? 0) <= 0;
 
   async function handlePromotionResolution(requestId: string, approve: boolean): Promise<void> {
@@ -505,6 +470,15 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
   }
 
   async function handleAdminToggle(uid: string, isAdmin: boolean): Promise<void> {
+    const targetUser = users.find((user) => user.uid === uid);
+    const targetLabel = targetUser?.email || uid;
+    if (!isAdmin) {
+      const confirmed = window.confirm(`Revoke admin access for ${targetLabel}?`);
+      if (!confirmed) {
+        return;
+      }
+    }
+
     setIsSaving(true);
     setError(null);
     try {
@@ -519,10 +493,46 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
   }
 
   async function handleSuperAdminToggle(uid: string, isSuperAdmin: boolean): Promise<void> {
+    const targetUser = users.find((user) => user.uid === uid);
+    const targetLabel = targetUser?.email || uid;
+
+    let transferToUid: string | undefined;
+    if (!isSuperAdmin) {
+      const candidates = users.filter((user) => user.uid !== uid);
+      if (candidates.length === 0) {
+        setError("Unable to transfer super admin: no other users are available.");
+        return;
+      }
+
+      const candidateList = candidates
+        .map((user) => `${user.email} (${user.uid})`)
+        .join("\n");
+      const input = window.prompt(
+        `Transfer super admin from ${targetLabel} to which user UID?\n\n${candidateList}\n\nEnter target UID:`
+      );
+      if (input === null) {
+        return;
+      }
+
+      const nextUid = input.trim();
+      const transferTarget = candidates.find((user) => user.uid === nextUid);
+      if (!transferTarget) {
+        setError("Transfer target must be a valid user UID listed in the table.");
+        return;
+      }
+
+      const confirmed = window.confirm(`Transfer super admin from ${targetLabel} to ${transferTarget.email}?`);
+      if (!confirmed) {
+        return;
+      }
+
+      transferToUid = transferTarget.uid;
+    }
+
     setIsSaving(true);
     setError(null);
     try {
-      const message = await setUserSuperAdminStatus(uid, isSuperAdmin);
+      const message = await setUserSuperAdminStatus(uid, isSuperAdmin, transferToUid);
       setStatus(message);
       await loadAll();
     } catch (err) {
@@ -539,123 +549,284 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
           <button type="button" onClick={onBack} className="btn-secondary admin-back-btn">← Back to App</button>
           <h1 className="admin-title">Super Admin</h1>
         </div>
-        <p className="admin-user-label">Signed in as {currentUserEmail ?? "super admin"}</p>
+        {!hasLoadedOnce ? (
+          <SkeletonBlock width="160px" height="18px" />
+        ) : (
+          <p className="admin-user-label">Signed in as {currentUserEmail ?? "super admin"}</p>
+        )}
       </header>
 
+      {!hasLoadedOnce && isLoading ? (
+        <div className="cf-page-skeleton">
+          <div className="cf-page-skeleton__section">
+            <div className="cf-stats-grid">
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <SkeletonBlock key={i} height="96px" borderRadius="10px" />
+              ))}
+            </div>
+          </div>
+          <SkeletonBlock height="300px" borderRadius="8px" className=" cf-page-skeleton__section" />
+          <SkeletonBlock height="160px" borderRadius="8px" className=" cf-page-skeleton__section" />
+          <SkeletonBlock height="200px" borderRadius="8px" className=" cf-page-skeleton__section" />
+          <SkeletonBlock height="200px" borderRadius="8px" className=" cf-page-skeleton__section" />
+        </div>
+      ) : (
+        <>
       <section className="admin-section">
         <div className="admin-section__header">
           <h3>Global Stats</h3>
           <button type="button" className="btn-secondary" onClick={() => { void loadAll(); }} disabled={isLoading}>
-            {isLoading ? "Loading..." : "Refresh"}
+            {isLoading ? "Loading…" : "Refresh"}
           </button>
         </div>
-        <div className="metadata-training-grid">
-          <p className="settings-meta">Users: <strong>{stats?.usersCount ?? 0}</strong></p>
-          <p className="settings-meta">Schools: <strong>{stats?.schoolsCount ?? 0}</strong></p>
-          <p className="settings-meta">Textbooks: <strong>{stats?.textbooksCount ?? 0}</strong></p>
-          <p className="settings-meta">Pending promotions: <strong>{stats?.pendingPromotionRequests ?? 0}</strong></p>
-          <p className="settings-meta">Tracked reads today: <strong>{stats?.trackedReadsToday ?? 0}</strong></p>
-          <p className="settings-meta">Tracked writes today: <strong>{stats?.trackedWritesToday ?? 0}</strong></p>
+        <div className="cf-stats-grid">
+          <StatCard
+            error={hasLoadedOnce && stats === null}
+            icon={
+              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+                <path d="M10 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-7 9a7 7 0 1 1 14 0H3Z" />
+              </svg>
+            }
+            label="Total Users"
+            value={stats?.usersCount}
+            accentColor="var(--cf-accent)"
+          />
+          <StatCard
+            error={hasLoadedOnce && stats === null}
+            icon={
+              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+                <path fillRule="evenodd" d="M4 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12H4V4Zm2 0v12h8V4H6Zm1 2h2v2H7V6Zm4 0h2v2h-2V6ZM7 10h2v2H7v-2Zm4 0h2v2h-2v-2Z" clipRule="evenodd" />
+              </svg>
+            }
+            label="Total Schools"
+            value={stats?.schoolsCount}
+            accentColor="hsl(210, 80%, 52%)"
+          />
+          <StatCard
+            error={hasLoadedOnce && stats === null}
+            icon={
+              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+                <path d="M9 4.804A7.968 7.968 0 0 0 5.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 0 1 5.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0 1 14.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0 0 14.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 1 1-2 0V4.804Z" />
+              </svg>
+            }
+            label="Total Textbooks"
+            value={stats?.textbooksCount}
+            accentColor="hsl(260, 72%, 55%)"
+          />
+          <StatCard
+            error={hasLoadedOnce && stats === null}
+            icon={
+              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+                <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
+              </svg>
+            }
+            label="Pending Promotions"
+            value={stats?.pendingPromotionRequests}
+            accentColor={
+              (stats?.pendingPromotionRequests ?? 0) > 0 ? "var(--cf-warning)" : "var(--cf-success)"
+            }
+          />
+          <StatCard
+            error={hasLoadedOnce && stats === null}
+            icon={
+              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+                <path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+                <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 0 1 0-1.186A10.004 10.004 0 0 1 10 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0 1 10 17c-4.257 0-7.893-2.66-9.336-6.41Z" clipRule="evenodd" />
+              </svg>
+            }
+            label="Tracked Reads Today"
+            value={resolvedCurrentReads?.value}
+            loading={!hasLoadedOnce || !isCurrentUsageGateOpen}
+            accentColor="hsl(190, 78%, 45%)"
+          />
+          <StatCard
+            error={hasLoadedOnce && stats === null}
+            icon={
+              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+                <path d="M2.695 14.763l-1.262 3.154a.5.5 0 0 0 .65.65l3.155-1.262a4 4 0 0 0 1.343-.885L17.5 5.5a2.121 2.121 0 0 0-3-3L3.58 13.42a4 4 0 0 0-.885 1.343Z" />
+              </svg>
+            }
+            label="Tracked Writes Today"
+            value={resolvedCurrentWrites?.value}
+            loading={!hasLoadedOnce || !isCurrentUsageGateOpen}
+            accentColor="hsl(30, 82%, 52%)"
+          />
         </div>
       </section>
 
       <section className="admin-section">
         <div className="admin-section__header">
           <h3>Global Firestore Quota (Super Admin)</h3>
-          <span className="admin-note" style={{ margin: 0, fontVariantNumeric: "tabular-nums" }}>
-            Daily reset in <strong>{pacificResetCountdown}</strong> (midnight Pacific Time)
-          </span>
         </div>
-        <div className="metadata-training-grid">
-          <p className="settings-meta">Source: <strong>{globalQuota?.source ?? "fallback"}</strong></p>
-          <p className="settings-meta">Project: <strong>{globalQuota?.projectId || "courseforge-prod"}</strong></p>
-          <p className="settings-meta">Read limit/day: <strong>{effectiveReadLimitPerDay.toLocaleString()}</strong></p>
-          <p className="settings-meta">Write limit/day: <strong>{effectiveWriteLimitPerDay.toLocaleString()}</strong></p>
-          <p className="settings-meta">Delete limit/day: <strong>{effectiveDeleteLimitPerDay.toLocaleString()}</strong></p>
-          <p className="settings-meta">Functions invocations/month: <strong>{effectiveFunctionInvocationsLimitPerMonth.toLocaleString()}</strong></p>
-          <p className="settings-meta">Current reads today: <strong>{quotaCurrentReadsDisplay}</strong></p>
-          <p className="settings-meta">Current writes today: <strong>{quotaCurrentWritesDisplay}</strong></p>
-          <p className="settings-meta">Fetched at: <strong>{globalQuota?.fetchedAt ? new Date(globalQuota.fetchedAt).toLocaleString() : "-"}</strong></p>
+        <div className="cf-quota-dashboard">
+          {/* ── Left column: countdown + metadata + overrides ── */}
+          <div className="cf-quota-left">
+            <CountdownBadge
+              secondsLeft={pacificResetCountdown.secondsLeft}
+              timeString={pacificResetCountdown.timeString}
+              loading={!hasLoadedOnce}
+            />
+
+            {hasLoadedOnce ? (
+              <div className="cf-quota-meta-row">
+                <span>Project: <strong>{globalQuota?.projectId || "courseforge-prod"}</strong></span>
+                <span>Source: <strong>{globalQuota?.source ?? "fallback"}</strong></span>
+                {globalQuota?.fetchedAt ? (
+                  <span>Fetched: <strong>{new Date(globalQuota.fetchedAt).toLocaleString()}</strong></span>
+                ) : null}
+              </div>
+            ) : (
+              <SkeletonBlock height="52px" borderRadius="8px" />
+            )}
+
+            <div className={`cf-quota-overrides${showManualOverrides ? "" : " cf-quota-overrides--collapsed"}`}>
+              <div className="cf-quota-overrides__header">
+                <p className="cf-quota-overrides__title">Manual Overrides</p>
+                <button
+                  type="button"
+                  className="btn-secondary cf-quota-overrides__toggle"
+                  onClick={() => { setShowManualOverrides((current) => !current); }}
+                >
+                  {showManualOverrides ? "Hide" : "Unhide"}
+                </button>
+              </div>
+              {!showManualOverrides ? (
+                <p className="cf-quota-overrides__collapsed-note">
+                  Hidden by default. Use Unhide to edit limits or reset overrides.
+                </p>
+              ) : !hasLoadedOnce ? (
+                <div style={{ display: "grid", gap: "0.55rem" }}>
+                  <SkeletonBlock height="52px" borderRadius="6px" />
+                  <SkeletonBlock height="52px" borderRadius="6px" />
+                  <SkeletonBlock height="52px" borderRadius="6px" />
+                  <SkeletonBlock height="52px" borderRadius="6px" />
+                </div>
+              ) : (
+                <div className="cf-quota-overrides__grid">
+                  <div className="cf-quota-overrides__field">
+                    <label htmlFor="cf-override-reads">Read limit / day</label>
+                    <input
+                      id="cf-override-reads"
+                      type="number"
+                      min={1}
+                      disabled={isSaving}
+                      style={{ width: getNumericInputWidth(quotaOverrides.readLimitPerDay) }}
+                      value={formatInputNumber(quotaOverrides.readLimitPerDay)}
+                      onChange={(event) => {
+                        const next = parsePositiveIntegerInput(event.target.value);
+                        setQuotaOverrides((current) => ({ ...current, readLimitPerDay: next }));
+                      }}
+                      placeholder={String(globalQuota?.readLimitPerDay ?? DEFAULT_GLOBAL_READ_LIMIT_PER_DAY)}
+                    />
+                  </div>
+                  <div className="cf-quota-overrides__field">
+                    <label htmlFor="cf-override-writes">Write limit / day</label>
+                    <input
+                      id="cf-override-writes"
+                      type="number"
+                      min={1}
+                      disabled={isSaving}
+                      style={{ width: getNumericInputWidth(quotaOverrides.writeLimitPerDay) }}
+                      value={formatInputNumber(quotaOverrides.writeLimitPerDay)}
+                      onChange={(event) => {
+                        const next = parsePositiveIntegerInput(event.target.value);
+                        setQuotaOverrides((current) => ({ ...current, writeLimitPerDay: next }));
+                      }}
+                      placeholder={String(globalQuota?.writeLimitPerDay ?? DEFAULT_GLOBAL_WRITE_LIMIT_PER_DAY)}
+                    />
+                  </div>
+                  <div className="cf-quota-overrides__field">
+                    <label htmlFor="cf-override-deletes">Delete limit / day</label>
+                    <input
+                      id="cf-override-deletes"
+                      type="number"
+                      min={1}
+                      disabled={isSaving}
+                      style={{ width: getNumericInputWidth(quotaOverrides.deleteLimitPerDay) }}
+                      value={formatInputNumber(quotaOverrides.deleteLimitPerDay)}
+                      onChange={(event) => {
+                        const next = parsePositiveIntegerInput(event.target.value);
+                        setQuotaOverrides((current) => ({ ...current, deleteLimitPerDay: next }));
+                      }}
+                      placeholder={String(globalQuota?.deleteLimitPerDay ?? DEFAULT_GLOBAL_DELETE_LIMIT_PER_DAY)}
+                    />
+                  </div>
+                  <div className="cf-quota-overrides__field">
+                    <label htmlFor="cf-override-functions">Functions invocations / month</label>
+                    <input
+                      id="cf-override-functions"
+                      type="number"
+                      min={1}
+                      disabled={isSaving}
+                      style={{ width: getNumericInputWidth(quotaOverrides.functionInvocationsLimitPerMonth) }}
+                      value={formatInputNumber(quotaOverrides.functionInvocationsLimitPerMonth)}
+                      onChange={(event) => {
+                        const next = parsePositiveIntegerInput(event.target.value);
+                        setQuotaOverrides((current) => ({ ...current, functionInvocationsLimitPerMonth: next }));
+                      }}
+                      placeholder={String(globalQuota?.functionInvocationsLimitPerMonth ?? DEFAULT_GLOBAL_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH)}
+                    />
+                  </div>
+                  <div className="cf-quota-overrides__actions">
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      disabled={isSaving}
+                      onClick={() => {
+                        setQuotaOverrides({
+                          readLimitPerDay: null,
+                          writeLimitPerDay: null,
+                          deleteLimitPerDay: null,
+                          functionInvocationsLimitPerMonth: null,
+                        });
+                        setStatus("Quota overrides reset to API/fallback defaults.");
+                      }}
+                    >
+                      Reset Overrides
+                    </button>
+                    <p className="admin-note" style={{ margin: 0, fontSize: "0.78rem" }}>
+                      Leave blank to use live API value or fallback default. Saved locally on this device.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {showReadTelemetryWarning ? (
+              <p className="error-text">Read telemetry is still 0 after load. Live read usage did not hydrate correctly.</p>
+            ) : null}
+          </div>
+
+          {/* ── Right column: 4 progress rings ── */}
+          <div className="cf-quota-rings-grid">
+            <ProgressRing
+              value={resolvedCurrentReads?.value ?? 0}
+              max={effectiveReadLimitPerDay}
+              label="Reads / Day"
+              sublabel={isCurrentUsageGateOpen ? resolvedCurrentReads?.source : undefined}
+              loading={!hasLoadedOnce || !isCurrentUsageGateOpen}
+            />
+            <ProgressRing
+              value={resolvedCurrentWrites?.value ?? 0}
+              max={effectiveWriteLimitPerDay}
+              label="Writes / Day"
+              sublabel={isCurrentUsageGateOpen ? resolvedCurrentWrites?.source : undefined}
+              loading={!hasLoadedOnce || !isCurrentUsageGateOpen}
+            />
+            <ProgressRing
+              value={0}
+              max={effectiveDeleteLimitPerDay}
+              label="Deletes / Day"
+              loading={!hasLoadedOnce}
+            />
+            <ProgressRing
+              value={0}
+              max={effectiveFunctionInvocationsLimitPerMonth}
+              label="Functions / Month"
+              loading={!hasLoadedOnce}
+            />
+          </div>
         </div>
-        <div className="admin-filter-bar" style={{ marginTop: "0.75rem" }}>
-          <label>
-            Read limit/day
-            <input
-              type="number"
-              min={1}
-              value={formatInputNumber(quotaOverrides.readLimitPerDay)}
-              onChange={(event) => {
-                const next = parsePositiveIntegerInput(event.target.value);
-                setQuotaOverrides((current) => ({ ...current, readLimitPerDay: next }));
-              }}
-              placeholder={String(globalQuota?.readLimitPerDay ?? DEFAULT_GLOBAL_READ_LIMIT_PER_DAY)}
-            />
-          </label>
-          <label>
-            Write limit/day
-            <input
-              type="number"
-              min={1}
-              value={formatInputNumber(quotaOverrides.writeLimitPerDay)}
-              onChange={(event) => {
-                const next = parsePositiveIntegerInput(event.target.value);
-                setQuotaOverrides((current) => ({ ...current, writeLimitPerDay: next }));
-              }}
-              placeholder={String(globalQuota?.writeLimitPerDay ?? DEFAULT_GLOBAL_WRITE_LIMIT_PER_DAY)}
-            />
-          </label>
-          <label>
-            Delete limit/day
-            <input
-              type="number"
-              min={1}
-              value={formatInputNumber(quotaOverrides.deleteLimitPerDay)}
-              onChange={(event) => {
-                const next = parsePositiveIntegerInput(event.target.value);
-                setQuotaOverrides((current) => ({ ...current, deleteLimitPerDay: next }));
-              }}
-              placeholder={String(globalQuota?.deleteLimitPerDay ?? DEFAULT_GLOBAL_DELETE_LIMIT_PER_DAY)}
-            />
-          </label>
-          <label>
-            Functions invocations/month
-            <input
-              type="number"
-              min={1}
-              value={formatInputNumber(quotaOverrides.functionInvocationsLimitPerMonth)}
-              onChange={(event) => {
-                const next = parsePositiveIntegerInput(event.target.value);
-                setQuotaOverrides((current) => ({ ...current, functionInvocationsLimitPerMonth: next }));
-              }}
-              placeholder={String(globalQuota?.functionInvocationsLimitPerMonth ?? DEFAULT_GLOBAL_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH)}
-            />
-          </label>
-        </div>
-        <p className="admin-note">
-          Leave a field blank to use the live API value (or fallback default). Changes are saved locally on this device for super-admin tuning.
-        </p>
-        {showReadTelemetryWarning ? (
-          <p className="error-text">Read telemetry is still 0 after load. This indicates live read usage did not hydrate correctly.</p>
-        ) : null}
-        <div className="admin-section__header" style={{ marginTop: "0.5rem", marginBottom: 0 }}>
-          <div />
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => {
-              setQuotaOverrides({
-                readLimitPerDay: null,
-                writeLimitPerDay: null,
-                deleteLimitPerDay: null,
-                functionInvocationsLimitPerMonth: null,
-              });
-              setStatus("Quota overrides reset to API/fallback defaults.");
-            }}
-          >
-            Reset Quota Overrides
-          </button>
-        </div>
-        {globalQuota?.message ? <p className="admin-note">{globalQuota.message}</p> : null}
       </section>
 
       <section className="admin-section">
@@ -715,7 +886,7 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
                     {user.isAdmin ? "Revoke Admin" : "Promote Admin"}
                   </button>
                   <button type="button" className="btn-secondary" onClick={() => { void handleSuperAdminToggle(user.uid, !user.isSuperAdmin); }} disabled={isSaving}>
-                    {user.isSuperAdmin ? "Revoke Super" : "Promote Super"}
+                    {user.isSuperAdmin ? "Transfer Super" : "Promote Super"}
                   </button>
                 </td>
               </tr>
@@ -748,8 +919,10 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
         </table>
       </section>
 
-      {status ? <p className="settings-meta">{status}</p> : null}
-      {error ? <p className="error-text">{error}</p> : null}
+      {status ? <p className="cf-toast cf-toast--success">{status}</p> : null}
+      {error ? <p className="cf-toast cf-toast--error">{error}</p> : null}
+        </>
+      )}
     </div>
   );
 }

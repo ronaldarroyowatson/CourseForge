@@ -23,8 +23,10 @@ import {
   TranslationReviewPanel,
   UserManagement,
 } from "./index";
+import { SchoolAdminPage } from "./SchoolAdminPage";
+import { useAuthStore } from "../../store/authStore";
 
-type AdminTab = "users" | "moderation" | "browser" | "premium" | "translations" | "translationReview" | "glossaries" | "debug" | "corrections";
+type AdminTab = "users" | "moderation" | "browser" | "premium" | "translations" | "translationReview" | "glossaries" | "debug" | "corrections" | "school";
 
 interface AdminToolsPageProps {
   currentUserEmail: string | null;
@@ -32,7 +34,12 @@ interface AdminToolsPageProps {
 }
 
 export function AdminToolsPage({ currentUserEmail, onBack }: AdminToolsPageProps): React.JSX.Element {
-  const [activeTab, setActiveTab] = useState<AdminTab>("users");
+  const isAdmin = useAuthStore((state) => state.isAdmin);
+  const isSchoolAdmin = useAuthStore((state) => state.isSchoolAdmin);
+  const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
+  const isSchoolOnlyAdmin = isSchoolAdmin && !isAdmin && !isSuperAdmin;
+
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => isSchoolOnlyAdmin ? "school" : "users");
 
   function renderTabContent(): React.JSX.Element {
     switch (activeTab) {
@@ -54,6 +61,8 @@ export function AdminToolsPage({ currentUserEmail, onBack }: AdminToolsPageProps
         return <DebugLoggingPanel />;
       case "corrections":
         return <CorrectionReviewPanel />;
+      case "school":
+        return <SchoolAdminPage onBack={() => {}} embedded />;
     }
   }
 
@@ -74,15 +83,20 @@ export function AdminToolsPage({ currentUserEmail, onBack }: AdminToolsPageProps
       <nav className="admin-tabs" aria-label="Admin sections">
         {(
           [
-            { id: "users", label: "User Management" },
-            { id: "moderation", label: "Moderation Queue" },
-            { id: "browser", label: "Content Browser" },
-            { id: "premium", label: "Premium Management" },
-            { id: "translations", label: "Translation Memory" },
-            { id: "translationReview", label: "Translation Review" },
-            { id: "glossaries", label: "Glossaries" },
-            { id: "debug", label: "Debug Logging" },
-            { id: "corrections", label: "Correction Review" },
+            ...(isAdmin || isSuperAdmin ? [
+              { id: "users", label: "User Management" },
+              { id: "moderation", label: "Moderation Queue" },
+              { id: "browser", label: "Content Browser" },
+              { id: "premium", label: "Premium Management" },
+              { id: "translations", label: "Translation Memory" },
+              { id: "translationReview", label: "Translation Review" },
+              { id: "glossaries", label: "Glossaries" },
+              { id: "debug", label: "Debug Logging" },
+              { id: "corrections", label: "Correction Review" },
+            ] : []),
+            ...(isSchoolAdmin || isAdmin || isSuperAdmin ? [
+              { id: "school", label: "School Admin" },
+            ] : []),
           ] as { id: AdminTab; label: string }[]
         ).map(({ id, label }) => (
           <button

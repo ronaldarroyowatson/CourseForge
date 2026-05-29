@@ -12,9 +12,10 @@ import { useAuthStore } from "../../store/authStore";
 
 interface SchoolAdminPageProps {
   onBack: () => void;
+  embedded?: boolean;
 }
 
-export function SchoolAdminPage({ onBack }: SchoolAdminPageProps): React.JSX.Element {
+export function SchoolAdminPage({ onBack, embedded = false }: SchoolAdminPageProps): React.JSX.Element {
   const schoolId = useAuthStore((state) => state.schoolId);
   const schoolName = useAuthStore((state) => state.schoolName);
   const currentUserEmail = useAuthStore((state) => state.userEmail);
@@ -108,19 +109,8 @@ export function SchoolAdminPage({ onBack }: SchoolAdminPageProps): React.JSX.Ele
     }
   }
 
-  return (
-    <div className="admin-shell">
-      <header className="admin-header">
-        <div className="admin-header__left">
-          <button type="button" onClick={onBack} className="btn-secondary admin-back-btn">← Back to App</button>
-          <h1 className="admin-title">School Admin</h1>
-        </div>
-        <p className="admin-user-label">
-          {dashboard?.schoolName ?? schoolName ?? "No school selected"}
-          {dashboard?.districtName ? ` (${dashboard.districtName})` : ""}
-          {currentUserEmail ? ` • ${currentUserEmail}` : ""}
-        </p>
-      </header>
+  const body = (
+    <>
 
       <section className="admin-section">
         <div className="admin-section__header">
@@ -211,6 +201,27 @@ export function SchoolAdminPage({ onBack }: SchoolAdminPageProps): React.JSX.Ele
 
       {status ? <p className="settings-meta">{status}</p> : null}
       {error ? <p className="error-text">{error}</p> : null}
+    </>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <div className="admin-shell">
+      <header className="admin-header">
+        <div className="admin-header__left">
+          <button type="button" onClick={onBack} className="btn-secondary admin-back-btn">← Back to App</button>
+          <h1 className="admin-title">School Admin</h1>
+        </div>
+        <p className="admin-user-label">
+          {dashboard?.schoolName ?? schoolName ?? "No school selected"}
+          {dashboard?.districtName ? ` (${dashboard.districtName})` : ""}
+          {currentUserEmail ? ` • ${currentUserEmail}` : ""}
+        </p>
+      </header>
+      {body}
     </div>
   );
 }

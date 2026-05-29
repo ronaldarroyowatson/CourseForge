@@ -9,10 +9,14 @@ const NETWORK_RETRY_MS = 5000;
 const RETRIES_STOPPED_MESSAGE = "Automatic retries stopped due to repeated failures.";
 const WRITE_BUDGET_WARNING = "Cloud sync paused to prevent excessive writes. Please review your data or try again later.";
 
-function shouldSkipAutoSyncRun(): boolean {
+function shouldSkipAutoSyncRun(isSuperAdmin: boolean): boolean {
   const ui = useUIStore.getState();
 
-  if (ui.isSyncing || ui.permissionDeniedSyncBlocked || ui.writeLoopBlocked || ui.writeBudgetExceeded || ui.readBudgetExceeded) {
+  if (ui.isSyncing) {
+    return true;
+  }
+
+  if (!isSuperAdmin && (ui.permissionDeniedSyncBlocked || ui.writeLoopBlocked || ui.writeBudgetExceeded || ui.readBudgetExceeded)) {
     return true;
   }
 
@@ -20,7 +24,7 @@ function shouldSkipAutoSyncRun(): boolean {
     return true;
   }
 
-  if (ui.lastSyncErrorCode === "permission-denied") {
+  if (!isSuperAdmin && ui.lastSyncErrorCode === "permission-denied") {
     return true;
   }
 
@@ -63,6 +67,7 @@ function applySyncMetrics(result: {
  */
 export function useAutoSync(): void {
   const authStatus = useAuthStore((state) => state.authStatus);
+  const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
   const localChangeVersion = useUIStore((state) => state.localChangeVersion);
 
   React.useEffect(() => {
@@ -80,7 +85,7 @@ export function useAutoSync(): void {
         return;
       }
 
-      if (shouldSkipAutoSyncRun()) {
+      if (shouldSkipAutoSyncRun(isSuperAdmin)) {
         return;
       }
 
@@ -91,7 +96,7 @@ export function useAutoSync(): void {
       }
 
       try {
-        const result = await syncNow();
+        const result = await syncNow({ superAdminSyncBypass: isSuperAdmin });
         if (!isActive) {
           return;
         }
@@ -104,13 +109,13 @@ export function useAutoSync(): void {
           return;
         }
 
-        if (result.writeLoopTriggered) {
+        if (!isSuperAdmin && result.writeLoopTriggered) {
           ui.setWriteLoopBlocked(true);
           ui.setSyncStatus("error", "Sync paused due to write-loop protection.");
           return;
         }
 
-        if (result.writeBudgetExceeded) {
+        if (!isSuperAdmin && result.writeBudgetExceeded) {
           ui.setAutomaticRetriesEnabled(false);
           ui.setSyncStatus("error", WRITE_BUDGET_WARNING);
           return;
@@ -127,7 +132,7 @@ export function useAutoSync(): void {
 
         ui.setSyncStatus("error", result.message);
 
-        if (result.permissionDenied) {
+        if (!isSuperAdmin && result.permissionDenied) {
           ui.setPermissionDeniedSyncBlocked(true);
           ui.addSyncDebugEvent("sync:stopped - permission denied");
           return;
@@ -185,7 +190,7 @@ export function useAutoSync(): void {
       clearInterval(intervalId);
       window.removeEventListener("online", handleOnline);
     };
-  }, [authStatus]);
+  }, [authStatus, isSuperAdmin]);
 
   React.useEffect(() => {
     let isCancelled = false;
@@ -198,7 +203,7 @@ export function useAutoSync(): void {
       return;
     }
 
-    if (shouldSkipAutoSyncRun()) {
+    if (shouldSkipAutoSyncRun(isSuperAdmin)) {
       return;
     }
 
@@ -208,7 +213,7 @@ export function useAutoSync(): void {
 
       try {
         ui.setSyncStatus("syncing", "Syncing local changes...");
-        const result = await syncNow();
+        const result = await syncNow({ superAdminSyncBypass: isSuperAdmin });
         if (isCancelled) {
           return;
         }
@@ -220,13 +225,13 @@ export function useAutoSync(): void {
           return;
         }
 
-        if (result.writeLoopTriggered) {
+        if (!isSuperAdmin && result.writeLoopTriggered) {
           ui.setWriteLoopBlocked(true);
           ui.setSyncStatus("error", "Sync paused due to write-loop protection.");
           return;
         }
 
-        if (result.writeBudgetExceeded) {
+        if (!isSuperAdmin && result.writeBudgetExceeded) {
           ui.setAutomaticRetriesEnabled(false);
           ui.setSyncStatus("error", WRITE_BUDGET_WARNING);
           return;
@@ -241,7 +246,7 @@ export function useAutoSync(): void {
           return;
         }
 
-        if (result.permissionDenied) {
+        if (!isSuperAdmin && result.permissionDenied) {
           ui.setPermissionDeniedSyncBlocked(true);
         }
 
@@ -264,5 +269,5 @@ export function useAutoSync(): void {
     return () => {
       isCancelled = true;
     };
-  }, [authStatus, localChangeVersion]);
+  }, [authStatus, isSuperAdmin, localChangeVersion]);
 }

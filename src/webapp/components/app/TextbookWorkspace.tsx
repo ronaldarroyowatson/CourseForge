@@ -92,7 +92,6 @@ export function TextbookWorkspace({
   const currentUserId = useAuthStore((state) => state.userId);
   const currentUserEmail = useAuthStore((state) => state.userEmail);
   const isAdmin = useAuthStore((state) => state.isAdmin);
-  const isSchoolAdmin = useAuthStore((state) => state.isSchoolAdmin);
   const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
   const syncStatus = useUIStore((state) => state.syncStatus);
   const lastSyncTime = useUIStore((state) => state.lastSyncTime);
@@ -848,33 +847,6 @@ export function TextbookWorkspace({
               <button type="button" onClick={() => { void handleSignOut(); }} disabled={isSigningOut}>
                 {isSigningOut ? "Signing out..." : "Sign out"}
               </button>
-              {(isAdmin || isSuperAdmin) ? (
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => { navigate("/admin"); }}
-                >
-                  Admin Tools
-                </button>
-              ) : null}
-              {(isSchoolAdmin || isAdmin || isSuperAdmin) ? (
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => { navigate("/school-admin"); }}
-                >
-                  School Admin
-                </button>
-              ) : null}
-              {isSuperAdmin ? (
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => { navigate("/super-admin"); }}
-                >
-                  Super Admin
-                </button>
-              ) : null}
               {signOutError ? <p className="error-text">Sign-out failed: {signOutError}</p> : null}
             </section>
 

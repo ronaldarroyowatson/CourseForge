@@ -83,9 +83,16 @@ export function getSyncThrottleWindowMs(): number {
 }
 
 function getUtcDateKey(now = new Date()): string {
-  const year = now.getUTCFullYear();
-  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(now.getUTCDate()).padStart(2, "0");
+  const dateFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = dateFormatter.formatToParts(now);
+  const year = parts.find((part) => part.type === "year")?.value ?? String(now.getUTCFullYear());
+  const month = parts.find((part) => part.type === "month")?.value ?? String(now.getUTCMonth() + 1).padStart(2, "0");
+  const day = parts.find((part) => part.type === "day")?.value ?? String(now.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 

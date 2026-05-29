@@ -102,13 +102,13 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
         return;
       }
 
-      if (result.writeLoopTriggered) {
+      if (result.writeLoopTriggered && !claims.isSuperAdmin) {
         setWriteLoopBlocked(true);
         setSyncStatus("error", "Sync paused due to write-loop protection.");
         return;
       }
 
-      if (result.writeBudgetExceeded) {
+      if (result.writeBudgetExceeded && !claims.isSuperAdmin) {
         setSyncStatus("error", "Cloud sync paused to prevent excessive writes. Please review your data or try again later.");
         return;
       }
@@ -122,7 +122,7 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
         return;
       }
 
-      if (result.permissionDenied) {
+      if (result.permissionDenied && !claims.isSuperAdmin) {
         setPermissionDeniedSyncBlocked(true);
       }
 
@@ -198,15 +198,15 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
       return `Sync failed: ${syncMessage ?? lastSyncError ?? "Unknown error"}`;
     }
 
-    if (permissionDeniedSyncBlocked) {
+    if (!isSuperAdmin && permissionDeniedSyncBlocked) {
       return "Sync paused: permission denied. Update Firestore rules and retry.";
     }
 
-    if (writeBudgetExceeded) {
+    if (!isSuperAdmin && writeBudgetExceeded) {
       return "Cloud sync paused to prevent excessive writes. Please review your data or try again later.";
     }
 
-    if (writeLoopBlocked) {
+    if (!isSuperAdmin && writeLoopBlocked) {
       return "Sync paused: write-loop protection triggered.";
     }
 
@@ -296,7 +296,7 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
                 <button
                   type="button"
                   className="btn-secondary"
-                  onClick={() => { navigate("/school-admin"); }}
+                  onClick={() => { navigate("/admin"); }}
                   title="Open school admin"
                 >
                   Admin
@@ -321,7 +321,7 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
           </div>
         </div>
       </div>
-      {writeBudgetExceeded ? (
+      {!isSuperAdmin && writeBudgetExceeded ? (
         <p className="error-text sync-indicator">Cloud sync paused to prevent excessive writes. Please review your data or try again later.</p>
       ) : null}
 

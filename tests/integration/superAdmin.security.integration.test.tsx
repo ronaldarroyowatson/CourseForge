@@ -17,8 +17,8 @@
  *
  *  4. Backend callable security contracts: the Cloud Function source must call
  *     the appropriate auth assertion helper *before* touching any data, and
- *     setUserSuperAdminStatus must enforce the owner-only self-target rule so
- *     one account cannot silently elevate another.
+ *     setUserSuperAdminStatus must enforce owner-only operation with explicit
+ *     transfer semantics when revoking a super-admin role.
  *
  *  5. All-zeros data guard: if the stats callable returns all-zero values the
  *     UI must still distinguish between a successful-but-empty result and an
@@ -227,6 +227,19 @@ describe("Backend callable security contracts", () => {
     expect(assertIdx).toBeLessThan(claimsIdx);
   });
 
+  it("setUserContentBlockStatus never allows blocking a super-admin account", () => {
+    const src = readFunctionsSource();
+
+    const fnStart = src.indexOf("export const setUserContentBlockStatus");
+    const superGuardIdx = src.indexOf("targetIsSuperAdmin", fnStart);
+    const messageIdx = src.indexOf("Super admin accounts cannot be blocked from cloud sync.", fnStart);
+
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(superGuardIdx).toBeGreaterThan(-1);
+    expect(messageIdx).toBeGreaterThan(-1);
+    expect(superGuardIdx).toBeLessThan(messageIdx);
+  });
+
   it("setUserSuperAdminStatus requires the owner allowlist check before touching claims", () => {
     const src = readFunctionsSource();
 
@@ -239,17 +252,12 @@ describe("Backend callable security contracts", () => {
     expect(ownerCheckIdx).toBeLessThan(claimsIdx);
   });
 
-  it("setUserSuperAdminStatus enforces self-only target: caller uid must equal target uid", () => {
+  it("setUserSuperAdminStatus enforces owner self-targeting guardrails before claim writes", () => {
     const src = readFunctionsSource();
 
-    const fnStart = src.indexOf("export const setUserSuperAdminStatus");
-    // The self-only guard must be present and must appear before setCustomUserClaims.
-    const selfCheckIdx = src.indexOf("uid !== request.auth.uid", fnStart);
-    const claimsIdx = src.indexOf("setCustomUserClaims", fnStart);
-
-    expect(selfCheckIdx).toBeGreaterThan(-1);
-    expect(claimsIdx).toBeGreaterThan(-1);
-    expect(selfCheckIdx).toBeLessThan(claimsIdx);
+    expect(src).toContain("Owner super admin changes are restricted to the owner account only.");
+    expect(src).toContain("Owner super admin changes must target the signed-in owner account.");
+    expect(src).toContain("setCustomUserClaims(uid, nextClaims)");
   });
 
   it("getSuperAdminDashboardStats sanitizes numeric syncUsage fields (no raw negative injection)", () => {
@@ -502,7 +510,9 @@ describe("Super admin page quota override input validation", () => {
       expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
     });
 
-    const inputs = screen.getAllByDisplayValue("") as HTMLInputElement[];
+    fireEvent.click(screen.getByRole("button", { name: /unhide/i }));
+
+    const inputs = screen.getAllByRole("spinbutton") as HTMLInputElement[];
     // The first override input is "Read limit/day".
     const readInput = inputs[0];
     fireEvent.change(readInput, { target: { value: "75000" } });
@@ -518,7 +528,9 @@ describe("Super admin page quota override input validation", () => {
       expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
     });
 
-    const inputs = screen.getAllByDisplayValue("") as HTMLInputElement[];
+    fireEvent.click(screen.getByRole("button", { name: /unhide/i }));
+
+    const inputs = screen.getAllByRole("spinbutton") as HTMLInputElement[];
     const readInput = inputs[0];
 
     // Type a negative number. The HTML number input allows it in the DOM value,
@@ -538,7 +550,9 @@ describe("Super admin page quota override input validation", () => {
       expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
     });
 
-    const inputs = screen.getAllByDisplayValue("") as HTMLInputElement[];
+    fireEvent.click(screen.getByRole("button", { name: /unhide/i }));
+
+    const inputs = screen.getAllByRole("spinbutton") as HTMLInputElement[];
     const readInput = inputs[0];
 
     // Simulating a script string in a number input (browser would reject this

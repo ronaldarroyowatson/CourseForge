@@ -17,6 +17,7 @@ import {
   type TextbookContentStats,
 } from "../../../core/services/repositories/textbookRepository";
 import { useRepositories } from "../../hooks/useRepositories";
+import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 
 type RetrySyncProgressTone = "info" | "success" | "warning" | "error";
@@ -143,6 +144,7 @@ export function TextbookList({
   onDeleted,
   onRefresh,
 }: TextbookListProps): React.JSX.Element {
+  const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
   const repositories = useRepositories();
   const scheduleTextbookDelete = repositories.scheduleTextbookDelete ?? repositories.removeTextbook;
   const toggleTextbookFavorite = repositories.toggleTextbookFavorite;
@@ -264,7 +266,7 @@ export function TextbookList({
         );
 
         const startedAt = Date.now();
-        const syncResult = await syncNow();
+        const syncResult = await syncNow({ superAdminSyncBypass: isSuperAdmin });
         const elapsedSeconds = Math.max((Date.now() - startedAt) / 1000, 0.001);
 
         if (syncResult.throttled) {

@@ -119,16 +119,21 @@ export function UserManagement(): React.JSX.Element {
           </tr>
         </thead>
         <tbody>
-          {users.map((user) => (
+          {users.map((user) => {
+            const isSuperAdminProtected = user.isSuperAdmin === true || /super\s*admin/i.test(user.displayName);
+
+            return (
             <tr key={user.uid}>
               <td>{user.email || <em>—</em>}</td>
               <td>{user.displayName || <em>—</em>}</td>
               <td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : <em>—</em>}</td>
               <td>{user.isAdmin ? "✅ Admin" : "—"}</td>
               <td>
-                {user.isContentBlocked
-                  ? `Blocked${user.contentBlockReason ? `: ${user.contentBlockReason}` : ""}`
-                  : "Allowed"}
+                {isSuperAdminProtected
+                  ? "Always allowed (Super Admin protected)"
+                  : user.isContentBlocked
+                    ? `Blocked${user.contentBlockReason ? `: ${user.contentBlockReason}` : ""}`
+                    : "Allowed"}
               </td>
               <td>
                 <div className="admin-premium-actions">
@@ -152,7 +157,16 @@ export function UserManagement(): React.JSX.Element {
                     </button>
                   )}
 
-                  {user.isContentBlocked ? (
+                  {isSuperAdminProtected ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="btn-secondary"
+                      title="Super Admin cloud sync cannot be blocked."
+                    >
+                      Cloud Sync Protected
+                    </button>
+                  ) : user.isContentBlocked ? (
                     <button
                       type="button"
                       onClick={() => void handleSetContentBlockStatus(user.uid, false)}
@@ -174,7 +188,8 @@ export function UserManagement(): React.JSX.Element {
                 </div>
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </section>

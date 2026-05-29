@@ -2769,6 +2769,19 @@ button.cf-ds-color-wheel__dot:active {
   background: var(--danger-bg-hover);
 }
 
+.btn-secondary:disabled,
+.btn-primary-sm:disabled,
+.btn-danger-sm:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.btn-danger-sm:disabled {
+  background: var(--button-bg-hover);
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+}
+
 @media (max-width: 768px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -4332,4 +4345,507 @@ button:not(:disabled):active {
   display: grid;
   gap: 0.75rem;
   scroll-margin-top: 1.5rem;
+}
+
+/* ============================================================
+   Admin Infographic Components
+   ============================================================ */
+
+/* ----- Skeleton shimmer ----- */
+@keyframes cf-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.cf-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--cf-surface-muted) 25%,
+    var(--cf-surface-strong) 50%,
+    var(--cf-surface-muted) 75%
+  );
+  background-size: 200% 100%;
+  animation: cf-shimmer 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+/* ----- Fade-in for data arriving ----- */
+@keyframes cf-fade-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ----- Page-level skeleton shell ----- */
+.cf-page-skeleton {
+  display: grid;
+  gap: 0.9rem;
+  animation: cf-fade-in 0.2s ease both;
+}
+
+.cf-page-skeleton__header {
+  height: 58px;
+  border-radius: 8px;
+}
+
+.cf-page-skeleton__section {
+  border-radius: 8px;
+}
+
+.cf-page-skeleton__section--tall {
+  height: 220px;
+}
+
+.cf-page-skeleton__section--short {
+  height: 140px;
+}
+
+/* ----- Stat cards ----- */
+.cf-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 768px) {
+  .cf-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .cf-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cf-stat-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  padding: 0.9rem 1rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  position: relative;
+  overflow: hidden;
+  animation: cf-fade-in 0.35s ease both;
+}
+
+.cf-stat-card__accent-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 10px 10px 0 0;
+}
+
+.cf-stat-card__header {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.cf-stat-card__icon {
+  width: 1.9rem;
+  height: 1.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--cf-accent) 12%, var(--bg-panel));
+  color: var(--cf-accent);
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.cf-stat-card__label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.cf-stat-card__body {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.cf-stat-card__value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  line-height: 1;
+  text-align: center;
+}
+
+.cf-stat-card__skeleton-area {
+  padding-top: 0.2rem;
+}
+
+.cf-stat-card__trend {
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.cf-stat-card__trend--up {
+  color: var(--cf-success);
+}
+
+.cf-stat-card__trend--down {
+  color: var(--cf-danger);
+}
+
+.cf-stat-card__trend--neutral {
+  color: var(--text-secondary);
+}
+
+/* ----- Fallback tile ----- */
+.cf-fallback-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 1.2rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  text-align: center;
+  font-size: 0.82rem;
+  min-height: 90px;
+}
+
+.cf-fallback-tile__icon {
+  font-size: 1.3rem;
+  color: var(--cf-warning);
+  line-height: 1;
+}
+
+.cf-fallback-tile__msg {
+  color: var(--text-secondary);
+}
+
+/* ----- Progress rings ----- */
+@keyframes cf-spike-flash {
+  0%, 100% { box-shadow: none; }
+  20%, 60% { box-shadow: 0 0 0 3px hsl(0, 90%, 55%); }
+}
+
+.cf-progress-ring {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.85rem 0.65rem 0.7rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  transition: box-shadow 0.2s ease;
+}
+
+.cf-progress-ring--spiking {
+  animation: cf-spike-flash 1.6s ease;
+}
+
+.cf-progress-ring__svg {
+  display: block;
+}
+
+.cf-progress-ring__label {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  text-align: center;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cf-progress-ring__values {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.cf-progress-ring__error-icon {
+  font-size: 1.2rem;
+  color: var(--cf-warning);
+}
+
+/* Rings layout (2×2 grid) */
+.cf-quota-rings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+/* ----- Quota Dashboard two-column layout ----- */
+.cf-quota-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.75rem;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .cf-quota-dashboard {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
+.cf-quota-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-right: 0.35rem;
+}
+
+/* ----- Countdown ring ----- */
+.cf-countdown-ring {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  background: color-mix(in srgb, var(--cf-accent) 9%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, var(--cf-accent) 28%, var(--border-default));
+  border-radius: 12px;
+  padding: 0.85rem 0.9rem 0.8rem;
+  overflow: hidden;
+}
+
+.cf-countdown-ring__visual {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.cf-countdown-ring__svg {
+  display: block;
+}
+
+.cf-countdown-ring__center-value {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -52%);
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  text-align: center;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.cf-countdown-ring__loading {
+  position: relative;
+  display: grid;
+  place-items: center;
+  gap: 0.65rem;
+}
+
+.cf-countdown-ring__loading .cf-skeleton:first-child {
+  display: block;
+}
+
+.cf-countdown-ring__label {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+/* ----- Project metadata row ----- */
+.cf-quota-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  background: var(--button-bg);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  animation: cf-fade-in 0.3s ease both;
+}
+
+.cf-quota-meta-row strong {
+  color: var(--text-primary);
+}
+
+/* ----- Manual Overrides section ----- */
+.cf-quota-overrides {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.cf-quota-overrides__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.cf-quota-overrides__toggle {
+  padding-inline: 0.8rem;
+  white-space: nowrap;
+}
+
+.cf-quota-overrides--collapsed {
+  padding-bottom: 0.1rem;
+}
+
+.cf-quota-overrides__title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+.cf-quota-overrides__collapsed-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
+.cf-quota-overrides__grid {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.cf-quota-overrides__field {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.cf-quota-overrides__field label {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.cf-quota-overrides__field input {
+  width: auto;
+  min-width: 7ch;
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border-radius: 6px;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 720px) {
+  .cf-quota-left {
+    padding-right: 0;
+  }
+}
+
+.cf-quota-overrides__field input:disabled {
+  opacity: 0.55;
+}
+
+.cf-quota-overrides__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ----- Quota bar (horizontal) ----- */
+.cf-quota-bar {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.cf-quota-bar__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cf-quota-bar__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cf-quota-bar__pct {
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cf-quota-bar__track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--cf-surface-muted);
+  overflow: hidden;
+}
+
+.cf-quota-bar__fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.cf-quota-bar__values {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cf-quota-bar--error .cf-quota-bar__error-msg {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* ----- Toast / status notification ----- */
+.cf-toast {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  border: 1px solid transparent;
+  animation: cf-fade-in 0.25s ease both;
+}
+
+.cf-toast--success {
+  background: var(--status-approved-bg);
+  color: var(--status-approved-fg);
+  border-color: var(--status-approved-border);
+}
+
+.cf-toast--error {
+  background: var(--status-rejected-bg);
+  color: var(--status-rejected-fg);
+  border-color: var(--status-rejected-border);
+}
+
+.cf-toast--warning {
+  background: var(--status-submitted-bg);
+  color: var(--status-submitted-fg);
+  border-color: var(--status-submitted-border);
 }

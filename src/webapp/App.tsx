@@ -92,52 +92,66 @@ export function App(): React.JSX.Element | null {
     const minSplashMs = 1200;
 
     const readStartupTelemetry = async () => {
-      const [bootResult, updaterResult] = await Promise.allSettled([
-        fetch("/api/boot-status", { method: "GET", cache: "no-store" }),
-        fetch("/api/updater-progress", { method: "GET", cache: "no-store" }),
-      ]);
+      try {
+        const [bootResult, updaterResult] = await Promise.allSettled([
+          fetch("/api/boot-status", { method: "GET", cache: "no-store" }),
+          fetch("/api/updater-progress", { method: "GET", cache: "no-store" }),
+        ]);
 
-      let bootStep = "running";
-      let bootMessage = "CourseForge server is running.";
-      let bootProgressPercent: number | null = null;
-      if (bootResult.status === "fulfilled" && bootResult.value.ok && isJsonResponse(bootResult.value)) {
-        const payload = await bootResult.value.json() as {
-          step?: string;
-          message?: string;
-          progressPercent?: number;
-        };
-        bootStep = payload.step || bootStep;
-        bootMessage = payload.message || bootMessage;
-        bootProgressPercent = typeof payload.progressPercent === "number" ? payload.progressPercent : null;
-      }
+        let bootStep = "running";
+        let bootMessage = "CourseForge server is running.";
+        let bootProgressPercent: number | null = null;
+        if (bootResult.status === "fulfilled" && bootResult.value.ok && isJsonResponse(bootResult.value)) {
+          const payload = await bootResult.value.json() as {
+            step?: string;
+            message?: string;
+            progressPercent?: number;
+          };
+          bootStep = payload.step || bootStep;
+          bootMessage = payload.message || bootMessage;
+          bootProgressPercent = typeof payload.progressPercent === "number" ? payload.progressPercent : null;
+        }
 
-      let updaterState = "idle";
-      let updaterMessage = "Updater idle.";
-      let currentVersion: string | null = null;
-      let latestVersion: string | null = null;
-      if (updaterResult.status === "fulfilled" && updaterResult.value.ok && isJsonResponse(updaterResult.value)) {
-        const payload = await updaterResult.value.json() as {
-          state?: string;
-          message?: string;
-          currentVersion?: string | null;
-          latestVersion?: string | null;
-        };
-        updaterState = payload.state || updaterState;
-        updaterMessage = payload.message || updaterMessage;
-        currentVersion = payload.currentVersion ?? null;
-        latestVersion = payload.latestVersion ?? null;
-      }
+        let updaterState = "idle";
+        let updaterMessage = "Updater idle.";
+        let currentVersion: string | null = null;
+        let latestVersion: string | null = null;
+        if (updaterResult.status === "fulfilled" && updaterResult.value.ok && isJsonResponse(updaterResult.value)) {
+          const payload = await updaterResult.value.json() as {
+            state?: string;
+            message?: string;
+            currentVersion?: string | null;
+            latestVersion?: string | null;
+          };
+          updaterState = payload.state || updaterState;
+          updaterMessage = payload.message || updaterMessage;
+          currentVersion = payload.currentVersion ?? null;
+          latestVersion = payload.latestVersion ?? null;
+        }
 
-      if (!disposed) {
-        setStartupTelemetry({
-          bootStep,
-          bootMessage,
-          bootProgressPercent,
-          updaterState,
-          updaterMessage,
-          currentVersion,
-          latestVersion,
-        });
+        if (!disposed) {
+          setStartupTelemetry({
+            bootStep,
+            bootMessage,
+            bootProgressPercent,
+            updaterState,
+            updaterMessage,
+            currentVersion,
+            latestVersion,
+          });
+        }
+      } catch {
+        if (!disposed) {
+          setStartupTelemetry({
+            bootStep: "running",
+            bootMessage: "CourseForge server is running.",
+            bootProgressPercent: null,
+            updaterState: "idle",
+            updaterMessage: "Updater idle.",
+            currentVersion: null,
+            latestVersion: null,
+          });
+        }
       }
     };
 

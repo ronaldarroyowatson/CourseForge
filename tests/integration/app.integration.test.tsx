@@ -393,4 +393,24 @@ describe("App admin/auth integration", () => {
     expect(state.permissionDeniedSyncBlocked).toBe(false);
     expect(syncMocks.syncNow.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
+
+  it("keeps rendering when startup telemetry returns HTML instead of JSON", async () => {
+    authMocks.state.currentUser = mockUser;
+    authMocks.getAdminClaim.mockResolvedValue(true);
+
+    const fetchMock = vi.fn(async () => new Response("<!doctype html><html><body>fallback</body></html>", {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderAt("/textbooks");
+
+    await waitFor(() => {
+      expect(screen.getByText("WORKSPACE_PAGE")).toBeInTheDocument();
+    });
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(useAuthStore.getState().authStatus).toBe("authenticated");
+  });
 });

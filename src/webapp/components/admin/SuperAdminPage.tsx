@@ -15,7 +15,9 @@ import {
   type SuperAdminDashboardStats,
   type SuperAdminGlobalQuota,
 } from "../../../core/services";
+import { getCurrentUser } from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
+import { useUIStore } from "../../store/uiStore";
 
 interface SuperAdminPageProps {
   onBack: () => void;
@@ -76,8 +78,21 @@ function formatInputNumber(value: number | null | undefined): string {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
 }
 
+function isPermissionDeniedError(error: unknown): boolean {
+  if (!error) {
+    return false;
+  }
+
+  const candidate = error as { code?: unknown; message?: unknown };
+  const code = typeof candidate.code === "string" ? candidate.code.toLowerCase() : "";
+  const message = typeof candidate.message === "string" ? candidate.message.toLowerCase() : "";
+  return code.includes("permission-denied") || message.includes("permission-denied") || message.includes("permission denied");
+}
+
 export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Element {
   const currentUserEmail = useAuthStore((state) => state.userEmail);
+  const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
+  const addSyncDebugEvent = useUIStore((state) => state.addSyncDebugEvent);
   const utcResetCountdown = useUtcMidnightCountdown();
   const [users, setUsers] = React.useState<AdminUserRecord[]>([]);
   const [schools, setSchools] = React.useState<SchoolDirectoryRow[]>([]);
@@ -132,9 +147,29 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
   const loadAll = React.useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    addSyncDebugEvent("superadmin:dashboard-load:start");
     try {
+      let statsPromise = getSuperAdminDashboardStats();
+      if (isSuperAdmin) {
+        statsPromise = statsPromise.catch(async (error) => {
+          if (!isPermissionDeniedError(error)) {
+            throw error;
+          }
+
+          addSyncDebugEvent("superadmin:dashboard-stats:permission-denied-retry:start");
+          const user = getCurrentUser();
+          if (user) {
+            await user.getIdToken(true);
+          }
+
+          const retried = await getSuperAdminDashboardStats();
+          addSyncDebugEvent("superadmin:dashboard-stats:permission-denied-retry:success");
+          return retried;
+        });
+      }
+
       const [statsResult, usersResult, schoolsResult, promotionsResult, quotaResult] = await Promise.allSettled([
-        getSuperAdminDashboardStats(),
+        statsPromise,
         getAllUsers(),
         listAllSchoolsForSuperAdmin(),
         listSchoolAdminPromotionRequests("pending"),
@@ -145,8 +180,14 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
 
       if (statsResult.status === "fulfilled") {
         setStats(statsResult.value);
+        addSyncDebugEvent(
+          `superadmin:dashboard-stats:loaded users=${statsResult.value.usersCount} schools=${statsResult.value.schoolsCount} textbooks=${statsResult.value.textbooksCount}`
+        );
       } else {
         failures.push(`stats: ${statsResult.reason instanceof Error ? statsResult.reason.message : String(statsResult.reason)}`);
+        addSyncDebugEvent(
+          `superadmin:dashboard-stats:failed ${statsResult.reason instanceof Error ? statsResult.reason.message : String(statsResult.reason)}`
+        );
       }
 
       if (usersResult.status === "fulfilled") {
@@ -176,13 +217,17 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
       if (failures.length > 0) {
         console.error("[super-admin] dashboard partial load failure", failures);
         setError(`Some dashboard data failed to load (${failures.join(" | ")}).`);
+        addSyncDebugEvent(`superadmin:dashboard-load:partial-failure ${failures.join(" | ")}`);
+      } else {
+        addSyncDebugEvent("superadmin:dashboard-load:success");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load super admin dashboard.");
+      addSyncDebugEvent(`superadmin:dashboard-load:error ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [addSyncDebugEvent, isSuperAdmin]);
 
   React.useEffect(() => {
     void loadAll();

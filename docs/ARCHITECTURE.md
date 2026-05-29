@@ -161,4 +161,6 @@ From now on, every architectural change, new file, refactor, plugin addition, pl
   - tracked activity totals aggregated from user `syncUsage` docs filtered by UTC `dateKey`
   - dashboard query paths avoid brittle composite-index requirements by doing status/date filtering in memory where needed
   - super-admin dashboard UI uses partial-load behavior (all-settled) so one callable failure does not blank all metrics/tables
+  - when the stats callable returns `permission-denied` for an already-super-admin session, the UI performs a one-shot token refresh (`getIdToken(true)`) and retries once to recover from claim propagation race conditions
+  - route-gate decisions and dashboard stats load/retry outcomes are emitted to the sync debug event pipeline for diagnostics
 - Existing `/admin` route remains global admin tooling; super-admins are also allowed through this route.

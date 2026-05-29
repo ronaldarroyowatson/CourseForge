@@ -1,12 +1,12 @@
 # Test Index
 
-Generated: 2026-05-29T00:34:11.328Z
+Generated: 2026-05-29T01:47:34.191Z
 
 ## Summary
 
-- Total test files: 73
+- Total test files: 74
 - Unit test files: 47
-- Integration test files: 24
+- Integration test files: 25
 - Rules test files: 2
 - Canonical sample files: 5
 
@@ -80,6 +80,7 @@ Generated: 2026-05-29T00:34:11.328Z
 - tests/integration/package-integrity.integration.test.ts
 - tests/integration/settings.updater.integration.test.tsx
 - tests/integration/startupSync.probe.test.tsx
+- tests/integration/superAdmin.access.integration.test.tsx
 - tests/integration/superAdmin.metrics.contract.integration.test.ts
 - tests/integration/textbookDeletion.integration.test.tsx
 - tests/integration/textbookDeletion.persistence.integration.test.ts

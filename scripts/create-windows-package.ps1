@@ -71,6 +71,24 @@ function Get-InnoSetupCompilerPath {
   return $null
 }
 
+function Get-WindowsSha256 {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $stream = [System.IO.File]::OpenRead($Path)
+  try {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace("-", "")
+    }
+    finally {
+      $sha.Dispose()
+    }
+  }
+  finally {
+    $stream.Dispose()
+  }
+}
+
 function New-WindowsZipArtifact {
   param(
     [string]$SourcePackageDir,
@@ -274,7 +292,7 @@ $integrityEntries = @()
 foreach ($relative in $integrityFiles) {
   $targetPath = Join-Path $packageDir $relative
   if (Test-Path $targetPath) {
-    $hash = (Get-FileHash -Path $targetPath -Algorithm SHA256).Hash
+    $hash = Get-WindowsSha256 -Path $targetPath
     $integrityEntries += [ordered]@{
       path = $relative
       hash = $hash

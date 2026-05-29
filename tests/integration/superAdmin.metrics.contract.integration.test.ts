@@ -17,9 +17,15 @@ describe("Super admin metrics backend contracts", () => {
     const source = readFunctionsSource();
 
     expect(source).toContain("firestore.collection(\"textbooks\").count().get()");
-    expect(source).toContain("const syncUsageSnapshot = await firestore.collectionGroup(\"syncUsage\").get();");
-    expect(source).toContain("if (typeof data.dateKey !== \"string\" || data.dateKey !== todayKey) {");
+    // Must NOT use the index-requiring .where filter on the collection group.
     expect(source).not.toContain("collectionGroup(\"syncUsage\").where(\"dateKey\", \"==\", todayKey)");
+    // Must filter dateKey in memory instead.
+    expect(source).toContain("if (typeof data.dateKey !== \"string\" || data.dateKey !== todayKey) {");
+    // The collectionGroup query on syncUsage requires a COLLECTION_GROUP_ASC index that may
+    // not be present in production (causes FAILED_PRECONDITION). It MUST be inside a try/catch
+    // so that a missing index cannot crash the function and discard all other stats.
+    expect(source).toContain("collectionGroup(\"syncUsage\").get()");
+    expect(source).toContain("[super-admin] syncUsage collection group query failed");
   });
 
   it("loads promotion requests without composite-index dependency", () => {

@@ -131,9 +131,8 @@ describe("Header super-admin self-repair flow", () => {
     });
   });
 
-  it("does not attempt self-promotion for non-admin users", async () => {
+  it("does not show Super Admin button for non-admin users", () => {
     useAuthStore.setState({ isAdmin: false, isSchoolAdmin: false, isSuperAdmin: false });
-    roleClaimMocks.getRoleClaims.mockResolvedValue({ isAdmin: false, isSchoolAdmin: false, isSuperAdmin: false, schoolId: null });
 
     render(
       <MemoryRouter initialEntries={["/settings"]}>
@@ -141,11 +140,11 @@ describe("Header super-admin self-repair flow", () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Super Admin" }));
+    // Non-admin users must not see the Super Admin button at all — hiding it is
+    // stronger protection than showing it and relying solely on the click handler.
+    expect(screen.queryByRole("button", { name: "Super Admin" })).toBeNull();
 
-    await waitFor(() => {
-      expect(schoolAdminMocks.setUserSuperAdminStatus).not.toHaveBeenCalled();
-      expect(useUIStore.getState().syncStatus).toBe("error");
-    });
+    // The setUserSuperAdminStatus callable must never have been invoked.
+    expect(schoolAdminMocks.setUserSuperAdminStatus).not.toHaveBeenCalled();
   });
 });

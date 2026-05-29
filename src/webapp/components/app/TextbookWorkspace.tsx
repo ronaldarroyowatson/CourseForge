@@ -92,6 +92,8 @@ export function TextbookWorkspace({
   const currentUserId = useAuthStore((state) => state.userId);
   const currentUserEmail = useAuthStore((state) => state.userEmail);
   const isAdmin = useAuthStore((state) => state.isAdmin);
+  const isSchoolAdmin = useAuthStore((state) => state.isSchoolAdmin);
+  const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
   const syncStatus = useUIStore((state) => state.syncStatus);
   const lastSyncTime = useUIStore((state) => state.lastSyncTime);
   const repositories = useRepositories();
@@ -124,7 +126,7 @@ export function TextbookWorkspace({
   useGlobalShortcuts({
     onGoTextbooks: () => navigate("/textbooks"),
     onGoSettings: () => navigate("/settings"),
-    onGoAdmin: isAdmin ? () => navigate("/admin") : undefined,
+    onGoAdmin: (isAdmin || isSuperAdmin) ? () => navigate("/admin") : undefined,
     onQuickSyncHint: () => setWorkflowNotice("Keyboard shortcuts: Alt+1 Textbooks, Alt+2 Settings, Alt+3 Admin, Alt+S Sync hint."),
   });
 
@@ -846,15 +848,31 @@ export function TextbookWorkspace({
               <button type="button" onClick={() => { void handleSignOut(); }} disabled={isSigningOut}>
                 {isSigningOut ? "Signing out..." : "Sign out"}
               </button>
-              {isAdmin ? (
+              {(isAdmin || isSuperAdmin) ? (
                 <button
                   type="button"
-                  className="btn-secondary admin-open-btn"
-                  onClick={() => {
-                    navigate("/admin");
-                  }}
+                  className="btn-secondary"
+                  onClick={() => { navigate("/admin"); }}
                 >
-                  Open Admin Tools
+                  Admin Tools
+                </button>
+              ) : null}
+              {(isSchoolAdmin || isAdmin || isSuperAdmin) ? (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => { navigate("/school-admin"); }}
+                >
+                  School Admin
+                </button>
+              ) : null}
+              {isSuperAdmin ? (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => { navigate("/super-admin"); }}
+                >
+                  Super Admin
                 </button>
               ) : null}
               {signOutError ? <p className="error-text">Sign-out failed: {signOutError}</p> : null}

@@ -272,27 +272,30 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
               <span>{isSyncing ? "Syncing..." : "Sync Now"}</span>
             </button>
           </div>
-          {isSettingsView ? (
+          {(isAdmin || isSchoolAdmin || isSuperAdmin) ? (
             <div className="app-header__admin-actions" aria-label="Administrative navigation">
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => { navigate("/school-admin"); }}
-                disabled={!isSchoolAdmin && !isAdmin && !isSuperAdmin}
-                title={!isSchoolAdmin && !isAdmin && !isSuperAdmin ? "School admin permission required" : "Open school admin"}
-              >
-                Admin
-              </button>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => {
-                  void handleOpenSuperAdmin();
-                }}
-                title="Open super admin"
-              >
-                Super Admin
-              </button>
+              {(isAdmin || isSchoolAdmin || isSuperAdmin) ? (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => { navigate("/school-admin"); }}
+                  title="Open school admin"
+                >
+                  Admin
+                </button>
+              ) : null}
+              {(isAdmin || isSuperAdmin) ? (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    void handleOpenSuperAdmin();
+                  }}
+                  title="Open super admin"
+                >
+                  Super Admin
+                </button>
+              ) : null}
             </div>
           ) : null}
           <div className="sync-cluster">

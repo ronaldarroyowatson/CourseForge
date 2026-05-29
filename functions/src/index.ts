@@ -2498,7 +2498,18 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
   }
 
   // Avoid collection-group index requirements by filtering dateKey in memory.
-  const syncUsageSnapshot = await firestore.collectionGroup("syncUsage").get();
+  // Wrapped in try/catch: a missing COLLECTION_GROUP_ASC index on syncUsage.dateKey
+  // causes a FAILED_PRECONDITION crash that would otherwise discard all other stats.
+  let syncUsageDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+  try {
+    const syncUsageSnapshot = await firestore.collectionGroup("syncUsage").get();
+    syncUsageDocs = syncUsageSnapshot.docs;
+  } catch (syncUsageErr) {
+    console.error(
+      "[super-admin] syncUsage collection group query failed — tracked usage will show 0",
+      syncUsageErr,
+    );
+  }
 
   let usersCount = 0;
   let nextPageToken: string | undefined;
@@ -2510,7 +2521,7 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
 
   let trackedReadsToday = 0;
   let trackedWritesToday = 0;
-  syncUsageSnapshot.docs.forEach((docSnap) => {
+  syncUsageDocs.forEach((docSnap) => {
     const data = docSnap.data();
     if (typeof data.dateKey !== "string" || data.dateKey !== todayKey) {
       return;
@@ -2528,7 +2539,7 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
     pendingPromotionRequests,
     trackedReadsToday,
     trackedWritesToday,
-    syncUsageDocsScanned: syncUsageSnapshot.size,
+    syncUsageDocsScanned: syncUsageDocs.length,
     todayKey,
   });
 

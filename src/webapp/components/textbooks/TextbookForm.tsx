@@ -6,12 +6,23 @@ import { fetchMetadataByISBN, normalizeISBN } from "../../../core/services/isbnS
 import { findCloudTextbookByISBN } from "../../../core/services/syncService";
 import { getCurrentUser } from "../../../firebase/auth";
 import { useRepositories } from "../../hooks/useRepositories";
+import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 import { AutoTextbookSetupFlow } from "./AutoTextbookSetupFlow";
 
 interface TextbookFormProps {
   onSaved: () => void;
   runtime?: "webapp" | "extension";
+  onAutoModeChange?: (isAutoMode: boolean) => void;
+  onManualModeChange?: (isManualMode: boolean) => void;
+  onSetupModeChange?: (mode: "choose" | "manual" | "auto" | "edit") => void;
+  onAutoProgressChange?: (progress: {
+    currentStep: 1 | 2 | 3 | 4;
+    currentLabel: string;
+    completed: [boolean, boolean, boolean, boolean];
+  }) => void;
+  autoNavigationRequest?: { direction: "back" | "next"; token: number } | null;
+  onAutoNavigationHandled?: (token: number) => void;
 }
 
 interface TextbookFormState {
@@ -59,9 +70,19 @@ const ISBN_TYPES: RelatedIsbnType[] = [
   "other",
 ];
 
-export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps): React.JSX.Element {
+export function TextbookForm({
+  onSaved,
+  runtime = "webapp",
+  onAutoModeChange,
+  onManualModeChange,
+  onSetupModeChange,
+  onAutoProgressChange,
+  autoNavigationRequest,
+  onAutoNavigationHandled,
+}: TextbookFormProps): React.JSX.Element {
   const { createTextbook, editTextbook, findDuplicateTextbook } = useRepositories();
   const { selectedTextbook, setSelectedTextbook } = useUIStore();
+  const authMode = useAuthStore((state) => state.authMode);
   const language = useUIStore((state) => state.language);
 
   const [form, setForm] = useState<TextbookFormState>(INITIAL_FORM_STATE);
@@ -70,8 +91,11 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
   const [isLookingUpISBN, setIsLookingUpISBN] = useState(false);
   const [isManualEntryMode, setIsManualEntryMode] = useState(false);
   const [entryMode, setEntryMode] = useState<"choose" | "manual" | "auto">("choose");
+  const [autoFlowNavigationRequest, setAutoFlowNavigationRequest] = useState<{ direction: "back" | "next"; token: number } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const lastHandledAutoNavTokenRef = useRef<number | null>(null);
+  const isLocalOnlySession = authMode !== "cloud";
 
   // Cover image state
   const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
@@ -103,6 +127,7 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
       setSuccessMessage(null);
       setIsManualEntryMode(false);
       setEntryMode("manual");
+      onSetupModeChange?.("edit");
     } else {
       setForm(INITIAL_FORM_STATE);
       setRelatedIsbns([]);
@@ -110,8 +135,9 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
       setCoverFile(null);
       setCoverDataUrl(null);
       setEntryMode("choose");
+      onSetupModeChange?.("choose");
     }
-  }, [selectedTextbook]);
+  }, [onSetupModeChange, selectedTextbook]);
 
   // Stop camera stream when component unmounts or capture mode exits
   const stopStream = useCallback(() => {
@@ -129,8 +155,77 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
   const isEditMode = selectedTextbook !== null;
   const showManualForm = isEditMode || entryMode === "manual";
 
+  useEffect(() => {
+    if (!isLocalOnlySession || isEditMode || entryMode !== "auto") {
+      return;
+    }
+
+    setEntryMode("choose");
+    onSetupModeChange?.("choose");
+  }, [entryMode, isEditMode, isLocalOnlySession, onSetupModeChange]);
+
+  useEffect(() => {
+    onAutoModeChange?.(!isEditMode && entryMode === "auto");
+
+    return () => {
+      onAutoModeChange?.(false);
+    };
+  }, [entryMode, isEditMode, onAutoModeChange]);
+
+  useEffect(() => {
+    onManualModeChange?.(!isEditMode && entryMode === "manual");
+
+  }, [entryMode, isEditMode, onManualModeChange]);
+
+  useEffect(() => {
+    return () => {
+      onManualModeChange?.(false);
+    };
+  }, [onManualModeChange]);
+
+  useEffect(() => {
+    if (!autoNavigationRequest) {
+      return;
+    }
+
+    if (lastHandledAutoNavTokenRef.current === autoNavigationRequest.token) {
+      return;
+    }
+
+    lastHandledAutoNavTokenRef.current = autoNavigationRequest.token;
+
+    if (isEditMode) {
+      onAutoNavigationHandled?.(autoNavigationRequest.token);
+      return;
+    }
+
+    if (entryMode === "manual") {
+      if (autoNavigationRequest.direction === "back") {
+        setEntryMode("choose");
+        onSetupModeChange?.("choose");
+      }
+
+      onAutoNavigationHandled?.(autoNavigationRequest.token);
+      return;
+    }
+
+    if (entryMode !== "auto") {
+      onAutoNavigationHandled?.(autoNavigationRequest.token);
+      return;
+    }
+
+    setAutoFlowNavigationRequest({ direction: autoNavigationRequest.direction, token: autoNavigationRequest.token });
+    onAutoNavigationHandled?.(autoNavigationRequest.token);
+  }, [autoNavigationRequest, entryMode, isEditMode, onAutoNavigationHandled, onSetupModeChange]);
+
   function updateField<K extends keyof TextbookFormState>(field: K, value: TextbookFormState[K]): void {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function handleAutosizeTextarea(event: React.FormEvent<HTMLTextAreaElement>): void {
+    const element = event.currentTarget;
+    element.style.height = "auto";
+    element.style.height = `${Math.max(element.scrollHeight, 42)}px`;
   }
 
   function formatIsbn13ForDisplay(isbnDigits: string): string {
@@ -145,6 +240,19 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
     setErrorMessage(null);
     setSuccessMessage(null);
     stopStream();
+  }
+
+  async function fileToDataUrl(file: File): Promise<string> {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve(typeof reader.result === "string" ? reader.result : "");
+      };
+      reader.onerror = () => {
+        reject(reader.error ?? new Error("Unable to read image file."));
+      };
+      reader.readAsDataURL(file);
+    });
   }
 
   // ── Related ISBNs helpers ───────────────────────────────────────────────
@@ -279,7 +387,13 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
 
       if (isEditMode && selectedTextbook) {
         let coverImageUrl = selectedTextbook.coverImageUrl ?? null;
-        if (coverFile) {
+        if (authMode === "local") {
+          if (coverDataUrl) {
+            coverImageUrl = coverDataUrl;
+          } else if (coverFile) {
+            coverImageUrl = await fileToDataUrl(coverFile);
+          }
+        } else if (coverFile) {
           coverImageUrl = await uploadTextbookCoverImage(selectedTextbook.id, coverFile);
         } else if (coverDataUrl) {
           coverImageUrl = await uploadTextbookCoverFromDataUrl(selectedTextbook.id, coverDataUrl);
@@ -355,6 +469,7 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
         setCoverDataUrl(null);
         setIsManualEntryMode(false);
         setEntryMode("choose");
+        onSetupModeChange?.("choose");
       }
 
       onSaved();
@@ -366,28 +481,37 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
   }
 
   return (
-    <section className="panel">
+    <section className="panel textbook-form-panel">
       <h3>{isEditMode ? `Edit: ${selectedTextbook?.title ?? "Textbook"}` : "Add Textbook"}</h3>
 
       {!isEditMode && entryMode === "choose" ? (
         <div className="textbook-entry-mode-grid">
           <button
             type="button"
-            className="textbook-entry-mode-card"
+            className={`textbook-entry-mode-card ${isLocalOnlySession ? "textbook-entry-mode-card--locked" : ""}`}
             onClick={() => {
+              if (isLocalOnlySession) {
+                setErrorMessage("Auto mode is unavailable in local-only accounts.");
+                return;
+              }
               setEntryMode("auto");
+              onSetupModeChange?.("auto");
               setErrorMessage(null);
               setSuccessMessage(null);
             }}
+            aria-disabled={isLocalOnlySession}
+            disabled={isLocalOnlySession}
+            title={isLocalOnlySession ? "Auto mode is unavailable in local-only accounts." : "Capture cover, copyright page, and TOC pages with guided extraction."}
           >
             <strong>Auto (Recommended)</strong>
-            <span>Capture cover, copyright page, and TOC pages with guided extraction.</span>
+            <span>{isLocalOnlySession ? "Cloud-backed Auto mode is disabled for local-only accounts." : "Capture cover, copyright page, and TOC pages with guided extraction."}</span>
           </button>
           <button
             type="button"
             className="textbook-entry-mode-card"
             onClick={() => {
               setEntryMode("manual");
+              onSetupModeChange?.("manual");
               setErrorMessage(null);
               setSuccessMessage(null);
             }}
@@ -406,9 +530,12 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
               onSaved={onSaved}
               onSwitchToManual={() => {
                 setEntryMode("manual");
+                onSetupModeChange?.("manual");
                 setErrorMessage(null);
                 setSuccessMessage(null);
               }}
+              externalNavigationRequest={autoFlowNavigationRequest}
+              onProgressChange={onAutoProgressChange}
             />
           </div>
         </div>
@@ -543,65 +670,78 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
         </fieldset>
 
         {/* ── Core fields ──────────────────────────────────────────────── */}
-        <label>
-          Title
-          <input
-            value={form.title}
-            onChange={(event) => updateField("title", event.target.value)}
-            required
-          />
-        </label>
+        <div className="textbook-metadata-grid">
+          <div className="textbook-metadata-row">
+            <label htmlFor="textbook-title">Title</label>
+            <textarea
+              id="textbook-title"
+              className="textbook-metadata-autosize"
+              rows={1}
+              value={form.title}
+              onInput={handleAutosizeTextarea}
+              onChange={(event) => updateField("title", event.target.value)}
+              required
+            />
+          </div>
 
-        <label>
-          Grade
-          <input
-            value={form.grade}
-            onChange={(event) => updateField("grade", event.target.value)}
-            required
-          />
-        </label>
+          <div className="textbook-metadata-row">
+            <label htmlFor="textbook-grade">Grade</label>
+            <input
+              id="textbook-grade"
+              value={form.grade}
+              onChange={(event) => updateField("grade", event.target.value)}
+              required
+            />
+          </div>
 
-        <label>
-          Subject
-          <select
-            value={form.subject}
-            onChange={(event) => updateField("subject", event.target.value)}
-            required
-          >
-            <option value="">— Select subject —</option>
-            {SUBJECTS.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </label>
+          <div className="textbook-metadata-row">
+            <label htmlFor="textbook-subject">Subject</label>
+            <select
+              id="textbook-subject"
+              value={form.subject}
+              onChange={(event) => updateField("subject", event.target.value)}
+              required
+            >
+              <option value="">— Select subject —</option>
+              {SUBJECTS.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
 
-        <label>
-          Edition
-          <input
-            value={form.edition}
-            onChange={(event) => updateField("edition", event.target.value)}
-            required
-          />
-        </label>
+          <div className="textbook-metadata-row">
+            <label htmlFor="textbook-edition">Edition</label>
+            <input
+              id="textbook-edition"
+              value={form.edition}
+              onChange={(event) => updateField("edition", event.target.value)}
+              required
+            />
+          </div>
 
-        <label>
-          Publication Year
-          <input
-            type="number"
-            value={form.publicationYear}
-            onChange={(event) => updateField("publicationYear", event.target.value)}
-            required
-          />
-        </label>
+          <div className="textbook-metadata-row">
+            <label htmlFor="textbook-publication-year">Publication Year</label>
+            <input
+              id="textbook-publication-year"
+              type="number"
+              value={form.publicationYear}
+              onChange={(event) => updateField("publicationYear", event.target.value)}
+              required
+            />
+          </div>
 
-        <label>
-          Platform URL (optional)
-          <input
-            type="url"
-            value={form.platformUrl}
-            onChange={(event) => updateField("platformUrl", event.target.value)}
-          />
-        </label>
+          <div className="textbook-metadata-row">
+            <label htmlFor="textbook-platform-url">Platform URL (optional)</label>
+            <textarea
+              id="textbook-platform-url"
+              className="textbook-metadata-autosize"
+              rows={1}
+              value={form.platformUrl}
+              onInput={handleAutosizeTextarea}
+              onChange={(event) => updateField("platformUrl", event.target.value)}
+            />
+          </div>
+        </div>
 
         {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
         {successMessage ? <p className="success-text">{successMessage}</p> : null}
@@ -616,6 +756,7 @@ export function TextbookForm({ onSaved, runtime = "webapp" }: TextbookFormProps)
               className="btn-secondary"
               onClick={() => {
                 setEntryMode("choose");
+                onSetupModeChange?.("choose");
                 setErrorMessage(null);
                 setSuccessMessage(null);
               }}

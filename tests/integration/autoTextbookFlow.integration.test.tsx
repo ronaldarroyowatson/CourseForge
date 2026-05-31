@@ -7,6 +7,7 @@ import { persistAutoTextbook } from "../../src/core/services/autoTextbookPersist
 import type { TocChapter } from "../../src/core/services/textbookAutoExtractionService";
 import { AutoTextbookSetupFlow } from "../../src/webapp/components/textbooks/AutoTextbookSetupFlow";
 import { TextbookForm } from "../../src/webapp/components/textbooks/TextbookForm";
+import { useAuthStore } from "../../src/webapp/store/authStore";
 import { useUIStore } from "../../src/webapp/store/uiStore";
 
 const AUTO_SESSION_DRAFTS_KEY = "courseforge.autoSessionDrafts.v2";
@@ -242,6 +243,7 @@ describe("auto textbook flow integration", () => {
     });
     metadataCorrectionSyncMocks.syncMetadataCorrectionLearning.mockResolvedValue({ message: null });
     authMocks.getCurrentUser.mockReturnValue({ uid: "teacher-sync" });
+    useAuthStore.setState({ authMode: "cloud" });
   });
 
   it("switches from Auto setup back to Manual entry", () => {
@@ -279,6 +281,7 @@ describe("auto textbook flow integration", () => {
       />
     );
 
+    fireEvent.click(screen.getAllByRole("listitem").find((el) => el.querySelector(".metadata-tile__title")?.textContent === "Title")!);
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Manual Title Override" } });
 
     const manualDot = container.querySelector("[title*='(manual)']");
@@ -358,6 +361,7 @@ describe("auto textbook flow integration", () => {
       />
     );
 
+    fireEvent.click(screen.getAllByRole("listitem").find((el) => el.querySelector(".metadata-tile__title")?.textContent === "Publisher Location")!);
     expect((screen.getByLabelText("Publisher Location") as HTMLInputElement).value).toBe(
       "McGraw-Hill Education, STEM Learning Solutions Center, 8777 Lusk Road, Columbus, OH 43240"
     );
@@ -380,6 +384,7 @@ describe("auto textbook flow integration", () => {
       />
     );
 
+    fireEvent.click(screen.getAllByRole("listitem").find((el) => el.querySelector(".metadata-tile__title")?.textContent === "Related ISBNs")!);
     const removeButton = screen.getByRole("button", { name: "Remove related ISBN" });
     expect(removeButton.textContent?.trim()).toBe("×");
     expect(document.body.textContent ?? "").not.toContain("âœ");
@@ -435,9 +440,13 @@ describe("auto textbook flow integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
 
     await waitFor(() => {
-      expect((screen.getByLabelText(/Additional ISBNs \(comma separated\)/i) as HTMLInputElement).value).toContain("9780076770007");
+      expect(screen.getAllByRole("listitem").find((el) => el.querySelector(".metadata-tile__title")?.textContent === "Additional ISBNs")).toBeTruthy();
     });
 
+    fireEvent.click(screen.getAllByRole("listitem").find((el) => el.querySelector(".metadata-tile__title")?.textContent === "Additional ISBNs")!);
+    expect((screen.getByLabelText(/Additional ISBNs \(comma separated\)/i) as HTMLInputElement).value).toContain("9780076770007");
+
+    fireEvent.click(screen.getAllByRole("listitem").find((el) => el.querySelector(".metadata-tile__title")?.textContent === "Related ISBNs")!);
     expect((screen.getByDisplayValue("Teacher Edition") as HTMLInputElement).value).toBe("Teacher Edition");
   });
 
@@ -655,11 +664,20 @@ describe("auto textbook flow integration", () => {
   });
 
   it("blocks explicit language in Auto OCR parsing", () => {
-    render(<TextbookForm onSaved={() => undefined} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /Auto \(Recommended\)/i }));
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "cover",
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          ocrDraft: "initial text",
+        }}
+      />
+    );
 
     const ocrInput = screen.getByLabelText(/OCR text/i);
+    fireEvent.click(ocrInput);
     fireEvent.change(ocrInput, { target: { value: "This is fucking explicit text" } });
     fireEvent.click(screen.getByRole("button", { name: "Re-parse OCR Text" }));
 
@@ -1281,11 +1299,14 @@ describe("auto textbook flow integration", () => {
         testingSeedState={{
           step: "toc",
           coverImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn8n7wAAAAASUVORK5CYII=",
+          ocrDraft: "initial placeholder",
         }}
       />
     );
 
-    fireEvent.change(screen.getByLabelText(/OCR text/i), {
+    const tocOcrInput = screen.getByLabelText(/OCR text/i);
+    fireEvent.click(tocOcrInput);
+    fireEvent.change(tocOcrInput, {
       target: {
         value: [
           "MODULE 1: THE NATURE OF SCIENCE",

@@ -36,6 +36,11 @@ import { readMetadataPipelineRuntimeStatus, type MetadataPipelineRuntimeStatus }
 import { readMetadataCorrectionSyncRuntimeState, type MetadataCorrectionSyncRuntimeState } from "../../../core/services/metadataCorrectionSyncService";
 import { getSupportedLanguages, t as translate } from "../../../core/services/i18nService";
 import { firestoreDb } from "../../../firebase/firestore";
+import {
+  getCurrentUser,
+  getLinkedAuthProviderIds,
+  signOutCurrentUser,
+} from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 import { FloatingDesignSystemCard } from "./FloatingDesignSystemCard";
@@ -290,6 +295,7 @@ function SyncDonutChart({
  */
 export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   const userId = useAuthStore((state) => state.userId);
+  const authMode = useAuthStore((state) => state.authMode);
   const schoolName = useAuthStore((state) => state.schoolName);
   const districtName = useAuthStore((state) => state.districtName);
   const language = useUIStore((state) => state.language);
@@ -344,6 +350,7 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   const [showLanguageSettings, setShowLanguageSettings] = React.useState(false);
   const [showAccessibilitySettings, setShowAccessibilitySettings] = React.useState(false);
   const [showMetadataLearning, setShowMetadataLearning] = React.useState(false);
+  const [accountStatus, setAccountStatus] = React.useState<string | null>(null);
   const [showFloatingDesignSystemCard, setShowFloatingDesignSystemCard] = React.useState(false);
   const [dscPluginInstalled, setDscPluginInstalled] = React.useState<boolean>(() => getDscInstalledSnapshot());
   const [dscPluginStatus, setDscPluginStatus] = React.useState<string | null>(() => (getDscInstalledSnapshot() ? "Installed" : "Not Installed"));
@@ -378,6 +385,14 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
     pageId: "settings",
     cardId: "debug-log",
   }), [debugEnabled, debugStats.entries, debugStats.totalBytes, debugPolicyStatus, debugStatus]);
+  const linkedAuthProviderIds = React.useMemo(() => getLinkedAuthProviderIds(getCurrentUser()), [authMode, userId]);
+  const providerLabelByFirebaseId: Record<string, string> = React.useMemo(() => ({
+    "google.com": "Google",
+    "github.com": "GitHub",
+    "microsoft.com": "Microsoft",
+    "apple.com": "Apple",
+  }), []);
+  const linkedAuthProviderLabels = React.useMemo(() => linkedAuthProviderIds.map((providerId) => providerLabelByFirebaseId[providerId] ?? providerId), [linkedAuthProviderIds, providerLabelByFirebaseId]);
 
   const refreshDscPluginStatus = React.useCallback(async () => {
     const status = await refreshPluginLifecycleStatus("dsc");
@@ -556,6 +571,27 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
       setSchoolDirectoryStatus(`Unable to save school affiliation right now. (${message})`);
     } finally {
       setIsSavingSchool(false);
+    }
+  }
+
+  function handleAddCloudService(): void {
+    setAccountStatus(null);
+
+    if (props.onNavigate) {
+      props.onNavigate("/login?from=/settings&linkMode=true");
+    } else {
+      window.location.assign("/login?from=/settings&linkMode=true");
+    }
+  }
+
+  async function handleSignOut(): Promise<void> {
+    setAccountStatus(null);
+    try {
+      await signOutCurrentUser();
+      window.location.assign("/login");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to sign out right now.";
+      setAccountStatus(message);
     }
   }
 
@@ -1146,6 +1182,38 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
       </div>
 
       <div className="settings-grid">
+        <article className="settings-card">
+          <div className="settings-card__head">
+            <h3>Account</h3>
+          </div>
+          <p>Signed in as {authMode === "local" ? "a local-only account" : "a cloud account"}.</p>
+          <p className="settings-meta">{userId ? `User ID: ${userId}` : "No user ID available."}</p>
+          {authMode === "local" ? (
+            <p className="manual-entry-banner">Local-only accounts stay on this device and never use Auto mode or cloud sync.</p>
+          ) : (
+            <div className="settings-provider-links">
+              <p className="settings-meta">Connected sign-in methods:</p>
+              <div className="settings-provider-links__checks">
+                {linkedAuthProviderLabels.length > 0 ? linkedAuthProviderLabels.map((providerLabel) => (
+                  <p key={providerLabel} className="settings-provider-check">
+                    <span aria-hidden="true">✓</span>
+                    <span>{providerLabel}</span>
+                  </p>
+                )) : <p className="settings-meta">No linked cloud services detected.</p>}
+              </div>
+            </div>
+          )}
+          <div className="form-actions">
+            <button type="button" className="btn-secondary" onClick={handleAddCloudService}>
+              Add Cloud Service
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => { void handleSignOut(); }}>
+              Sign Out
+            </button>
+          </div>
+          {accountStatus ? <p className="settings-meta">{accountStatus}</p> : null}
+        </article>
+
         <article className={`settings-card settings-card--expandable ${showSyncPreferences ? "settings-card--expanded" : ""}`}>
           <div className="settings-card__head">
             <h3>Sync Preferences</h3>

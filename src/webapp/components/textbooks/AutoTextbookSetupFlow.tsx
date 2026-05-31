@@ -56,6 +56,81 @@ import { captureVisibleChromeTab, isChromeOSRuntime, isSmallChromebookViewport }
 import { getCurrentUser } from "../../../firebase/auth";
 
 type AutoFlowStep = "cover" | "title" | "toc" | "toc-editor";
+type AutoPrimaryHelperAction =
+  | "capture-cover"
+  | "upload-cover"
+  | "capture-title"
+  | "upload-title"
+  | "capture-toc"
+  | "finish-toc"
+  | "switch-manual";
+type MetadataTileKey =
+  | "title"
+  | "subtitle"
+  | "grade"
+  | "gradeBand"
+  | "subject"
+  | "edition"
+  | "publicationYear"
+  | "copyrightYear"
+  | "isbnRaw"
+  | "additionalIsbnsCsv"
+  | "relatedIsbns"
+  | "authorsCsv"
+  | "publisher"
+  | "publisherLocation"
+  | "platformUrl"
+  | "mhid"
+  | "seriesName";
+
+const AUTO_HELPER_HOVER_DELAY_MS = 480;
+const AUTO_HELPER_FOCUS_DELAY_MS = 640;
+const AUTO_HELPER_POINTER_OFFSET_X = 6;
+const AUTO_HELPER_POINTER_OFFSET_Y = 8;
+const AUTO_HELPER_FOCUS_OFFSET_Y = 6;
+const HIGH_CONFIDENCE_THRESHOLD = 0.8;
+
+const COVER_PRIMARY_TILE_FIELDS: MetadataTileKey[] = ["title", "subtitle", "subject", "seriesName", "publisher"];
+const COVER_EXTRA_COMPACT_TILE_FIELDS: MetadataTileKey[] = ["grade", "gradeBand", "edition"];
+const COVER_NANO_COMPACT_TILE_FIELDS: MetadataTileKey[] = ["grade", "mhid", "isbnRaw"];
+const METADATA_TILE_FIELD_ORDER: MetadataTileKey[] = [
+  "title",
+  "subtitle",
+  "grade",
+  "gradeBand",
+  "subject",
+  "edition",
+  "publicationYear",
+  "copyrightYear",
+  "isbnRaw",
+  "additionalIsbnsCsv",
+  "relatedIsbns",
+  "authorsCsv",
+  "publisher",
+  "publisherLocation",
+  "platformUrl",
+  "mhid",
+  "seriesName",
+];
+const METADATA_TILE_LABELS: Record<MetadataTileKey, string> = {
+  title: "Title",
+  subtitle: "Subtitle",
+  grade: "Grade",
+  gradeBand: "Grade Band",
+  subject: "Subject",
+  edition: "Edition",
+  publicationYear: "Publication Year",
+  copyrightYear: "Copyright Year",
+  isbnRaw: "ISBN",
+  additionalIsbnsCsv: "Additional ISBNs",
+  relatedIsbns: "Related ISBNs",
+  authorsCsv: "Authors",
+  publisher: "Publisher",
+  publisherLocation: "Publisher Location",
+  platformUrl: "Publisher URL",
+  mhid: "MHID",
+  seriesName: "Series Name",
+};
 
 const RELATED_ISBN_TYPES: RelatedIsbnType[] = ["student", "teacher", "digital", "workbook", "assessment", "other"];
 const IMMEDIATE_UPLOAD_SYNC_TIMEOUT_MS = 4500;
@@ -65,6 +140,12 @@ interface AutoTextbookSetupFlowProps {
   runtime?: "webapp" | "extension";
   onSaved: () => void;
   onSwitchToManual: () => void;
+  externalNavigationRequest?: { direction: "back" | "next"; token: number } | null;
+  onProgressChange?: (progress: {
+    currentStep: 1 | 2 | 3 | 4;
+    currentLabel: string;
+    completed: [boolean, boolean, boolean, boolean];
+  }) => void;
   testingSeedState?: {
     step?: AutoFlowStep;
     usage?: { cover: number; title: number; toc: number };
@@ -940,7 +1021,14 @@ function buildExtractionFieldList(meta: AutoTextbookMetadata): string[] {
   return found;
 }
 
-export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToManual, testingSeedState }: AutoTextbookSetupFlowProps): React.JSX.Element {
+export function AutoTextbookSetupFlow({
+  runtime = "webapp",
+  onSaved,
+  onSwitchToManual,
+  externalNavigationRequest,
+  onProgressChange,
+  testingSeedState,
+}: AutoTextbookSetupFlowProps): React.JSX.Element {
   const language = useUIStore((state) => state.language);
   const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
   const chromeOs = useMemo(() => runtime === "extension" && isChromeOSRuntime(), [runtime]);
@@ -995,6 +1083,11 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     confidence: testingSeedState.tocResult.confidence,
   }] : []));
   const [isBusy, setIsBusy] = useState(false);
+  const [activePrimaryHelper, setActivePrimaryHelper] = useState<AutoPrimaryHelperAction | null>(null);
+  const [primaryHelperAnchor, setPrimaryHelperAnchor] = useState<{ x: number; y: number } | null>(null);
+  const helperDelayTimerRef = useRef<number | null>(null);
+  const pendingHelperActionRef = useRef<AutoPrimaryHelperAction | null>(null);
+  const pendingHelperAnchorRef = useRef<{ x: number; y: number } | null>(null);
   const [isRunningOcr, setIsRunningOcr] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -1048,6 +1141,10 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
   // ocrDraft: editable copy the user can correct before re-parsing.
   const [rawOcrText, setRawOcrText] = useState(testingSeedState?.ocrDraft ?? "");
   const [isRawOcrExpanded, setIsRawOcrExpanded] = useState(false);
+  const [isOcrEditorExpanded, setIsOcrEditorExpanded] = useState(false);
+  const [expandedMetadataField, setExpandedMetadataField] = useState<MetadataTileKey | null>(null);
+  const lastHandledExternalNavigationTokenRef = useRef<number | null>(null);
+  const ocrTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // â”€â”€ Resumable sessions (max 3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [resumableDrafts, setResumableDrafts] = useState<AutoSessionDraft[]>(() => readAutoSessionDrafts());
@@ -1149,28 +1246,142 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   const canFinishToc = tocResult.chapters.length > 0;
 
-  const stepTitle = useMemo(() => {
-    if (step === "cover") return "Auto Setup: Cover";
-    if (step === "title") return "Auto Setup: Copyright Page";
-    if (step === "toc") return "Auto Setup: Table of Contents";
-    return "Auto Setup: TOC Editor";
-  }, [step]);
+  useEffect(() => {
+    const currentStep: 1 | 2 | 3 | 4 = step === "cover"
+      ? 1
+      : step === "title"
+        ? 2
+        : step === "toc"
+          ? 3
+          : 4;
 
-  const stepPrompt = useMemo(() => {
-    if (step === "cover") {
+    const currentLabel = currentStep === 1
+      ? "Cover"
+      : currentStep === 2
+        ? "Copyright Page"
+        : currentStep === 3
+          ? "Table of Contents"
+          : "Data";
+
+    const completed: [boolean, boolean, boolean, boolean] = [
+      Boolean(coverImageDataUrl),
+      Boolean(ownershipProofDataUrl),
+      tocResult.chapters.length > 0,
+      false,
+    ];
+
+    onProgressChange?.({ currentStep, currentLabel, completed });
+  }, [coverImageDataUrl, onProgressChange, ownershipProofDataUrl, step, tocResult.chapters.length]);
+
+  const primaryHelperText = useMemo(() => {
+    if (activePrimaryHelper === "capture-cover") {
       return environmentPreparationMessage;
     }
 
-    if (step === "title") {
-      return "Navigate to the copyright page, then click 'Capture Copyright Page'. CourseForge captures the full page for ownership-proof metadata matching.";
+    if (activePrimaryHelper === "upload-cover") {
+      return "Upload a cover screenshot if live capture is blocked. A clear, full-page image gives the best extraction quality.";
     }
 
-    if (step === "toc") {
-      return "Navigate to the table of contents. Capture each page until you're done.";
+    if (activePrimaryHelper === "capture-title") {
+      return "Capture the full copyright page so ownership and publication details can be verified accurately.";
     }
 
-    return "Review the detected chapters and sections, then confirm to save.";
-  }, [environmentPreparationMessage, step]);
+    if (activePrimaryHelper === "upload-title") {
+      return "Upload a clear copyright page image if live capture is blocked. Keep text large and legible for better OCR.";
+    }
+
+    if (activePrimaryHelper === "capture-toc") {
+      return "Capture one TOC page at a time. Keep chapter and section numbers visible so parsing remains accurate.";
+    }
+
+    if (activePrimaryHelper === "finish-toc") {
+      return "Finish TOC after capturing all contents pages you want included. You can still review and edit in the TOC editor next.";
+    }
+
+    if (activePrimaryHelper === "switch-manual") {
+      return "Switch to Manual mode if you prefer entering textbook metadata directly.";
+    }
+
+    return null;
+  }, [activePrimaryHelper, environmentPreparationMessage]);
+  const hasOcrDraft = ocrDraft.trim().length > 0;
+
+  useEffect(() => {
+    return () => {
+      if (helperDelayTimerRef.current !== null) {
+        window.clearTimeout(helperDelayTimerRef.current);
+        helperDelayTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  function clearPrimaryHelperDelay(): void {
+    if (helperDelayTimerRef.current !== null) {
+      window.clearTimeout(helperDelayTimerRef.current);
+      helperDelayTimerRef.current = null;
+    }
+  }
+
+  function schedulePrimaryHelper(action: AutoPrimaryHelperAction, x: number, y: number, delayMs: number): void {
+    clearPrimaryHelperDelay();
+    pendingHelperActionRef.current = action;
+    pendingHelperAnchorRef.current = { x, y };
+
+    helperDelayTimerRef.current = window.setTimeout(() => {
+      const pendingAction = pendingHelperActionRef.current;
+      const pendingAnchor = pendingHelperAnchorRef.current;
+      if (!pendingAction || !pendingAnchor) {
+        return;
+      }
+
+      setActivePrimaryHelper(pendingAction);
+      setPrimaryHelperAnchor(pendingAnchor);
+      helperDelayTimerRef.current = null;
+    }, delayMs);
+  }
+
+  function showPrimaryHelper(action: AutoPrimaryHelperAction, x: number, y: number): void {
+    schedulePrimaryHelper(action, x, y, AUTO_HELPER_HOVER_DELAY_MS);
+  }
+
+  function hidePrimaryHelper(): void {
+    clearPrimaryHelperDelay();
+    pendingHelperActionRef.current = null;
+    pendingHelperAnchorRef.current = null;
+    setActivePrimaryHelper(null);
+    setPrimaryHelperAnchor(null);
+  }
+
+  function handlePrimaryHelperMouseEnter(action: AutoPrimaryHelperAction, event: React.MouseEvent<HTMLButtonElement>): void {
+    showPrimaryHelper(
+      action,
+      event.clientX + AUTO_HELPER_POINTER_OFFSET_X,
+      event.clientY + AUTO_HELPER_POINTER_OFFSET_Y,
+    );
+  }
+
+  function handlePrimaryHelperMouseMove(event: React.MouseEvent<HTMLButtonElement>): void {
+    const nextAnchor = {
+      x: event.clientX + AUTO_HELPER_POINTER_OFFSET_X,
+      y: event.clientY + AUTO_HELPER_POINTER_OFFSET_Y,
+    };
+    if (activePrimaryHelper) {
+      setPrimaryHelperAnchor(nextAnchor);
+      return;
+    }
+
+    pendingHelperAnchorRef.current = nextAnchor;
+  }
+
+  function handlePrimaryHelperFocus(action: AutoPrimaryHelperAction, event: React.FocusEvent<HTMLButtonElement>): void {
+    const rect = event.currentTarget.getBoundingClientRect();
+    schedulePrimaryHelper(
+      action,
+      rect.left + rect.width / 2,
+      rect.bottom + AUTO_HELPER_FOCUS_OFFSET_Y,
+      AUTO_HELPER_FOCUS_DELAY_MS,
+    );
+  }
 
   function updateMetadataForm<K extends keyof MetadataFormState>(field: K, value: MetadataFormState[K]): void {
     setMetadataForm((current) => {
@@ -1201,6 +1412,26 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       },
     }));
   }
+
+  useEffect(() => {
+    if (!hasOcrDraft) {
+      setIsOcrEditorExpanded(false);
+      return;
+    }
+
+    // Collapse when fresh OCR arrives so preview stays compact until user opens it.
+    setIsOcrEditorExpanded(false);
+  }, [rawOcrText, hasOcrDraft]);
+
+  useEffect(() => {
+    if (!isOcrEditorExpanded || !ocrTextareaRef.current) {
+      return;
+    }
+
+    const textarea = ocrTextareaRef.current;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 320)}px`;
+  }, [isOcrEditorExpanded, ocrDraft]);
 
   function applyMetadataDraft(nextMetadata: AutoTextbookMetadata, tocConfidence = tocResult.confidence): void {
     setMetadataDraft(nextMetadata);
@@ -1307,11 +1538,189 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     );
   }
 
-  /** Smooth-scroll the viewport so the metadata fields are centred. */
+  function getMetadataTileConfidence(tile: MetadataTileKey): number | null {
+    const confidenceFieldMap: Partial<Record<MetadataTileKey, AutoMetadataFieldKey>> = {
+      title: "title",
+      subtitle: "subtitle",
+      gradeBand: "gradeBand",
+      subject: "subject",
+      edition: "edition",
+      copyrightYear: "copyrightYear",
+      isbnRaw: "isbn",
+      additionalIsbnsCsv: "additionalIsbns",
+      authorsCsv: "authors",
+      publisher: "publisher",
+      publisherLocation: "publisherLocation",
+      platformUrl: "platformUrl",
+      mhid: "mhid",
+      seriesName: "seriesName",
+    };
+
+    const mappedField = confidenceFieldMap[tile];
+    return mappedField ? getFieldConfidence(mappedField) : null;
+  }
+
+  function getTileConfidenceField(tile: MetadataTileKey): AutoMetadataFieldKey | undefined {
+    const confidenceFieldMap: Partial<Record<MetadataTileKey, AutoMetadataFieldKey>> = {
+      title: "title",
+      subtitle: "subtitle",
+      gradeBand: "gradeBand",
+      subject: "subject",
+      edition: "edition",
+      copyrightYear: "copyrightYear",
+      isbnRaw: "isbn",
+      additionalIsbnsCsv: "additionalIsbns",
+      authorsCsv: "authors",
+      publisher: "publisher",
+      publisherLocation: "publisherLocation",
+      platformUrl: "platformUrl",
+      mhid: "mhid",
+      seriesName: "seriesName",
+    };
+    return confidenceFieldMap[tile];
+  }
+
+  function getMetadataTileSummary(tile: MetadataTileKey): string {
+    switch (tile) {
+      case "title":
+        return metadataForm.title;
+      case "subtitle":
+        return metadataForm.subtitle;
+      case "grade":
+        return metadataForm.grade;
+      case "gradeBand":
+        return metadataForm.gradeBand;
+      case "subject":
+        return metadataForm.subject;
+      case "edition":
+        return metadataForm.edition;
+      case "publicationYear":
+        return metadataForm.publicationYear;
+      case "copyrightYear":
+        return metadataForm.copyrightYear;
+      case "isbnRaw":
+        return metadataForm.isbnRaw;
+      case "additionalIsbnsCsv":
+        return metadataForm.additionalIsbnsCsv;
+      case "relatedIsbns": {
+        const filledCount = relatedIsbns.filter((entry) => entry.isbn.trim().length > 0).length;
+        return filledCount > 0 ? `${filledCount} linked` : "";
+      }
+      case "authorsCsv":
+        return metadataForm.authorsCsv;
+      case "publisher":
+        return metadataForm.publisher;
+      case "publisherLocation":
+        return metadataForm.publisherLocation;
+      case "platformUrl":
+        return metadataForm.platformUrl;
+      case "mhid":
+        return metadataForm.mhid;
+      case "seriesName":
+        return metadataForm.seriesName;
+      default:
+        return "";
+    }
+  }
+
+  function isMetadataTileCaptured(tile: MetadataTileKey): boolean {
+    return getMetadataTileSummary(tile).trim().length > 0;
+  }
+
+  function renderMetadataTileEditor(tile: MetadataTileKey): React.JSX.Element {
+    if (tile === "title") {
+      return <input aria-label="Title" value={metadataForm.title} onChange={(event) => updateMetadataForm("title", event.target.value)} />;
+    }
+    if (tile === "subtitle") {
+      return <input value={metadataForm.subtitle} onChange={(event) => updateMetadataForm("subtitle", event.target.value)} />;
+    }
+    if (tile === "grade") {
+      return <input value={metadataForm.grade} onChange={(event) => updateMetadataForm("grade", event.target.value)} />;
+    }
+    if (tile === "gradeBand") {
+      return <input value={metadataForm.gradeBand} onChange={(event) => updateMetadataForm("gradeBand", event.target.value)} />;
+    }
+    if (tile === "subject") {
+      return (
+        <select value={metadataForm.subject} onChange={(event) => updateMetadataForm("subject", event.target.value)}>
+          {SUBJECTS.map((subject) => (
+            <option key={subject} value={subject}>{subject}</option>
+          ))}
+        </select>
+      );
+    }
+    if (tile === "edition") {
+      return <input value={metadataForm.edition} onChange={(event) => updateMetadataForm("edition", event.target.value)} />;
+    }
+    if (tile === "publicationYear") {
+      return <input type="number" value={metadataForm.publicationYear} onChange={(event) => updateMetadataForm("publicationYear", event.target.value)} />;
+    }
+    if (tile === "copyrightYear") {
+      return <input type="number" value={metadataForm.copyrightYear} onChange={(event) => updateMetadataForm("copyrightYear", event.target.value)} />;
+    }
+    if (tile === "isbnRaw") {
+      return <input value={metadataForm.isbnRaw} onChange={(event) => updateMetadataForm("isbnRaw", event.target.value)} />;
+    }
+    if (tile === "additionalIsbnsCsv") {
+      return <input aria-label="Additional ISBNs (comma separated)" value={metadataForm.additionalIsbnsCsv} onChange={(event) => updateMetadataForm("additionalIsbnsCsv", event.target.value)} />;
+    }
+    if (tile === "authorsCsv") {
+      return <input value={metadataForm.authorsCsv} onChange={(event) => updateMetadataForm("authorsCsv", event.target.value)} />;
+    }
+    if (tile === "publisher") {
+      return <input value={metadataForm.publisher} onChange={(event) => updateMetadataForm("publisher", event.target.value)} />;
+    }
+    if (tile === "publisherLocation") {
+      return <input aria-label="Publisher Location" value={metadataForm.publisherLocation} onChange={(event) => updateMetadataForm("publisherLocation", event.target.value)} />;
+    }
+    if (tile === "platformUrl") {
+      return <input type="url" value={metadataForm.platformUrl} onChange={(event) => updateMetadataForm("platformUrl", event.target.value)} />;
+    }
+    if (tile === "mhid") {
+      return <input value={metadataForm.mhid} onChange={(event) => updateMetadataForm("mhid", event.target.value)} />;
+    }
+    if (tile === "seriesName") {
+      return <input value={metadataForm.seriesName} onChange={(event) => updateMetadataForm("seriesName", event.target.value)} />;
+    }
+
+    return (
+      <fieldset className="form-fieldset">
+        <legend>Related ISBNs (typed)</legend>
+        {relatedIsbns.map((row, index) => (
+          <div key={`auto-related-isbn-${index}`} className="related-isbn-row">
+            <input
+              value={row.isbn}
+              onChange={(event) => updateRelatedIsbn(index, "isbn", event.target.value)}
+              placeholder="ISBN-10 or ISBN-13"
+              className="related-isbn-input"
+            />
+            <select
+              value={row.type}
+              onChange={(event) => updateRelatedIsbn(index, "type", event.target.value as RelatedIsbnType)}
+              aria-label={`Auto related ISBN type ${index + 1}`}
+              className="related-isbn-type"
+            >
+              {RELATED_ISBN_TYPES.map((type) => (
+                <option key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</option>
+              ))}
+            </select>
+            <input
+              value={row.note ?? ""}
+              onChange={(event) => updateRelatedIsbn(index, "note", event.target.value)}
+              placeholder="Label/Note (optional, e.g., Teacher Edition)"
+              className="related-isbn-note"
+            />
+            <button type="button" className="btn-icon btn-danger" onClick={() => removeRelatedIsbn(index)} aria-label="Remove related ISBN" title="Remove">{"\u00D7"}</button>
+          </div>
+        ))}
+        <button type="button" className="btn-secondary" onClick={addRelatedIsbn}>+ Add Related ISBN</button>
+      </fieldset>
+    );
+  }
+
+  /** Auto-scroll disabled during current UI refinement cycle. */
   function scrollToMetadata(): void {
-    window.requestAnimationFrame(() => {
-      metadataFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
+    // Intentionally no-op.
   }
 
   async function requestSelection(imageDataUrl: string): Promise<SelectionRect | null> {
@@ -1612,6 +2021,50 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
     queueCorrectionLearningSample("accept_title");
     setStep("toc");
   }
+
+  useEffect(() => {
+    if (!externalNavigationRequest) {
+      return;
+    }
+
+    if (lastHandledExternalNavigationTokenRef.current === externalNavigationRequest.token) {
+      return;
+    }
+
+    lastHandledExternalNavigationTokenRef.current = externalNavigationRequest.token;
+
+    if (externalNavigationRequest.direction === "back") {
+      if (step === "title") {
+        setStep("cover");
+        return;
+      }
+
+      if (step === "toc") {
+        setStep("title");
+        return;
+      }
+
+      if (step === "toc-editor") {
+        setStep("toc");
+      }
+
+      return;
+    }
+
+    if (step === "cover") {
+      handleAcceptCoverStep();
+      return;
+    }
+
+    if (step === "title") {
+      handleAcceptTitleStep();
+      return;
+    }
+
+    if (step === "toc") {
+      setStep("toc-editor");
+    }
+  }, [externalNavigationRequest, step]);
 
   function applyTocFromText(rawText: string): void {
     const safety = evaluateAutoCaptureSafety(rawText, "toc");
@@ -2843,123 +3296,119 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
   return (
     <section className={`panel auto-textbook-flow${compactChromeLayout ? " auto-textbook-flow--chromeos-compact" : ""}`}>
-      <h3>{stepTitle}</h3>
-
       {/* â”€â”€ Session queue (max 3 unfinished auto captures) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      <div className="auto-session-resume" role="complementary" aria-label="Resume previous Auto sessions">
+      <div
+        className={`auto-session-resume${resumableDrafts.length === 0 ? " auto-session-resume--collapsed" : ""}`}
+        role="complementary"
+        aria-label="Resume previous Auto sessions"
+      >
         <p className="auto-session-resume__title">Auto Mode Queue ({resumableDrafts.length}/{MAX_AUTO_SESSION_DRAFTS})</p>
-        <div className="auto-session-slots" aria-label="Auto capture queue slots">
-          {Array.from({ length: MAX_AUTO_SESSION_DRAFTS }).map((_, index) => {
-            const draft = resumableDrafts[index] ?? null;
-            if (!draft) {
-              return (
-                <div key={`auto-slot-empty-${index}`} className="auto-session-slot auto-session-slot--empty" aria-label={`Queue slot ${index + 1} empty`}>
-                    <span className="auto-session-slot__placeholder" aria-hidden="true">{"\u{1F4D8}"}</span>
-                  <p className="auto-session-slot__hint">Empty slot</p>
-                </div>
-              );
-            }
-
-            return (
-              <div key={draft.id} className="auto-session-slot" aria-label={`Queue slot ${index + 1} in progress`}>
-                {draft.coverImageDataUrl ? (
-                  <img src={draft.coverImageDataUrl} alt="Queued cover thumbnail" className="auto-session-resume__thumb" />
-                ) : (
-                  <span className="auto-session-slot__placeholder" aria-hidden="true">{"\u{1F4D8}"}</span>
-                )}
-                <p className="auto-session-resume__meta">
-                  {draft.metadataTitle ? <strong>{draft.metadataTitle}</strong> : <em>Untitled</em>}
-                </p>
-                <p className="auto-session-resume__meta">Saved {new Date(draft.savedAt).toLocaleTimeString()}</p>
-                <p className="auto-session-resume__meta">
-                  Completed: {[
-                    draft.stepsCompleted.cover && "Cover",
-                    draft.stepsCompleted.copyright && "Copyright",
-                  ].filter(Boolean).join(", ") || "None yet"}
-                </p>
-                <div className="auto-session-resume__actions">
-                  <button
-                    type="button"
-                    disabled={isBusy}
-                    onClick={() => {
-                      activeSessionDraftIdRef.current = draft.id;
-                      setCoverImageDataUrl(draft.coverImageDataUrl);
-                      setOwnershipProofDataUrl(draft.ownershipProofDataUrl ?? null);
-                      setLastMetadataImageDataUrl(draft.ownershipProofDataUrl ?? draft.coverImageDataUrl);
-                      setRawOcrText(draft.rawOcrText);
-                      setOcrDraft(draft.rawOcrText);
-                      const nextMetadataForm: MetadataFormState = draft.metadataFormSnapshot
-                        ? { ...draft.metadataFormSnapshot }
-                        : {
-                            ...metadataForm,
-                            title: draft.metadataTitle || metadataForm.title,
-                            subject: draft.metadataSubject || metadataForm.subject,
-                            publisher: draft.metadataPublisher || metadataForm.publisher,
-                          };
-                      const nextRelatedIsbns = draft.relatedIsbnsSnapshot ?? [];
-
-                      setMetadataForm(nextMetadataForm);
-                      setRelatedIsbns(nextRelatedIsbns);
-                      setMetadataDraft({
-                        ...fromMetadataFormState(nextMetadataForm),
-                        relatedIsbns: nextRelatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
-                      });
-                      setStep(draft.step);
-                      setResumableDrafts(deleteAutoSessionDraft(draft.id));
-                    }}
-                  >
-                    Resume
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    disabled={isBusy}
-                    onClick={() => {
-                      setResumableDrafts(deleteAutoSessionDraft(draft.id));
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {isSessionCapacityReached ? (
-          <p className="error-text">
-            Queue full: finish or delete one of the 3 in-progress auto captures before starting another.
-          </p>
-        ) : null}
         {resumableDrafts.length > 0 ? (
-          <div className="auto-session-resume__actions">
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={isBusy}
-              onClick={() => {
-                clearAllAutoSessionDrafts();
-                setResumableDrafts([]);
-              }}
-            >
-              Delete All Drafts
-            </button>
-          </div>
+          <>
+            <div className="auto-session-slots" aria-label="Auto capture queue slots">
+              {Array.from({ length: MAX_AUTO_SESSION_DRAFTS }).map((_, index) => {
+                const draft = resumableDrafts[index] ?? null;
+                if (!draft) {
+                  return (
+                    <div key={`auto-slot-empty-${index}`} className="auto-session-slot auto-session-slot--empty" aria-label={`Queue slot ${index + 1} empty`}>
+                      <span className="auto-session-slot__placeholder" aria-hidden="true">{"\u{1F4D8}"}</span>
+                      <p className="auto-session-slot__hint">Empty</p>
+                    </div>
+                  );
+                }
+
+                const draftTitle = draft.metadataTitle?.trim() || "Untitled";
+                const draftYear = draft.metadataFormSnapshot?.publicationYear?.trim() || "Year n/a";
+
+                return (
+                  <div key={draft.id} className="auto-session-slot" aria-label={`Queue slot ${index + 1} in progress`}>
+                    <div className="auto-session-slot__cover" aria-hidden="true">
+                      {draft.coverImageDataUrl ? (
+                        <img src={draft.coverImageDataUrl} alt="Queued cover thumbnail" className="auto-session-resume__thumb" />
+                      ) : (
+                        <span className="auto-session-slot__placeholder" aria-hidden="true">{"\u{1F4D8}"}</span>
+                      )}
+                    </div>
+
+                    <div className="auto-session-slot__text">
+                      <p className="auto-session-slot__title" title={draftTitle}>{draftTitle}</p>
+                      <p className="auto-session-slot__year">{draftYear}</p>
+                    </div>
+
+                    <div className="auto-session-slot__actions">
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => {
+                          activeSessionDraftIdRef.current = draft.id;
+                          setCoverImageDataUrl(draft.coverImageDataUrl);
+                          setOwnershipProofDataUrl(draft.ownershipProofDataUrl ?? null);
+                          setLastMetadataImageDataUrl(draft.ownershipProofDataUrl ?? draft.coverImageDataUrl);
+                          setRawOcrText(draft.rawOcrText);
+                          setOcrDraft(draft.rawOcrText);
+                          const nextMetadataForm: MetadataFormState = draft.metadataFormSnapshot
+                            ? { ...draft.metadataFormSnapshot }
+                            : {
+                                ...metadataForm,
+                                title: draft.metadataTitle || metadataForm.title,
+                                subject: draft.metadataSubject || metadataForm.subject,
+                                publisher: draft.metadataPublisher || metadataForm.publisher,
+                              };
+                          const nextRelatedIsbns = draft.relatedIsbnsSnapshot ?? [];
+
+                          setMetadataForm(nextMetadataForm);
+                          setRelatedIsbns(nextRelatedIsbns);
+                          setMetadataDraft({
+                            ...fromMetadataFormState(nextMetadataForm),
+                            relatedIsbns: nextRelatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
+                          });
+                          setStep(draft.step);
+                          setResumableDrafts(deleteAutoSessionDraft(draft.id));
+                        }}
+                      >
+                        Resume
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={isBusy}
+                        onClick={() => {
+                          setResumableDrafts(deleteAutoSessionDraft(draft.id));
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {isSessionCapacityReached ? (
+              <p className="error-text">
+                Queue full: finish or delete one of the 3 in-progress auto captures before starting another.
+              </p>
+            ) : null}
+
+            <div className="auto-session-resume__actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={isBusy}
+                onClick={() => {
+                  clearAllAutoSessionDrafts();
+                  setResumableDrafts([]);
+                }}
+              >
+                Delete All Drafts
+              </button>
+            </div>
+          </>
         ) : null}
       </div>
 
       {chromeOs ? (
         <p className="form-hint">{translate(language, "autoMode", "chromeOsBanner")}</p>
       ) : null}
-
-      <p className="form-hint">
-        {AUTO_MODE_SCOPE_MESSAGE}
-      </p>
-
-      <p className="form-hint">{stepPrompt}</p>
-
-      <p className="form-hint">
-        It is okay to include extra space while capturing; CourseForge will auto-crop page boundaries.
-      </p>
 
       {step === "title" ? (
         <>
@@ -3080,10 +3529,37 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
       <div className="form-actions">
         {step === "cover" ? (
           <>
-            <button type="button" onClick={() => void handleCaptureCover()} disabled={isBusy || isSessionCapacityReached}>
+            <button
+              type="button"
+              onClick={() => {
+                hidePrimaryHelper();
+                void handleCaptureCover();
+              }}
+              disabled={isBusy || isSessionCapacityReached}
+              onMouseEnter={(event) => handlePrimaryHelperMouseEnter("capture-cover", event)}
+              onMouseMove={handlePrimaryHelperMouseMove}
+              onMouseLeave={hidePrimaryHelper}
+              onFocus={(event) => handlePrimaryHelperFocus("capture-cover", event)}
+              onBlur={hidePrimaryHelper}
+              onMouseDown={hidePrimaryHelper}
+            >
               Capture Cover
             </button>
-            <button type="button" className="btn-secondary" onClick={() => coverFileInputRef.current?.click()} disabled={isBusy || isSessionCapacityReached}>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                hidePrimaryHelper();
+                coverFileInputRef.current?.click();
+              }}
+              disabled={isBusy || isSessionCapacityReached}
+              onMouseEnter={(event) => handlePrimaryHelperMouseEnter("upload-cover", event)}
+              onMouseMove={handlePrimaryHelperMouseMove}
+              onMouseLeave={hidePrimaryHelper}
+              onFocus={(event) => handlePrimaryHelperFocus("upload-cover", event)}
+              onBlur={hidePrimaryHelper}
+              onMouseDown={hidePrimaryHelper}
+            >
               Upload Image
             </button>
           </>
@@ -3091,10 +3567,37 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
         {step === "title" ? (
           <>
-            <button type="button" onClick={() => void handleCaptureTitle()} disabled={isBusy || isSessionCapacityReached}>
+            <button
+              type="button"
+              onClick={() => {
+                hidePrimaryHelper();
+                void handleCaptureTitle();
+              }}
+              disabled={isBusy || isSessionCapacityReached}
+              onMouseEnter={(event) => handlePrimaryHelperMouseEnter("capture-title", event)}
+              onMouseMove={handlePrimaryHelperMouseMove}
+              onMouseLeave={hidePrimaryHelper}
+              onFocus={(event) => handlePrimaryHelperFocus("capture-title", event)}
+              onBlur={hidePrimaryHelper}
+              onMouseDown={hidePrimaryHelper}
+            >
               Capture Copyright Page
             </button>
-            <button type="button" className="btn-secondary" onClick={() => titleFileInputRef.current?.click()} disabled={isBusy || isSessionCapacityReached}>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                hidePrimaryHelper();
+                titleFileInputRef.current?.click();
+              }}
+              disabled={isBusy || isSessionCapacityReached}
+              onMouseEnter={(event) => handlePrimaryHelperMouseEnter("upload-title", event)}
+              onMouseMove={handlePrimaryHelperMouseMove}
+              onMouseLeave={hidePrimaryHelper}
+              onFocus={(event) => handlePrimaryHelperFocus("upload-title", event)}
+              onBlur={hidePrimaryHelper}
+              onMouseDown={hidePrimaryHelper}
+            >
               Upload Copyright Page
             </button>
           </>
@@ -3102,30 +3605,100 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
         {step === "toc" ? (
           <>
-            <button type="button" onClick={() => void handleCaptureToc()} disabled={isBusy}>
+            <button
+              type="button"
+              onClick={() => {
+                hidePrimaryHelper();
+                void handleCaptureToc();
+              }}
+              disabled={isBusy}
+              onMouseEnter={(event) => handlePrimaryHelperMouseEnter("capture-toc", event)}
+              onMouseMove={handlePrimaryHelperMouseMove}
+              onMouseLeave={hidePrimaryHelper}
+              onFocus={(event) => handlePrimaryHelperFocus("capture-toc", event)}
+              onBlur={hidePrimaryHelper}
+              onMouseDown={hidePrimaryHelper}
+            >
               Capture TOC Page
             </button>
-            <button type="button" className="btn-secondary" onClick={() => setStep("toc-editor")} disabled={!canFinishToc || isBusy}>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                hidePrimaryHelper();
+                setStep("toc-editor");
+              }}
+              disabled={!canFinishToc || isBusy}
+              onMouseEnter={(event) => handlePrimaryHelperMouseEnter("finish-toc", event)}
+              onMouseMove={handlePrimaryHelperMouseMove}
+              onMouseLeave={hidePrimaryHelper}
+              onFocus={(event) => handlePrimaryHelperFocus("finish-toc", event)}
+              onBlur={hidePrimaryHelper}
+              onMouseDown={hidePrimaryHelper}
+            >
               Finish TOC
             </button>
           </>
         ) : null}
 
-        <button type="button" className="btn-secondary" onClick={onSwitchToManual}>
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={() => {
+            hidePrimaryHelper();
+            onSwitchToManual();
+          }}
+          onMouseEnter={(event) => handlePrimaryHelperMouseEnter("switch-manual", event)}
+          onMouseMove={handlePrimaryHelperMouseMove}
+          onMouseLeave={hidePrimaryHelper}
+          onFocus={(event) => handlePrimaryHelperFocus("switch-manual", event)}
+          onBlur={hidePrimaryHelper}
+          onMouseDown={hidePrimaryHelper}
+        >
           Switch to Manual
         </button>
       </div>
 
-      <label>
-        OCR text (editable)
-        <textarea
-          rows={6}
-          aria-label="OCR text"
-          value={ocrDraft}
-          onChange={(event) => setOcrDraft(event.target.value)}
-          placeholder="If the OCR misread something, paste or edit it here before parsing."
-        />
-      </label>
+      {(step === "cover" || step === "title" || step === "toc") && primaryHelperText && primaryHelperAnchor ? (
+        <div
+          className="auto-primary-helper-tooltip"
+          style={{ left: `${primaryHelperAnchor.x}px`, top: `${primaryHelperAnchor.y}px` }}
+          role="tooltip"
+        >
+          {primaryHelperText}
+        </div>
+      ) : null}
+
+      {hasOcrDraft ? (
+        <div className={`ocr-editor-shell${isOcrEditorExpanded ? " ocr-editor-shell--expanded" : " ocr-editor-shell--collapsed"}`}>
+          <label className="ocr-editor-shell__label" htmlFor="auto-ocr-editor">OCR text (editable)</label>
+          <div className="ocr-editor-shell__textarea-wrap">
+            <textarea
+              id="auto-ocr-editor"
+              ref={ocrTextareaRef}
+              className="ocr-editor-shell__textarea"
+              rows={isOcrEditorExpanded ? 6 : 3}
+              aria-label="OCR text"
+              value={ocrDraft}
+              onChange={(event) => setOcrDraft(event.target.value)}
+              onClick={() => {
+                if (!isOcrEditorExpanded) {
+                  setIsOcrEditorExpanded(true);
+                }
+              }}
+              onFocus={() => {
+                if (!isOcrEditorExpanded) {
+                  setIsOcrEditorExpanded(true);
+                }
+              }}
+              readOnly={!isOcrEditorExpanded}
+              placeholder="If the OCR misread something, paste or edit it here before parsing."
+            />
+            {!isOcrEditorExpanded ? <div className="ocr-editor-shell__fade" aria-hidden="true" /> : null}
+          </div>
+          {!isOcrEditorExpanded ? <p className="ocr-editor-shell__hint">Click to expand and edit full OCR text.</p> : null}
+        </div>
+      ) : null}
 
       {/* â”€â”€ Raw OCR collapsible section (item #5 / #9) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {rawOcrText ? (
@@ -3226,139 +3799,61 @@ export function AutoTextbookSetupFlow({ runtime = "webapp", onSaved, onSwitchToM
 
       {(step === "cover" || step === "title") ? (
         <div ref={metadataFormRef} className="metadata-fields-section">
-        <div className="form-grid">
-          <label>
-            Title
-            {renderConfidenceDot("title")}
-            <input value={metadataForm.title} onChange={(event) => updateMetadataForm("title", event.target.value)} />
-          </label>
+          <div className="metadata-tile-grid" role="list" aria-label="Captured metadata fields">
+            {(step === "cover"
+              ? [
+                  ...COVER_PRIMARY_TILE_FIELDS,
+                  ...METADATA_TILE_FIELD_ORDER.filter((field) => !COVER_PRIMARY_TILE_FIELDS.includes(field)),
+                ]
+              : METADATA_TILE_FIELD_ORDER
+            ).map((fieldKey) => {
+              const label = METADATA_TILE_LABELS[fieldKey];
+              const captured = isMetadataTileCaptured(fieldKey);
+              const summary = getMetadataTileSummary(fieldKey);
+              const confidence = getMetadataTileConfidence(fieldKey);
+              const highConfidence = confidence !== null && confidence >= HIGH_CONFIDENCE_THRESHOLD && captured;
+              const isExpanded = expandedMetadataField === fieldKey;
+              const isCoverSecondaryField = step === "cover" && !COVER_PRIMARY_TILE_FIELDS.includes(fieldKey);
+              const shouldCompact = !captured && (isCoverSecondaryField || step === "title");
+              const shouldUseMicroCompact = shouldCompact && COVER_EXTRA_COMPACT_TILE_FIELDS.includes(fieldKey);
+              const shouldUseNanoCompact = shouldCompact && COVER_NANO_COMPACT_TILE_FIELDS.includes(fieldKey);
 
-          <label>
-            Subtitle
-            {renderConfidenceDot("subtitle")}
-            <input value={metadataForm.subtitle} onChange={(event) => updateMetadataForm("subtitle", event.target.value)} />
-          </label>
-
-          <label>
-            Grade
-            <input value={metadataForm.grade} onChange={(event) => updateMetadataForm("grade", event.target.value)} />
-          </label>
-
-          <label>
-            Grade Band
-            {renderConfidenceDot("gradeBand")}
-            <input value={metadataForm.gradeBand} onChange={(event) => updateMetadataForm("gradeBand", event.target.value)} />
-          </label>
-
-          <label>
-            Subject
-            {renderConfidenceDot("subject")}
-            <select value={metadataForm.subject} onChange={(event) => updateMetadataForm("subject", event.target.value)}>
-              {SUBJECTS.map((subject) => (
-                <option key={subject} value={subject}>{subject}</option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Edition
-            {renderConfidenceDot("edition")}
-            <input value={metadataForm.edition} onChange={(event) => updateMetadataForm("edition", event.target.value)} />
-          </label>
-
-          <label>
-            Publication Year
-            <input type="number" value={metadataForm.publicationYear} onChange={(event) => updateMetadataForm("publicationYear", event.target.value)} />
-          </label>
-
-          <label>
-            Copyright Year
-            {renderConfidenceDot("copyrightYear")}
-            <input type="number" value={metadataForm.copyrightYear} onChange={(event) => updateMetadataForm("copyrightYear", event.target.value)} />
-          </label>
-
-          <label>
-            ISBN
-            {renderConfidenceDot("isbn")}
-            <input value={metadataForm.isbnRaw} onChange={(event) => updateMetadataForm("isbnRaw", event.target.value)} />
-          </label>
-
-          <label>
-            Additional ISBNs (comma separated)
-            {renderConfidenceDot("additionalIsbns")}
-            <input value={metadataForm.additionalIsbnsCsv} onChange={(event) => updateMetadataForm("additionalIsbnsCsv", event.target.value)} />
-            <span className="form-hint">Use the typed Related ISBN list below when you need an edition label (Teacher, Digital, etc.).</span>
-          </label>
-
-          <fieldset className="form-fieldset">
-            <legend>Related ISBNs (typed)</legend>
-            <p className="form-hint">Use this when the copyright page lists student, teacher, digital, workbook, or assessment ISBNs separately.</p>
-            {relatedIsbns.map((row, index) => (
-              <div key={`auto-related-isbn-${index}`} className="related-isbn-row">
-                <input
-                  value={row.isbn}
-                  onChange={(event) => updateRelatedIsbn(index, "isbn", event.target.value)}
-                  placeholder="ISBN-10 or ISBN-13"
-                  className="related-isbn-input"
-                />
-                <select
-                  value={row.type}
-                  onChange={(event) => updateRelatedIsbn(index, "type", event.target.value as RelatedIsbnType)}
-                  aria-label={`Auto related ISBN type ${index + 1}`}
-                  className="related-isbn-type"
+              return (
+                <button
+                  key={fieldKey}
+                  type="button"
+                  className={[
+                    "metadata-tile",
+                    captured ? "metadata-tile--captured" : "metadata-tile--empty",
+                    isExpanded ? "metadata-tile--expanded" : "",
+                    !shouldCompact ? "metadata-tile--full" : "",
+                    shouldCompact ? "metadata-tile--compact" : "",
+                    isCoverSecondaryField && !captured ? "metadata-tile--cover-secondary" : "",
+                    shouldUseMicroCompact ? "metadata-tile--compact-micro" : "",
+                    shouldUseNanoCompact ? "metadata-tile--compact-nano" : "",
+                  ].filter(Boolean).join(" ")}
+                  onClick={() => {
+                    setExpandedMetadataField((current) => current === fieldKey ? null : fieldKey);
+                  }}
+                  role="listitem"
+                  aria-expanded={isExpanded}
                 >
-                  {RELATED_ISBN_TYPES.map((type) => (
-                    <option key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</option>
-                  ))}
-                </select>
-                <input
-                  value={row.note ?? ""}
-                  onChange={(event) => updateRelatedIsbn(index, "note", event.target.value)}
-                  placeholder="Label/Note (optional, e.g., Teacher Edition)"
-                  className="related-isbn-note"
-                />
-                <button type="button" className="btn-icon btn-danger" onClick={() => removeRelatedIsbn(index)} aria-label="Remove related ISBN" title="Remove">{"\u00D7"}</button>
-              </div>
-            ))}
-            <button type="button" className="btn-secondary" onClick={addRelatedIsbn}>+ Add Related ISBN</button>
-          </fieldset>
+                  <span className="metadata-tile__header-row">
+                    <span className="metadata-tile__title">{label}</span>
+                    {!shouldCompact && highConfidence ? <span className="metadata-tile__check" aria-label="High confidence capture">{"\u2713"}</span> : null}
+                  </span>
+                  {!shouldCompact ? <span className="metadata-tile__summary">{captured ? summary : "Awaiting capture"}</span> : null}
+                </button>
+              );
+            })}
+          </div>
 
-          <label>
-            Authors (comma separated)
-            {renderConfidenceDot("authors")}
-            <input value={metadataForm.authorsCsv} onChange={(event) => updateMetadataForm("authorsCsv", event.target.value)} />
-          </label>
-
-          <label>
-            Publisher
-            {renderConfidenceDot("publisher")}
-            <input value={metadataForm.publisher} onChange={(event) => updateMetadataForm("publisher", event.target.value)} />
-          </label>
-
-          <label>
-            Publisher Location
-            {renderConfidenceDot("publisherLocation")}
-            <input value={metadataForm.publisherLocation} onChange={(event) => updateMetadataForm("publisherLocation", event.target.value)} />
-          </label>
-
-          <label>
-            Publisher URL
-            {renderConfidenceDot("platformUrl")}
-            <input type="url" value={metadataForm.platformUrl} onChange={(event) => updateMetadataForm("platformUrl", event.target.value)} />
-          </label>
-
-          <label>
-            MHID
-            {renderConfidenceDot("mhid")}
-            <input value={metadataForm.mhid} onChange={(event) => updateMetadataForm("mhid", event.target.value)} />
-          </label>
-
-          <label>
-            Series Name
-            {renderConfidenceDot("seriesName")}
-            <input value={metadataForm.seriesName} onChange={(event) => updateMetadataForm("seriesName", event.target.value)} />
-          </label>
-        </div>
+          {expandedMetadataField ? (
+            <div className="metadata-tile-editor" role="region" aria-label="Metadata field editor">
+              <p className="metadata-tile-editor__title">Editing {expandedMetadataField === "isbnRaw" ? "ISBN" : expandedMetadataField === "additionalIsbnsCsv" ? "Additional ISBNs" : expandedMetadataField === "authorsCsv" ? "Authors" : expandedMetadataField === "platformUrl" ? "Publisher URL" : expandedMetadataField === "relatedIsbns" ? "Related ISBNs" : expandedMetadataField === "mhid" ? "MHID" : expandedMetadataField === "seriesName" ? "Series Name" : expandedMetadataField === "gradeBand" ? "Grade Band" : expandedMetadataField === "publicationYear" ? "Publication Year" : expandedMetadataField === "copyrightYear" ? "Copyright Year" : expandedMetadataField === "publisherLocation" ? "Publisher Location" : expandedMetadataField.charAt(0).toUpperCase() + expandedMetadataField.slice(1)}{" "}{(() => { const f = getTileConfidenceField(expandedMetadataField); return f ? renderConfidenceDot(f) : null; })()}</p>
+              {renderMetadataTileEditor(expandedMetadataField)}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

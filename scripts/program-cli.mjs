@@ -522,11 +522,43 @@ function showHelp() {
   console.log("  courseforge plugins <install|uninstall|status> [plugin-id]");
   console.log("  courseforge debug <feature> [flags]  (alias: npm run courseforge -- debug ...)");
   console.log("  program debug <feature> [--severity info|warn|error] [--sourceType automatic|manual] [--message text]");
+  console.log("  program debug auth-trace [--event redirect-resolve-error] [--provider microsoft] [--message text] [--severity info|warn|error]");
   console.log("  program debug dsc <enable|disable|report|clear> [--page settings] [--card \"Debug Log\"] [--report path]");
   console.log("  program debug dump-log [--sourceType automatic|manual] [--output path] [--sync-cloud] [--approve-delete]");
   console.log("  program debug clear-log");
   console.log("  program debug enable");
   console.log("  program debug disable");
+}
+
+function handleAuthTrace() {
+  const event = parseFlag("event", "redirect-attempt");
+  const provider = parseFlag("provider", "microsoft");
+  const code = parseFlag("code", "n/a");
+  const message = parseFlag("message", `Auth redirect trace: ${event} (${provider})`);
+
+  const config = readConfig();
+  if (!config.enabled) {
+    console.error("Debug logging is disabled. Use: program debug enable");
+    process.exit(1);
+  }
+
+  rotateLogs(config);
+
+  const entry = {
+    timestamp: new Date().toISOString(),
+    subsystem: "auth-redirect",
+    severity: parseFlag("severity", "info").toLowerCase(),
+    sourceType: normalizeSourceType(parseFlag("sourceType", "automatic")),
+    sourceKind: parseFlag("sourceKind", "automatic").toLowerCase(),
+    message,
+    errorContext: parseFlag("errorContext", `${event}; provider=${provider}; code=${code}`),
+    stackTrace: parseFlag("stack", "") || null,
+  };
+
+  ensureDir();
+  fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`, "utf8");
+  trimIfOversized(config);
+  console.log(`Logged auth redirect trace to ${logPath}`);
 }
 
 function normalizeCardId(value) {
@@ -725,6 +757,11 @@ if (subcommand === "enable") {
 
 if (subcommand === "disable") {
   setEnabled(false);
+  process.exit(0);
+}
+
+if (subcommand === "auth-trace") {
+  handleAuthTrace();
   process.exit(0);
 }
 

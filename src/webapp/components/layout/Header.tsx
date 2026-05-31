@@ -14,6 +14,7 @@ import { useUIStore } from "../../store/uiStore";
 export function Header({ isSettingsView = false }: { isSettingsView?: boolean }): React.JSX.Element {
   const navigate = useNavigate();
   const userId = useAuthStore((state) => state.userId);
+  const authMode = useAuthStore((state) => state.authMode);
   const isAdmin = useAuthStore((state) => state.isAdmin);
   const isSchoolAdmin = useAuthStore((state) => state.isSchoolAdmin);
   const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
@@ -47,8 +48,14 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
   const setRoleClaims = useAuthStore((state) => state.setRoleClaims);
 
   const [showDebugPanel, setShowDebugPanel] = React.useState(false);
+  const [isHeaderExpanded, setIsHeaderExpanded] = React.useState(false);
 
   async function handleSyncNow(): Promise<void> {
+    if (authMode !== "cloud") {
+      setSyncStatus("idle", "Cloud sync is unavailable in local-only mode.");
+      return;
+    }
+
     clearWriteBudgetForManualRetry();
     clearReadBudgetForManualRetry();
     addSyncDebugEvent("sync:manual-start - cleared local read/write budget flags");
@@ -214,6 +221,10 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
       return `Pending changes (${pendingChangesCount})`;
     }
 
+    if (authMode !== "cloud") {
+      return "Local only mode";
+    }
+
     if (lastSyncTime) {
       return `Synced at ${new Date(lastSyncTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
     }
@@ -222,7 +233,7 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
   }
 
   return (
-    <header className="app-header">
+    <header className={`app-header ${isHeaderExpanded ? "app-header--expanded" : "app-header--compact"}`}>
       <div className="app-header__main">
         <div className="app-header__left">
           {isSettingsView ? (
@@ -238,9 +249,9 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
             </button>
           ) : null}
 
-          <div>
+          <div className="app-header__title">
             <h1>CourseForge</h1>
-            <p>Teacher-guided curriculum builder</p>
+            {isHeaderExpanded ? <p>Teacher-guided curriculum builder</p> : null}
           </div>
         </div>
 
@@ -284,13 +295,25 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
               onClick={() => {
                 void handleSyncNow();
               }}
-              disabled={isSyncing}
+              disabled={isSyncing || authMode !== "cloud"}
+              title={authMode !== "cloud" ? "Cloud sync is unavailable in local-only mode." : "Sync now"}
             >
               <span className={`sync-now-button__icon ${isSyncing ? "sync-now-button__icon--spinning" : ""}`} aria-hidden="true">↻</span>
-              <span>{isSyncing ? "Syncing..." : "Sync Now"}</span>
+              <span>{authMode !== "cloud" ? "Local Only" : isSyncing ? "Syncing..." : "Sync Now"}</span>
+            </button>
+            <button
+              type="button"
+              className="btn-secondary app-header__details-toggle"
+              aria-expanded={isHeaderExpanded}
+              onClick={() => {
+                setIsHeaderExpanded((current) => !current);
+              }}
+            >
+              {isHeaderExpanded ? "Hide Details" : "Show Details"}
             </button>
           </div>
-          {(isAdmin || isSchoolAdmin || isSuperAdmin) ? (
+
+          {isHeaderExpanded && (isAdmin || isSchoolAdmin || isSuperAdmin) ? (
             <div className="app-header__admin-actions" aria-label="Administrative navigation">
               {(isAdmin || isSchoolAdmin || isSuperAdmin) ? (
                 <button
@@ -316,16 +339,20 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
               ) : null}
             </div>
           ) : null}
-          <div className="sync-cluster">
-            <p className={`sync-indicator ${syncStatus === "synced" ? "sync-indicator--synced" : ""}`}>{getStatusLabel()}</p>
-          </div>
+
+          {isHeaderExpanded ? (
+            <div className="sync-cluster">
+              <p className={`sync-indicator ${syncStatus === "synced" ? "sync-indicator--synced" : ""}`}>{getStatusLabel()}</p>
+              {authMode !== "cloud" ? <p className="sync-indicator">Local-only sessions never use cloud sync or Auto mode.</p> : null}
+            </div>
+          ) : null}
         </div>
       </div>
       {!isSuperAdmin && writeBudgetExceeded ? (
         <p className="error-text sync-indicator">Cloud sync paused to prevent excessive writes. Please review your data or try again later.</p>
       ) : null}
 
-      {import.meta.env.DEV ? (
+      {isHeaderExpanded && import.meta.env.DEV ? (
         <section className="debug-panel">
           <button
             type="button"

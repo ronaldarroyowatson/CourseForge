@@ -13,7 +13,6 @@ import { ChapterForm } from "../chapters/ChapterForm";
 import { ChapterList } from "../chapters/ChapterList";
 import { PowerPointWorkspaceCard } from "../content/PowerPointWorkspaceCard";
 import { SectionContentPanel, type ContentPanelTab } from "../content/SectionContentPanel";
-import { AccordionTile } from "../layout/AccordionTile";
 import { Header } from "../layout/Header";
 import type { WorkflowTab } from "../layout/WorkflowRibbon";
 import { SectionForm } from "../sections/SectionForm";
@@ -80,6 +79,22 @@ interface TextbookWorkspaceProps {
   showSuperAdminPage?: boolean;
 }
 
+type AutoNavigationDirection = "back" | "next";
+
+interface AutoNavigationRequest {
+  direction: AutoNavigationDirection;
+  token: number;
+}
+
+interface AutoProgressState {
+  currentStep: 1 | 2 | 3 | 4;
+  currentLabel: string;
+  completed: [boolean, boolean, boolean, boolean];
+}
+
+const AUTO_PROGRESS_LABELS = ["Cover", "Copyright Page", "Table of Contents", "Data"] as const;
+const MANUAL_PROGRESS_LABELS = ["Metadata", "Chapters", "Sections", "Content"] as const;
+
 export function TextbookWorkspace({
   showAdminPage = false,
   showSettingsPage = false,
@@ -118,9 +133,17 @@ export function TextbookWorkspace({
   const [sections, setSections] = React.useState<Section[]>([]);
   const [activeContentPanel, setActiveContentPanel] = React.useState<ContentPanelTab>("vocab");
   const [workflowNotice, setWorkflowNotice] = React.useState<string | null>(null);
+  const [textbookSetupMode, setTextbookSetupMode] = React.useState<"choose" | "manual" | "auto" | "edit">("choose");
+  const [autoNavigationRequest, setAutoNavigationRequest] = React.useState<AutoNavigationRequest | null>(null);
+  const [autoProgress, setAutoProgress] = React.useState<AutoProgressState>({
+    currentStep: 1,
+    currentLabel: "Cover",
+    completed: [false, false, false, false],
+  });
   const [activeWorkflowTab, setActiveWorkflowTab] = React.useState<WorkflowTab>("textbook");
   const [expandedTile, setExpandedTile] = React.useState<WorkflowTab | null>("textbook");
   const sectionPanelRef = React.useRef<HTMLDivElement | null>(null);
+  const autoNavigationTokenRef = React.useRef(0);
 
   useGlobalShortcuts({
     onGoTextbooks: () => navigate("/textbooks"),
@@ -147,9 +170,7 @@ export function TextbookWorkspace({
     : null;
 
   function scrollToSectionPanel(): void {
-    window.requestAnimationFrame(() => {
-      sectionPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+    // Auto-scroll temporarily disabled during workflow iteration.
   }
 
   function expandSection(sectionId: string, workflow: "sections" | "content" = "sections"): void {
@@ -385,7 +406,7 @@ export function TextbookWorkspace({
   }, [activeContentPanel, activeWorkflowTab, location.pathname, navigate, selectedChapterId, selectedSectionId, selectedTextbookId, showAdminPage, showSchoolAdminPage, showSettingsPage, showSuperAdminPage]);
 
   React.useEffect(() => {
-    if (!selectedTextbookId) {
+    if (!selectedTextbookId && textbookSetupMode === "choose") {
       setSelectedChapterId(null);
       setSelectedSectionId(null);
       setActiveWorkflowTab("textbook");
@@ -397,30 +418,30 @@ export function TextbookWorkspace({
     if (!hasSelectedTextbook) {
       navigate("/textbooks", { replace: true });
     }
-  }, [navigate, selectedTextbookId, textbooks]);
+  }, [navigate, selectedTextbookId, textbookSetupMode, textbooks]);
 
   React.useEffect(() => {
-    if (!selectedTextbookId && activeWorkflowTab !== "textbook") {
+    if (!selectedTextbookId && activeWorkflowTab !== "textbook" && textbookSetupMode === "choose") {
       setActiveWorkflowTab("textbook");
       setExpandedTile("textbook");
       return;
     }
 
-    if (!selectedChapterId && activeWorkflowTab === "sections") {
+    if (!selectedChapterId && activeWorkflowTab === "sections" && textbookSetupMode === "choose") {
       setActiveWorkflowTab(selectedTextbookId ? "chapters" : "textbook");
       setExpandedTile(selectedTextbookId ? "chapters" : "textbook");
     }
 
-    if (!selectedChapterId && activeWorkflowTab === "content") {
+    if (!selectedChapterId && activeWorkflowTab === "content" && textbookSetupMode === "choose") {
       setActiveWorkflowTab(selectedTextbookId ? "chapters" : "textbook");
       setExpandedTile(selectedTextbookId ? "chapters" : "textbook");
     }
 
-    if (!selectedChapterId && activeWorkflowTab === "powerpoints") {
+    if (!selectedChapterId && activeWorkflowTab === "powerpoints" && textbookSetupMode === "choose") {
       setActiveWorkflowTab(selectedTextbookId ? "chapters" : "textbook");
       setExpandedTile(selectedTextbookId ? "chapters" : "textbook");
     }
-  }, [activeWorkflowTab, selectedChapterId, selectedTextbookId]);
+  }, [activeWorkflowTab, selectedChapterId, selectedTextbookId, textbookSetupMode]);
 
   // --- Startup duplicate-detection helpers ---
 
@@ -619,10 +640,6 @@ export function TextbookWorkspace({
   }
 
   function toggleWorkflowTab(tab: WorkflowTab): void {
-    if (!canOpenTab(tab)) {
-      return;
-    }
-
     if (activeWorkflowTab !== tab) {
       setActiveWorkflowTab(tab);
       setExpandedTile(tab);
@@ -631,6 +648,22 @@ export function TextbookWorkspace({
 
     setExpandedTile((current) => current === tab ? null : tab);
   }
+
+  function requestAutoNavigation(direction: AutoNavigationDirection): void {
+    autoNavigationTokenRef.current += 1;
+    setAutoNavigationRequest({ direction, token: autoNavigationTokenRef.current });
+  }
+
+  const handleSetupModeChange = React.useCallback((mode: "choose" | "manual" | "auto" | "edit"): void => {
+    setTextbookSetupMode(mode);
+    if (mode !== "auto") {
+      setAutoProgress({
+        currentStep: 1,
+        currentLabel: "Cover",
+        completed: [false, false, false, false],
+      });
+    }
+  }, []);
 
   function getCardSummary(tab: WorkflowTab): string {
     if (tab === "textbook") {
@@ -662,23 +695,53 @@ export function TextbookWorkspace({
       : "Select a section to unlock PowerPoint tools.";
   }
 
+  function getCardTitle(tab: WorkflowTab): string {
+    if (tab === "textbook") {
+      return "Textbooks";
+    }
+
+    if (tab === "chapters") {
+      return "Chapters";
+    }
+
+    if (tab === "sections") {
+      return "Sections";
+    }
+
+    if (tab === "content") {
+      return "Content";
+    }
+
+    return "PowerPoints";
+  }
+
   function renderWorkflowCardBody(tab: WorkflowTab): React.JSX.Element {
     if (tab === "textbook") {
       return (
-        <div className="panel-grid">
-          <TextbookForm onSaved={handleTextbookSaved} />
-          <TextbookList
-            textbooks={textbooks}
-            isLoading={isLoadingTextbooks}
-            loadError={textbookLoadError}
-            selectedTextbookId={selectedTextbookId}
-            onSelectTextbook={handleTextbookSelected}
-            onContinueToSections={() => {
-              void handleContinueToSections();
+        <div className="panel-grid textbook-setup-grid">
+          <TextbookForm
+            onSaved={handleTextbookSaved}
+            onSetupModeChange={handleSetupModeChange}
+            onAutoProgressChange={setAutoProgress}
+            autoNavigationRequest={autoNavigationRequest}
+            onAutoNavigationHandled={(token) => {
+              setAutoNavigationRequest((current) => (current?.token === token ? null : current));
             }}
-            onDeleted={handleTextbookDeleted}
-            onRefresh={() => setTextbookRefreshKey((current) => current + 1)}
           />
+          {textbookSetupMode === "choose" ? (
+            <TextbookList
+              textbooks={textbooks}
+              isLoading={isLoadingTextbooks}
+              loadError={textbookLoadError}
+              selectedTextbookId={selectedTextbookId}
+              onSelectTextbook={handleTextbookSelected}
+              onContinueToSections={() => {
+                void handleContinueToSections();
+              }}
+              onDeleted={handleTextbookDeleted}
+              onRefresh={() => setTextbookRefreshKey((current) => current + 1)}
+            />
+          ) : null}
         </div>
       );
     }
@@ -771,44 +834,143 @@ export function TextbookWorkspace({
 
   function renderWorkflowPanel(): React.JSX.Element {
     const activeIndex = workflowOrder.indexOf(activeWorkflowTab);
+    const previousTab = activeIndex > 0 ? workflowOrder[activeIndex - 1] : workflowOrder[0];
+    const nextTab = activeIndex >= 0 && activeIndex < workflowOrder.length - 1
+      ? workflowOrder[activeIndex + 1]
+      : workflowOrder[workflowOrder.length - 1];
+    const setupNavigationEnabled = (textbookSetupMode === "auto" || textbookSetupMode === "manual")
+      && activeWorkflowTab === "textbook";
 
     return (
-      <div className="workflow-card-stack" aria-label="Onboarding workflow cards">
-        {workflowOrder.map((tab, index) => {
-          const isActive = index === activeIndex;
-          const isPeekPrevious = index === activeIndex - 1;
-          const isPeekNext = index === activeIndex + 1;
+      <section className="workflow-panel" aria-label="Onboarding workflow cards">
+        <div className="workflow-card-stack">
+          <section className="workflow-card workflow-card--active" aria-label={getCardTitle(activeWorkflowTab)}>
+            <div className="workflow-card-body">
+              {renderWorkflowCardBody(activeWorkflowTab)}
+            </div>
+          </section>
+        </div>
 
-          const positionClass = isActive
-            ? "workflow-card workflow-card--active"
-            : isPeekPrevious
-              ? "workflow-card workflow-card--peek-prev"
-              : isPeekNext
-                ? "workflow-card workflow-card--peek-next"
-                : "workflow-card workflow-card--hidden";
+        <div className="workflow-step-actions" aria-label="Workflow navigation">
+          <button
+            type="button"
+            onClick={() => {
+              if (setupNavigationEnabled) {
+                requestAutoNavigation("back");
+                return;
+              }
 
-          return (
-            <AccordionTile
-              key={tab}
-              title=""
-              summary=""
-              isExpanded={isActive && expandedTile === tab}
-              onToggle={() => toggleWorkflowTab(tab)}
-              className={positionClass}
-              disabled={!canOpenTab(tab)}
-            >
-              {renderWorkflowCardBody(tab)}
-            </AccordionTile>
-          );
-        })}
-      </div>
+              toggleWorkflowTab(previousTab);
+            }}
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (textbookSetupMode === "auto" && activeWorkflowTab === "textbook") {
+                requestAutoNavigation("next");
+                return;
+              }
+
+              toggleWorkflowTab(nextTab);
+            }}
+          >
+            Next
+          </button>
+        </div>
+      </section>
     );
+  }
+
+  function getManualProgressState(): AutoProgressState {
+    const currentStep: 1 | 2 | 3 | 4 = activeWorkflowTab === "textbook"
+      ? 1
+      : activeWorkflowTab === "chapters"
+        ? 2
+        : activeWorkflowTab === "sections"
+          ? 3
+          : 4;
+
+    return {
+      currentStep,
+      currentLabel: MANUAL_PROGRESS_LABELS[currentStep - 1],
+      completed: [
+        Boolean(selectedTextbookId),
+        Boolean(selectedChapterId),
+        Boolean(selectedSectionId),
+        false,
+      ],
+    };
   }
 
   return (
     <div className="app-shell">
       <main className="app-main">
         <Header isSettingsView={showSettingsPage} />
+
+        {!showAdminPage && !showSettingsPage && !showSchoolAdminPage && !showSuperAdminPage && textbookSetupMode === "auto" ? (
+          <section className="auto-progress-shell" aria-label="Auto workflow progress">
+            <p className="auto-progress-shell__title">{autoProgress.currentLabel}</p>
+            <div className="auto-progress-track" role="list" aria-label="Auto workflow steps">
+              {AUTO_PROGRESS_LABELS.map((label, index) => {
+                const stepNumber = (index + 1) as 1 | 2 | 3 | 4;
+                const completed = autoProgress.completed[index];
+                const isCurrent = autoProgress.currentStep === stepNumber;
+
+                return (
+                  <React.Fragment key={label}>
+                    {index > 0 ? (
+                      <span
+                        className={`auto-progress-track__line ${autoProgress.completed[index - 1] ? "auto-progress-track__line--done" : ""}`}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    <span className="auto-progress-track__step" role="listitem" aria-label={`Step ${stepNumber}: ${label}`}>
+                      <span
+                        className={`auto-progress-track__dot ${completed ? "auto-progress-track__dot--done" : ""} ${isCurrent ? "auto-progress-track__dot--current" : ""}`}
+                        aria-current={isCurrent ? "step" : undefined}
+                      >
+                        {completed ? "\u2713" : stepNumber}
+                      </span>
+                    </span>
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </section>
+        ) : (!showAdminPage && !showSettingsPage && !showSchoolAdminPage && !showSuperAdminPage && textbookSetupMode === "manual") ? (
+          <section className="auto-progress-shell" aria-label="Manual workflow progress">
+            <p className="auto-progress-shell__title">{getManualProgressState().currentLabel}</p>
+            <div className="auto-progress-track" role="list" aria-label="Manual workflow steps">
+              {MANUAL_PROGRESS_LABELS.map((label, index) => {
+                const progress = getManualProgressState();
+                const stepNumber = (index + 1) as 1 | 2 | 3 | 4;
+                const completed = progress.completed[index];
+                const isCurrent = progress.currentStep === stepNumber;
+
+                return (
+                  <React.Fragment key={label}>
+                    {index > 0 ? (
+                      <span
+                        className={`auto-progress-track__line ${progress.completed[index - 1] ? "auto-progress-track__line--done" : ""}`}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    <span className="auto-progress-track__step" role="listitem" aria-label={`Step ${stepNumber}: ${label}`}>
+                      <span
+                        className={`auto-progress-track__dot ${completed ? "auto-progress-track__dot--done" : ""} ${isCurrent ? "auto-progress-track__dot--current" : ""}`}
+                        aria-current={isCurrent ? "step" : undefined}
+                      >
+                        {completed ? "\u2713" : stepNumber}
+                      </span>
+                    </span>
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
 
         {showAdminPage ? (
           <React.Suspense fallback={<section className="placeholder-panel"><p>Loading admin tools...</p></section>}>
@@ -839,17 +1001,20 @@ export function TextbookWorkspace({
           <SettingsPage />
         ) : (
           <>
-            <section className="placeholder-panel">
-              <h2>Onboarding Workflow</h2>
-              <p>Set up textbooks, chapters, and sections in sequence, then continue into section content capture.</p>
-              <p><strong>Auth:</strong> {currentUserEmail ?? (currentUserId ? `UID: ${currentUserId}` : "Unknown user")}</p>
-              {workflowNotice ? <p className="sync-indicator">{workflowNotice}</p> : null}
-              <button type="button" onClick={() => { void handleSignOut(); }} disabled={isSigningOut}>
-                {isSigningOut ? "Signing out..." : "Sign out"}
-              </button>
-              {signOutError ? <p className="error-text">Sign-out failed: {signOutError}</p> : null}
-            </section>
+            {textbookSetupMode === "choose" ? (
+              <section className="placeholder-panel">
+                <h2>Onboarding Workflow</h2>
+                <p>Set up textbooks, chapters, and sections in sequence, then continue into section content capture.</p>
+                <p><strong>Auth:</strong> {currentUserEmail ?? (currentUserId ? `UID: ${currentUserId}` : "Unknown user")}</p>
+                {workflowNotice ? <p className="sync-indicator">{workflowNotice}</p> : null}
+                <button type="button" onClick={() => { void handleSignOut(); }} disabled={isSigningOut}>
+                  {isSigningOut ? "Signing out..." : "Sign out"}
+                </button>
+                {signOutError ? <p className="error-text">Sign-out failed: {signOutError}</p> : null}
+              </section>
+            ) : null}
 
+            {textbookSetupMode === "auto" && workflowNotice ? <p className="sync-indicator">{workflowNotice}</p> : null}
             {renderWorkflowPanel()}
 
             {duplicatePairIndex < startupDuplicatePairs.length ? (

@@ -1,11 +1,13 @@
 import { create } from "zustand";
 
 export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
+export type AuthMode = "cloud" | "local";
 
 interface AuthSession {
   userId: string;
   userEmail: string | null;
   userDisplayName: string | null;
+  authMode: AuthMode;
   isAdmin: boolean;
   isSchoolAdmin: boolean;
   isSuperAdmin: boolean;
@@ -19,6 +21,7 @@ interface AuthStore {
   userId: string | null;
   userEmail: string | null;
   userDisplayName: string | null;
+  authMode: AuthMode | null;
   isAdmin: boolean;
   isSchoolAdmin: boolean;
   isSuperAdmin: boolean;
@@ -28,6 +31,7 @@ interface AuthStore {
   authError: string | null;
   setLoading: () => void;
   setAuthenticated: (session: AuthSession) => void;
+  setAuthMode: (mode: AuthMode | null) => void;
   setRoleClaims: (claims: {
     isAdmin: boolean;
     isSchoolAdmin: boolean;
@@ -43,6 +47,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
   userId: null,
   userEmail: null,
   userDisplayName: null,
+  authMode: null,
   isAdmin: false,
   isSchoolAdmin: false,
   isSuperAdmin: false,
@@ -57,6 +62,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
       userId: session.userId,
       userEmail: session.userEmail,
       userDisplayName: session.userDisplayName,
+      authMode: session.authMode,
       isAdmin: session.isAdmin,
       isSchoolAdmin: session.isSchoolAdmin,
       isSuperAdmin: session.isSuperAdmin,
@@ -72,12 +78,14 @@ export const useAuthStore = create<AuthStore>((set) => ({
       isSuperAdmin: claims.isSuperAdmin,
       schoolId: claims.schoolId,
     })),
+  setAuthMode: (mode) => set({ authMode: mode }),
   setUnauthenticated: (error = null) =>
     set({
       authStatus: "unauthenticated",
       userId: null,
       userEmail: null,
       userDisplayName: null,
+      authMode: null,
       isAdmin: false,
       isSchoolAdmin: false,
       isSuperAdmin: false,

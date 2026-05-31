@@ -56,7 +56,7 @@ CourseForge consists of three main layers:
   - `/textbooks/{textbookId}/chapters/{chapterId}`
   - `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}`
   - `/textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}`
-- User profile docs stored at `/users/{uid}` for auth bootstrap and admin user management.
+- Auth bootstrap restores either a cloud Firebase session or a local-only session stored in browser `localStorage`; user profile docs remain stored at `/users/{uid}` for cloud accounts, auth bootstrap, and admin user management.
 - User profile docs also store cloud content policy state (`isContentBlocked`, reason/updatedBy metadata).
 - User profile docs store a lightweight cloud content token (`syncToken`) updated after cloud curriculum mutations so clients can cheaply detect no-change sync windows.
 - Firestore security model:

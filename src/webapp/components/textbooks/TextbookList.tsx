@@ -427,7 +427,7 @@ export function TextbookList({
   }, [contentStatsById, sorted]);
 
   return (
-    <section className="panel">
+    <section className="panel textbook-list-panel">
       <h3>Textbooks</h3>
 
       {isLoading ? <p>Loading textbooks...</p> : null}

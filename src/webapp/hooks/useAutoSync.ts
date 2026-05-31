@@ -67,13 +67,14 @@ function applySyncMetrics(result: {
  */
 export function useAutoSync(): void {
   const authStatus = useAuthStore((state) => state.authStatus);
+  const authMode = useAuthStore((state) => state.authMode);
   const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
   const localChangeVersion = useUIStore((state) => state.localChangeVersion);
 
   React.useEffect(() => {
     let isCancelled = false;
 
-    if (authStatus !== "authenticated") {
+    if (authStatus !== "authenticated" || authMode !== "cloud") {
       return;
     }
 
@@ -190,12 +191,12 @@ export function useAutoSync(): void {
       clearInterval(intervalId);
       window.removeEventListener("online", handleOnline);
     };
-  }, [authStatus, isSuperAdmin]);
+  }, [authStatus, authMode, isSuperAdmin]);
 
   React.useEffect(() => {
     let isCancelled = false;
 
-    if (authStatus !== "authenticated") {
+    if (authStatus !== "authenticated" || authMode !== "cloud") {
       return;
     }
 
@@ -269,5 +270,5 @@ export function useAutoSync(): void {
     return () => {
       isCancelled = true;
     };
-  }, [authStatus, isSuperAdmin, localChangeVersion]);
+  }, [authStatus, authMode, isSuperAdmin, localChangeVersion]);
 }

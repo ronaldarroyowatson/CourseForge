@@ -94,15 +94,22 @@ const syncMocks = vi.hoisted(() => ({
 
 const { mockUser } = authMocks;
 
-vi.mock("../../src/firebase/auth", () => ({
-  initializePersistentAuth: authMocks.initializePersistentAuth,
-  subscribeToAuthTokenChanges: authMocks.subscribeToAuthTokenChanges,
-  signInWithGoogle: authMocks.signInWithGoogle,
-  signOutCurrentUser: authMocks.signOutCurrentUser,
-  getAdminClaim: authMocks.getAdminClaim,
-  getRoleClaims: authMocks.getRoleClaims,
-  saveUserProfileToFirestore: authMocks.saveUserProfileToFirestore,
-}));
+vi.mock("../../src/firebase/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/firebase/auth")>();
+  return {
+    ...actual,
+    initializePersistentAuth: authMocks.initializePersistentAuth,
+    subscribeToAuthTokenChanges: authMocks.subscribeToAuthTokenChanges,
+    signInWithGoogle: authMocks.signInWithGoogle,
+    signOutCurrentUser: authMocks.signOutCurrentUser,
+    getStoredLocalAuthSession: vi.fn(() => null),
+    getPendingAuthRedirect: vi.fn(() => null),
+    resolvePendingAuthRedirectResult: vi.fn(async () => undefined),
+    getAdminClaim: authMocks.getAdminClaim,
+    getRoleClaims: authMocks.getRoleClaims,
+    saveUserProfileToFirestore: authMocks.saveUserProfileToFirestore,
+  };
+});
 
 vi.mock("../../src/core/services/syncService", () => ({
   syncUserData: syncMocks.syncUserData,

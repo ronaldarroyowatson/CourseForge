@@ -120,6 +120,7 @@ describe("Header super-admin self-repair flow", () => {
       </MemoryRouter>
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Show Details" }));
     fireEvent.click(screen.getByRole("button", { name: "Super Admin" }));
 
     await waitFor(() => {

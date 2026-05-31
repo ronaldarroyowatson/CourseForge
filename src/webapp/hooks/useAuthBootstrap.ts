@@ -4,9 +4,12 @@ import { doc, getDoc } from "firebase/firestore";
 
 import { syncNow } from "../../core/services/syncService";
 import {
+  flushStagedLocalToCloudMigration,
   getAdminClaim,
   getRoleClaims,
   initializePersistentAuth,
+  getStoredLocalAuthSession,
+  resolvePendingAuthRedirectResult,
   saveUserProfileToFirestore,
   subscribeToAuthTokenChanges,
 } from "../../firebase/auth";
@@ -53,6 +56,26 @@ export function useAuthBootstrap(): void {
     let bootstrapAdminRetryUserId: string | null = null;
 
     useAuthStore.getState().setLoading();
+
+    const localSession = getStoredLocalAuthSession();
+    if (localSession) {
+      useAuthStore.getState().setAuthenticated({
+        userId: localSession.userId,
+        userEmail: null,
+        userDisplayName: localSession.displayName,
+        authMode: "local",
+        isAdmin: false,
+        isSchoolAdmin: false,
+        isSuperAdmin: false,
+        schoolId: null,
+        schoolName: null,
+        districtName: null,
+      });
+      useUIStore.getState().clearSync();
+      return () => {
+        isActive = false;
+      };
+    }
 
     async function syncAuthenticatedUser(user: User, options?: { allowAdminRetry?: boolean }): Promise<void> {
       const uiState = useUIStore.getState();
@@ -111,6 +134,12 @@ export function useAuthBootstrap(): void {
           await saveUserProfileToFirestore(user);
         } catch (error) {
           console.warn("saveUserProfileToFirestore failed (non-critical):", error);
+        }
+
+        try {
+          await flushStagedLocalToCloudMigration(user);
+        } catch (error) {
+          console.warn("flushStagedLocalToCloudMigration failed (non-critical):", error);
         }
 
         const uiStore = useUIStore.getState();
@@ -210,6 +239,7 @@ export function useAuthBootstrap(): void {
         userId: user.uid,
         userEmail: user.email ?? null,
         userDisplayName: user.displayName ?? null,
+        authMode: "cloud",
         isAdmin: preserveExistingClaims ? previousSession.isAdmin : false,
         isSchoolAdmin: preserveExistingClaims ? previousSession.isSchoolAdmin : false,
         isSuperAdmin: preserveExistingClaims ? previousSession.isSuperAdmin : false,
@@ -267,6 +297,7 @@ export function useAuthBootstrap(): void {
             userId: user.uid,
             userEmail: user.email ?? null,
             userDisplayName: user.displayName ?? null,
+            authMode: "cloud",
             isAdmin: claims.isAdmin,
             isSchoolAdmin: claims.isSchoolAdmin,
             isSuperAdmin: claims.isSuperAdmin,
@@ -289,6 +320,7 @@ export function useAuthBootstrap(): void {
             userId: user.uid,
             userEmail: user.email ?? null,
             userDisplayName: user.displayName ?? null,
+            authMode: "cloud",
             isAdmin: claims.isAdmin,
             isSchoolAdmin: claims.isSchoolAdmin,
             isSuperAdmin: claims.isSuperAdmin,
@@ -305,6 +337,7 @@ export function useAuthBootstrap(): void {
     }
 
     void initializePersistentAuth()
+      .then(() => resolvePendingAuthRedirectResult())
       .then(() => subscribeToAuthTokenChanges((user) => {
         void handleUser(user);
       }))

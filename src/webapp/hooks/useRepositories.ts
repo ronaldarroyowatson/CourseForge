@@ -44,6 +44,7 @@ import {
 } from "../../core/services/coverImageService";
 import { hardDeleteTextbookFromCloud } from "../../core/services/syncService";
 import { getCurrentUser } from "../../firebase/auth";
+import { useAuthStore } from "../store/authStore";
 import { useUIStore } from "../store/uiStore";
 
 export interface CreateTextbookInput {
@@ -141,13 +142,15 @@ export interface CreateKeyIdeaInput {
 }
 
 function resolveCurrentUserId(): string | undefined {
-  return getCurrentUser()?.uid?.trim() || undefined;
+  const storeUserId = useAuthStore.getState().userId?.trim();
+  return storeUserId || getCurrentUser()?.uid?.trim() || undefined;
 }
 
 function buildTextbookFromInput(
   input: CreateTextbookInput,
   creatorUserId?: string,
-  resolvedCoverUrl?: string | null
+  resolvedCoverUrl?: string | null,
+  resolvedOwnershipProofUrl?: string | null
 ): Textbook {
   const timestamp = new Date().toISOString();
   return {
@@ -181,7 +184,7 @@ function buildTextbookFromInput(
     requiresAdminReview: input.requiresAdminReview,
     platformUrl: input.platformUrl,
     coverImageUrl: resolvedCoverUrl ?? input.coverImageUrl ?? null,
-    ownershipProofImageUrl: input.ownershipProofImageUrl ?? null,
+    ownershipProofImageUrl: resolvedOwnershipProofUrl ?? input.ownershipProofImageUrl ?? null,
     createdAt: timestamp,
     updatedAt: timestamp,
     lastModified: timestamp,
@@ -330,6 +333,20 @@ function buildKeyIdeaFromInput(
  */
 export function useRepositories() {
   const markLocalChange = useUIStore((state) => state.markLocalChange);
+  const authMode = useAuthStore((state) => state.authMode);
+
+  async function fileToDataUrl(file: File): Promise<string> {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve(typeof reader.result === "string" ? reader.result : "");
+      };
+      reader.onerror = () => {
+        reject(reader.error ?? new Error("Unable to read image file."));
+      };
+      reader.readAsDataURL(file);
+    });
+  }
 
   const fetchTextbooks = useCallback(async (): Promise<Textbook[]> => {
     return listTextbooks();
@@ -337,13 +354,20 @@ export function useRepositories() {
 
   const createTextbook = useCallback(async (input: CreateTextbookInput): Promise<string> => {
     const creatorUserId = resolveCurrentUserId();
-    const textbook = buildTextbookFromInput(input, creatorUserId);
+    const isLocalOnlySession = authMode === "local";
+    const localCoverImageUrl = isLocalOnlySession
+      ? input.coverDataUrl ?? (input.coverFile ? await fileToDataUrl(input.coverFile) : null)
+      : null;
+    const localOwnershipProofImageUrl = isLocalOnlySession
+      ? input.ownershipProofDataUrl ?? null
+      : null;
+    const textbook = buildTextbookFromInput(input, creatorUserId, localCoverImageUrl, localOwnershipProofImageUrl);
 
     const id = await saveTextbook(textbook);
     markLocalChange();
 
     // Save locally first so textbook creation cannot block on network storage.
-    if (input.coverFile) {
+    if (!isLocalOnlySession && input.coverFile) {
       void uploadTextbookCoverImage(textbook.id, input.coverFile)
         .then(async (coverImageUrl) => {
           await updateTextbook(textbook.id, { coverImageUrl });
@@ -355,7 +379,7 @@ export function useRepositories() {
             message: error instanceof Error ? error.message : String(error),
           });
         });
-    } else if (input.coverDataUrl) {
+    } else if (!isLocalOnlySession && input.coverDataUrl) {
       void uploadTextbookCoverFromDataUrl(textbook.id, input.coverDataUrl)
         .then(async (coverImageUrl) => {
           await updateTextbook(textbook.id, { coverImageUrl });
@@ -369,7 +393,7 @@ export function useRepositories() {
         });
     }
 
-    if (input.ownershipProofDataUrl) {
+    if (!isLocalOnlySession && input.ownershipProofDataUrl) {
       void uploadTextbookOwnershipProofFromDataUrl(textbook.id, input.ownershipProofDataUrl)
         .then(async (ownershipProofImageUrl) => {
           await updateTextbook(textbook.id, { ownershipProofImageUrl });
@@ -384,7 +408,7 @@ export function useRepositories() {
     }
 
     return id;
-  }, [markLocalChange]);
+  }, [authMode, markLocalChange]);
 
   const removeTextbook = useCallback(async (id: string): Promise<void> => {
     console.info("[CourseForge][TextbookDelete] Request received.", { textbookId: id });
@@ -688,6 +712,10 @@ export function useRepositories() {
   }, [markLocalChange]);
 
   const recoverTextbookCover = useCallback(async (textbookId: string): Promise<boolean> => {
+    if (authMode === "local") {
+      return false;
+    }
+
     const coverImageUrl = await extractAndUploadCoverFromBlob(textbookId);
     if (!coverImageUrl) {
       return false;
@@ -695,7 +723,7 @@ export function useRepositories() {
     await updateTextbook(textbookId, { coverImageUrl });
     markLocalChange();
     return true;
-  }, [markLocalChange]);
+  }, [authMode, markLocalChange]);
 
   return {
     fetchTextbooks,

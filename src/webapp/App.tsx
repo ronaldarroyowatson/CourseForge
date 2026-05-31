@@ -26,6 +26,19 @@ function isJsonResponse(response: Response): boolean {
   return contentType.toLowerCase().includes("application/json");
 }
 
+async function fetchWithTimeout(path: string, timeoutMs = 2800): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    return await fetch(path, { method: "GET", cache: "no-store", signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 /**
  * Root web app router.
  *
@@ -94,8 +107,8 @@ export function App(): React.JSX.Element | null {
     const readStartupTelemetry = async () => {
       try {
         const [bootResult, updaterResult] = await Promise.allSettled([
-          fetch("/api/boot-status", { method: "GET", cache: "no-store" }),
-          fetch("/api/updater-progress", { method: "GET", cache: "no-store" }),
+          fetchWithTimeout("/api/boot-status"),
+          fetchWithTimeout("/api/updater-progress"),
         ]);
 
         let bootStep = "running";

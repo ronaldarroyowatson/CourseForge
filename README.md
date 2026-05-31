@@ -14,7 +14,8 @@ Quick release note: v1.4.3 adds end-to-end trace IDs and OCR debug sink logging 
 
 - Build textbook hierarchies with textbooks, chapters, sections, vocab, equations, concepts, and key ideas.
 - Save data locally first, then sync per-user content to Firebase.
-- Restore sessions automatically with browser-local Firebase Auth persistence.
+- Restore sessions automatically with browser-local Firebase Auth persistence or a local-only account.
+- Link cloud sign-in methods across Google, GitHub, Microsoft, and Apple for the same account.
 - Support direct routes such as `/textbooks`, `/textbooks/:id`, `/admin`, `/school-admin`, and `/super-admin`.
 - Promote admins and moderate shared content through secured callable Cloud Functions.
 - Export curriculum data to XML for downstream game and tutor pipelines.
@@ -86,6 +87,7 @@ Quick release note: v1.4.3 adds end-to-end trace IDs and OCR debug sink logging 
 | [ChromeOS Deployment](docs/chromeos-deployment.md) | Chrome extension/webapp deployment guidance for managed Chromebooks |
 | [i18n Architecture](docs/i18n-architecture.md) | Language detection, fallback strategy, and localization data model |
 | [Accessibility Plan](docs/accessibility-plan.md) | Foundational accessibility features, settings, and roadmap |
+| [Loose Ends: Auth and Onboarding](docs/loose-ends-auth-onboarding.md) | Open items and validation checklist for provider setup, local-only onboarding, migration, and duplicate textbook handling |
 
 ## Local development
 

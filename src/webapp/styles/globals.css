@@ -4378,6 +4378,35 @@ button.cf-ds-color-wheel__dot:active {
   font-size: 0.8rem;
 }
 
+.auto-cue-canvas {
+  position: relative;
+  margin-top: 0.6rem;
+  border: 1px solid rgba(22, 160, 80, 0.25);
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 560px;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.auto-cue-canvas__image {
+  display: block;
+  width: 100%;
+  max-height: 340px;
+  object-fit: contain;
+  cursor: crosshair;
+}
+
+.auto-cue-canvas__marker {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid #0f172a;
+  background: #facc15;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.25);
+}
+
 @media (max-width: 768px) {
   .textbook-entry-mode-grid {
     grid-template-columns: 1fr;

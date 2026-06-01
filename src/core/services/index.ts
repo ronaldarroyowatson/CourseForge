@@ -14,6 +14,7 @@ export * from "./accessibilityService";
 export * from "./autoOcrService";
 export * from "./autoExtractionOrchestrationService";
 export * from "./guidedCaptureCueService";
+export * from "./glossaryLoopExecutor";
 export * from "./ocrCorrectionLearningService";
 export * from "./metadataCorrectionLearningService";
 export * from "./metadataCorrectionSyncService";

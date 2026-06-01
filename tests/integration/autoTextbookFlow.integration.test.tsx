@@ -219,6 +219,7 @@ describe("auto textbook flow integration", () => {
     window.localStorage.removeItem(METADATA_CORRECTION_STORAGE_KEYS.corrections);
     window.localStorage.removeItem(AUTO_SESSION_DRAFTS_KEY);
     window.localStorage.removeItem("courseforge.autoSessionDraft.v1");
+    window.localStorage.removeItem("courseforge.autoExtractionCheckpoints.v1");
     metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl.mockClear();
     syncServiceMocks.syncNow.mockClear();
     syncServiceMocks.findCloudTextbookByISBN.mockReset().mockResolvedValue(undefined);
@@ -448,6 +449,66 @@ describe("auto textbook flow integration", () => {
 
     fireEvent.click(screen.getAllByRole("listitem").find((el) => el.querySelector(".metadata-tile__title")?.textContent === "Related ISBNs")!);
     expect((screen.getByDisplayValue("Teacher Edition") as HTMLInputElement).value).toBe("Teacher Edition");
+  });
+
+  it("restores pinned guided cue markers from a resumable TOC draft", async () => {
+    const now = Date.now();
+    window.localStorage.setItem(
+      AUTO_SESSION_DRAFTS_KEY,
+      JSON.stringify([
+        {
+          id: "resume-guided-cues-draft",
+          version: 1,
+          savedAt: now,
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          tocCaptureImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          rawOcrText: "Table of Contents",
+          metadataTitle: "Inspire Physical Science",
+          metadataSubject: "Science",
+          metadataPublisher: "McGraw Hill",
+          guidedCuePlan: {
+            version: 1,
+            viewerHost: "example.viewer",
+            cues: {
+              openToc: {
+                type: "openToc",
+                acknowledged: true,
+                point: { xRatio: 0.15, yRatio: 0.22, capturedAt: now },
+              },
+              openGlossary: {
+                type: "openGlossary",
+                acknowledged: true,
+                point: { xRatio: 0.33, yRatio: 0.45, capturedAt: now },
+              },
+              nextPage: {
+                type: "nextPage",
+                acknowledged: true,
+                point: { xRatio: 0.87, yRatio: 0.56, capturedAt: now },
+              },
+            },
+          },
+          step: "toc",
+          stepsCompleted: { cover: true, copyright: true },
+        },
+      ])
+    );
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("TOC opener marker")).toBeInTheDocument();
+      expect(screen.getByLabelText("Glossary opener marker")).toBeInTheDocument();
+      expect(screen.getByLabelText("Next page control marker")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/Required cues are marked\./i)).toBeInTheDocument();
   });
 
   it("limits unfinished auto captures to three queue slots and allows deleting a draft to reopen capacity", async () => {
@@ -1329,5 +1390,48 @@ describe("auto textbook flow integration", () => {
     expect(screen.getAllByText(/pp\. 3-36/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Methods of Science/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/pp\. 4-11/i).length).toBeGreaterThan(0);
+  });
+
+  it("pins guided cue coordinates from TOC screenshot clicks", async () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc",
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          ocrDraft: "Table of Contents",
+          tocCaptureImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          guidedCuePlan: {
+            version: 1,
+            viewerHost: "example.viewer",
+            cues: {},
+          },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Pin TOC opener" }));
+
+    const cueImage = screen.getByTestId("guided-cue-canvas-image");
+    Object.defineProperty(cueImage, "getBoundingClientRect", {
+      value: () => ({
+        left: 10,
+        top: 20,
+        width: 200,
+        height: 100,
+        right: 210,
+        bottom: 120,
+        x: 10,
+        y: 20,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.click(cueImage, { clientX: 110, clientY: 70 });
+
+    expect(await screen.findByText(/TOC opener pinned\./i)).toBeInTheDocument();
+    expect(screen.getByLabelText("TOC opener marker")).toBeInTheDocument();
+    expect(screen.getByText(/Required for glossary automation:/i)).toHaveTextContent("Glossary opener");
   });
 });

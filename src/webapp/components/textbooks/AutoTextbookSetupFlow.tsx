@@ -54,7 +54,7 @@ import {
   createEmptyGuidedCaptureCuePlan,
   getGuidedCueCompletion,
   getGuidedCueLabel,
-  getMissingGuidedCues,
+  getMissingGuidedCuesForAutomation,
   markGuidedCue,
   type GuidedCaptureCuePlan,
   type GuidedCueType,
@@ -176,6 +176,7 @@ interface AutoTextbookSetupFlowProps {
     ocrDraft?: string;
     tocResult?: ParsedTocResult;
     tocPages?: TocPage[];
+    tocCaptureImageDataUrl?: string | null;
     guidedCuePlan?: GuidedCaptureCuePlan;
     bypassImageModeration?: boolean;
   };
@@ -391,6 +392,7 @@ interface AutoSessionDraft {
   relatedIsbnsSnapshot?: RelatedIsbn[];
   extractionCheckpoint?: AutoExtractionCheckpoint;
   guidedCuePlan?: GuidedCaptureCuePlan;
+  tocCaptureImageDataUrl?: string | null;
   step: AutoFlowStep;
   stepsCompleted: { cover: boolean; copyright: boolean };
 }
@@ -415,6 +417,7 @@ function isAutoSessionDraft(value: unknown): value is AutoSessionDraft {
     && (draft.relatedIsbnsSnapshot === undefined || Array.isArray(draft.relatedIsbnsSnapshot))
     && (draft.extractionCheckpoint === undefined || typeof draft.extractionCheckpoint === "object")
     && (draft.guidedCuePlan === undefined || typeof draft.guidedCuePlan === "object")
+    && (draft.tocCaptureImageDataUrl === undefined || typeof draft.tocCaptureImageDataUrl === "string" || draft.tocCaptureImageDataUrl === null)
     && (draft.step === "cover" || draft.step === "title" || draft.step === "toc" || draft.step === "toc-editor")
     && typeof draft.stepsCompleted?.cover === "boolean"
     && typeof draft.stepsCompleted?.copyright === "boolean"
@@ -1130,7 +1133,9 @@ export function AutoTextbookSetupFlow({
     chapters: testingSeedState.tocResult.chapters,
     confidence: testingSeedState.tocResult.confidence,
   }] : []));
+  const [tocCaptureImageDataUrl, setTocCaptureImageDataUrl] = useState<string | null>(testingSeedState?.tocCaptureImageDataUrl ?? null);
   const [guidedCuePlan, setGuidedCuePlan] = useState<GuidedCaptureCuePlan>(initialGuidedCuePlan);
+  const [activeCueForPin, setActiveCueForPin] = useState<GuidedCueType | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [activePrimaryHelper, setActivePrimaryHelper] = useState<AutoPrimaryHelperAction | null>(null);
   const [primaryHelperAnchor, setPrimaryHelperAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -1312,6 +1317,7 @@ export function AutoTextbookSetupFlow({
       relatedIsbnsSnapshot: relatedIsbns,
       extractionCheckpoint,
       guidedCuePlan,
+      tocCaptureImageDataUrl,
       step,
       stepsCompleted: {
         cover: Boolean(coverImageDataUrl),
@@ -1335,12 +1341,13 @@ export function AutoTextbookSetupFlow({
     syncWriteExceeded,
     syncWriteLimit,
     guidedCuePlan,
+    tocCaptureImageDataUrl,
     tocResult.chapters.length,
   ]);
 
   const canFinishToc = tocResult.chapters.length > 0;
   const guidedCueCompletion = useMemo(() => getGuidedCueCompletion(guidedCuePlan), [guidedCuePlan]);
-  const missingGuidedCues = useMemo(() => getMissingGuidedCues(guidedCuePlan), [guidedCuePlan]);
+  const missingGuidedCues = useMemo(() => getMissingGuidedCuesForAutomation(guidedCuePlan), [guidedCuePlan]);
 
   function toggleGuidedCue(type: GuidedCueType): void {
     if (guidedCuePlan.cues[type]?.acknowledged) {
@@ -1349,6 +1356,27 @@ export function AutoTextbookSetupFlow({
     }
 
     setGuidedCuePlan((current) => markGuidedCue(current, type));
+  }
+
+  function handleCueCanvasClick(event: React.MouseEvent<HTMLImageElement>): void {
+    if (!activeCueForPin) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+
+    const xRatio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    const yRatio = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+
+    setGuidedCuePlan((current) => markGuidedCue(current, activeCueForPin, {
+      xRatio,
+      yRatio,
+      label: getGuidedCueLabel(activeCueForPin),
+    }));
+    setInfoMessage(`${getGuidedCueLabel(activeCueForPin)} pinned.`);
   }
 
   useEffect(() => {
@@ -2797,6 +2825,7 @@ export function AutoTextbookSetupFlow({
     }
 
     setOcrDraft(captured.ocrText);
+    setTocCaptureImageDataUrl(captured.imageDataUrl);
     setStep("toc");
     applyTocFromText(captured.ocrText);
     setInfoMessage(`TOC page captured and parsed. Continue capturing or finish TOC. (OCR: ${captured.ocrProviderId})`);
@@ -3471,6 +3500,7 @@ export function AutoTextbookSetupFlow({
                             ...fromMetadataFormState(nextMetadataForm),
                             relatedIsbns: nextRelatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
                           });
+                          setTocCaptureImageDataUrl(draft.tocCaptureImageDataUrl ?? null);
                           setGuidedCuePlan(draft.guidedCuePlan ?? createEmptyGuidedCaptureCuePlan());
                           setStep(draft.step);
                           if (draft.extractionCheckpoint) {
@@ -3858,14 +3888,64 @@ export function AutoTextbookSetupFlow({
                   key={`guided-cue-${cue}`}
                   type="button"
                   className={marked ? "btn-secondary" : undefined}
-                  onClick={() => toggleGuidedCue(cue)}
+                  onClick={() => {
+                    setActiveCueForPin(cue);
+                    if (guidedCuePlan.cues[cue]?.acknowledged) {
+                      toggleGuidedCue(cue);
+                    }
+                  }}
                   disabled={isBusy}
                 >
-                  {marked ? "Unmark" : "Mark"} {getGuidedCueLabel(cue)}
+                  {activeCueForPin === cue ? "Pinning" : "Pin"} {getGuidedCueLabel(cue)}
                 </button>
               );
             })}
+            {activeCueForPin ? (
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={isBusy}
+                onClick={() => setActiveCueForPin(null)}
+              >
+                Cancel Pinning
+              </button>
+            ) : null}
           </div>
+          <p className="form-hint">
+            {activeCueForPin
+              ? `Click on the screenshot to pin ${getGuidedCueLabel(activeCueForPin)}.`
+              : "Choose a cue button, then click the screenshot to pin its location."}
+          </p>
+
+          {(tocCaptureImageDataUrl || lastMetadataImageDataUrl) ? (
+            <div className="auto-cue-canvas" role="group" aria-label="Cue pin canvas">
+              <img
+                data-testid="guided-cue-canvas-image"
+                src={tocCaptureImageDataUrl ?? lastMetadataImageDataUrl ?? ""}
+                alt="Pin guided navigation cues"
+                className="auto-cue-canvas__image"
+                onClick={handleCueCanvasClick}
+              />
+              {GUIDED_CUE_TYPES.map((cue) => {
+                const point = guidedCuePlan.cues[cue]?.point;
+                if (typeof point?.xRatio !== "number" || typeof point?.yRatio !== "number") {
+                  return null;
+                }
+
+                return (
+                  <span
+                    key={`guided-cue-marker-${cue}`}
+                    className="auto-cue-canvas__marker"
+                    style={{ left: `${point.xRatio * 100}%`, top: `${point.yRatio * 100}%` }}
+                    aria-label={`${getGuidedCueLabel(cue)} marker`}
+                    title={getGuidedCueLabel(cue)}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            <p className="form-hint">Capture at least one TOC page to enable on-screen cue pinning.</p>
+          )}
         </div>
       ) : null}
 

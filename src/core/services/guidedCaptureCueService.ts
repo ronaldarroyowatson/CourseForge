@@ -88,6 +88,24 @@ export function getMissingGuidedCues(
   return required.filter((type) => !plan.cues[type]?.acknowledged);
 }
 
+function hasCuePoint(entry: GuidedCueEntry | undefined): boolean {
+  if (!entry?.point) {
+    return false;
+  }
+
+  return typeof entry.point.xRatio === "number" && typeof entry.point.yRatio === "number";
+}
+
+export function getMissingGuidedCuesForAutomation(
+  plan: GuidedCaptureCuePlan,
+  required: GuidedCueType[] = REQUIRED_AUTOMATION_CUES
+): GuidedCueType[] {
+  return required.filter((type) => {
+    const entry = plan.cues[type];
+    return !entry?.acknowledged || !hasCuePoint(entry);
+  });
+}
+
 export function getGuidedCueCompletion(plan: GuidedCaptureCuePlan): { completed: number; total: number; percent: number } {
   const completed = ALL_CUE_TYPES.filter((type) => plan.cues[type]?.acknowledged).length;
   const total = ALL_CUE_TYPES.length;
@@ -101,6 +119,10 @@ export function getGuidedCueCompletion(plan: GuidedCaptureCuePlan): { completed:
 
 export function isGuidedCuePlanReady(plan: GuidedCaptureCuePlan): boolean {
   return getMissingGuidedCues(plan).length === 0;
+}
+
+export function isGuidedCuePlanReadyForAutomation(plan: GuidedCaptureCuePlan): boolean {
+  return getMissingGuidedCuesForAutomation(plan).length === 0;
 }
 
 export function getGuidedCueLabel(type: GuidedCueType): string {

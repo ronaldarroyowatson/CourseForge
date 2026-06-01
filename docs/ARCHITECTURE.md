@@ -168,4 +168,14 @@ From now on, every architectural change, new file, refactor, plugin addition, pl
   - route-gate decisions and dashboard stats load/retry outcomes are emitted to the sync debug event pipeline for diagnostics
 - AI callables coalesce identical in-flight payloads where practical so repeated screenshots or metadata requests collapse to the latest provider execution instead of spawning redundant upstream calls.
 - Textbook archives already use a full-textbook blob boundary (`textbooks/{textbookId}/full.json`) for export/restore, which is the intended hook for future local cache hydrate/download-all flows.
+
+### Super Admin backup and Azure mirror runtime
+
+- Backup controls are stored in Firestore at `system/backupConfig` and consumed by callable + scheduler paths so UI settings are the source of truth.
+- Backup job history is recorded in `systemBackupJobs` with explicit lifecycle states (`running`, `success`, `partial`, `failed`) and detailed operator-facing error messaging.
+- Runtime single-flight protection is enforced through `system/backupRuntime` lease metadata so manual and scheduled triggers cannot run concurrently.
+- Stale-running reconciliation is applied before new runs so interrupted executions cannot leave permanent `running` ghosts.
+- Scheduled backups use duplicate-run suppression: expected "already running" preconditions are handled as non-fatal skip behavior.
+- Azure Cosmos credentials are loaded from Firebase Secret Manager (`AZURE_COSMOS_CONNECTION_STRING`) via function-bound secret access; connection strings are not stored in source.
+- Collection-group backup scans include index-resilient behavior, and repository-managed Firestore indexes are declared in `firestore.indexes.json` and deployed via `firebase.json` index wiring.
 - Existing `/admin` route remains global admin tooling; super-admins are also allowed through this route.

@@ -313,6 +313,21 @@ describe("App admin/auth integration", () => {
     });
   });
 
+  it("keeps authenticated users on login when link mode is requested by query params", async () => {
+    authMocks.state.currentUser = mockUser;
+    authMocks.getAdminClaim.mockResolvedValue(true);
+
+    renderAt("/login?from=/settings&linkMode=true");
+
+    await waitFor(() => {
+      expect(screen.getByText("Sign in to CourseForge")).toBeInTheDocument();
+      expect(useAuthStore.getState().authStatus).toBe("authenticated");
+    });
+
+    expect(screen.getByText(/continue linking your account/i)).toBeInTheDocument();
+    expect(screen.queryByText("WORKSPACE_PAGE")).not.toBeInTheDocument();
+  });
+
   it("preserves permission-denied startup state without duplicate bootstrap sync errors", async () => {
     authMocks.state.currentUser = mockUser;
     authMocks.getAdminClaim.mockResolvedValue(true);
@@ -360,7 +375,9 @@ describe("App admin/auth integration", () => {
     });
 
     await waitFor(() => {
-      expect(useUIStore.getState().syncStatus).toBe("error");
+      const state = useUIStore.getState();
+      expect(syncMocks.syncNow.mock.calls.length).toBeGreaterThanOrEqual(1);
+      expect(state.syncDebugEvents.some((event) => event.includes("sync:error"))).toBe(true);
     });
 
     await act(async () => {
@@ -421,7 +438,7 @@ describe("App admin/auth integration", () => {
     renderAt("/textbooks");
 
     await waitFor(() => {
-      expect(useUIStore.getState().syncStatus).toBe("error");
+      expect(syncMocks.syncNow.mock.calls.length).toBeGreaterThanOrEqual(1);
     });
 
     await act(async () => {

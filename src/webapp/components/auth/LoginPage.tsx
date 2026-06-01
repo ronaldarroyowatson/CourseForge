@@ -58,10 +58,14 @@ export function LoginPage(): React.JSX.Element {
   const authStatus = useAuthStore((state) => state.authStatus);
   const authError = useAuthStore((state) => state.authError);
   const pendingRedirect = React.useMemo(() => getPendingAuthRedirect(), []);
-  const linkState = (location.state as { linkProviderId?: AuthProviderKey; linkMode?: boolean } | null);
+  const linkState = (location.state as { from?: string; linkProviderId?: AuthProviderKey; linkMode?: boolean } | null);
+  const queryParams = React.useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const linkModeFromQuery = queryParams.get("linkMode");
+  const hasQueryLinkMode = linkModeFromQuery === "true" || linkModeFromQuery === "1";
+  const queryFrom = queryParams.get("from");
   const canUsePendingLinkRedirect = authStatus === "authenticated";
   const linkProviderId = linkState?.linkProviderId ?? (canUsePendingLinkRedirect && pendingRedirect?.mode === "link" ? pendingRedirect.providerId : null);
-  const isLinkMode = Boolean(linkState?.linkMode || linkProviderId || (canUsePendingLinkRedirect && pendingRedirect?.mode === "link"));
+  const isLinkMode = Boolean(linkState?.linkMode || hasQueryLinkMode || linkProviderId || (canUsePendingLinkRedirect && pendingRedirect?.mode === "link"));
   const [isSigningIn, setIsSigningIn] = React.useState<AuthProviderKey | "local" | null>(null);
   const [localUsername, setLocalUsername] = React.useState("");
   const [signInError, setSignInError] = React.useState<string | null>(null);
@@ -81,10 +85,10 @@ export function LoginPage(): React.JSX.Element {
 
   React.useEffect(() => {
     if (authStatus === "authenticated" && !isLinkMode) {
-      const redirectTarget = (location.state as { from?: string } | null)?.from ?? "/textbooks";
+      const redirectTarget = linkState?.from ?? queryFrom ?? "/textbooks";
       navigate(redirectTarget, { replace: true });
     }
-  }, [authStatus, isLinkMode, location.state, navigate]);
+  }, [authStatus, isLinkMode, linkState?.from, queryFrom, navigate]);
 
   React.useEffect(() => {
     if (!showOnlyLocalCard) {

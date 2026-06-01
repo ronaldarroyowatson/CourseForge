@@ -41,6 +41,15 @@ import {
   type MetadataResult,
 } from "../../../core/services/metadataCorrectionLearningService";
 import {
+  clearAutoExtractionCheckpoints,
+  deleteAutoExtractionCheckpoint,
+  getExtractionContentOrder,
+  resolveSubjectPriority,
+  saveAutoExtractionCheckpoint,
+  shouldPauseAutoExtraction,
+  type AutoExtractionCheckpoint,
+} from "../../../core/services/autoExtractionOrchestrationService";
+import {
   extractMetadataWithOcrFallbackFromDataUrl,
   type MetadataPipelineResult,
 } from "../../../core/services/metadataExtractionPipelineService";
@@ -367,6 +376,7 @@ interface AutoSessionDraft {
   metadataPublisher: string;
   metadataFormSnapshot?: MetadataFormState;
   relatedIsbnsSnapshot?: RelatedIsbn[];
+  extractionCheckpoint?: AutoExtractionCheckpoint;
   step: AutoFlowStep;
   stepsCompleted: { cover: boolean; copyright: boolean };
 }
@@ -389,6 +399,7 @@ function isAutoSessionDraft(value: unknown): value is AutoSessionDraft {
     && typeof draft.metadataPublisher === "string"
     && (draft.metadataFormSnapshot === undefined || typeof draft.metadataFormSnapshot === "object")
     && (draft.relatedIsbnsSnapshot === undefined || Array.isArray(draft.relatedIsbnsSnapshot))
+    && (draft.extractionCheckpoint === undefined || typeof draft.extractionCheckpoint === "object")
     && (draft.step === "cover" || draft.step === "title" || draft.step === "toc" || draft.step === "toc-editor")
     && typeof draft.stepsCompleted?.cover === "boolean"
     && typeof draft.stepsCompleted?.copyright === "boolean"
@@ -1030,6 +1041,12 @@ export function AutoTextbookSetupFlow({
   testingSeedState,
 }: AutoTextbookSetupFlowProps): React.JSX.Element {
   const language = useUIStore((state) => state.language);
+  const syncWriteCount = useUIStore((state) => state.writeCount);
+  const syncReadCount = useUIStore((state) => state.readCount);
+  const syncWriteLimit = useUIStore((state) => state.writeBudgetLimit);
+  const syncReadLimit = useUIStore((state) => state.readBudgetLimit);
+  const syncWriteExceeded = useUIStore((state) => state.writeBudgetExceeded);
+  const syncReadExceeded = useUIStore((state) => state.readBudgetExceeded);
   const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
   const chromeOs = useMemo(() => runtime === "extension" && isChromeOSRuntime(), [runtime]);
   const compactChromeLayout = useMemo(() => chromeOs && isSmallChromebookViewport(), [chromeOs]);
@@ -1216,10 +1233,36 @@ export function AutoTextbookSetupFlow({
   // page reload.  Only save when there is something meaningful to recover.
   useEffect(() => {
     if (!coverImageDataUrl && !ownershipProofDataUrl && !rawOcrText && !metadataForm.title) {
+      deleteAutoExtractionCheckpoint(activeSessionDraftIdRef.current);
       const remaining = deleteAutoSessionDraft(activeSessionDraftIdRef.current);
       setResumableDrafts(remaining);
       return;
     }
+
+    const extractionCheckpoint: AutoExtractionCheckpoint = {
+      version: 1,
+      draftId: activeSessionDraftIdRef.current,
+      savedAt: Date.now(),
+      stage: "guided_navigation",
+      subjectPriority: resolveSubjectPriority(metadataForm.subject),
+      contentOrder: getExtractionContentOrder({ subject: metadataForm.subject }),
+      cursor: {
+        chapterIndex: tocResult.chapters.length > 0 ? 0 : undefined,
+      },
+      completedCounts: {},
+      pauseReason: shouldPauseAutoExtraction({
+        cloudReads: { used: syncReadCount, limit: syncReadLimit },
+        cloudWrites: { used: syncWriteCount, limit: syncWriteLimit },
+        localWrites: {
+          used: syncWriteExceeded ? syncWriteLimit : 0,
+          limit: syncWriteLimit,
+        },
+      }).shouldPause || syncReadExceeded
+        ? "usage_limit_near_threshold"
+        : undefined,
+    };
+
+    saveAutoExtractionCheckpoint(extractionCheckpoint);
 
     const draft: AutoSessionDraft = {
       id: activeSessionDraftIdRef.current,
@@ -1233,6 +1276,7 @@ export function AutoTextbookSetupFlow({
       metadataPublisher: metadataForm.publisher,
       metadataFormSnapshot: metadataForm,
       relatedIsbnsSnapshot: relatedIsbns,
+      extractionCheckpoint,
       step,
       stepsCompleted: {
         cover: Boolean(coverImageDataUrl),
@@ -1242,7 +1286,21 @@ export function AutoTextbookSetupFlow({
 
     const nextDrafts = saveAutoSessionDraft(draft);
     setResumableDrafts(nextDrafts.filter((entry) => entry.id !== activeSessionDraftIdRef.current));
-  }, [coverImageDataUrl, ownershipProofDataUrl, rawOcrText, metadataForm, relatedIsbns, step]);
+  }, [
+    coverImageDataUrl,
+    ownershipProofDataUrl,
+    rawOcrText,
+    metadataForm,
+    relatedIsbns,
+    step,
+    syncReadCount,
+    syncReadExceeded,
+    syncReadLimit,
+    syncWriteCount,
+    syncWriteExceeded,
+    syncWriteLimit,
+    tocResult.chapters.length,
+  ]);
 
   const canFinishToc = tocResult.chapters.length > 0;
 
@@ -3150,6 +3208,7 @@ export function AutoTextbookSetupFlow({
           return;
         }
 
+        deleteAutoExtractionCheckpoint(activeSessionDraftIdRef.current);
         clearPersistedCaptureUsage(draftKeyRef.current);
         setResumableDrafts(deleteAutoSessionDraft(activeSessionDraftIdRef.current));
         activeSessionDraftIdRef.current = createAutoFlowTraceId("auto-draft");
@@ -3333,6 +3392,9 @@ export function AutoTextbookSetupFlow({
                     <div className="auto-session-slot__text">
                       <p className="auto-session-slot__title" title={draftTitle}>{draftTitle}</p>
                       <p className="auto-session-slot__year">{draftYear}</p>
+                      <p className="auto-session-slot__year">
+                        Data: {draft.extractionCheckpoint?.pauseReason ? "Paused near usage limit" : "Ready to extract"}
+                      </p>
                     </div>
 
                     <div className="auto-session-slot__actions">
@@ -3363,6 +3425,9 @@ export function AutoTextbookSetupFlow({
                             relatedIsbns: nextRelatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
                           });
                           setStep(draft.step);
+                          if (draft.extractionCheckpoint) {
+                            saveAutoExtractionCheckpoint(draft.extractionCheckpoint);
+                          }
                           setResumableDrafts(deleteAutoSessionDraft(draft.id));
                         }}
                       >
@@ -3373,6 +3438,7 @@ export function AutoTextbookSetupFlow({
                         className="btn-secondary"
                         disabled={isBusy}
                         onClick={() => {
+                          deleteAutoExtractionCheckpoint(draft.id);
                           setResumableDrafts(deleteAutoSessionDraft(draft.id));
                         }}
                       >
@@ -3395,6 +3461,7 @@ export function AutoTextbookSetupFlow({
                 className="btn-secondary"
                 disabled={isBusy}
                 onClick={() => {
+                  clearAutoExtractionCheckpoints();
                   clearAllAutoSessionDrafts();
                   setResumableDrafts([]);
                 }}

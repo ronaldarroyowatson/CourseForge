@@ -12,6 +12,7 @@ export * from "./adminFirestoreService";
 export * from "./schoolAdminService";
 export * from "./accessibilityService";
 export * from "./autoOcrService";
+export * from "./autoExtractionOrchestrationService";
 export * from "./ocrCorrectionLearningService";
 export * from "./metadataCorrectionLearningService";
 export * from "./metadataCorrectionSyncService";

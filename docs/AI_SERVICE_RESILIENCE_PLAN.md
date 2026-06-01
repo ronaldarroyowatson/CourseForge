@@ -103,6 +103,8 @@ Model host support:
   - vision extraction attempt status
   - vision failure reason and fallback decision
   - OCR fallback completion + final source summary
+- AI callable usage is now tracked in per-user `aiUsage/current` docs with daily counters for request volume, bucket hits, provider failures, and per-callable categories.
+- Identical in-flight image requests are bucketed so repeated calls share one provider execution instead of flooding the upstream model.
 - Diagnostics are mirrored to:
   - local OCR debug sink (`/api/ocr-debug-log`)
   - in-app debug history for session-level troubleshooting

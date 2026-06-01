@@ -94,6 +94,8 @@ export interface SuperAdminDashboardStats {
   pendingPromotionRequests: number;
   trackedReadsToday: number | null;
   trackedWritesToday: number | null;
+  trackedAiRequestsToday: number | null;
+  trackedAiBucketHitsToday: number | null;
 }
 
 export interface SuperAdminGlobalQuotaDetails {
@@ -117,6 +119,158 @@ export interface SuperAdminGlobalQuota {
   currentWritesToday?: number | null;
   message: string | null;
   details: SuperAdminGlobalQuotaDetails[];
+}
+
+export interface SuperAdminAzureQuota {
+  projectId: string;
+  fetchedAt: string;
+  source: "env" | "fallback";
+  configured: boolean;
+  mirrorEnabled: boolean;
+  databaseId: string;
+  containerId: string;
+  requestUnitsPerSecondLimit: number | null;
+  requestUnitsPerDayLimit: number | null;
+  storageGbLimit: number | null;
+  currentReadsToday: number | null;
+  currentWritesToday: number | null;
+  currentRequestUnitsToday: number | null;
+  currentErrorsToday: number | null;
+  message: string | null;
+}
+
+export interface SuperAdminBackupConfig {
+  primaryDb: "firestore" | "cosmos";
+  mirrorEnabled: boolean;
+  firestoreEnabled: boolean;
+  cosmosEnabled: boolean;
+  backupMode: "interval" | "manual";
+  frequencyMinutes: number;
+  lastBackupAt: string | null;
+  nextBackupAt: string | null;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface SuperAdminBackupJob {
+  id: string;
+  triggeredBy: string;
+  startedAt: string;
+  finishedAt: string | null;
+  status: "running" | "success" | "partial" | "failed";
+  docsScanned: number;
+  docsMirrored: number;
+  docsFailed: number;
+  requestUnitsUsed: number;
+  message: string;
+}
+
+export interface OpenAiRateLimitSnapshot {
+  model: string;
+  capturedAt: string;
+  source: "headers" | "defaults";
+  requestsPerMinuteLimit: number | null;
+  requestsPerMinuteRemaining: number | null;
+  requestsResetIn: string | null;
+  tokensPerMinuteLimit: number | null;
+  tokensPerMinuteRemaining: number | null;
+  tokensResetIn: string | null;
+  requestsPerDayLimit: number | null;
+  tokensPerDayLimit: number | null;
+  requestWindowUsedPercent: number | null;
+  tokenWindowUsedPercent: number | null;
+}
+
+export interface AiSafetyPolicyRecord {
+  defaultDailyRequestLimit: number;
+  defaultDailyTokenLimit: number;
+  defaultMonthlyBudgetUsd: number;
+  openAiMonthlySpendUsd: number | null;
+  githubCopilotTier?: "free" | "pro" | "business" | "enterprise";
+  githubDailyRequestLimit?: number;
+  githubDailyTokenLimit?: number;
+  githubRequestsPerMinuteLimit?: number;
+  githubTokensPerRequestInputLimit?: number;
+  githubTokensPerRequestOutputLimit?: number;
+  githubConcurrentRequestsLimit?: number;
+  budgetAlertThresholdPct: number;
+  budgetHardStopThresholdPct: number;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface CurrentAiSafetyStatus {
+  usage: {
+    aiRequestsToday: number;
+    aiTokensToday: number;
+    aiExecutionsToday: number;
+    aiBucketHitsToday: number;
+    aiFailuresToday: number;
+    screenshotTextRequestsToday: number;
+    imageMetadataRequestsToday: number;
+    documentContentRequestsToday: number;
+    providerRateLimitedToday: number;
+    openAiRequestsToday?: number;
+    openAiTokensToday?: number;
+    githubRequestsToday?: number;
+    githubTokensToday?: number;
+    openAiRateLimitedToday?: number;
+    githubRateLimitedToday?: number;
+    lastResetDate: string;
+  };
+  effectiveLimits: {
+    dailyRequestLimit: number;
+    dailyTokenLimit: number;
+    monthlyBudgetUsd: number;
+    githubDailyRequestLimit?: number;
+    githubDailyTokenLimit?: number;
+    githubCopilotTier?: "free" | "pro" | "business" | "enterprise";
+    githubRequestsPerMinuteLimit?: number;
+    githubTokensPerRequestInputLimit?: number;
+    githubTokensPerRequestOutputLimit?: number;
+    githubConcurrentRequestsLimit?: number;
+    budgetAlertThresholdPct: number;
+    budgetHardStopThresholdPct: number;
+    openAiMonthlySpendUsd: number | null;
+  };
+  dailyRequestUsagePercent: number;
+  dailyTokenUsagePercent: number;
+  githubDailyRequestUsagePercent?: number;
+  githubDailyTokenUsagePercent?: number;
+  monthlyBudgetUsagePercent: number | null;
+  hasExceededDailyRequestLimit: boolean;
+  hasExceededDailyTokenLimit: boolean;
+  hasExceededGithubDailyRequestLimit?: boolean;
+  hasExceededGithubDailyTokenLimit?: boolean;
+  hasExceededMonthlyBudgetThreshold: boolean;
+}
+
+export interface SuperAdminAiProviderLimits {
+  provider: "openai";
+  capturedAt: string;
+  policy: AiSafetyPolicyRecord;
+  models: OpenAiRateLimitSnapshot[];
+  github?: {
+    tier: "free" | "pro" | "business" | "enterprise";
+    requestsPerMinuteLimit: number;
+    requestsPerDayLimit: number;
+    tokensPerRequestInputLimit: number;
+    tokensPerRequestOutputLimit: number;
+    concurrentRequestsLimit: number;
+  };
+  aggregateToday: {
+    aiRequestsToday: number;
+    aiTokensToday: number;
+    aiBucketHitsToday: number;
+    aiFailuresToday: number;
+    providerRateLimitedToday: number;
+    openAiRequestsToday?: number;
+    openAiTokensToday?: number;
+    githubRequestsToday?: number;
+    githubTokensToday?: number;
+    openAiRateLimitedToday?: number;
+    githubRateLimitedToday?: number;
+  };
 }
 
 export async function listSchoolDirectory(query = ""): Promise<SchoolDirectoryRow[]> {
@@ -164,6 +318,49 @@ export async function getSuperAdminDashboardStats(): Promise<SuperAdminDashboard
 
 export async function getSuperAdminGlobalQuota(): Promise<SuperAdminGlobalQuota> {
   return callFunction<Record<string, never>, SuperAdminGlobalQuota>("getSuperAdminGlobalQuota", {});
+}
+
+export async function getSuperAdminAzureQuota(): Promise<SuperAdminAzureQuota> {
+  return callFunction<Record<string, never>, SuperAdminAzureQuota>("getSuperAdminAzureQuota", {});
+}
+
+export async function getSuperAdminBackupConfig(): Promise<SuperAdminBackupConfig> {
+  return callFunction<Record<string, never>, SuperAdminBackupConfig>("getSuperAdminBackupConfig", {});
+}
+
+export async function setSuperAdminBackupConfig(input: Partial<SuperAdminBackupConfig>): Promise<SuperAdminBackupConfig> {
+  return callFunction<Partial<SuperAdminBackupConfig>, SuperAdminBackupConfig>("setSuperAdminBackupConfig", input);
+}
+
+export async function runSuperAdminBackupNow(): Promise<SuperAdminBackupJob> {
+  return callFunction<Record<string, never>, SuperAdminBackupJob>("runSuperAdminBackupNow", {});
+}
+
+export async function listSuperAdminBackupJobs(limit = 10): Promise<SuperAdminBackupJob[]> {
+  return callFunction<{ limit: number }, SuperAdminBackupJob[]>("listSuperAdminBackupJobs", { limit });
+}
+
+export async function getSuperAdminAiProviderLimits(): Promise<SuperAdminAiProviderLimits> {
+  return callFunction<Record<string, never>, SuperAdminAiProviderLimits>("getSuperAdminAiProviderLimits", {});
+}
+
+export async function setGlobalAiSafetyPolicy(input: Partial<AiSafetyPolicyRecord>): Promise<AiSafetyPolicyRecord> {
+  return callFunction<Partial<AiSafetyPolicyRecord>, AiSafetyPolicyRecord>("setGlobalAiSafetyPolicy", input);
+}
+
+export async function setUserAiSafetyOverride(input: {
+  uid: string;
+  dailyRequestLimit?: number | null;
+  dailyTokenLimit?: number | null;
+  monthlyBudgetUsd?: number | null;
+  githubDailyRequestLimit?: number | null;
+  githubDailyTokenLimit?: number | null;
+}): Promise<{ uid: string; override: { dailyRequestLimit: number | null; dailyTokenLimit: number | null; monthlyBudgetUsd: number | null; githubDailyRequestLimit?: number | null; githubDailyTokenLimit?: number | null; updatedBy: string; updatedAt: string } }> {
+  return callFunction<typeof input, { uid: string; override: { dailyRequestLimit: number | null; dailyTokenLimit: number | null; monthlyBudgetUsd: number | null; githubDailyRequestLimit?: number | null; githubDailyTokenLimit?: number | null; updatedBy: string; updatedAt: string } }>("setUserAiSafetyOverride", input);
+}
+
+export async function getCurrentAiSafetyStatus(): Promise<CurrentAiSafetyStatus> {
+  return callFunction<Record<string, never>, CurrentAiSafetyStatus>("getCurrentAiSafetyStatus", {});
 }
 
 export async function listSchoolAdminPromotionRequests(status: "pending" | "approved" | "rejected" | "all" = "pending"): Promise<PromotionRequestRow[]> {

@@ -30,6 +30,8 @@ interface ReconciliationResult {
 let memoryQueue: PendingWrite[] = [];
 let retryTimer: ReturnType<typeof setInterval> | null = null;
 let flushInProgress = false;
+let activeWriteJobs = new Map<string, Promise<void>>();
+let latestQueuedWrites = new Map<string, PendingWrite>();
 
 function getLocalStorage(): Storage | null {
   if (typeof window === "undefined" || !window.localStorage) {
@@ -83,6 +85,20 @@ function upsertPendingWrite(entry: PendingWrite): void {
   }
 
   writeQueue(queue);
+}
+
+function buildWriteKey(collection: string, id: string): string {
+  return `${collection}/${id}`;
+}
+
+function coalescePendingWrites(queue: PendingWrite[]): PendingWrite[] {
+  const latestByKey = new Map<string, PendingWrite>();
+
+  for (const entry of queue) {
+    latestByKey.set(buildWriteKey(entry.collection, entry.id), entry);
+  }
+
+  return [...latestByKey.values()];
 }
 
 function removePendingWrite(collection: string, id: string): void {
@@ -159,23 +175,55 @@ async function performDualWrite(collection: string, id: string, data: unknown): 
   await writeToAzure(collection, id, data);
 }
 
-export async function syncWrite(collection: string, id: string, data: unknown): Promise<void> {
-  try {
-    await performDualWrite(collection, id, data);
-    removePendingWrite(collection, id);
-    console.info(`[dual-sync] write succeeded for ${collection}/${id}`);
-  } catch (error) {
-    console.error(`[dual-sync] write failed for ${collection}/${id}; queueing retry`, error);
-    upsertPendingWrite({
-      collection,
-      id,
-      data,
-      attempts: 1,
-      createdAt: new Date().toISOString(),
-      lastError: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
+async function processQueuedWrites(key: string): Promise<void> {
+  while (true) {
+    const entry = latestQueuedWrites.get(key);
+    if (!entry) {
+      return;
+    }
+
+    latestQueuedWrites.delete(key);
+
+    try {
+      await performDualWrite(entry.collection, entry.id, entry.data);
+      removePendingWrite(entry.collection, entry.id);
+      console.info(`[dual-sync] write succeeded for ${entry.collection}/${entry.id}`);
+    } catch (error) {
+      upsertPendingWrite({
+        ...entry,
+        attempts: entry.attempts + 1,
+        lastError: error instanceof Error ? error.message : String(error),
+      });
+      console.error(`[dual-sync] write failed for ${entry.collection}/${entry.id}; queueing retry`, error);
+      throw error;
+    }
   }
+}
+
+export async function syncWrite(collection: string, id: string, data: unknown): Promise<void> {
+  const key = buildWriteKey(collection, id);
+  latestQueuedWrites.set(key, {
+    collection,
+    id,
+    data,
+    attempts: 0,
+    createdAt: new Date().toISOString(),
+    lastError: null,
+  });
+
+  const activeJob = activeWriteJobs.get(key);
+  if (activeJob) {
+    return activeJob;
+  }
+
+  const job = processQueuedWrites(key).finally(() => {
+    if (activeWriteJobs.get(key) === job) {
+      activeWriteJobs.delete(key);
+    }
+  });
+
+  activeWriteJobs.set(key, job);
+  return job;
 }
 
 export async function flushPendingWrites(): Promise<number> {
@@ -185,7 +233,7 @@ export async function flushPendingWrites(): Promise<number> {
 
   flushInProgress = true;
   try {
-    const queue = readQueue();
+    const queue = coalescePendingWrites(readQueue());
     if (!queue.length) {
       return 0;
     }

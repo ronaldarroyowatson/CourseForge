@@ -24,6 +24,8 @@ const serviceMocks = vi.hoisted(() => ({
     pendingPromotionRequests: 0,
     trackedReadsToday: 0,
     trackedWritesToday: 0,
+    trackedAiRequestsToday: 0,
+    trackedAiBucketHitsToday: 0,
   })),
   listAllSchoolsForSuperAdmin: vi.fn(async () => []),
   listSchoolAdminPromotionRequests: vi.fn(async () => []),
@@ -41,6 +43,102 @@ const serviceMocks = vi.hoisted(() => ({
     message: null,
     details: [],
   })),
+  getSuperAdminAzureQuota: vi.fn(async () => ({
+    projectId: "courseforge-prod",
+    fetchedAt: "2026-06-01T00:00:00.000Z",
+    source: "fallback" as const,
+    configured: false,
+    mirrorEnabled: false,
+    databaseId: "courseforge",
+    containerId: "textbooks",
+    requestUnitsPerSecondLimit: null,
+    requestUnitsPerDayLimit: null,
+    storageGbLimit: null,
+    currentReadsToday: 0,
+    currentWritesToday: 0,
+    currentRequestUnitsToday: 0,
+    currentErrorsToday: 0,
+    message: null,
+  })),
+  getSuperAdminBackupConfig: vi.fn(async () => ({
+    primaryDb: "firestore" as const,
+    mirrorEnabled: true,
+    firestoreEnabled: true,
+    cosmosEnabled: true,
+    backupMode: "interval" as const,
+    frequencyMinutes: 240,
+    lastBackupAt: null,
+    nextBackupAt: null,
+    updatedBy: "test",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  })),
+  setSuperAdminBackupConfig: vi.fn(async () => ({
+    primaryDb: "firestore" as const,
+    mirrorEnabled: true,
+    firestoreEnabled: true,
+    cosmosEnabled: true,
+    backupMode: "interval" as const,
+    frequencyMinutes: 240,
+    lastBackupAt: null,
+    nextBackupAt: null,
+    updatedBy: "test",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  })),
+  runSuperAdminBackupNow: vi.fn(async () => ({
+    id: "job-1",
+    triggeredBy: "test",
+    startedAt: "2026-06-01T00:00:00.000Z",
+    finishedAt: "2026-06-01T00:01:00.000Z",
+    status: "success" as const,
+    docsScanned: 0,
+    docsMirrored: 0,
+    docsFailed: 0,
+    requestUnitsUsed: 0,
+    message: "ok",
+  })),
+  listSuperAdminBackupJobs: vi.fn(async () => []),
+  getSuperAdminAiProviderLimits: vi.fn(async () => ({
+    provider: "openai" as const,
+    capturedAt: "2026-06-01T00:00:00.000Z",
+    policy: {
+      defaultDailyRequestLimit: 120,
+      defaultDailyTokenLimit: 120000,
+      defaultMonthlyBudgetUsd: 10,
+      openAiMonthlySpendUsd: 0,
+      budgetAlertThresholdPct: 80,
+      budgetHardStopThresholdPct: 100,
+      updatedBy: "test",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    },
+    models: [],
+    aggregateToday: {
+      aiRequestsToday: 0,
+      aiTokensToday: 0,
+      aiBucketHitsToday: 0,
+      aiFailuresToday: 0,
+      providerRateLimitedToday: 0,
+    },
+  })),
+  setGlobalAiSafetyPolicy: vi.fn(async () => ({
+    defaultDailyRequestLimit: 120,
+    defaultDailyTokenLimit: 120000,
+    defaultMonthlyBudgetUsd: 10,
+    openAiMonthlySpendUsd: 0,
+    budgetAlertThresholdPct: 80,
+    budgetHardStopThresholdPct: 100,
+    updatedBy: "test",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  })),
+  setUserAiSafetyOverride: vi.fn(async () => ({
+    uid: "user-1",
+    override: {
+      dailyRequestLimit: 120,
+      dailyTokenLimit: 120000,
+      monthlyBudgetUsd: 10,
+      updatedBy: "test",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    },
+  })),
 }));
 
 const authMocks = vi.hoisted(() => ({
@@ -57,6 +155,14 @@ vi.mock("../../src/core/services", () => ({
   resolveSchoolAdminPromotionRequest: serviceMocks.resolveSchoolAdminPromotionRequest,
   setUserSuperAdminStatus: serviceMocks.setUserSuperAdminStatus,
   getSuperAdminGlobalQuota: serviceMocks.getSuperAdminGlobalQuota,
+  getSuperAdminAzureQuota: serviceMocks.getSuperAdminAzureQuota,
+  getSuperAdminBackupConfig: serviceMocks.getSuperAdminBackupConfig,
+  setSuperAdminBackupConfig: serviceMocks.setSuperAdminBackupConfig,
+  runSuperAdminBackupNow: serviceMocks.runSuperAdminBackupNow,
+  listSuperAdminBackupJobs: serviceMocks.listSuperAdminBackupJobs,
+  getSuperAdminAiProviderLimits: serviceMocks.getSuperAdminAiProviderLimits,
+  setGlobalAiSafetyPolicy: serviceMocks.setGlobalAiSafetyPolicy,
+  setUserAiSafetyOverride: serviceMocks.setUserAiSafetyOverride,
 }));
 
 vi.mock("../../src/firebase/auth", () => ({
@@ -75,6 +181,8 @@ const REALISTIC_STATS = {
   pendingPromotionRequests: 0,
   trackedReadsToday: 0,
   trackedWritesToday: 0,
+  trackedAiRequestsToday: 0,
+  trackedAiBucketHitsToday: 0,
 };
 
 function setSuperAdminAuth(): void {
@@ -151,6 +259,8 @@ function resetServiceMocks(): void {
     pendingPromotionRequests: 0,
     trackedReadsToday: 0,
     trackedWritesToday: 0,
+    trackedAiRequestsToday: 0,
+    trackedAiBucketHitsToday: 0,
   });
   serviceMocks.listAllSchoolsForSuperAdmin.mockResolvedValue([]);
   serviceMocks.listSchoolAdminPromotionRequests.mockResolvedValue([]);
@@ -167,6 +277,102 @@ function resetServiceMocks(): void {
     currentUsageSource: "none",
     message: null,
     details: [],
+  });
+  serviceMocks.getSuperAdminAzureQuota.mockResolvedValue({
+    projectId: "courseforge-prod",
+    fetchedAt: "2026-06-01T00:00:00.000Z",
+    source: "fallback",
+    configured: false,
+    mirrorEnabled: false,
+    databaseId: "courseforge",
+    containerId: "textbooks",
+    requestUnitsPerSecondLimit: null,
+    requestUnitsPerDayLimit: null,
+    storageGbLimit: null,
+    currentReadsToday: 0,
+    currentWritesToday: 0,
+    currentRequestUnitsToday: 0,
+    currentErrorsToday: 0,
+    message: null,
+  });
+  serviceMocks.getSuperAdminBackupConfig.mockResolvedValue({
+    primaryDb: "firestore",
+    mirrorEnabled: true,
+    firestoreEnabled: true,
+    cosmosEnabled: true,
+    backupMode: "interval",
+    frequencyMinutes: 240,
+    lastBackupAt: null,
+    nextBackupAt: null,
+    updatedBy: "test",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  });
+  serviceMocks.setSuperAdminBackupConfig.mockResolvedValue({
+    primaryDb: "firestore",
+    mirrorEnabled: true,
+    firestoreEnabled: true,
+    cosmosEnabled: true,
+    backupMode: "interval",
+    frequencyMinutes: 240,
+    lastBackupAt: null,
+    nextBackupAt: null,
+    updatedBy: "test",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  });
+  serviceMocks.runSuperAdminBackupNow.mockResolvedValue({
+    id: "job-1",
+    triggeredBy: "test",
+    startedAt: "2026-06-01T00:00:00.000Z",
+    finishedAt: "2026-06-01T00:01:00.000Z",
+    status: "success",
+    docsScanned: 0,
+    docsMirrored: 0,
+    docsFailed: 0,
+    requestUnitsUsed: 0,
+    message: "ok",
+  });
+  serviceMocks.listSuperAdminBackupJobs.mockResolvedValue([]);
+  serviceMocks.getSuperAdminAiProviderLimits.mockResolvedValue({
+    provider: "openai",
+    capturedAt: "2026-06-01T00:00:00.000Z",
+    policy: {
+      defaultDailyRequestLimit: 120,
+      defaultDailyTokenLimit: 120000,
+      defaultMonthlyBudgetUsd: 10,
+      openAiMonthlySpendUsd: 0,
+      budgetAlertThresholdPct: 80,
+      budgetHardStopThresholdPct: 100,
+      updatedBy: "test",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    },
+    models: [],
+    aggregateToday: {
+      aiRequestsToday: 0,
+      aiTokensToday: 0,
+      aiBucketHitsToday: 0,
+      aiFailuresToday: 0,
+      providerRateLimitedToday: 0,
+    },
+  });
+  serviceMocks.setGlobalAiSafetyPolicy.mockResolvedValue({
+    defaultDailyRequestLimit: 120,
+    defaultDailyTokenLimit: 120000,
+    defaultMonthlyBudgetUsd: 10,
+    openAiMonthlySpendUsd: 0,
+    budgetAlertThresholdPct: 80,
+    budgetHardStopThresholdPct: 100,
+    updatedBy: "test",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  });
+  serviceMocks.setUserAiSafetyOverride.mockResolvedValue({
+    uid: "user-1",
+    override: {
+      dailyRequestLimit: 120,
+      dailyTokenLimit: 120000,
+      monthlyBudgetUsd: 10,
+      updatedBy: "test",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    },
   });
 }
 
@@ -322,6 +528,8 @@ describe("Super admin access and data flow", () => {
         pendingPromotionRequests: 3,
         trackedReadsToday: 811,
         trackedWritesToday: 126,
+        trackedAiRequestsToday: 0,
+        trackedAiBucketHitsToday: 0,
       };
     });
 

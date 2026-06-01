@@ -695,6 +695,7 @@ describe("Settings updater communication", () => {
 
     const debugCard = screen.getByText("Debug Log").closest("article");
     expect(debugCard).not.toBeNull();
+    fireEvent.click(within(debugCard as HTMLElement).getByRole("button", { name: "Show" }));
 
     expect(within(debugCard as HTMLElement).getByLabelText("Enable Debug Logging")).toBeInTheDocument();
     expect(within(debugCard as HTMLElement).getByRole("button", { name: "Clear Debug Log" })).toBeInTheDocument();
@@ -710,6 +711,7 @@ describe("Settings updater communication", () => {
     render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     const dscCard = (await screen.findByText("Design System Controls")).closest("article") as HTMLElement;
+    fireEvent.click(within(dscCard).getByRole("button", { name: "Show" }));
     expect(within(dscCard).getAllByText("Not Installed").length).toBeGreaterThan(0);
     expect(within(dscCard).getByText(/Install DSC to unlock advanced design controls/)).toBeInTheDocument();
     expect(within(dscCard).getByRole("button", { name: "Install DSC Module" })).toBeInTheDocument();
@@ -720,6 +722,7 @@ describe("Settings updater communication", () => {
     render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     const dscCard = (await screen.findByText("Design System Controls")).closest("article") as HTMLElement;
+    fireEvent.click(within(dscCard).getByRole("button", { name: "Show" }));
     fireEvent.click(within(dscCard).getByRole("button", { name: "Install DSC Module" }));
 
     await waitFor(() => {
@@ -746,6 +749,7 @@ describe("Settings updater communication", () => {
     render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     const dscCard = (await screen.findByText("Design System Controls")).closest("article") as HTMLElement;
+    fireEvent.click(within(dscCard).getByRole("button", { name: "Show" }));
     fireEvent.click(within(dscCard).getByRole("button", { name: "Install DSC Module" }));
     await waitFor(() => expect(within(dscCard).getByRole("button", { name: "Open DSC Module" })).toBeInTheDocument());
     fireEvent.click(within(dscCard).getByRole("button", { name: "Open DSC Module" }));
@@ -780,6 +784,7 @@ describe("Settings updater communication", () => {
     render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     const dscCard = (await screen.findByText("Design System Controls")).closest("article") as HTMLElement;
+    fireEvent.click(within(dscCard).getByRole("button", { name: "Show" }));
     fireEvent.click(within(dscCard).getByRole("button", { name: "Install DSC Module" }));
     await waitFor(() => expect(within(dscCard).getByRole("button", { name: "Uninstall DSC Module" })).toBeInTheDocument());
 

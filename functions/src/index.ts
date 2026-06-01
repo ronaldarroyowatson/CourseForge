@@ -1,7 +1,10 @@
 ﻿import dotenv from "dotenv";
+import { createHash } from "node:crypto";
+import { CosmosClient, type Container } from "@azure/cosmos";
 import * as admin from "firebase-admin";
 import { defineSecret } from "firebase-functions/params";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import {
   analyzeDocumentQuality,
   buildExtractionPrompts,
@@ -17,6 +20,7 @@ dotenv.config();
 
 const openAiKeySecret = defineSecret("OPENAI_API_KEY");
 const githubModelsTokenSecret = defineSecret("COURSEFORGE_GITHUB_TOKEN");
+const azureCosmosConnectionStringSecret = defineSecret("AZURE_COSMOS_CONNECTION_STRING");
 
 admin.initializeApp();
 
@@ -172,6 +176,8 @@ interface SuperAdminDashboardStats {
   pendingPromotionRequests: number;
   trackedReadsToday: number | null;
   trackedWritesToday: number | null;
+  trackedAiRequestsToday: number | null;
+  trackedAiBucketHitsToday: number | null;
 }
 
 interface SuperAdminGlobalQuotaDetails {
@@ -199,10 +205,65 @@ interface SuperAdminGlobalQuotaResult {
   details: SuperAdminGlobalQuotaDetails[];
 }
 
+interface SuperAdminAzureQuotaResult {
+  projectId: string;
+  fetchedAt: string;
+  source: "env" | "fallback";
+  configured: boolean;
+  mirrorEnabled: boolean;
+  databaseId: string;
+  containerId: string;
+  requestUnitsPerSecondLimit: number | null;
+  requestUnitsPerDayLimit: number | null;
+  storageGbLimit: number | null;
+  currentReadsToday: number | null;
+  currentWritesToday: number | null;
+  currentRequestUnitsToday: number | null;
+  currentErrorsToday: number | null;
+  message: string | null;
+}
+
+type BackupPrimaryDb = "firestore" | "cosmos";
+type BackupMode = "interval" | "manual";
+
+interface SuperAdminBackupConfigResult {
+  primaryDb: BackupPrimaryDb;
+  mirrorEnabled: boolean;
+  firestoreEnabled: boolean;
+  cosmosEnabled: boolean;
+  backupMode: BackupMode;
+  frequencyMinutes: number;
+  lastBackupAt: string | null;
+  nextBackupAt: string | null;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+interface SuperAdminBackupJobResult {
+  id: string;
+  triggeredBy: string;
+  startedAt: string;
+  finishedAt: string | null;
+  status: "running" | "success" | "partial" | "failed";
+  docsScanned: number;
+  docsMirrored: number;
+  docsFailed: number;
+  requestUnitsUsed: number;
+  message: string;
+}
+
 const DEFAULT_FIRESTORE_READ_LIMIT_PER_DAY = 50000;
 const DEFAULT_FIRESTORE_WRITE_LIMIT_PER_DAY = 20000;
 const DEFAULT_FIRESTORE_DELETE_LIMIT_PER_DAY = 20000;
 const DEFAULT_FUNCTION_INVOCATIONS_LIMIT_PER_MONTH = 2000000;
+const DEFAULT_AZURE_COSMOS_DATABASE_ID = "courseforge";
+const DEFAULT_AZURE_COSMOS_CONTAINER_ID = "textbooks";
+const DEFAULT_BACKUP_FREQUENCY_MINUTES = 240;
+const BACKUP_FREQUENCY_MINUTES_MIN = 15;
+const BACKUP_FREQUENCY_MINUTES_MAX = 7 * 24 * 60;
+const BACKUP_DOC_LIMIT_PER_COLLECTION = 250;
+const BACKUP_RUN_LEASE_MS = 12 * 60 * 1000;
+const BACKUP_STALE_RUNNING_MS = 30 * 60 * 1000;
 
 interface PremiumUsageState {
   premiumRequestsUsedToday: number;
@@ -215,6 +276,605 @@ interface PremiumUsageState {
   lastResetDate: string;
   lastResetWeek: string;
   lastResetMonth: string;
+}
+
+function isMissingCollectionGroupIndexError(error: unknown): boolean {
+  if (!error) {
+    return false;
+  }
+
+  const candidate = error as { code?: unknown; message?: unknown };
+  const message = typeof candidate.message === "string" ? candidate.message.toLowerCase() : "";
+  const code = typeof candidate.code === "number" ? candidate.code : null;
+  return code === 9 || message.includes("failed_precondition") || message.includes("collection_group") || message.includes("collectiongroup");
+}
+
+async function fetchBackupSnapshotsForCollection(
+  collectionName: SupportedCollection,
+  sinceIso: string,
+): Promise<{ snapshots: FirebaseFirestore.QuerySnapshot[]; usedIndexFallback: boolean }> {
+  try {
+    const snapshots = await Promise.all([
+      firestore.collectionGroup(collectionName).where("updatedAt", ">", sinceIso).limit(BACKUP_DOC_LIMIT_PER_COLLECTION).get(),
+      firestore.collectionGroup(collectionName).where("lastModified", ">", sinceIso).limit(BACKUP_DOC_LIMIT_PER_COLLECTION).get(),
+    ]);
+    return { snapshots, usedIndexFallback: false };
+  } catch (error) {
+    if (!isMissingCollectionGroupIndexError(error)) {
+      throw error;
+    }
+
+    // Fallback path for environments missing collection-group timestamp indexes.
+    const snapshot = await firestore.collectionGroup(collectionName).limit(BACKUP_DOC_LIMIT_PER_COLLECTION * 4).get();
+    return { snapshots: [snapshot], usedIndexFallback: true };
+  }
+}
+
+function parsePositiveEnvNumber(name: string): number | null {
+  const raw = process.env[name];
+  if (!raw || raw.trim().length === 0) {
+    return null;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
+async function readAzureUsageTotals(): Promise<{
+  readsToday: number;
+  writesToday: number;
+  requestUnitsToday: number;
+  errorsToday: number;
+}> {
+  const usageSnapshot = await firestore.collectionGroup("azureUsage").get();
+  let readsToday = 0;
+  let writesToday = 0;
+  let requestUnitsToday = 0;
+  let errorsToday = 0;
+
+  usageSnapshot.docs.forEach((docSnap) => {
+    if (docSnap.id !== "current") {
+      return;
+    }
+
+    const data = docSnap.data() as Record<string, unknown>;
+    const reads = typeof data.readsToday === "number" ? data.readsToday : 0;
+    const writes = typeof data.writesToday === "number" ? data.writesToday : 0;
+    const requestUnits = typeof data.requestUnitsToday === "number" ? data.requestUnitsToday : 0;
+    const errors = typeof data.errorsToday === "number" ? data.errorsToday : 0;
+
+    readsToday += Math.max(0, Math.floor(reads));
+    writesToday += Math.max(0, Math.floor(writes));
+    requestUnitsToday += Math.max(0, Math.floor(requestUnits));
+    errorsToday += Math.max(0, Math.floor(errors));
+  });
+
+  return { readsToday, writesToday, requestUnitsToday, errorsToday };
+}
+
+function toIsoOrNull(value: unknown): string | null {
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) {
+      return new Date(parsed).toISOString();
+    }
+  }
+
+  return null;
+}
+
+function normalizeBackupConfig(value: unknown): SuperAdminBackupConfigResult {
+  const data = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+
+  const primaryDb: BackupPrimaryDb = data.primaryDb === "cosmos" ? "cosmos" : "firestore";
+  const backupMode: BackupMode = data.backupMode === "manual" ? "manual" : "interval";
+  const rawFrequency = typeof data.frequencyMinutes === "number"
+    ? data.frequencyMinutes
+    : DEFAULT_BACKUP_FREQUENCY_MINUTES;
+  const frequencyMinutes = Math.max(BACKUP_FREQUENCY_MINUTES_MIN, Math.min(BACKUP_FREQUENCY_MINUTES_MAX, Math.floor(rawFrequency)));
+  const lastBackupAt = toIsoOrNull(data.lastBackupAt);
+  const updatedAt = toIsoOrNull(data.updatedAt) ?? new Date(0).toISOString();
+  const nextBackupAt = lastBackupAt
+    ? new Date(Date.parse(lastBackupAt) + frequencyMinutes * 60 * 1000).toISOString()
+    : null;
+
+  return {
+    primaryDb,
+    mirrorEnabled: data.mirrorEnabled !== false,
+    firestoreEnabled: data.firestoreEnabled !== false,
+    cosmosEnabled: data.cosmosEnabled !== false,
+    backupMode,
+    frequencyMinutes,
+    lastBackupAt,
+    nextBackupAt,
+    updatedBy: typeof data.updatedBy === "string" && data.updatedBy.trim().length > 0 ? data.updatedBy : "system",
+    updatedAt,
+  };
+}
+
+function getBackupConfigDocRef(): FirebaseFirestore.DocumentReference {
+  return firestore.doc("system/backupConfig");
+}
+
+function getBackupJobsCollectionRef(): FirebaseFirestore.CollectionReference {
+  return firestore.collection("systemBackupJobs");
+}
+
+function getBackupRuntimeDocRef(): FirebaseFirestore.DocumentReference {
+  return firestore.doc("system/backupRuntime");
+}
+
+function readSecretOrEnv(secret: { value: () => string }, envName: string): string {
+  try {
+    const secretValue = secret.value();
+    if (typeof secretValue === "string" && secretValue.trim().length > 0) {
+      return secretValue.trim();
+    }
+  } catch {
+    // Secret access is only available when the function is bound to this secret.
+  }
+
+  return (process.env[envName] ?? "").trim();
+}
+
+function getAzureCosmosCredentials(): { connectionString: string; endpoint: string; key: string } {
+  const connectionString = readSecretOrEnv(azureCosmosConnectionStringSecret, "AZURE_COSMOS_CONNECTION_STRING");
+  const endpoint = (process.env.AZURE_COSMOS_ENDPOINT ?? "").trim();
+  const key = (process.env.AZURE_COSMOS_KEY ?? "").trim();
+  return { connectionString, endpoint, key };
+}
+
+let cosmosClientForBackup: CosmosClient | null = null;
+let cosmosContainerForBackup: Container | null = null;
+
+function getAzureCosmosClientForBackup(): CosmosClient {
+  if (cosmosClientForBackup) {
+    return cosmosClientForBackup;
+  }
+
+  const { connectionString, endpoint, key } = getAzureCosmosCredentials();
+
+  if (connectionString.trim().length > 0) {
+    cosmosClientForBackup = new CosmosClient({ connectionString });
+    return cosmosClientForBackup;
+  }
+
+  if (endpoint.trim().length > 0 && key.trim().length > 0) {
+    cosmosClientForBackup = new CosmosClient({ endpoint, key });
+    return cosmosClientForBackup;
+  }
+
+  throw new HttpsError("failed-precondition", "Azure Cosmos is not configured. Set AZURE_COSMOS_CONNECTION_STRING secret or AZURE_COSMOS_ENDPOINT + AZURE_COSMOS_KEY secrets.");
+}
+
+async function getAzureCosmosContainerForBackup(): Promise<Container> {
+  if (cosmosContainerForBackup) {
+    return cosmosContainerForBackup;
+  }
+
+  const client = getAzureCosmosClientForBackup();
+  const databaseId = process.env.AZURE_COSMOS_DATABASE_ID?.trim() || DEFAULT_AZURE_COSMOS_DATABASE_ID;
+  const containerId = process.env.AZURE_COSMOS_CONTAINER_ID?.trim() || DEFAULT_AZURE_COSMOS_CONTAINER_ID;
+  const { database } = await client.databases.createIfNotExists({ id: databaseId });
+  const { container } = await database.containers.createIfNotExists({
+    id: containerId,
+    partitionKey: { paths: ["/collection"] },
+  });
+  cosmosContainerForBackup = container;
+  return container;
+}
+
+async function reconcileStaleRunningBackupJobs(): Promise<void> {
+  const snapshot = await getBackupJobsCollectionRef().orderBy("startedAt", "desc").limit(30).get();
+  const nowMs = Date.now();
+  const staleUpdates: Array<{ ref: FirebaseFirestore.DocumentReference; data: Partial<SuperAdminBackupJobResult> }> = [];
+
+  snapshot.docs.forEach((docSnap) => {
+    const data = docSnap.data() as Partial<SuperAdminBackupJobResult>;
+    if (data.status !== "running" || typeof data.startedAt !== "string") {
+      return;
+    }
+
+    const startedMs = Date.parse(data.startedAt);
+    if (Number.isNaN(startedMs) || nowMs - startedMs < BACKUP_STALE_RUNNING_MS) {
+      return;
+    }
+
+    staleUpdates.push({
+      ref: docSnap.ref,
+      data: {
+        status: "failed",
+        finishedAt: new Date(nowMs).toISOString(),
+        message: "Backup marked stale after exceeding lease window.",
+      },
+    });
+  });
+
+  if (staleUpdates.length === 0) {
+    return;
+  }
+
+  const batch = firestore.batch();
+  staleUpdates.forEach((update) => {
+    batch.set(update.ref, update.data, { merge: true });
+  });
+  await batch.commit();
+}
+
+async function acquireBackupRunLease(runId: string, triggeredBy: string): Promise<void> {
+  const lockRef = getBackupRuntimeDocRef();
+  await firestore.runTransaction(async (transaction) => {
+    const now = new Date();
+    const nowMs = now.getTime();
+    const nowIso = now.toISOString();
+    const leaseUntilIso = new Date(nowMs + BACKUP_RUN_LEASE_MS).toISOString();
+
+    const snapshot = await transaction.get(lockRef);
+    const data = snapshot.data() as Record<string, unknown> | undefined;
+    const existingRunId = typeof data?.runId === "string" ? data.runId : "";
+    const existingStatus = typeof data?.status === "string" ? data.status : "idle";
+    const existingLeaseUntil = typeof data?.leaseUntil === "string" ? Date.parse(data.leaseUntil) : 0;
+
+    if (
+      existingStatus === "running"
+      && existingRunId
+      && existingRunId !== runId
+      && Number.isFinite(existingLeaseUntil)
+      && existingLeaseUntil > nowMs
+    ) {
+      throw new HttpsError("failed-precondition", "A backup run is already in progress. Please wait for it to finish.");
+    }
+
+    transaction.set(lockRef, {
+      runId,
+      status: "running",
+      triggeredBy,
+      startedAt: nowIso,
+      leaseUntil: leaseUntilIso,
+      updatedAt: nowIso,
+    }, { merge: true });
+  });
+}
+
+async function touchBackupRunLease(runId: string): Promise<void> {
+  const lockRef = getBackupRuntimeDocRef();
+  await firestore.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(lockRef);
+    const data = snapshot.data() as Record<string, unknown> | undefined;
+    const existingRunId = typeof data?.runId === "string" ? data.runId : "";
+    if (existingRunId !== runId) {
+      return;
+    }
+
+    const now = new Date();
+    transaction.set(lockRef, {
+      leaseUntil: new Date(now.getTime() + BACKUP_RUN_LEASE_MS).toISOString(),
+      updatedAt: now.toISOString(),
+    }, { merge: true });
+  });
+}
+
+async function releaseBackupRunLease(runId: string, finalStatus: "success" | "partial" | "failed"): Promise<void> {
+  const lockRef = getBackupRuntimeDocRef();
+  await firestore.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(lockRef);
+    const data = snapshot.data() as Record<string, unknown> | undefined;
+    const existingRunId = typeof data?.runId === "string" ? data.runId : "";
+    if (existingRunId !== runId) {
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    transaction.set(lockRef, {
+      runId: null,
+      status: "idle",
+      leaseUntil: null,
+      finishedAt: nowIso,
+      lastRunStatus: finalStatus,
+      updatedAt: nowIso,
+    }, { merge: true });
+  });
+}
+
+async function runAzureBackupMirror(triggeredBy: string): Promise<SuperAdminBackupJobResult> {
+  const startedAt = new Date().toISOString();
+  const jobRef = getBackupJobsCollectionRef().doc();
+
+  let docsScanned = 0;
+  let docsMirrored = 0;
+  let docsFailed = 0;
+  let requestUnitsUsed = 0;
+  let usedIndexFallback = false;
+  const seenPaths = new Set<string>();
+
+  await reconcileStaleRunningBackupJobs();
+  await acquireBackupRunLease(jobRef.id, triggeredBy);
+
+  try {
+    await jobRef.set({
+      id: jobRef.id,
+      triggeredBy,
+      startedAt,
+      finishedAt: null,
+      status: "running",
+      docsScanned: 0,
+      docsMirrored: 0,
+      docsFailed: 0,
+      requestUnitsUsed: 0,
+      message: "Backup request received. Scanning for changed documents.",
+    } satisfies SuperAdminBackupJobResult);
+
+    const container = await getAzureCosmosContainerForBackup();
+    const backupConfig = normalizeBackupConfig((await getBackupConfigDocRef().get()).data());
+    const sinceMillis = backupConfig.lastBackupAt ? Date.parse(backupConfig.lastBackupAt) : 0;
+    const sinceIso = new Date(sinceMillis).toISOString();
+
+    for (const collectionName of SUPPORTED_COLLECTIONS) {
+      const { snapshots, usedIndexFallback: fallbackForCollection } = await fetchBackupSnapshotsForCollection(collectionName, sinceIso);
+      if (fallbackForCollection) {
+        usedIndexFallback = true;
+      }
+
+      for (const snapshot of snapshots) {
+        for (const docSnap of snapshot.docs) {
+          if (seenPaths.has(docSnap.ref.path)) {
+            continue;
+          }
+
+          seenPaths.add(docSnap.ref.path);
+          docsScanned += 1;
+          const payload = docSnap.data();
+          const isoUpdatedAt = toIsoOrNull(payload.updatedAt) ?? toIsoOrNull(payload.lastModified) ?? startedAt;
+          if (Date.parse(isoUpdatedAt) <= sinceMillis) {
+            continue;
+          }
+
+          const mirroredRecord = {
+            id: createHash("sha1").update(docSnap.ref.path).digest("hex"),
+            collection: collectionName,
+            sourcePath: docSnap.ref.path,
+            payload,
+            updatedAt: isoUpdatedAt,
+            mirroredAt: startedAt,
+          };
+
+          try {
+            const response = await container.items.upsert(mirroredRecord);
+            docsMirrored += 1;
+            requestUnitsUsed += Number(response.requestCharge ?? 0);
+          } catch {
+            docsFailed += 1;
+          }
+        }
+      }
+
+      await jobRef.set({
+        status: "running",
+        docsScanned,
+        docsMirrored,
+        docsFailed,
+        requestUnitsUsed: Number(requestUnitsUsed.toFixed(2)),
+        message: `Running backup: scanned ${docsScanned}, mirrored ${docsMirrored}, failed ${docsFailed}.`,
+      }, { merge: true });
+
+      await touchBackupRunLease(jobRef.id);
+    }
+
+    const status: "success" | "partial" | "failed" = docsFailed === 0
+      ? "success"
+      : docsMirrored > 0
+        ? "partial"
+        : "failed";
+
+    const finishedAt = new Date().toISOString();
+    const message = status === "success"
+      ? `Mirrored ${docsMirrored} changed documents to Azure.`
+      : status === "partial"
+        ? `Mirrored ${docsMirrored} documents with ${docsFailed} failures.`
+        : "No documents were mirrored to Azure.";
+
+    const finalMessage = usedIndexFallback
+      ? `${message} Index fallback mode used (timestamp index missing); run may scan extra docs.`
+      : message;
+
+    const jobResult: SuperAdminBackupJobResult = {
+      id: jobRef.id,
+      triggeredBy,
+      startedAt,
+      finishedAt,
+      status,
+      docsScanned,
+      docsMirrored,
+      docsFailed,
+      requestUnitsUsed: Number(requestUnitsUsed.toFixed(2)),
+      message: finalMessage,
+    };
+
+    await jobRef.set(jobResult);
+    await getBackupConfigDocRef().set({
+      lastBackupAt: finishedAt,
+      updatedAt: finishedAt,
+      updatedBy: triggeredBy,
+    }, { merge: true });
+
+    return jobResult;
+  } catch (error) {
+    const finishedAt = new Date().toISOString();
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    const failureMessage = rawMessage.trim().length > 0 ? rawMessage : "Backup failed before document mirroring began.";
+
+    await jobRef.set({
+      id: jobRef.id,
+      triggeredBy,
+      startedAt,
+      finishedAt,
+      status: "failed",
+      docsScanned,
+      docsMirrored,
+      docsFailed,
+      requestUnitsUsed: Number(requestUnitsUsed.toFixed(2)),
+      message: `Backup failed: ${failureMessage}`,
+    } satisfies SuperAdminBackupJobResult);
+
+    console.error("[backup] manual/scheduled mirror failed", { triggeredBy, message: failureMessage });
+
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+
+    throw new HttpsError("internal", `Backup failed: ${failureMessage}`);
+  } finally {
+    const finalStatus: "success" | "partial" | "failed" = docsMirrored > 0
+      ? (docsFailed > 0 ? "partial" : "success")
+      : "failed";
+    await releaseBackupRunLease(jobRef.id, finalStatus);
+  }
+}
+
+type AiUsageKind = "screenshot_text" | "image_metadata" | "document_content";
+type AiUsageProvider = "openai" | "github";
+type GitHubCopilotTier = "free" | "pro" | "business" | "enterprise";
+
+interface AiUsageState {
+  aiRequestsToday: number;
+  aiTokensToday: number;
+  aiExecutionsToday: number;
+  aiBucketHitsToday: number;
+  aiFailuresToday: number;
+  screenshotTextRequestsToday: number;
+  imageMetadataRequestsToday: number;
+  documentContentRequestsToday: number;
+  providerRateLimitedToday: number;
+  openAiRequestsToday: number;
+  openAiTokensToday: number;
+  githubRequestsToday: number;
+  githubTokensToday: number;
+  openAiRateLimitedToday: number;
+  githubRateLimitedToday: number;
+  lastResetDate: string;
+}
+
+interface AiUsageIncrement {
+  kind: AiUsageKind;
+  provider?: AiUsageProvider;
+  requestCount?: number;
+  tokenCount?: number;
+  executionCount?: number;
+  bucketHitCount?: number;
+  failureCount?: number;
+  rateLimitedCount?: number;
+}
+
+interface OpenAiModelLimitDefaults {
+  requestsPerMinute: number | null;
+  tokensPerMinute: number | null;
+  requestsPerDay: number | null;
+  tokensPerDay: number | null;
+}
+
+interface OpenAiRateLimitSnapshot {
+  model: string;
+  capturedAt: string;
+  source: "headers" | "defaults";
+  requestsPerMinuteLimit: number | null;
+  requestsPerMinuteRemaining: number | null;
+  requestsResetIn: string | null;
+  tokensPerMinuteLimit: number | null;
+  tokensPerMinuteRemaining: number | null;
+  tokensResetIn: string | null;
+  requestsPerDayLimit: number | null;
+  tokensPerDayLimit: number | null;
+  requestWindowUsedPercent: number | null;
+  tokenWindowUsedPercent: number | null;
+}
+
+interface AiSafetyPolicyRecord {
+  defaultDailyRequestLimit: number;
+  defaultDailyTokenLimit: number;
+  defaultMonthlyBudgetUsd: number;
+  openAiMonthlySpendUsd: number | null;
+  githubCopilotTier: GitHubCopilotTier;
+  githubDailyRequestLimit: number;
+  githubDailyTokenLimit: number;
+  githubRequestsPerMinuteLimit: number;
+  githubTokensPerRequestInputLimit: number;
+  githubTokensPerRequestOutputLimit: number;
+  githubConcurrentRequestsLimit: number;
+  budgetAlertThresholdPct: number;
+  budgetHardStopThresholdPct: number;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+interface AiSafetyOverrideRecord {
+  dailyRequestLimit: number | null;
+  dailyTokenLimit: number | null;
+  monthlyBudgetUsd: number | null;
+  githubDailyRequestLimit: number | null;
+  githubDailyTokenLimit: number | null;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+interface CurrentAiSafetyStatusResult {
+  usage: AiUsageState;
+  effectiveLimits: {
+    dailyRequestLimit: number;
+    dailyTokenLimit: number;
+    monthlyBudgetUsd: number;
+    githubDailyRequestLimit: number;
+    githubDailyTokenLimit: number;
+    githubCopilotTier: GitHubCopilotTier;
+    githubRequestsPerMinuteLimit: number;
+    githubTokensPerRequestInputLimit: number;
+    githubTokensPerRequestOutputLimit: number;
+    githubConcurrentRequestsLimit: number;
+    budgetAlertThresholdPct: number;
+    budgetHardStopThresholdPct: number;
+    openAiMonthlySpendUsd: number | null;
+  };
+  dailyRequestUsagePercent: number;
+  dailyTokenUsagePercent: number;
+  githubDailyRequestUsagePercent: number;
+  githubDailyTokenUsagePercent: number;
+  monthlyBudgetUsagePercent: number | null;
+  hasExceededDailyRequestLimit: boolean;
+  hasExceededDailyTokenLimit: boolean;
+  hasExceededGithubDailyRequestLimit: boolean;
+  hasExceededGithubDailyTokenLimit: boolean;
+  hasExceededMonthlyBudgetThreshold: boolean;
+}
+
+interface SuperAdminAiProviderLimitsResult {
+  provider: "openai";
+  capturedAt: string;
+  policy: AiSafetyPolicyRecord;
+  models: OpenAiRateLimitSnapshot[];
+  github: {
+    tier: GitHubCopilotTier;
+    requestsPerMinuteLimit: number;
+    requestsPerDayLimit: number;
+    tokensPerRequestInputLimit: number;
+    tokensPerRequestOutputLimit: number;
+    concurrentRequestsLimit: number;
+  };
+  aggregateToday: {
+    aiRequestsToday: number;
+    aiTokensToday: number;
+    aiBucketHitsToday: number;
+    aiFailuresToday: number;
+    providerRateLimitedToday: number;
+    openAiRequestsToday: number;
+    openAiTokensToday: number;
+    githubRequestsToday: number;
+    githubTokensToday: number;
+    openAiRateLimitedToday: number;
+    githubRateLimitedToday: number;
+  };
 }
 
 interface AdminPremiumUsageRow {
@@ -757,6 +1417,7 @@ const DAILY_BASELINE_MULTIPLIER = 0.4;
 const WEEKLY_BASELINE_MULTIPLIER = 2.7;
 const MONTHLY_LIMIT_PERCENT = 100;
 const AI_PROVIDER_POLICY_DOC_PATH = "config/aiProviderPolicy";
+const AI_SAFETY_POLICY_DOC_PATH = "config/aiSafetyPolicy";
 const DEBUG_POLICY_DOC_PATH = "config/debugLoggingPolicy";
 const METADATA_CORRECTION_RULES_DOC_PATH = "config/metadataCorrectionRules";
 const METADATA_CORRECTION_LIMITS_DOC_PATH = "config/metadataCorrectionLimits";
@@ -777,6 +1438,63 @@ const DEFAULT_DEBUG_POLICY: DebugLoggingPolicyRecord = {
 const OCR_RATE_LIMIT_WINDOW_MS = 60_000;
 const OCR_RATE_LIMIT_MAX_REQUESTS = 30;
 const MAX_OCR_IMAGE_DATA_URL_BYTES = 8 * 1024 * 1024;
+const DEFAULT_USER_AI_DAILY_REQUEST_LIMIT = 120;
+const DEFAULT_USER_AI_DAILY_TOKEN_LIMIT = 120_000;
+const DEFAULT_OPENAI_MONTHLY_BUDGET_USD = 10;
+const DEFAULT_OPENAI_BUDGET_ALERT_THRESHOLD_PCT = 80;
+const DEFAULT_OPENAI_BUDGET_HARD_STOP_PCT = 100;
+const DEFAULT_GITHUB_COPILOT_TIER: GitHubCopilotTier = "free";
+const OPENAI_RATE_LIMIT_DOC_ROOT = "providerRateLimits/openai/models";
+const OPENAI_MODEL_LIMIT_DEFAULTS: Record<string, OpenAiModelLimitDefaults> = {
+  "gpt-4o-mini": {
+    requestsPerMinute: 500,
+    tokensPerMinute: 200_000,
+    requestsPerDay: 10_000,
+    tokensPerDay: 2_000_000,
+  },
+  "gpt-4.1": {
+    requestsPerMinute: 500,
+    tokensPerMinute: 30_000,
+    requestsPerDay: null,
+    tokensPerDay: 900_000,
+  },
+};
+const GITHUB_COPILOT_TIER_LIMITS: Record<GitHubCopilotTier, {
+  requestsPerMinuteLimit: number;
+  requestsPerDayLimit: number;
+  tokensPerRequestInputLimit: number;
+  tokensPerRequestOutputLimit: number;
+  concurrentRequestsLimit: number;
+}> = {
+  free: {
+    requestsPerMinuteLimit: 10,
+    requestsPerDayLimit: 50,
+    tokensPerRequestInputLimit: 8_000,
+    tokensPerRequestOutputLimit: 4_000,
+    concurrentRequestsLimit: 2,
+  },
+  pro: {
+    requestsPerMinuteLimit: 10,
+    requestsPerDayLimit: 50,
+    tokensPerRequestInputLimit: 8_000,
+    tokensPerRequestOutputLimit: 4_000,
+    concurrentRequestsLimit: 2,
+  },
+  business: {
+    requestsPerMinuteLimit: 10,
+    requestsPerDayLimit: 100,
+    tokensPerRequestInputLimit: 8_000,
+    tokensPerRequestOutputLimit: 4_000,
+    concurrentRequestsLimit: 2,
+  },
+  enterprise: {
+    requestsPerMinuteLimit: 15,
+    requestsPerDayLimit: 150,
+    tokensPerRequestInputLimit: 16_000,
+    tokensPerRequestOutputLimit: 8_000,
+    concurrentRequestsLimit: 4,
+  },
+};
 const DEFAULT_CORRECTION_DAILY_LIMIT = 25;
 const DEFAULT_CORRECTION_MAX_IMAGE_BYTES = 200 * 1024;
 const DEFAULT_CORRECTION_MIN_UPLOAD_INTERVAL_SECONDS = 5;
@@ -1711,6 +2429,433 @@ function applyPremiumResets(usage: PremiumUsageState, now = new Date()): Premium
   return next;
 }
 
+function normalizeAiUsage(record: FirebaseFirestore.DocumentData | undefined | null): AiUsageState {
+  const defaults: AiUsageState = {
+    aiRequestsToday: 0,
+    aiTokensToday: 0,
+    aiExecutionsToday: 0,
+    aiBucketHitsToday: 0,
+    aiFailuresToday: 0,
+    screenshotTextRequestsToday: 0,
+    imageMetadataRequestsToday: 0,
+    documentContentRequestsToday: 0,
+    providerRateLimitedToday: 0,
+    openAiRequestsToday: 0,
+    openAiTokensToday: 0,
+    githubRequestsToday: 0,
+    githubTokensToday: 0,
+    openAiRateLimitedToday: 0,
+    githubRateLimitedToday: 0,
+    lastResetDate: getUtcDateKey(),
+  };
+
+  if (!record || typeof record !== "object") {
+    return defaults;
+  }
+
+  return {
+    aiRequestsToday: typeof record.aiRequestsToday === "number" ? Math.max(0, Math.floor(record.aiRequestsToday)) : defaults.aiRequestsToday,
+    aiTokensToday: typeof record.aiTokensToday === "number" ? Math.max(0, Math.floor(record.aiTokensToday)) : defaults.aiTokensToday,
+    aiExecutionsToday: typeof record.aiExecutionsToday === "number" ? Math.max(0, Math.floor(record.aiExecutionsToday)) : defaults.aiExecutionsToday,
+    aiBucketHitsToday: typeof record.aiBucketHitsToday === "number" ? Math.max(0, Math.floor(record.aiBucketHitsToday)) : defaults.aiBucketHitsToday,
+    aiFailuresToday: typeof record.aiFailuresToday === "number" ? Math.max(0, Math.floor(record.aiFailuresToday)) : defaults.aiFailuresToday,
+    screenshotTextRequestsToday: typeof record.screenshotTextRequestsToday === "number" ? Math.max(0, Math.floor(record.screenshotTextRequestsToday)) : defaults.screenshotTextRequestsToday,
+    imageMetadataRequestsToday: typeof record.imageMetadataRequestsToday === "number" ? Math.max(0, Math.floor(record.imageMetadataRequestsToday)) : defaults.imageMetadataRequestsToday,
+    documentContentRequestsToday: typeof record.documentContentRequestsToday === "number" ? Math.max(0, Math.floor(record.documentContentRequestsToday)) : defaults.documentContentRequestsToday,
+    providerRateLimitedToday: typeof record.providerRateLimitedToday === "number" ? Math.max(0, Math.floor(record.providerRateLimitedToday)) : defaults.providerRateLimitedToday,
+    openAiRequestsToday: typeof record.openAiRequestsToday === "number" ? Math.max(0, Math.floor(record.openAiRequestsToday)) : defaults.openAiRequestsToday,
+    openAiTokensToday: typeof record.openAiTokensToday === "number" ? Math.max(0, Math.floor(record.openAiTokensToday)) : defaults.openAiTokensToday,
+    githubRequestsToday: typeof record.githubRequestsToday === "number" ? Math.max(0, Math.floor(record.githubRequestsToday)) : defaults.githubRequestsToday,
+    githubTokensToday: typeof record.githubTokensToday === "number" ? Math.max(0, Math.floor(record.githubTokensToday)) : defaults.githubTokensToday,
+    openAiRateLimitedToday: typeof record.openAiRateLimitedToday === "number" ? Math.max(0, Math.floor(record.openAiRateLimitedToday)) : defaults.openAiRateLimitedToday,
+    githubRateLimitedToday: typeof record.githubRateLimitedToday === "number" ? Math.max(0, Math.floor(record.githubRateLimitedToday)) : defaults.githubRateLimitedToday,
+    lastResetDate: typeof record.lastResetDate === "string" ? record.lastResetDate : defaults.lastResetDate,
+  };
+}
+
+function applyAiUsageResets(usage: AiUsageState, now = new Date()): AiUsageState {
+  const next = { ...usage };
+  const dateKey = getUtcDateKey(now);
+
+  if (next.lastResetDate !== dateKey) {
+    next.aiRequestsToday = 0;
+    next.aiTokensToday = 0;
+    next.aiExecutionsToday = 0;
+    next.aiBucketHitsToday = 0;
+    next.aiFailuresToday = 0;
+    next.screenshotTextRequestsToday = 0;
+    next.imageMetadataRequestsToday = 0;
+    next.documentContentRequestsToday = 0;
+    next.providerRateLimitedToday = 0;
+    next.openAiRequestsToday = 0;
+    next.openAiTokensToday = 0;
+    next.githubRequestsToday = 0;
+    next.githubTokensToday = 0;
+    next.openAiRateLimitedToday = 0;
+    next.githubRateLimitedToday = 0;
+    next.lastResetDate = dateKey;
+  }
+
+  return next;
+}
+
+function sanitizeOpenAiModelKey(model: string): string {
+  return model.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").slice(0, 80) || "unknown-model";
+}
+
+function parseRateLimitHeaderNumber(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/,/g, "");
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
+}
+
+function deriveUsedPercent(limit: number | null, remaining: number | null): number | null {
+  if (limit === null || remaining === null || limit <= 0) {
+    return null;
+  }
+
+  const used = Math.max(0, limit - remaining);
+  return Math.min(100, Math.max(0, (used / limit) * 100));
+}
+
+function extractOpenAiRateLimitSnapshot(model: string, headers: Headers): OpenAiRateLimitSnapshot {
+  const defaults = OPENAI_MODEL_LIMIT_DEFAULTS[model] ?? {
+    requestsPerMinute: null,
+    tokensPerMinute: null,
+    requestsPerDay: null,
+    tokensPerDay: null,
+  };
+
+  const requestsPerMinuteLimit = parseRateLimitHeaderNumber(headers.get("x-ratelimit-limit-requests")) ?? defaults.requestsPerMinute;
+  const requestsPerMinuteRemaining = parseRateLimitHeaderNumber(headers.get("x-ratelimit-remaining-requests"));
+  const requestsResetIn = headers.get("x-ratelimit-reset-requests")?.trim() || null;
+  const tokensPerMinuteLimit = parseRateLimitHeaderNumber(headers.get("x-ratelimit-limit-tokens")) ?? defaults.tokensPerMinute;
+  const tokensPerMinuteRemaining = parseRateLimitHeaderNumber(headers.get("x-ratelimit-remaining-tokens"));
+  const tokensResetIn = headers.get("x-ratelimit-reset-tokens")?.trim() || null;
+  const source: "headers" | "defaults" = (
+    headers.has("x-ratelimit-limit-requests")
+    || headers.has("x-ratelimit-limit-tokens")
+    || headers.has("x-ratelimit-remaining-requests")
+    || headers.has("x-ratelimit-remaining-tokens")
+  ) ? "headers" : "defaults";
+
+  return {
+    model,
+    capturedAt: new Date().toISOString(),
+    source,
+    requestsPerMinuteLimit,
+    requestsPerMinuteRemaining,
+    requestsResetIn,
+    tokensPerMinuteLimit,
+    tokensPerMinuteRemaining,
+    tokensResetIn,
+    requestsPerDayLimit: defaults.requestsPerDay,
+    tokensPerDayLimit: defaults.tokensPerDay,
+    requestWindowUsedPercent: deriveUsedPercent(requestsPerMinuteLimit, requestsPerMinuteRemaining),
+    tokenWindowUsedPercent: deriveUsedPercent(tokensPerMinuteLimit, tokensPerMinuteRemaining),
+  };
+}
+
+async function recordOpenAiRateLimitSnapshotBestEffort(model: string, headers: Headers): Promise<void> {
+  try {
+    const snapshot = extractOpenAiRateLimitSnapshot(model, headers);
+    const docRef = firestore.doc(`${OPENAI_RATE_LIMIT_DOC_ROOT}/${sanitizeOpenAiModelKey(model)}`);
+    await docRef.set(snapshot, { merge: true });
+  } catch (error) {
+    console.warn("[AI limits] Failed to persist OpenAI rate-limit snapshot", {
+      model,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function normalizeGitHubCopilotTier(value: unknown): GitHubCopilotTier {
+  if (value === "free" || value === "pro" || value === "business" || value === "enterprise") {
+    return value;
+  }
+
+  return DEFAULT_GITHUB_COPILOT_TIER;
+}
+
+function normalizeAiSafetyPolicy(value: unknown): AiSafetyPolicyRecord {
+  const data = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+
+  const defaultDailyRequestLimit = typeof data.defaultDailyRequestLimit === "number"
+    ? Math.max(1, Math.round(data.defaultDailyRequestLimit))
+    : DEFAULT_USER_AI_DAILY_REQUEST_LIMIT;
+  const defaultDailyTokenLimit = typeof data.defaultDailyTokenLimit === "number"
+    ? Math.max(1000, Math.round(data.defaultDailyTokenLimit))
+    : DEFAULT_USER_AI_DAILY_TOKEN_LIMIT;
+  const defaultMonthlyBudgetUsd = typeof data.defaultMonthlyBudgetUsd === "number"
+    ? Math.max(0, Number(data.defaultMonthlyBudgetUsd.toFixed(2)))
+    : DEFAULT_OPENAI_MONTHLY_BUDGET_USD;
+  const openAiMonthlySpendUsd = typeof data.openAiMonthlySpendUsd === "number"
+    ? Math.max(0, Number(data.openAiMonthlySpendUsd.toFixed(2)))
+    : null;
+
+  const githubCopilotTier = normalizeGitHubCopilotTier(data.githubCopilotTier);
+  const githubTierDefaults = GITHUB_COPILOT_TIER_LIMITS[githubCopilotTier];
+  const githubDailyRequestLimit = typeof data.githubDailyRequestLimit === "number"
+    ? Math.max(1, Math.round(data.githubDailyRequestLimit))
+    : githubTierDefaults.requestsPerDayLimit;
+  const githubDailyTokenLimit = typeof data.githubDailyTokenLimit === "number"
+    ? Math.max(1000, Math.round(data.githubDailyTokenLimit))
+    : Math.max(1000, githubDailyRequestLimit * (githubTierDefaults.tokensPerRequestInputLimit + githubTierDefaults.tokensPerRequestOutputLimit));
+  const githubRequestsPerMinuteLimit = typeof data.githubRequestsPerMinuteLimit === "number"
+    ? Math.max(1, Math.round(data.githubRequestsPerMinuteLimit))
+    : githubTierDefaults.requestsPerMinuteLimit;
+  const githubTokensPerRequestInputLimit = typeof data.githubTokensPerRequestInputLimit === "number"
+    ? Math.max(1000, Math.round(data.githubTokensPerRequestInputLimit))
+    : githubTierDefaults.tokensPerRequestInputLimit;
+  const githubTokensPerRequestOutputLimit = typeof data.githubTokensPerRequestOutputLimit === "number"
+    ? Math.max(1000, Math.round(data.githubTokensPerRequestOutputLimit))
+    : githubTierDefaults.tokensPerRequestOutputLimit;
+  const githubConcurrentRequestsLimit = typeof data.githubConcurrentRequestsLimit === "number"
+    ? Math.max(1, Math.round(data.githubConcurrentRequestsLimit))
+    : githubTierDefaults.concurrentRequestsLimit;
+
+  const budgetAlertThresholdPct = typeof data.budgetAlertThresholdPct === "number"
+    ? Math.min(100, Math.max(1, Number(data.budgetAlertThresholdPct.toFixed(1))))
+    : DEFAULT_OPENAI_BUDGET_ALERT_THRESHOLD_PCT;
+  const budgetHardStopThresholdPct = typeof data.budgetHardStopThresholdPct === "number"
+    ? Math.min(100, Math.max(budgetAlertThresholdPct, Number(data.budgetHardStopThresholdPct.toFixed(1))))
+    : DEFAULT_OPENAI_BUDGET_HARD_STOP_PCT;
+
+  return {
+    defaultDailyRequestLimit,
+    defaultDailyTokenLimit,
+    defaultMonthlyBudgetUsd,
+    openAiMonthlySpendUsd,
+    githubCopilotTier,
+    githubDailyRequestLimit,
+    githubDailyTokenLimit,
+    githubRequestsPerMinuteLimit,
+    githubTokensPerRequestInputLimit,
+    githubTokensPerRequestOutputLimit,
+    githubConcurrentRequestsLimit,
+    budgetAlertThresholdPct,
+    budgetHardStopThresholdPct,
+    updatedBy: typeof data.updatedBy === "string" ? data.updatedBy : "system",
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date(0).toISOString(),
+  };
+}
+
+async function getAiSafetyPolicyRecord(): Promise<AiSafetyPolicyRecord> {
+  const snapshot = await firestore.doc(AI_SAFETY_POLICY_DOC_PATH).get();
+  const policy = normalizeAiSafetyPolicy(snapshot.data());
+
+  if (!snapshot.exists) {
+    await firestore.doc(AI_SAFETY_POLICY_DOC_PATH).set(policy, { merge: true });
+  }
+
+  return policy;
+}
+
+function normalizeAiSafetyOverride(value: unknown): AiSafetyOverrideRecord {
+  const data = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  return {
+    dailyRequestLimit: typeof data.dailyRequestLimit === "number" ? Math.max(1, Math.round(data.dailyRequestLimit)) : null,
+    dailyTokenLimit: typeof data.dailyTokenLimit === "number" ? Math.max(1000, Math.round(data.dailyTokenLimit)) : null,
+    monthlyBudgetUsd: typeof data.monthlyBudgetUsd === "number" ? Math.max(0, Number(data.monthlyBudgetUsd.toFixed(2))) : null,
+    githubDailyRequestLimit: typeof data.githubDailyRequestLimit === "number" ? Math.max(1, Math.round(data.githubDailyRequestLimit)) : null,
+    githubDailyTokenLimit: typeof data.githubDailyTokenLimit === "number" ? Math.max(1000, Math.round(data.githubDailyTokenLimit)) : null,
+    updatedBy: typeof data.updatedBy === "string" ? data.updatedBy : "system",
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date(0).toISOString(),
+  };
+}
+
+async function getAiSafetyOverrideForUser(uid: string): Promise<AiSafetyOverrideRecord | null> {
+  const snapshot = await firestore.doc(`users/${uid}/aiSafety/current`).get();
+  if (!snapshot.exists) {
+    return null;
+  }
+
+  return normalizeAiSafetyOverride(snapshot.data());
+}
+
+function buildCurrentAiSafetyStatusResult(usage: AiUsageState, policy: AiSafetyPolicyRecord, override: AiSafetyOverrideRecord | null): CurrentAiSafetyStatusResult {
+  const effectiveDailyRequestLimit = override?.dailyRequestLimit ?? policy.defaultDailyRequestLimit;
+  const effectiveDailyTokenLimit = override?.dailyTokenLimit ?? policy.defaultDailyTokenLimit;
+  const effectiveMonthlyBudgetUsd = override?.monthlyBudgetUsd ?? policy.defaultMonthlyBudgetUsd;
+  const effectiveGithubDailyRequestLimit = override?.githubDailyRequestLimit ?? policy.githubDailyRequestLimit;
+  const effectiveGithubDailyTokenLimit = override?.githubDailyTokenLimit ?? policy.githubDailyTokenLimit;
+  const monthlyBudgetUsagePercent = policy.openAiMonthlySpendUsd !== null && effectiveMonthlyBudgetUsd > 0
+    ? Math.max(0, (policy.openAiMonthlySpendUsd / effectiveMonthlyBudgetUsd) * 100)
+    : null;
+
+  const dailyRequestUsagePercent = Math.max(0, Math.min(1000, (usage.aiRequestsToday / Math.max(1, effectiveDailyRequestLimit)) * 100));
+  const dailyTokenUsagePercent = Math.max(0, Math.min(1000, (usage.aiTokensToday / Math.max(1, effectiveDailyTokenLimit)) * 100));
+  const githubDailyRequestUsagePercent = Math.max(0, Math.min(1000, (usage.githubRequestsToday / Math.max(1, effectiveGithubDailyRequestLimit)) * 100));
+  const githubDailyTokenUsagePercent = Math.max(0, Math.min(1000, (usage.githubTokensToday / Math.max(1, effectiveGithubDailyTokenLimit)) * 100));
+
+  return {
+    usage,
+    effectiveLimits: {
+      dailyRequestLimit: effectiveDailyRequestLimit,
+      dailyTokenLimit: effectiveDailyTokenLimit,
+      monthlyBudgetUsd: effectiveMonthlyBudgetUsd,
+      githubDailyRequestLimit: effectiveGithubDailyRequestLimit,
+      githubDailyTokenLimit: effectiveGithubDailyTokenLimit,
+      githubCopilotTier: policy.githubCopilotTier,
+      githubRequestsPerMinuteLimit: policy.githubRequestsPerMinuteLimit,
+      githubTokensPerRequestInputLimit: policy.githubTokensPerRequestInputLimit,
+      githubTokensPerRequestOutputLimit: policy.githubTokensPerRequestOutputLimit,
+      githubConcurrentRequestsLimit: policy.githubConcurrentRequestsLimit,
+      budgetAlertThresholdPct: policy.budgetAlertThresholdPct,
+      budgetHardStopThresholdPct: policy.budgetHardStopThresholdPct,
+      openAiMonthlySpendUsd: policy.openAiMonthlySpendUsd,
+    },
+    dailyRequestUsagePercent,
+    dailyTokenUsagePercent,
+    githubDailyRequestUsagePercent,
+    githubDailyTokenUsagePercent,
+    monthlyBudgetUsagePercent,
+    hasExceededDailyRequestLimit: usage.aiRequestsToday >= effectiveDailyRequestLimit,
+    hasExceededDailyTokenLimit: usage.aiTokensToday >= effectiveDailyTokenLimit,
+    hasExceededGithubDailyRequestLimit: usage.githubRequestsToday >= effectiveGithubDailyRequestLimit,
+    hasExceededGithubDailyTokenLimit: usage.githubTokensToday >= effectiveGithubDailyTokenLimit,
+    hasExceededMonthlyBudgetThreshold: monthlyBudgetUsagePercent !== null && monthlyBudgetUsagePercent >= policy.budgetHardStopThresholdPct,
+  };
+}
+
+async function listOpenAiRateLimitSnapshots(): Promise<OpenAiRateLimitSnapshot[]> {
+  const snapshots = await firestore.collection("providerRateLimits").doc("openai").collection("models").get();
+  return snapshots.docs
+    .map((docSnap) => {
+      const raw = docSnap.data() as Partial<OpenAiRateLimitSnapshot>;
+      const model = typeof raw.model === "string" ? raw.model : docSnap.id;
+      const headers = new Headers();
+
+      if (typeof raw.requestsPerMinuteLimit === "number") {
+        headers.set("x-ratelimit-limit-requests", String(raw.requestsPerMinuteLimit));
+      }
+      if (typeof raw.requestsPerMinuteRemaining === "number") {
+        headers.set("x-ratelimit-remaining-requests", String(raw.requestsPerMinuteRemaining));
+      }
+      if (typeof raw.requestsResetIn === "string") {
+        headers.set("x-ratelimit-reset-requests", raw.requestsResetIn);
+      }
+      if (typeof raw.tokensPerMinuteLimit === "number") {
+        headers.set("x-ratelimit-limit-tokens", String(raw.tokensPerMinuteLimit));
+      }
+      if (typeof raw.tokensPerMinuteRemaining === "number") {
+        headers.set("x-ratelimit-remaining-tokens", String(raw.tokensPerMinuteRemaining));
+      }
+      if (typeof raw.tokensResetIn === "string") {
+        headers.set("x-ratelimit-reset-tokens", raw.tokensResetIn);
+      }
+
+      const normalized = extractOpenAiRateLimitSnapshot(model, headers);
+      return {
+        ...normalized,
+        source: raw.source === "headers" || raw.source === "defaults" ? raw.source : normalized.source,
+        capturedAt: typeof raw.capturedAt === "string" ? raw.capturedAt : normalized.capturedAt,
+      };
+    })
+    .sort((left, right) => left.model.localeCompare(right.model));
+}
+
+async function getAiUsageDocRef(uid: string): Promise<FirebaseFirestore.DocumentReference> {
+  return firestore.doc(`users/${uid}/aiUsage/current`);
+}
+
+async function recordAiUsage(uid: string, increment: AiUsageIncrement): Promise<void> {
+  const docRef = await getAiUsageDocRef(uid);
+
+  await firestore.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(docRef);
+    const normalized = applyAiUsageResets(normalizeAiUsage(snapshot.exists ? snapshot.data() : null));
+
+    const requestCount = increment.requestCount ?? 0;
+    const tokenCount = increment.tokenCount ?? 0;
+    const executionCount = increment.executionCount ?? 0;
+    const bucketHitCount = increment.bucketHitCount ?? 0;
+    const failureCount = increment.failureCount ?? 0;
+    const rateLimitedCount = increment.rateLimitedCount ?? 0;
+
+    const provider = increment.provider;
+    const next: AiUsageState = {
+      ...normalized,
+      aiRequestsToday: normalized.aiRequestsToday + requestCount,
+      aiTokensToday: normalized.aiTokensToday + tokenCount,
+      aiExecutionsToday: normalized.aiExecutionsToday + executionCount,
+      aiBucketHitsToday: normalized.aiBucketHitsToday + bucketHitCount,
+      aiFailuresToday: normalized.aiFailuresToday + failureCount,
+      screenshotTextRequestsToday: normalized.screenshotTextRequestsToday + (increment.kind === "screenshot_text" ? requestCount : 0),
+      imageMetadataRequestsToday: normalized.imageMetadataRequestsToday + (increment.kind === "image_metadata" ? requestCount : 0),
+      documentContentRequestsToday: normalized.documentContentRequestsToday + (increment.kind === "document_content" ? requestCount : 0),
+      providerRateLimitedToday: normalized.providerRateLimitedToday + rateLimitedCount,
+      openAiRequestsToday: normalized.openAiRequestsToday + (provider === "openai" ? requestCount : 0),
+      openAiTokensToday: normalized.openAiTokensToday + (provider === "openai" ? tokenCount : 0),
+      githubRequestsToday: normalized.githubRequestsToday + (provider === "github" ? requestCount : 0),
+      githubTokensToday: normalized.githubTokensToday + (provider === "github" ? tokenCount : 0),
+      openAiRateLimitedToday: normalized.openAiRateLimitedToday + (provider === "openai" ? rateLimitedCount : 0),
+      githubRateLimitedToday: normalized.githubRateLimitedToday + (provider === "github" ? rateLimitedCount : 0),
+    };
+
+    transaction.set(docRef, next, { merge: true });
+  });
+}
+
+const inFlightAiRequests = new Map<string, Promise<unknown>>();
+
+function getOrStartAiRequest<T>(requestKey: string, executor: () => Promise<T>): { promise: Promise<T>; isPrimary: boolean } {
+  const existing = inFlightAiRequests.get(requestKey) as Promise<T> | undefined;
+  if (existing) {
+    return { promise: existing, isPrimary: false };
+  }
+
+  const promise = executor().finally(() => {
+    if (inFlightAiRequests.get(requestKey) === promise) {
+      inFlightAiRequests.delete(requestKey);
+    }
+  });
+
+  inFlightAiRequests.set(requestKey, promise);
+  return { promise, isPrimary: true };
+}
+
+function buildAiRequestKey(kind: AiUsageKind, uid: string, payload: string): string {
+  return `${kind}:${uid}:${createHash("sha256").update(payload).digest("hex")}`;
+}
+
+function toHttpsErrorCode(error: unknown): string | null {
+  if (error instanceof HttpsError) {
+    return error.code;
+  }
+
+  return null;
+}
+
+async function recordAiUsageBestEffort(uid: string, increment: AiUsageIncrement): Promise<void> {
+  try {
+    await recordAiUsage(uid, increment);
+  } catch (error) {
+    console.warn("[AI usage] Failed to record usage", {
+      uid,
+      increment,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function recordAiProviderFailure(increment: AiUsageIncrement, error: unknown): AiUsageIncrement {
+  const code = toHttpsErrorCode(error);
+  return {
+    ...increment,
+    failureCount: (increment.failureCount ?? 0) + 1,
+    rateLimitedCount: (increment.rateLimitedCount ?? 0) + (code === "resource-exhausted" ? 1 : 0),
+  };
+}
+
 async function getPremiumUsageDocRef(uid: string): Promise<FirebaseFirestore.DocumentReference> {
   return firestore.doc(`users/${uid}/premiumUsage/current`);
 }
@@ -2597,6 +3742,17 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
     );
   }
 
+  let aiUsageDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+  try {
+    const aiUsageSnapshot = await firestore.collectionGroup("aiUsage").get();
+    aiUsageDocs = aiUsageSnapshot.docs;
+  } catch (aiUsageErr) {
+    console.error(
+      "[super-admin] aiUsage collection group query failed — tracked AI usage will show 0",
+      aiUsageErr,
+    );
+  }
+
   let usersCount = 0;
   let nextPageToken: string | undefined;
   do {
@@ -2618,6 +3774,20 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
     trackedWritesToday += writes;
   });
 
+  let trackedAiRequestsToday = 0;
+  let trackedAiBucketHitsToday = 0;
+  aiUsageDocs.forEach((docSnap) => {
+    const data = docSnap.data();
+    if (typeof data.lastResetDate !== "string" || data.lastResetDate !== todayKey) {
+      return;
+    }
+
+    const requests = typeof data.aiRequestsToday === "number" ? Math.max(0, Math.floor(data.aiRequestsToday)) : 0;
+    const bucketHits = typeof data.aiBucketHitsToday === "number" ? Math.max(0, Math.floor(data.aiBucketHitsToday)) : 0;
+    trackedAiRequestsToday += requests;
+    trackedAiBucketHitsToday += bucketHits;
+  });
+
   console.info("[super-admin] dashboard stats computed", {
     usersCount,
     schoolsCount,
@@ -2625,7 +3795,10 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
     pendingPromotionRequests,
     trackedReadsToday,
     trackedWritesToday,
+    trackedAiRequestsToday,
+    trackedAiBucketHitsToday,
     syncUsageDocsScanned: syncUsageDocs.length,
+    aiUsageDocsScanned: aiUsageDocs.length,
     todayKey,
   });
 
@@ -2636,6 +3809,8 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
     pendingPromotionRequests,
     trackedReadsToday,
     trackedWritesToday,
+    trackedAiRequestsToday,
+    trackedAiBucketHitsToday,
   };
 
   return success("Loaded super admin stats.", stats);
@@ -2705,6 +3880,150 @@ export const getSuperAdminGlobalQuota = onCall(async (request) => {
     };
 
     return success("Loaded global quota fallback.", fallback);
+  }
+});
+
+export const getSuperAdminAzureQuota = onCall({ secrets: [azureCosmosConnectionStringSecret] }, async (request) => {
+  assertSuperAdmin(request.auth);
+
+  const projectId = process.env.GCLOUD_PROJECT ?? "";
+  const { connectionString: azureConnectionString, endpoint: azureEndpoint, key: azureKey } = getAzureCosmosCredentials();
+  const configured = azureConnectionString.trim().length > 0 || (azureEndpoint.trim().length > 0 && azureKey.trim().length > 0);
+  const backupConfig = normalizeBackupConfig((await getBackupConfigDocRef().get()).data());
+  const mirrorEnabled = backupConfig.mirrorEnabled && backupConfig.cosmosEnabled;
+  const databaseId = process.env.AZURE_COSMOS_DATABASE_ID?.trim() || DEFAULT_AZURE_COSMOS_DATABASE_ID;
+  const containerId = process.env.AZURE_COSMOS_CONTAINER_ID?.trim() || DEFAULT_AZURE_COSMOS_CONTAINER_ID;
+  const requestUnitsPerSecondLimit = parsePositiveEnvNumber("AZURE_COSMOS_RU_PER_SECOND_LIMIT");
+  const requestUnitsPerDayLimit = parsePositiveEnvNumber("AZURE_COSMOS_RU_PER_DAY_LIMIT");
+  const storageGbLimit = parsePositiveEnvNumber("AZURE_COSMOS_STORAGE_GB_LIMIT");
+
+  let usage = {
+    readsToday: 0,
+    writesToday: 0,
+    requestUnitsToday: 0,
+    errorsToday: 0,
+  };
+  let usageMessage: string | null = null;
+
+  try {
+    usage = await readAzureUsageTotals();
+  } catch {
+    usageMessage = "Azure usage telemetry docs are unavailable. Ensure azureUsage/current docs are being written per user.";
+  }
+
+  const result: SuperAdminAzureQuotaResult = {
+    projectId,
+    fetchedAt: new Date().toISOString(),
+    source: configured ? "env" : "fallback",
+    configured,
+    mirrorEnabled,
+    databaseId,
+    containerId,
+    requestUnitsPerSecondLimit,
+    requestUnitsPerDayLimit,
+    storageGbLimit,
+    currentReadsToday: usage.readsToday,
+    currentWritesToday: usage.writesToday,
+    currentRequestUnitsToday: usage.requestUnitsToday,
+    currentErrorsToday: usage.errorsToday,
+    message: usageMessage ?? (configured
+      ? (mirrorEnabled
+        ? "Azure Cosmos configuration detected. Mirror path is enabled; confirm live traffic by checking non-zero Azure usage counters."
+        : "Azure Cosmos configuration detected but mirror path is disabled. Enable Mirror + Cosmos availability in Super Admin Backup Controls to activate backup writes.")
+        : "Azure Cosmos is not configured yet. Set AZURE_COSMOS_CONNECTION_STRING secret (or AZURE_COSMOS_ENDPOINT + AZURE_COSMOS_KEY secrets) and limits env vars to enable quota tracking."),
+  };
+
+  return success("Loaded Azure Cosmos quota and telemetry status.", result);
+});
+
+export const getSuperAdminBackupConfig = onCall(async (request) => {
+  assertSuperAdmin(request.auth);
+
+  const snapshot = await getBackupConfigDocRef().get();
+  const config = normalizeBackupConfig(snapshot.data());
+  return success("Loaded backup configuration.", config);
+});
+
+export const setSuperAdminBackupConfig = onCall(async (request) => {
+  assertSuperAdmin(request.auth);
+  const data = typeof request.data === "object" && request.data !== null ? request.data as Record<string, unknown> : {};
+  const existing = normalizeBackupConfig((await getBackupConfigDocRef().get()).data());
+
+  const primaryDb: BackupPrimaryDb = data.primaryDb === "cosmos" ? "cosmos" : data.primaryDb === "firestore" ? "firestore" : existing.primaryDb;
+  const backupMode: BackupMode = data.backupMode === "manual" ? "manual" : data.backupMode === "interval" ? "interval" : existing.backupMode;
+  const requestedFrequency = typeof data.frequencyMinutes === "number"
+    ? Math.floor(data.frequencyMinutes)
+    : existing.frequencyMinutes;
+  const frequencyMinutes = Math.max(BACKUP_FREQUENCY_MINUTES_MIN, Math.min(BACKUP_FREQUENCY_MINUTES_MAX, requestedFrequency));
+  const merged: SuperAdminBackupConfigResult = {
+    primaryDb,
+    mirrorEnabled: typeof data.mirrorEnabled === "boolean" ? data.mirrorEnabled : existing.mirrorEnabled,
+    firestoreEnabled: typeof data.firestoreEnabled === "boolean" ? data.firestoreEnabled : existing.firestoreEnabled,
+    cosmosEnabled: typeof data.cosmosEnabled === "boolean" ? data.cosmosEnabled : existing.cosmosEnabled,
+    backupMode,
+    frequencyMinutes,
+    lastBackupAt: existing.lastBackupAt,
+    nextBackupAt: existing.lastBackupAt
+      ? new Date(Date.parse(existing.lastBackupAt) + frequencyMinutes * 60 * 1000).toISOString()
+      : null,
+    updatedBy: request.auth?.uid ?? "system",
+    updatedAt: new Date().toISOString(),
+  };
+
+  await getBackupConfigDocRef().set(merged, { merge: true });
+  return success("Saved backup configuration.", merged);
+});
+
+export const runSuperAdminBackupNow = onCall({ secrets: [azureCosmosConnectionStringSecret] }, async (request) => {
+  assertSuperAdmin(request.auth);
+  const config = normalizeBackupConfig((await getBackupConfigDocRef().get()).data());
+  if (!config.mirrorEnabled || !config.cosmosEnabled) {
+    throw new HttpsError("failed-precondition", "Backup mirror is disabled. Enable Cosmos + mirror before running backup.");
+  }
+
+  const result = await runAzureBackupMirror(request.auth?.uid ?? "superadmin");
+  return success("Executed backup run.", result);
+});
+
+export const listSuperAdminBackupJobs = onCall(async (request) => {
+  assertSuperAdmin(request.auth);
+  const requestedLimit = typeof request.data?.limit === "number" ? Math.floor(request.data.limit) : 10;
+  const limitCount = Math.max(1, Math.min(50, requestedLimit));
+  const snapshot = await getBackupJobsCollectionRef().orderBy("startedAt", "desc").limit(limitCount).get();
+  const rows = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+  return success("Loaded backup jobs.", rows);
+});
+
+export const runScheduledAzureBackup = onSchedule({ schedule: "every 15 minutes", secrets: [azureCosmosConnectionStringSecret] }, async () => {
+  const config = normalizeBackupConfig((await getBackupConfigDocRef().get()).data());
+  if (!config.mirrorEnabled || !config.cosmosEnabled || config.backupMode !== "interval") {
+    return;
+  }
+
+  const nowMs = Date.now();
+  const lastBackupMs = config.lastBackupAt ? Date.parse(config.lastBackupAt) : 0;
+  if (lastBackupMs > 0 && nowMs - lastBackupMs < config.frequencyMinutes * 60 * 1000) {
+    return;
+  }
+
+  try {
+    await runAzureBackupMirror("schedule");
+  } catch (error) {
+    if (error instanceof HttpsError && error.code === "failed-precondition") {
+      return;
+    }
+
+    await getBackupJobsCollectionRef().add({
+      triggeredBy: "schedule",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      status: "failed",
+      docsScanned: 0,
+      docsMirrored: 0,
+      docsFailed: 0,
+      requestUnitsUsed: 0,
+      message: error instanceof Error ? error.message : String(error),
+    });
   }
 });
 
@@ -2987,6 +4306,148 @@ export const getCurrentPremiumUsage = onCall(async (request) => {
   return success("Loaded premium usage.", usage);
 });
 
+export const getCurrentAiSafetyStatus = onCall(async (request) => {
+  assertSignedIn(request.auth);
+
+  const usageSnapshot = await firestore.doc(`users/${request.auth.uid}/aiUsage/current`).get();
+  const usage = applyAiUsageResets(normalizeAiUsage(usageSnapshot.exists ? usageSnapshot.data() : null));
+  const policy = await getAiSafetyPolicyRecord();
+  const override = await getAiSafetyOverrideForUser(request.auth.uid);
+  const status = buildCurrentAiSafetyStatusResult(usage, policy, override);
+
+  if (!usageSnapshot.exists || usageSnapshot.data()?.lastResetDate !== usage.lastResetDate) {
+    await firestore.doc(`users/${request.auth.uid}/aiUsage/current`).set(usage, { merge: true });
+  }
+
+  return success("Loaded current AI safety status.", status);
+});
+
+export const getSuperAdminAiProviderLimits = onCall(async (request) => {
+  assertSuperAdmin(request.auth);
+
+  const policy = await getAiSafetyPolicyRecord();
+  const models = await listOpenAiRateLimitSnapshots();
+
+  let aiUsageDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+  try {
+    const aiUsageSnapshot = await firestore.collectionGroup("aiUsage").get();
+    aiUsageDocs = aiUsageSnapshot.docs;
+  } catch (error) {
+    console.error("[super-admin] aiUsage aggregate query failed", error);
+  }
+
+  const todayKey = getUtcDateKey();
+  let aiRequestsToday = 0;
+  let aiTokensToday = 0;
+  let aiBucketHitsToday = 0;
+  let aiFailuresToday = 0;
+  let providerRateLimitedToday = 0;
+  let openAiRequestsToday = 0;
+  let openAiTokensToday = 0;
+  let githubRequestsToday = 0;
+  let githubTokensToday = 0;
+  let openAiRateLimitedToday = 0;
+  let githubRateLimitedToday = 0;
+
+  aiUsageDocs.forEach((docSnap) => {
+    const usage = normalizeAiUsage(docSnap.data());
+    if (usage.lastResetDate !== todayKey) {
+      return;
+    }
+
+    aiRequestsToday += usage.aiRequestsToday;
+    aiTokensToday += usage.aiTokensToday;
+    aiBucketHitsToday += usage.aiBucketHitsToday;
+    aiFailuresToday += usage.aiFailuresToday;
+    providerRateLimitedToday += usage.providerRateLimitedToday;
+    openAiRequestsToday += usage.openAiRequestsToday;
+    openAiTokensToday += usage.openAiTokensToday;
+    githubRequestsToday += usage.githubRequestsToday;
+    githubTokensToday += usage.githubTokensToday;
+    openAiRateLimitedToday += usage.openAiRateLimitedToday;
+    githubRateLimitedToday += usage.githubRateLimitedToday;
+  });
+
+  const result: SuperAdminAiProviderLimitsResult = {
+    provider: "openai",
+    capturedAt: new Date().toISOString(),
+    policy,
+    models,
+    github: {
+      tier: policy.githubCopilotTier,
+      requestsPerMinuteLimit: policy.githubRequestsPerMinuteLimit,
+      requestsPerDayLimit: policy.githubDailyRequestLimit,
+      tokensPerRequestInputLimit: policy.githubTokensPerRequestInputLimit,
+      tokensPerRequestOutputLimit: policy.githubTokensPerRequestOutputLimit,
+      concurrentRequestsLimit: policy.githubConcurrentRequestsLimit,
+    },
+    aggregateToday: {
+      aiRequestsToday,
+      aiTokensToday,
+      aiBucketHitsToday,
+      aiFailuresToday,
+      providerRateLimitedToday,
+      openAiRequestsToday,
+      openAiTokensToday,
+      githubRequestsToday,
+      githubTokensToday,
+      openAiRateLimitedToday,
+      githubRateLimitedToday,
+    },
+  };
+
+  return success("Loaded super admin AI provider limits.", result);
+});
+
+export const setGlobalAiSafetyPolicy = onCall(async (request) => {
+  assertSuperAdmin(request.auth);
+  assertSignedIn(request.auth);
+
+  const payload = request.data as Partial<AiSafetyPolicyRecord>;
+  const current = await getAiSafetyPolicyRecord();
+  const next = normalizeAiSafetyPolicy({
+    ...current,
+    ...payload,
+    updatedBy: request.auth.uid,
+    updatedAt: new Date().toISOString(),
+  });
+
+  await firestore.doc(AI_SAFETY_POLICY_DOC_PATH).set(next, { merge: true });
+  return success("Updated global AI safety policy.", next);
+});
+
+export const setUserAiSafetyOverride = onCall(async (request) => {
+  assertSuperAdmin(request.auth);
+  assertSignedIn(request.auth);
+
+  const payload = request.data as {
+    uid?: unknown;
+    dailyRequestLimit?: unknown;
+    dailyTokenLimit?: unknown;
+    monthlyBudgetUsd?: unknown;
+    githubDailyRequestLimit?: unknown;
+    githubDailyTokenLimit?: unknown;
+  };
+
+  const uid = typeof payload.uid === "string" ? payload.uid.trim() : "";
+  if (!uid) {
+    throw new HttpsError("invalid-argument", "A target uid is required.");
+  }
+
+  const next = normalizeAiSafetyOverride({
+    dailyRequestLimit: typeof payload.dailyRequestLimit === "number" ? payload.dailyRequestLimit : null,
+    dailyTokenLimit: typeof payload.dailyTokenLimit === "number" ? payload.dailyTokenLimit : null,
+    monthlyBudgetUsd: typeof payload.monthlyBudgetUsd === "number" ? payload.monthlyBudgetUsd : null,
+    githubDailyRequestLimit: typeof payload.githubDailyRequestLimit === "number" ? payload.githubDailyRequestLimit : null,
+    githubDailyTokenLimit: typeof payload.githubDailyTokenLimit === "number" ? payload.githubDailyTokenLimit : null,
+    updatedBy: request.auth.uid,
+    updatedAt: new Date().toISOString(),
+  });
+
+  await firestore.doc(`users/${uid}/aiSafety/current`).set(next, { merge: true });
+  return success("Updated user AI safety override.", { uid, override: next });
+});
+
 export const getAiProviderPolicy = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in.");
@@ -3065,7 +4526,7 @@ async function executeCloudOcrExtraction(
   imageDataUrl: string,
   traceId: string,
   userId: string
-): Promise<{ text: string; details: CloudOcrExecutionDetails }> {
+): Promise<{ text: string; tokenCount: number; details: CloudOcrExecutionDetails }> {
   const details = createCloudOcrExecutionDetails(runtime, traceId);
 
   if (!runtime.apiKey) {
@@ -3141,6 +4602,10 @@ async function executeCloudOcrExtraction(
     clearTimeout(timeoutId);
   }
 
+  if (runtime.id === "cloud_openai_vision") {
+    void recordOpenAiRateLimitSnapshotBestEffort(runtime.model, response.headers);
+  }
+
   if (!response.ok) {
     details.failureStage = "provider_response";
     const providerDetails = await readResponseSnippet(response);
@@ -3188,9 +4653,9 @@ async function executeCloudOcrExtraction(
     );
   }
 
-  let json: { choices?: Array<{ message?: { content?: string } }> };
+  let json: { choices?: Array<{ message?: { content?: string } }>; usage?: { total_tokens?: number } };
   try {
-    json = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    json = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { total_tokens?: number } };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     details.failureStage = "response_parse";
@@ -3246,7 +4711,11 @@ async function executeCloudOcrExtraction(
     );
   }
 
-  return { text: extractedText, details };
+  const tokenCount = typeof json.usage?.total_tokens === "number"
+    ? Math.max(0, Math.floor(json.usage.total_tokens))
+    : 0;
+
+  return { text: extractedText, tokenCount, details };
 }
 
 export const getAiProviderStatus = onCall({ invoker: "public", secrets: [openAiKeySecret, githubModelsTokenSecret] }, async (request) => {
@@ -3455,6 +4924,7 @@ export const extractScreenshotText = onCall({ secrets: [openAiKeySecret, githubM
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to extract screenshot text.");
   }
+  const uid = request.auth.uid;
 
   const payload = request.data as { imageDataUrl?: unknown; debugTraceId?: unknown; providerId?: unknown };
   const imageDataUrl = typeof payload.imageDataUrl === "string" ? payload.imageDataUrl.trim() : "";
@@ -3487,23 +4957,60 @@ export const extractScreenshotText = onCall({ secrets: [openAiKeySecret, githubM
   console.log("[OCR] Starting screenshot text extraction", {
     traceId: debugTraceId,
     providerId: runtime.id,
-    userId: request.auth.uid,
+    userId: uid,
     imageSize: imageDataUrl.length,
   });
 
-  const result = await executeCloudOcrExtraction(runtime, imageDataUrl, debugTraceId, request.auth.uid);
+  const requestKey = buildAiRequestKey("screenshot_text", uid, `${runtime.id}:${imageDataUrl}`);
+  const { promise, isPrimary } = getOrStartAiRequest(requestKey, () => executeCloudOcrExtraction(runtime, imageDataUrl, debugTraceId, uid));
 
-  return success("Screenshot text extracted.", {
-    text: result.text,
-    providerId: runtime.id,
-    diagnostics: result.details,
-  });
+  const screenshotProvider: AiUsageProvider = runtime.id === "cloud_github_models_vision" ? "github" : "openai";
+
+  if (!isPrimary) {
+    void recordAiUsageBestEffort(uid, {
+      kind: "screenshot_text",
+      provider: screenshotProvider,
+      requestCount: 1,
+      bucketHitCount: 1,
+    });
+  }
+
+  try {
+    const result = await promise;
+
+    if (isPrimary) {
+      void recordAiUsageBestEffort(uid, {
+        kind: "screenshot_text",
+        provider: screenshotProvider,
+        requestCount: 1,
+        tokenCount: result.tokenCount,
+        executionCount: 1,
+      });
+    }
+
+    return success("Screenshot text extracted.", {
+      text: result.text,
+      providerId: runtime.id,
+      diagnostics: result.details,
+    });
+  } catch (error) {
+    if (isPrimary) {
+      void recordAiUsageBestEffort(uid, recordAiProviderFailure({
+        kind: "screenshot_text",
+        provider: screenshotProvider,
+        requestCount: 1,
+        executionCount: 1,
+      }, error));
+    }
+    throw error;
+  }
 });
 
 export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to extract metadata from images.");
   }
+  const uid = request.auth.uid;
 
   const payload = request.data as {
     imageDataUrl?: unknown;
@@ -3531,100 +5038,142 @@ export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret
   if (!openaiKey) {
     throw new HttpsError("failed-precondition", "Vision metadata extraction is unavailable because OPENAI_API_KEY is not configured.");
   }
+  const requestKey = buildAiRequestKey("image_metadata", uid, `${imageDataUrl}:${pageType}:${publisherHint}`);
+  const { promise, isPrimary } = getOrStartAiRequest(requestKey, async () => {
+    await consumeOcrRequestQuota(uid);
+    inferImageMimeType(imageDataUrl);
 
-  await consumeOcrRequestQuota(request.auth.uid);
-  inferImageMimeType(imageDataUrl);
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${openaiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: "You are a specialized textbook metadata extractor. Extract textbook metadata from cover and copyright-page images with high precision. Return strict JSON only, no markdown fences or extra text.",
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: [
-                "Extract textbook metadata from this image. Return JSON with these fields (all as strings except confidence/numbers, or null if not found):",
-                "title, subtitle, edition, publisher, publisherLocation, series, gradeLevel, subject, copyrightYear, isbn, additionalIsbns, relatedIsbns, platformUrl, mhid, confidence, rawText.",
-                "",
-                "CRITICAL EXTRACTION RULES:",
-                "1. TITLE: Main title of the textbook (not subtitle or edition)",
-                "2. SUBTITLE: Secondary subtitle if present (e.g., 'with Earth Science')",
-                "3. EDITION: Edition information (e.g., '3rd Edition')",
-                "4. PUBLISHER: Publisher name (e.g., 'McGraw-Hill Education', 'Pearson')",
-                "5. PUBLISHER LOCATION: Full mailing/business address including street address, city, state, ZIP code",
-                "6. SERIES: Series name if identifiable from title start word",
-                "7. GRADE LEVEL: Grade span (e.g., 'Grades 7-9', 'Pre-K-12', '8')",
-                "8. SUBJECT: Primary subject area (e.g., 'Science', 'Math', 'English', 'Social Studies') - set to null, we fill this separately",
-                "9. COPYRIGHT YEAR: Year from copyright line (e.g., 2021), must be 4 digits",
-                "10. ISBN: Primary ISBN-13 or ISBN-10 (REQUIRED - look for 978/979 prefix or 10-digit with checksum)",
-                "11. ADDITIONAL ISBNS: Other ISBN numbers on page (array of strings)",
-                "12. RELATED ISBNS: Array of {isbn, type, note} where type is: student|teacher|digital|workbook|assessment|other",
-                "13. PLATFORM URL: Publisher website URL (e.g., 'https://mheducation.com', starts with http/www or .com/.edu etc)",
-                "14. MHID: McGraw-Hill ID if present",
-                "15. rawText: CRITICAL â€” Copy ALL visible text from the image verbatim, preserving every line break. Include every line: URL, full address block, every ISBN line, MHID line, legal notices, footer codes. Do NOT summarize or truncate.",
-                "",
-                "FIELD EXTRACTION DETAILS:",
-                "- For PUBLISHER LOCATION: Look for 'Send all inquiries to:' section or address blocks with street + city, state ZIP",
-                "- For COPYRIGHT PAGE images, always extract address if visible",
-                "- For ISBN: Never skip - search entire image for 10-13 digit sequences, ISBN labels",
-                "- For platformUrl: Look for domain names, website text, typically 'mheducation.com' or similar",
-                "- For copyrightYear: Extract from 'Copyright Â© YYYY' or 'Â© YYYY'",
-                "- confidence: 0.0-1.0 based on overall extraction quality",
-                "",
-                `- pageType context: ${pageType} (use this to focus extraction on relevant fields)`,
-                publisherHint ? `- publisherHint context: ${publisherHint} (verified publisher name for this book)` : "",
-              ].filter(Boolean).join("\n"),
-            },
-            { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
-          ],
-        },
-      ],
-      max_tokens: 2500,
-      temperature: 0,
-      response_format: {
-        type: "json_object",
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${openaiKey}`,
       },
-    }),
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: "You are a specialized textbook metadata extractor. Extract textbook metadata from cover and copyright-page images with high precision. Return strict JSON only, no markdown fences or extra text.",
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: [
+                  "Extract textbook metadata from this image. Return JSON with these fields (all as strings except confidence/numbers, or null if not found):",
+                  "title, subtitle, edition, publisher, publisherLocation, series, gradeLevel, subject, copyrightYear, isbn, additionalIsbns, relatedIsbns, platformUrl, mhid, confidence, rawText.",
+                  "",
+                  "CRITICAL EXTRACTION RULES:",
+                  "1. TITLE: Main title of the textbook (not subtitle or edition)",
+                  "2. SUBTITLE: Secondary subtitle if present (e.g., 'with Earth Science')",
+                  "3. EDITION: Edition information (e.g., '3rd Edition')",
+                  "4. PUBLISHER: Publisher name (e.g., 'McGraw-Hill Education', 'Pearson')",
+                  "5. PUBLISHER LOCATION: Full mailing/business address including street address, city, state, ZIP code",
+                  "6. SERIES: Series name if identifiable from title start word",
+                  "7. GRADE LEVEL: Grade span (e.g., 'Grades 7-9', 'Pre-K-12', '8')",
+                  "8. SUBJECT: Primary subject area (e.g., 'Science', 'Math', 'English', 'Social Studies') - set to null, we fill this separately",
+                  "9. COPYRIGHT YEAR: Year from copyright line (e.g., 2021), must be 4 digits",
+                  "10. ISBN: Primary ISBN-13 or ISBN-10 (REQUIRED - look for 978/979 prefix or 10-digit with checksum)",
+                  "11. ADDITIONAL ISBNS: Other ISBN numbers on page (array of strings)",
+                  "12. RELATED ISBNS: Array of {isbn, type, note} where type is: student|teacher|digital|workbook|assessment|other",
+                  "13. PLATFORM URL: Publisher website URL (e.g., 'https://mheducation.com', starts with http/www or .com/.edu etc)",
+                  "14. MHID: McGraw-Hill ID if present",
+                  "15. rawText: CRITICAL â€” Copy ALL visible text from the image verbatim, preserving every line break. Include every line: URL, full address block, every ISBN line, MHID line, legal notices, footer codes. Do NOT summarize or truncate.",
+                  "",
+                  "FIELD EXTRACTION DETAILS:",
+                  "- For PUBLISHER LOCATION: Look for 'Send all inquiries to:' section or address blocks with street + city, state ZIP",
+                  "- For COPYRIGHT PAGE images, always extract address if visible",
+                  "- For ISBN: Never skip - search entire image for 10-13 digit sequences, ISBN labels",
+                  "- For platformUrl: Look for domain names, website text, typically 'mheducation.com' or similar",
+                  "- For copyrightYear: Extract from 'Copyright Â© YYYY' or 'Â© YYYY'",
+                  "- confidence: 0.0-1.0 based on overall extraction quality",
+                  "",
+                  `- pageType context: ${pageType} (use this to focus extraction on relevant fields)`,
+                  publisherHint ? `- publisherHint context: ${publisherHint} (verified publisher name for this book)` : "",
+                ].filter(Boolean).join("\n"),
+              },
+              { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
+            ],
+          },
+        ],
+        max_tokens: 2500,
+        temperature: 0,
+        response_format: {
+          type: "json_object",
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const providerDetails = await readResponseSnippet(response);
+      throw new HttpsError("internal", `Vision provider error (${response.status} ${response.statusText}). ${providerDetails}`.trim());
+    }
+
+    void recordOpenAiRateLimitSnapshotBestEffort("gpt-4o-mini", response.headers);
+
+    const json = await response.json() as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: { total_tokens?: number };
+    };
+
+    const rawContent = json.choices?.[0]?.message?.content?.trim() ?? "";
+    if (!rawContent) {
+      throw new HttpsError("internal", "Vision provider returned empty metadata.");
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawContent);
+    } catch {
+      throw new HttpsError("internal", "Vision provider returned non-JSON metadata.");
+    }
+
+    return {
+      metadata: sanitizeMetadataResult(parsed, "vision"),
+      tokenCount: typeof json.usage?.total_tokens === "number" ? Math.max(0, Math.floor(json.usage.total_tokens)) : 0,
+    };
   });
 
-  if (!response.ok) {
-    const providerDetails = await readResponseSnippet(response);
-    throw new HttpsError("internal", `Vision provider error (${response.status} ${response.statusText}). ${providerDetails}`.trim());
+  if (!isPrimary) {
+    void recordAiUsageBestEffort(request.auth.uid, {
+      kind: "image_metadata",
+      provider: "openai",
+      requestCount: 1,
+      bucketHitCount: 1,
+    });
   }
 
-  const json = await response.json() as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-
-  const rawContent = json.choices?.[0]?.message?.content?.trim() ?? "";
-  if (!rawContent) {
-    throw new HttpsError("internal", "Vision provider returned empty metadata.");
-  }
-
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(rawContent);
-  } catch {
-    throw new HttpsError("internal", "Vision provider returned non-JSON metadata.");
-  }
+    const { metadata, tokenCount } = await promise;
 
-  const metadata = sanitizeMetadataResult(parsed, "vision");
-  return success("Image metadata extracted.", {
-    metadata,
-    confidence: metadata.confidence,
-    rawText: metadata.rawText,
-  });
+    if (isPrimary) {
+      void recordAiUsageBestEffort(request.auth.uid, {
+        kind: "image_metadata",
+        provider: "openai",
+        requestCount: 1,
+        tokenCount,
+        executionCount: 1,
+      });
+    }
+
+    return success("Image metadata extracted.", {
+      metadata,
+      confidence: metadata.confidence,
+      rawText: metadata.rawText,
+    });
+  } catch (error) {
+    if (isPrimary) {
+      void recordAiUsageBestEffort(request.auth.uid, recordAiProviderFailure({
+        kind: "image_metadata",
+        provider: "openai",
+        requestCount: 1,
+        executionCount: 1,
+      }, error));
+    }
+    throw error;
+  }
 });
 
 export const correctionsUpload = onCall(async (request) => {
@@ -4201,35 +5750,39 @@ export const extractDocumentContent = onCall({ secrets: [openAiKeySecret] }, asy
     quality: heuristicQuality,
   });
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${openaiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      max_tokens: 1500,
-      temperature: 0.2,
-    }),
-  });
+  let extracted: ExtractedDocumentData = createEmptyExtractionData();
 
-  if (!response.ok) {
-    throw new HttpsError("internal", `OpenAI API error: ${response.status} ${response.statusText}`);
-  }
-
-  const json = await response.json() as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-
-  const content = json.choices?.[0]?.message?.content?.trim() ?? "";
-
-  let extracted: ExtractedDocumentData;
   try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${openaiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 1500,
+        temperature: 0.2,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new HttpsError("internal", `OpenAI API error: ${response.status} ${response.statusText}`);
+    }
+
+    void recordOpenAiRateLimitSnapshotBestEffort("gpt-4o-mini", response.headers);
+
+    const json = await response.json() as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: { total_tokens?: number };
+    };
+
+    const content = json.choices?.[0]?.message?.content?.trim() ?? "";
+
     // Strip potential markdown code fences
     const cleaned = content.replace(/^```[a-z]*\n?|```$/gm, "").trim();
     const parsed = JSON.parse(cleaned) as Record<string, unknown>;
@@ -4311,7 +5864,21 @@ export const extractDocumentContent = onCall({ secrets: [openAiKeySecret] }, asy
         accepted: !qualityWithSectionCheck.issues.some((issue) => issue.severity === "error"),
       },
     };
+
+    void recordAiUsageBestEffort(request.auth.uid, {
+      kind: "document_content",
+      provider: "openai",
+      requestCount: 1,
+      tokenCount: typeof json.usage?.total_tokens === "number" ? Math.max(0, Math.floor(json.usage.total_tokens)) : 0,
+      executionCount: 1,
+    });
   } catch {
+    void recordAiUsageBestEffort(request.auth.uid, {
+      kind: "document_content",
+      provider: "openai",
+      requestCount: 1,
+      failureCount: 1,
+    });
     throw new HttpsError("internal", "AI returned malformed JSON. Please try again.");
   }
 

@@ -54,6 +54,8 @@ const serviceMocks = vi.hoisted(() => ({
     pendingPromotionRequests: 0,
     trackedReadsToday: 0,
     trackedWritesToday: 0,
+    trackedAiRequestsToday: 0,
+    trackedAiBucketHitsToday: 0,
   })),
   listAllSchoolsForSuperAdmin: vi.fn(async () => [] as Array<{ schoolId: string; schoolName: string; districtName?: string | null; memberCount: number }>),
   listSchoolAdminPromotionRequests: vi.fn(async () => [] as Array<{ id: string; uid: string; email: string; displayName: string; schoolId: string; schoolName: string; districtName?: string | null; reason?: string | null; status: "pending" | "approved" | "rejected"; createdAt: string | null; reviewedAt?: string | null; reviewedBy?: string | null }>),
@@ -73,6 +75,102 @@ const serviceMocks = vi.hoisted(() => ({
     message: null,
     details: [],
   }) as any),
+  getSuperAdminAzureQuota: vi.fn(async () => ({
+    projectId: "courseforge-prod",
+    fetchedAt: "2026-06-01T00:00:00.000Z",
+    source: "fallback" as const,
+    configured: false,
+    mirrorEnabled: false,
+    databaseId: "courseforge",
+    containerId: "textbooks",
+    requestUnitsPerSecondLimit: null,
+    requestUnitsPerDayLimit: null,
+    storageGbLimit: null,
+    currentReadsToday: 0,
+    currentWritesToday: 0,
+    currentRequestUnitsToday: 0,
+    currentErrorsToday: 0,
+    message: null,
+  }) as any),
+  getSuperAdminBackupConfig: vi.fn(async () => ({
+    primaryDb: "firestore" as const,
+    mirrorEnabled: true,
+    firestoreEnabled: true,
+    cosmosEnabled: true,
+    backupMode: "interval" as const,
+    frequencyMinutes: 240,
+    lastBackupAt: null,
+    nextBackupAt: null,
+    updatedBy: "test",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  }) as any),
+  setSuperAdminBackupConfig: vi.fn(async () => ({
+    primaryDb: "firestore" as const,
+    mirrorEnabled: true,
+    firestoreEnabled: true,
+    cosmosEnabled: true,
+    backupMode: "interval" as const,
+    frequencyMinutes: 240,
+    lastBackupAt: null,
+    nextBackupAt: null,
+    updatedBy: "test",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  }) as any),
+  runSuperAdminBackupNow: vi.fn(async () => ({
+    id: "job-1",
+    triggeredBy: "test",
+    startedAt: "2026-06-01T00:00:00.000Z",
+    finishedAt: "2026-06-01T00:01:00.000Z",
+    status: "success" as const,
+    docsScanned: 0,
+    docsMirrored: 0,
+    docsFailed: 0,
+    requestUnitsUsed: 0,
+    message: "ok",
+  }) as any),
+  listSuperAdminBackupJobs: vi.fn(async () => [] as any[]),
+  getSuperAdminAiProviderLimits: vi.fn(async () => ({
+    provider: "openai" as const,
+    capturedAt: "2026-06-01T00:00:00.000Z",
+    policy: {
+      defaultDailyRequestLimit: 120,
+      defaultDailyTokenLimit: 120000,
+      defaultMonthlyBudgetUsd: 10,
+      openAiMonthlySpendUsd: 0,
+      budgetAlertThresholdPct: 80,
+      budgetHardStopThresholdPct: 100,
+      updatedBy: "test",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    },
+    models: [],
+    aggregateToday: {
+      aiRequestsToday: 0,
+      aiTokensToday: 0,
+      aiBucketHitsToday: 0,
+      aiFailuresToday: 0,
+      providerRateLimitedToday: 0,
+    },
+  })),
+  setGlobalAiSafetyPolicy: vi.fn(async () => ({
+    defaultDailyRequestLimit: 120,
+    defaultDailyTokenLimit: 120000,
+    defaultMonthlyBudgetUsd: 10,
+    openAiMonthlySpendUsd: 0,
+    budgetAlertThresholdPct: 80,
+    budgetHardStopThresholdPct: 100,
+    updatedBy: "test",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  })),
+  setUserAiSafetyOverride: vi.fn(async () => ({
+    uid: "user-1",
+    override: {
+      dailyRequestLimit: 120,
+      dailyTokenLimit: 120000,
+      monthlyBudgetUsd: 10,
+      updatedBy: "test",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    },
+  })),
 }));
 
 const authMocks = vi.hoisted(() => ({
@@ -89,6 +187,14 @@ vi.mock("../../src/core/services", () => ({
   resolveSchoolAdminPromotionRequest: serviceMocks.resolveSchoolAdminPromotionRequest,
   setUserSuperAdminStatus: serviceMocks.setUserSuperAdminStatus,
   getSuperAdminGlobalQuota: serviceMocks.getSuperAdminGlobalQuota,
+  getSuperAdminAzureQuota: serviceMocks.getSuperAdminAzureQuota,
+  getSuperAdminBackupConfig: serviceMocks.getSuperAdminBackupConfig,
+  setSuperAdminBackupConfig: serviceMocks.setSuperAdminBackupConfig,
+  runSuperAdminBackupNow: serviceMocks.runSuperAdminBackupNow,
+  listSuperAdminBackupJobs: serviceMocks.listSuperAdminBackupJobs,
+  getSuperAdminAiProviderLimits: serviceMocks.getSuperAdminAiProviderLimits,
+  setGlobalAiSafetyPolicy: serviceMocks.setGlobalAiSafetyPolicy,
+  setUserAiSafetyOverride: serviceMocks.setUserAiSafetyOverride,
 }));
 
 vi.mock("../../src/firebase/auth", () => ({
@@ -312,6 +418,8 @@ describe("Super admin page XSS injection protection", () => {
       pendingPromotionRequests: 0,
       trackedReadsToday: 0,
       trackedWritesToday: 0,
+      trackedAiRequestsToday: 0,
+      trackedAiBucketHitsToday: 0,
     });
 
     serviceMocks.getAllUsers.mockResolvedValueOnce([
@@ -350,6 +458,8 @@ describe("Super admin page XSS injection protection", () => {
       pendingPromotionRequests: 0,
       trackedReadsToday: 0,
       trackedWritesToday: 0,
+      trackedAiRequestsToday: 0,
+      trackedAiBucketHitsToday: 0,
     });
 
     serviceMocks.getAllUsers.mockResolvedValueOnce([
@@ -386,6 +496,8 @@ describe("Super admin page XSS injection protection", () => {
       pendingPromotionRequests: 1,
       trackedReadsToday: 0,
       trackedWritesToday: 0,
+      trackedAiRequestsToday: 0,
+      trackedAiBucketHitsToday: 0,
     });
 
     serviceMocks.listSchoolAdminPromotionRequests.mockResolvedValueOnce([
@@ -499,6 +611,8 @@ describe("Super admin page quota override input validation", () => {
       pendingPromotionRequests: 0,
       trackedReadsToday: 0,
       trackedWritesToday: 0,
+      trackedAiRequestsToday: 0,
+      trackedAiBucketHitsToday: 0,
     });
   });
 
@@ -594,6 +708,8 @@ describe("Super admin page live-data contract (zero-guard)", () => {
       pendingPromotionRequests: 1,
       trackedReadsToday: 312,
       trackedWritesToday: 88,
+      trackedAiRequestsToday: 0,
+      trackedAiBucketHitsToday: 0,
     });
 
     renderSuperAdminRoute();

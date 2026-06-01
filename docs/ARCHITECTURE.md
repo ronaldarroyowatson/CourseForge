@@ -159,10 +159,13 @@ From now on, every architectural change, new file, refactor, plugin addition, pl
   - user totals from Firebase Auth user records (not only mirrored Firestore user docs)
   - textbook totals from top-level Firestore `textbooks` documents
   - tracked activity totals aggregated from user `syncUsage` docs filtered by Pacific `dateKey`
+  - AI usage totals aggregated from user `aiUsage` docs filtered by Pacific `lastResetDate`, including request volume and bucket-hit counts
   - dashboard query paths avoid brittle composite-index requirements by doing status/date filtering in memory where needed
   - super-admin dashboard UI uses partial-load behavior (all-settled) so one callable failure does not blank all metrics/tables
   - when the stats callable returns `permission-denied` for an already-super-admin session, the UI performs a one-shot token refresh (`getIdToken(true)`) and retries once to recover from claim propagation race conditions
   - auth bootstrap preserves existing super-admin claims for already-authenticated sessions while refreshed role claims are in flight, preventing transient route guard redirects from `/super-admin` to `/settings`
   - header manual sync refreshes the ID token first and refuses to downgrade an active super-admin session from stale role-claim reads during the same sync click
   - route-gate decisions and dashboard stats load/retry outcomes are emitted to the sync debug event pipeline for diagnostics
+- AI callables coalesce identical in-flight payloads where practical so repeated screenshots or metadata requests collapse to the latest provider execution instead of spawning redundant upstream calls.
+- Textbook archives already use a full-textbook blob boundary (`textbooks/{textbookId}/full.json`) for export/restore, which is the intended hook for future local cache hydrate/download-all flows.
 - Existing `/admin` route remains global admin tooling; super-admins are also allowed through this route.

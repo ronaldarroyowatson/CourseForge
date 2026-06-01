@@ -705,7 +705,7 @@ body {
   }
 
   .settings-grid {
-    grid-template-columns: repeat(1, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
 }
 
@@ -1128,7 +1128,8 @@ body {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-auto-flow: row dense;
   gap: 0.8rem;
 }
 
@@ -1137,6 +1138,18 @@ body {
   background: var(--bg-panel);
   border-radius: 8px;
   padding: 0.9rem;
+}
+
+.settings-card--priority-1 {
+  order: -20;
+}
+
+.settings-card--priority-2 {
+  order: -19;
+}
+
+.settings-card--sync-safety {
+  grid-column: span 2;
 }
 
 .settings-card h3 {
@@ -1151,6 +1164,23 @@ body {
 .settings-card--school-affiliation {
   display: grid;
   gap: 0.65rem;
+}
+
+.settings-school-affiliation__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.65rem;
+}
+
+.settings-school-affiliation__fields label {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.settings-school-affiliation__fields input {
+  width: 100%;
+  min-width: 0;
 }
 
 .settings-school-suggestions {
@@ -1213,11 +1243,11 @@ body {
 }
 
 .settings-card--expandable:not(.settings-card--expanded) {
-  padding-bottom: 1rem;
+  padding-bottom: 0.9rem;
 }
 
 .settings-card--expanded {
-  grid-column: 1 / -1;
+  grid-column: auto;
 }
 
 .settings-card--compact.settings-card--expanded {
@@ -2363,6 +2393,27 @@ button.cf-ds-color-wheel__dot:active {
   align-items: start;
 }
 
+.settings-ai-safety-block {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.5rem;
+}
+
+.settings-ai-rings-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.5rem;
+  align-items: start;
+}
+
+.settings-ai-provider-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.45rem 0.85rem;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
 .sync-donut {
   display: flex;
   flex-direction: column;
@@ -2915,6 +2966,10 @@ button.cf-ds-color-wheel__dot:active {
 
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-card--sync-safety {
+    grid-column: span 1;
   }
 
   .admin-header {
@@ -5383,6 +5438,7 @@ button:not(:disabled):active {
 
 .cf-quota-overrides__grid {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 0.55rem;
 }
 
@@ -5421,9 +5477,95 @@ button:not(:disabled):active {
 
 .cf-quota-overrides__actions {
   display: flex;
+  grid-column: 1 / -1;
   gap: 0.5rem;
   flex-wrap: wrap;
   align-items: center;
+}
+
+.cf-quota-right {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.cf-quota-right__items {
+  display: grid;
+  gap: 0.6rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+.cf-quota-right__scroll-wrap {
+  position: relative;
+}
+
+.cf-quota-right__fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3.2rem;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, color-mix(in srgb, var(--bg-panel) 94%, transparent) 70%, var(--bg-panel) 100%);
+}
+
+.cf-quota-item {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.65rem 0.75rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+}
+
+.cf-quota-item h4 {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--text-primary);
+}
+
+.cf-quota-item p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.cf-quota-item--compact {
+  text-align: left;
+  width: 100%;
+  border: 1px solid var(--border-default);
+  cursor: pointer;
+}
+
+.cf-quota-item--compact:hover {
+  background: color-mix(in srgb, var(--bg-panel) 82%, var(--button-bg-hover) 18%);
+}
+
+.cf-quota-item__glance,
+.cf-quota-item__detail-preview,
+.cf-quota-item__hint,
+.cf-quota-item__detail p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-quota-item__hint {
+  font-size: 0.72rem;
+  opacity: 0.75;
+}
+
+.cf-quota-item__detail {
+  display: grid;
+  gap: 0.2rem;
+  padding-top: 0.15rem;
+  border-top: 1px dashed var(--border-default);
+}
+
+.cf-quota-item--expanded .cf-quota-item__detail p {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* ----- Quota bar (horizontal) ----- */

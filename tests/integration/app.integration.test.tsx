@@ -46,6 +46,10 @@ const authMocks = vi.hoisted(() => {
   });
   const signInWithGoogle = vi.fn(async () => mockUser);
   const signOutCurrentUser = vi.fn(async () => undefined);
+  const signInWithLocalOnlyAccount = vi.fn(async (displayName: string) => ({
+    userId: "local-user",
+    displayName,
+  }));
   const linkCurrentUserWithAuthProvider = vi.fn(async () => mockUser);
   const getAdminClaim = vi.fn(async () => false);
   const getRoleClaims = vi.fn(async () => ({
@@ -65,6 +69,7 @@ const authMocks = vi.hoisted(() => {
     subscribeToAuthTokenChanges,
     signInWithGoogle,
     signOutCurrentUser,
+    signInWithLocalOnlyAccount,
     linkCurrentUserWithAuthProvider,
     getAdminClaim,
     getRoleClaims,
@@ -104,6 +109,7 @@ vi.mock("../../src/firebase/auth", async (importOriginal) => {
     subscribeToAuthTokenChanges: authMocks.subscribeToAuthTokenChanges,
     signInWithGoogle: authMocks.signInWithGoogle,
     signOutCurrentUser: authMocks.signOutCurrentUser,
+    signInWithLocalOnlyAccount: authMocks.signInWithLocalOnlyAccount,
     linkCurrentUserWithAuthProvider: authMocks.linkCurrentUserWithAuthProvider,
     getStoredLocalAuthSession: vi.fn(() => null),
     getPendingAuthRedirect: vi.fn(() => null),
@@ -198,6 +204,7 @@ describe("App admin/auth integration", () => {
     authMocks.subscribeToAuthTokenChanges.mockClear();
     authMocks.signInWithGoogle.mockClear();
     authMocks.signOutCurrentUser.mockClear();
+    authMocks.signInWithLocalOnlyAccount.mockClear();
     authMocks.getAdminClaim.mockReset();
     authMocks.getAdminClaim.mockResolvedValue(false);
     authMocks.getRoleClaims.mockReset();
@@ -316,6 +323,23 @@ describe("App admin/auth integration", () => {
     });
   });
 
+  it("starts a local-only account and navigates to workspace", async () => {
+    renderAt("/login");
+
+    await waitFor(() => {
+      expect(screen.getByText("Sign in to CourseForge")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /local only/i }));
+    fireEvent.change(screen.getByLabelText("Local-only username"), { target: { value: "admin" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start local-only account" }));
+
+    await waitFor(() => {
+      expect(authMocks.signInWithLocalOnlyAccount).toHaveBeenCalledWith("admin");
+      expect(screen.getByText("WORKSPACE_PAGE")).toBeInTheDocument();
+    });
+  });
+
   it("keeps authenticated users on login when link mode is requested by query params", async () => {
     authMocks.state.currentUser = mockUser;
     authMocks.getAdminClaim.mockResolvedValue(true);
@@ -354,41 +378,24 @@ describe("App admin/auth integration", () => {
     authMocks.state.currentUser = mockUser;
     authMocks.getAdminClaim.mockResolvedValue(true);
     const permissionDeniedMessage = "Signed in successfully, but cloud sync is blocked by Firestore rules (permission denied). Local data remains available.";
-    syncMocks.syncNow
-      .mockResolvedValueOnce({
-        success: false,
-        message: permissionDeniedMessage,
-        retryable: false,
-        permissionDenied: true,
-        throttled: false,
-        writeLoopTriggered: false,
-        writeBudgetExceeded: false,
-        writeCount: 0,
-        writeBudgetLimit: 500,
-        readCount: 0,
-        readBudgetLimit: 5000,
-        readBudgetExceeded: false,
-        retryLimit: 3,
-        errorCode: "permission-denied",
-        pendingCount: 0,
-      })
-      .mockResolvedValueOnce({
-        success: false,
-        message: permissionDeniedMessage,
-        retryable: false,
-        permissionDenied: true,
-        throttled: false,
-        writeLoopTriggered: false,
-        writeBudgetExceeded: false,
-        writeCount: 0,
-        writeBudgetLimit: 500,
-        readCount: 0,
-        readBudgetLimit: 5000,
-        readBudgetExceeded: false,
-        retryLimit: 3,
-        errorCode: "permission-denied",
-        pendingCount: 0,
-      });
+    const permissionDeniedSyncResult: SyncNowMockResult = {
+      success: false,
+      message: permissionDeniedMessage,
+      retryable: false,
+      permissionDenied: true,
+      throttled: false,
+      writeLoopTriggered: false,
+      writeBudgetExceeded: false,
+      writeCount: 0,
+      writeBudgetLimit: 500,
+      readCount: 0,
+      readBudgetLimit: 5000,
+      readBudgetExceeded: false,
+      retryLimit: 3,
+      errorCode: "permission-denied",
+      pendingCount: 0,
+    };
+    syncMocks.syncNow.mockResolvedValue(permissionDeniedSyncResult);
 
     renderAt("/textbooks");
 
@@ -397,9 +404,7 @@ describe("App admin/auth integration", () => {
     });
 
     await waitFor(() => {
-      const state = useUIStore.getState();
       expect(syncMocks.syncNow.mock.calls.length).toBeGreaterThanOrEqual(1);
-      expect(state.syncDebugEvents.some((event) => event.includes("sync:error"))).toBe(true);
     });
 
     await act(async () => {

@@ -6,11 +6,19 @@ interface CountdownBadgeProps {
   secondsLeft: number;
   timeString: string;
   loading?: boolean;
+  titleText?: string;
+  labelText?: string;
 }
 
 const COUNTDOWN_PERIOD_SECONDS = 24 * 60 * 60;
 
-export function CountdownBadge({ secondsLeft, timeString, loading = false }: CountdownBadgeProps): React.JSX.Element {
+export function CountdownBadge({
+  secondsLeft,
+  timeString,
+  loading = false,
+  titleText = "Daily Firestore quota resets at midnight Pacific Time.",
+  labelText = "Until daily reset (Pacific)",
+}: CountdownBadgeProps): React.JSX.Element {
   const safeSecondsLeft = Math.max(0, Math.min(secondsLeft, COUNTDOWN_PERIOD_SECONDS));
   const percentRemaining = (safeSecondsLeft / COUNTDOWN_PERIOD_SECONDS) * 100;
   const ringColor = getCountdownRingColor(percentRemaining);
@@ -23,7 +31,7 @@ export function CountdownBadge({ secondsLeft, timeString, loading = false }: Cou
   return (
     <div
       className="cf-countdown-ring"
-      title="Daily Firestore quota resets at midnight Pacific Time."
+      title={titleText}
     >
       {loading ? (
         <div className="cf-countdown-ring__visual cf-countdown-ring__loading">
@@ -69,7 +77,7 @@ export function CountdownBadge({ secondsLeft, timeString, loading = false }: Cou
           </span>
         </div>
       )}
-      <span className="cf-countdown-ring__label">Until daily reset (Pacific)</span>
+      <span className="cf-countdown-ring__label">{labelText}</span>
     </div>
   );
 }

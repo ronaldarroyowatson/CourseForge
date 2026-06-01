@@ -1,13 +1,39 @@
 import type { Textbook } from "../../models";
 import { delete as deleteRecord, getAll as getAllRecords, getById, save, STORE_NAMES } from "../db";
 import { normalizeISBN } from "../isbnService";
-import { getCurrentUser } from "../../../firebase/auth";
+import { getCurrentUser, getStoredLocalAuthSession } from "../../../firebase/auth";
 
 const LOCALHOST_SHARED_TEXTBOOK_ENDPOINT = "/api/local-textbooks-state";
 const LOCALHOST_SHARED_REQUEST_TIMEOUT_MS = 1200;
 
 let hasAttemptedLocalhostHydration = false;
 let localhostSharedSnapshotAvailable: boolean | null = null;
+
+function getActiveSessionUserId(): string | null {
+  const cloudUserId = getCurrentUser()?.uid?.trim();
+  if (cloudUserId) {
+    return cloudUserId;
+  }
+
+  const localUserId = getStoredLocalAuthSession()?.userId?.trim();
+  return localUserId || null;
+}
+
+function getRecordUserId(textbook: Textbook): string | null {
+  const userId = textbook.userId?.trim();
+  return userId || null;
+}
+
+function filterTextbooksForActiveSession(textbooks: Textbook[]): Textbook[] {
+  const activeUserId = getActiveSessionUserId();
+
+  if (activeUserId) {
+    return textbooks.filter((textbook) => getRecordUserId(textbook) === activeUserId);
+  }
+
+  // When there is no signed-in session, only show legacy unscoped local rows.
+  return textbooks.filter((textbook) => getRecordUserId(textbook) === null);
+}
 
 function isLikelyLocalhostRuntime(): boolean {
   if (typeof window === "undefined") {
@@ -84,7 +110,12 @@ async function hydrateFromLocalhostSharedSnapshotIfNeeded(): Promise<void> {
     return;
   }
 
-  await Promise.all(shared.map((textbook) => save(STORE_NAMES.textbooks, textbook)));
+  const scopedShared = filterTextbooksForActiveSession(shared);
+  if (scopedShared.length === 0) {
+    return;
+  }
+
+  await Promise.all(scopedShared.map((textbook) => save(STORE_NAMES.textbooks, textbook)));
 }
 
 async function publishLocalhostSharedSnapshotBestEffort(): Promise<void> {
@@ -97,7 +128,7 @@ async function publishLocalhostSharedSnapshotBestEffort(): Promise<void> {
   }
 
   try {
-    const textbooks = await getAllRecords(STORE_NAMES.textbooks);
+    const textbooks = filterTextbooksForActiveSession(await getAllRecords(STORE_NAMES.textbooks));
     const response = await fetch(LOCALHOST_SHARED_TEXTBOOK_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -136,7 +167,7 @@ export async function getAll(): Promise<Textbook[]> {
 
 export async function listTextbooks(): Promise<Textbook[]> {
   const textbooks = await getAll();
-  return textbooks.filter((textbook) => !textbook.isDeleted);
+  return filterTextbooksForActiveSession(textbooks).filter((textbook) => !textbook.isDeleted);
 }
 
 export async function listExpiredRecycledTextbooks(nowIso = new Date().toISOString()): Promise<Textbook[]> {

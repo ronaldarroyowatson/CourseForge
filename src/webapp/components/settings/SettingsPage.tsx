@@ -31,7 +31,9 @@ import {
   refreshPluginStatus as refreshPluginLifecycleStatus,
   listSchoolDirectory,
   setUserSchoolAffiliation,
+  getCurrentAiSafetyStatus,
   type SchoolDirectoryRow,
+  type CurrentAiSafetyStatus,
 } from "../../../core/services";
 import { readMetadataPipelineRuntimeStatus, type MetadataPipelineRuntimeStatus } from "../../../core/services/metadataExtractionPipelineService";
 import { readMetadataCorrectionSyncRuntimeState, type MetadataCorrectionSyncRuntimeState } from "../../../core/services/metadataCorrectionSyncService";
@@ -45,6 +47,8 @@ import {
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 import { FloatingDesignSystemCard } from "./FloatingDesignSystemCard";
+import { ProgressRing } from "../admin/infographics/ProgressRing";
+import { CountdownBadge } from "../admin/infographics/CountdownBadge";
 
 interface SettingsPageProps {
   onBack?: () => void;
@@ -298,6 +302,48 @@ function SyncDonutChart({
   );
 }
 
+function getSecondsUntilPacificMidnight(): number {
+  const now = new Date();
+  const tz = "America/Los_Angeles";
+  const dateFmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  });
+  const parts = dateFmt.formatToParts(now);
+  const year = parseInt(parts.find((p) => p.type === "year")!.value, 10);
+  const month = parseInt(parts.find((p) => p.type === "month")!.value, 10) - 1;
+  const day = parseInt(parts.find((p) => p.type === "day")!.value, 10);
+  const probe = new Date(Date.UTC(year, month, day, 12, 0, 0));
+  const hourFmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false });
+  const pacificHourAtProbe = parseInt(hourFmt.format(probe), 10);
+  const offsetHours = 12 - pacificHourAtProbe;
+  const nextDayPacificMidnightMs = Date.UTC(year, month, day + 1) + offsetHours * 3600 * 1000;
+  return Math.max(0, Math.floor((nextDayPacificMidnightMs - now.getTime()) / 1000));
+}
+
+function formatCountdown(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}
+
+function usePacificMidnightCountdown(): { secondsLeft: number; timeString: string } {
+  const [secondsLeft, setSecondsLeft] = React.useState(getSecondsUntilPacificMidnight);
+
+  React.useEffect(() => {
+    const tick = (): void => {
+      setSecondsLeft(getSecondsUntilPacificMidnight());
+    };
+    const id = window.setInterval(tick, 1000);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, []);
+
+  return { secondsLeft, timeString: formatCountdown(secondsLeft) };
+}
+
 /**
  * Centralized user preferences for sync safety and appearance.
  */
@@ -354,10 +400,15 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   const [schoolDirectory, setSchoolDirectory] = React.useState<SchoolDirectoryRow[]>([]);
   const [schoolDirectoryStatus, setSchoolDirectoryStatus] = React.useState<string | null>(null);
   const [isSavingSchool, setIsSavingSchool] = React.useState(false);
+  const [showAccountCard, setShowAccountCard] = React.useState(false);
   const [showSyncPreferences, setShowSyncPreferences] = React.useState(false);
   const [showLanguageSettings, setShowLanguageSettings] = React.useState(false);
   const [showAccessibilitySettings, setShowAccessibilitySettings] = React.useState(false);
+  const [showSchoolAffiliation, setShowSchoolAffiliation] = React.useState(false);
+  const [showAiResilience, setShowAiResilience] = React.useState(false);
   const [showMetadataLearning, setShowMetadataLearning] = React.useState(false);
+  const [showDesignSystemControls, setShowDesignSystemControls] = React.useState(false);
+  const [showDebugLog, setShowDebugLog] = React.useState(false);
   const [accountStatus, setAccountStatus] = React.useState<string | null>(null);
   const [showFloatingDesignSystemCard, setShowFloatingDesignSystemCard] = React.useState(false);
   const [dscPluginInstalled, setDscPluginInstalled] = React.useState<boolean>(() => getDscInstalledSnapshot());
@@ -373,6 +424,7 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   });
   const [metadataSyncRuntime, setMetadataSyncRuntime] = React.useState<MetadataCorrectionSyncRuntimeState | null>(null);
   const [metadataPipelineRuntime, setMetadataPipelineRuntime] = React.useState<MetadataPipelineRuntimeStatus>(() => readMetadataPipelineRuntimeStatus());
+  const [aiSafetyStatus, setAiSafetyStatus] = React.useState<CurrentAiSafetyStatus | null>(null);
   const languageOptions = React.useMemo(() => getSupportedLanguages(), []);
   const ocrHealthById = React.useMemo(() => {
     return new Map(ocrProviderHealth.map((provider) => [provider.id, provider]));
@@ -388,6 +440,21 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   const secondChoiceProviderId = ocrProviderOrder.find((providerId) => providerId !== ocrProviderOrder[0] && providerId !== "local_tesseract") ?? "cloud_github_models_vision";
   const retryVisualTotal = Math.max(1, Math.min(5, retryLimit || 3));
   const retryVisualUsed = Math.max(0, Math.min(retryVisualTotal, retryCount));
+  const pacificResetCountdown = usePacificMidnightCountdown();
+
+  const openAiRequestsToday = aiSafetyStatus?.usage.openAiRequestsToday ?? aiSafetyStatus?.usage.aiRequestsToday ?? 0;
+  const openAiTokensToday = aiSafetyStatus?.usage.openAiTokensToday ?? aiSafetyStatus?.usage.aiTokensToday ?? 0;
+  const openAiDailyRequestLimit = Math.max(1, aiSafetyStatus?.effectiveLimits.dailyRequestLimit ?? 1);
+  const openAiDailyTokenLimit = Math.max(1, aiSafetyStatus?.effectiveLimits.dailyTokenLimit ?? 1000);
+
+  const githubRequestsToday = aiSafetyStatus?.usage.githubRequestsToday ?? 0;
+  const githubTokensToday = aiSafetyStatus?.usage.githubTokensToday ?? 0;
+  const githubDailyRequestLimit = Math.max(1, aiSafetyStatus?.effectiveLimits.githubDailyRequestLimit ?? 1);
+  const githubDailyTokenLimit = Math.max(1, aiSafetyStatus?.effectiveLimits.githubDailyTokenLimit ?? 1000);
+  const githubTier = aiSafetyStatus?.effectiveLimits.githubCopilotTier ?? "free";
+
+  const openAiMonthlyBudget = Math.max(1, aiSafetyStatus?.effectiveLimits.monthlyBudgetUsd ?? 1);
+  const openAiMonthlySpend = aiSafetyStatus?.effectiveLimits.openAiMonthlySpendUsd ?? 0;
   const designTokenDebugReport = React.useMemo(() => getDesignTokenDebugReport({
     enabled: debugEnabled,
     pageId: "settings",
@@ -499,6 +566,15 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
     });
     setMetadataSyncRuntime(readMetadataCorrectionSyncRuntimeState());
     setMetadataPipelineRuntime(readMetadataPipelineRuntimeStatus());
+  }
+
+  async function refreshAiSafetyStatus(): Promise<void> {
+    try {
+      const status = await getCurrentAiSafetyStatus();
+      setAiSafetyStatus(status);
+    } catch {
+      setAiSafetyStatus(null);
+    }
   }
 
   function renderProviderStatusBadge(providerId: AutoOcrProviderId): React.JSX.Element {
@@ -726,6 +802,7 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
       setOcrProviderOrderState(effectiveOrder);
       await handleSchoolDirectoryLookup("");
       await refreshOcrProviderHealth(false);
+      await refreshAiSafetyStatus();
       await refreshDebugStats();
       refreshMetadataTrainingStats();
       const policy = await getDebugLoggingPolicy();
@@ -1204,48 +1281,55 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
       </div>
 
       <div className="settings-grid">
-        <article className="settings-card">
+        <article className={`settings-card settings-card--expandable settings-card--compact ${showAccountCard ? "settings-card--expanded" : ""}`}>
           <div className="settings-card__head">
             <h3>Account</h3>
+            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowAccountCard((previous) => !previous)}>
+              {showAccountCard ? "Hide" : "Show"}
+            </button>
           </div>
-          <p>Signed in as {authMode === "local" ? "a local-only account" : "a cloud account"}.</p>
-          <p className="settings-meta">{userId ? `User ID: ${userId}` : "No user ID available."}</p>
-          {authMode === "local" ? (
-            <p className="manual-entry-banner">Local-only accounts stay on this device and never use Auto mode or cloud sync.</p>
-          ) : (
-            <div className="settings-provider-links">
-              <p className="settings-meta">Connected sign-in methods:</p>
-              <div className="settings-provider-links__checks">
-                {linkedAuthProviderLabels.length > 0 ? linkedAuthProviderLabels.map((providerLabel) => (
-                  <p key={providerLabel} className="settings-provider-check">
-                    <span aria-hidden="true">✓</span>
-                    <span>{providerLabel}</span>
-                  </p>
-                )) : <p className="settings-meta">No linked cloud services detected.</p>}
+          {showAccountCard ? (
+            <>
+              <p>Signed in as {authMode === "local" ? "a local-only account" : "a cloud account"}.</p>
+              <p className="settings-meta">{userId ? `User ID: ${userId}` : "No user ID available."}</p>
+              {authMode === "local" ? (
+                <p className="manual-entry-banner">Local-only accounts stay on this device and never use Auto mode or cloud sync.</p>
+              ) : (
+                <div className="settings-provider-links">
+                  <p className="settings-meta">Connected sign-in methods:</p>
+                  <div className="settings-provider-links__checks">
+                    {linkedAuthProviderLabels.length > 0 ? linkedAuthProviderLabels.map((providerLabel) => (
+                      <p key={providerLabel} className="settings-provider-check">
+                        <span aria-hidden="true">✓</span>
+                        <span>{providerLabel}</span>
+                      </p>
+                    )) : <p className="settings-meta">No linked cloud services detected.</p>}
+                  </div>
+                </div>
+              )}
+              <div className="form-actions">
+                <button type="button" className="btn-secondary" onClick={handleAddCloudService}>
+                  Add Cloud Service
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => { void handleSignOut(); }}>
+                  Sign Out
+                </button>
               </div>
-            </div>
-          )}
-          <div className="form-actions">
-            <button type="button" className="btn-secondary" onClick={handleAddCloudService}>
-              Add Cloud Service
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => { void handleSignOut(); }}>
-              Sign Out
-            </button>
-          </div>
-          {accountStatus ? <p className="settings-meta">{accountStatus}</p> : null}
+              {accountStatus ? <p className="settings-meta">{accountStatus}</p> : null}
+            </>
+          ) : null}
         </article>
 
-        <article className={`settings-card settings-card--expandable ${showSyncPreferences ? "settings-card--expanded" : ""}`}>
+        <article className={`settings-card settings-card--expandable settings-card--compact ${showSyncPreferences ? "settings-card--expanded" : ""}`}>
           <div className="settings-card__head">
-            <h3>Sync Preferences</h3>
+            <h3>Sync Settings</h3>
             <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowSyncPreferences((previous) => !previous)}>
               {showSyncPreferences ? "Hide" : "Show"}
             </button>
           </div>
-          <p>Automatic retries are off by default to avoid repeated failed writes and quota spikes.</p>
           {showSyncPreferences ? (
             <>
+              <p>Automatic retries are off by default to avoid repeated failed writes and quota spikes.</p>
               <div className="settings-sync-retry-row">
                 <label
                   className="settings-toggle"
@@ -1285,16 +1369,16 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
           ) : null}
         </article>
 
-        <article className={`settings-card settings-card--expandable ${showLanguageSettings ? "settings-card--expanded" : ""}`}>
+        <article className={`settings-card settings-card--expandable settings-card--compact ${showLanguageSettings ? "settings-card--expanded" : ""}`}>
           <div className="settings-card__head">
-            <h3>{translate(language, "settings", "title")}</h3>
+            <h3>Languages</h3>
             <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowLanguageSettings((previous) => !previous)}>
               {showLanguageSettings ? "Hide" : "Show"}
             </button>
           </div>
-          <p className="settings-meta">Current language: {language.toUpperCase()}</p>
           {showLanguageSettings ? (
             <>
+              <p className="settings-meta">Current language: {language.toUpperCase()}</p>
               <label>
                 {translate(language, "settings", "languageLabel")}
                 <select value={language} onChange={(event) => { void handleLanguageChange(event.target.value); }}>
@@ -1315,16 +1399,16 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
           ) : null}
         </article>
 
-        <article className={`settings-card settings-card--expandable ${showAccessibilitySettings ? "settings-card--expanded" : ""}`} aria-live="polite">
+        <article className={`settings-card settings-card--expandable settings-card--compact ${showAccessibilitySettings ? "settings-card--expanded" : ""}`} aria-live="polite">
           <div className="settings-card__head">
             <h3>{translate(language, "settings", "accessibilityTitle")}</h3>
             <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowAccessibilitySettings((previous) => !previous)}>
               {showAccessibilitySettings ? "Hide" : "Show"}
             </button>
           </div>
-          <p className="settings-meta">Color mode: {accessibility.colorBlindMode ?? "none"} | Font scale: {(accessibility.fontScale ?? 1).toFixed(2)} | UI scale: {(accessibility.uiScale ?? 1).toFixed(2)}</p>
           {showAccessibilitySettings ? (
             <>
+              <p className="settings-meta">Color mode: {accessibility.colorBlindMode ?? "none"} | Font scale: {(accessibility.fontScale ?? 1).toFixed(2)} | UI scale: {(accessibility.uiScale ?? 1).toFixed(2)}</p>
               <label>
                 {translate(language, "settings", "colorBlindMode")}
                 <select
@@ -1392,83 +1476,156 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
           ) : null}
         </article>
 
-        <article className="settings-card settings-card--school-affiliation" aria-live="polite">
-          <h3>School / District Affiliation</h3>
-          <p className="settings-meta">
-            {schoolName
-              ? `Current school: ${schoolName}${districtName ? ` (${districtName})` : ""}`
-              : "First-time setup: add your school so CourseForge can group your district data and permissions."}
-          </p>
-          <div className="admin-filter-bar">
-            <label>
-              School Name
-              <input
-                value={schoolSearch}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setSchoolSearch(value);
-                  void handleSchoolDirectoryLookup(value);
-                }}
-                placeholder="Type School Name Here"
-              />
-            </label>
-            <label>
-              District (optional)
-              <input
-                value={districtInput}
-                onChange={(event) => setDistrictInput(event.target.value)}
-                placeholder="Type School District Here"
-              />
-            </label>
-          </div>
-          {schoolDirectory.length > 0 ? (
-            <div className="settings-school-suggestions" role="list" aria-label="School suggestions">
-              {schoolDirectory.slice(0, 8).map((row) => (
-                <button
-                  key={row.schoolId}
-                  type="button"
-                  className="btn-secondary settings-school-suggestion"
-                  onClick={() => {
-                    setSchoolSearch(row.schoolName);
-                    setDistrictInput(row.districtName ?? districtInput);
-                    void handleSaveSchoolAffiliation({ schoolName: row.schoolName, schoolId: row.schoolId });
-                  }}
-                  disabled={isSavingSchool}
-                >
-                  {row.schoolName}
-                  {row.districtName ? ` • ${row.districtName}` : ""}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <div className="form-actions">
-            <button
-              type="button"
-              onClick={() => { void handleSaveSchoolAffiliation(); }}
-              disabled={isSavingSchool}
-            >
-              {isSavingSchool ? "Saving..." : "Save School Affiliation"}
+        <article className={`settings-card settings-card--school-affiliation settings-card--expandable settings-card--compact ${showSchoolAffiliation ? "settings-card--expanded" : ""}`} aria-live="polite">
+          <div className="settings-card__head">
+            <h3>School / District Affiliation</h3>
+            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowSchoolAffiliation((previous) => !previous)}>
+              {showSchoolAffiliation ? "Hide" : "Show"}
             </button>
           </div>
-          {schoolDirectoryStatus ? <p className="settings-meta">{schoolDirectoryStatus}</p> : null}
+          {showSchoolAffiliation ? (
+            <>
+              <p className="settings-meta">
+                {schoolName
+                  ? `Current school: ${schoolName}${districtName ? ` (${districtName})` : ""}`
+                  : "First-time setup: add your school so CourseForge can group your district data and permissions."}
+              </p>
+              <div className="settings-school-affiliation__fields">
+                <label>
+                  School Name
+                  <input
+                    value={schoolSearch}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setSchoolSearch(value);
+                      void handleSchoolDirectoryLookup(value);
+                    }}
+                    placeholder="Type School Name Here"
+                  />
+                </label>
+                <label>
+                  District (optional)
+                  <input
+                    value={districtInput}
+                    onChange={(event) => setDistrictInput(event.target.value)}
+                    placeholder="Type School District Here"
+                  />
+                </label>
+              </div>
+              {schoolDirectory.length > 0 ? (
+                <div className="settings-school-suggestions" role="list" aria-label="School suggestions">
+                  {schoolDirectory.slice(0, 8).map((row) => (
+                    <button
+                      key={row.schoolId}
+                      type="button"
+                      className="btn-secondary settings-school-suggestion"
+                      onClick={() => {
+                        setSchoolSearch(row.schoolName);
+                        setDistrictInput(row.districtName ?? districtInput);
+                        void handleSaveSchoolAffiliation({ schoolName: row.schoolName, schoolId: row.schoolId });
+                      }}
+                      disabled={isSavingSchool}
+                    >
+                      {row.schoolName}
+                      {row.districtName ? ` • ${row.districtName}` : ""}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <div className="form-actions">
+                <button
+                  type="button"
+                  onClick={() => { void handleSaveSchoolAffiliation(); }}
+                  disabled={isSavingSchool}
+                >
+                  {isSavingSchool ? "Saving..." : "Save School Affiliation"}
+                </button>
+              </div>
+              {schoolDirectoryStatus ? <p className="settings-meta">{schoolDirectoryStatus}</p> : null}
+            </>
+          ) : null}
         </article>
 
-        <article className="settings-card">
+        <article className="settings-card settings-card--priority-1 settings-card--sync-safety">
           <h3>Sync Safety Status</h3>
           <p className="settings-meta">Sync status: {syncStatus}</p>
           {pendingChangesCount > 0 && (
             <p className="settings-meta">Pending changes: {pendingChangesCount}</p>
           )}
+
           <div className="sync-safety-donuts">
             <SyncDonutChart label="Writes" used={writeCount} limit={writeBudgetLimit} exceeded={writeBudgetExceeded} showWarning />
             <SyncDonutChart label="Reads" used={readCount} limit={readBudgetLimit} exceeded={readBudgetExceeded} />
           </div>
+
+          <div className="settings-ai-safety-block">
+            <CountdownBadge
+              secondsLeft={pacificResetCountdown.secondsLeft}
+              timeString={pacificResetCountdown.timeString}
+              titleText="Per-user AI safety limits reset at midnight Pacific Time."
+              labelText="Until AI daily reset (Pacific)"
+            />
+
+            {aiSafetyStatus ? (
+              <>
+                <p className="settings-meta">
+                  Per-user coded limits are shown below. GitHub tier: <strong>{githubTier.toUpperCase()}</strong>
+                </p>
+                <div className="settings-ai-rings-grid">
+                  <ProgressRing
+                    value={openAiRequestsToday}
+                    max={openAiDailyRequestLimit}
+                    label="OAI Req/d"
+                  />
+                  <ProgressRing
+                    value={openAiTokensToday}
+                    max={openAiDailyTokenLimit}
+                    label="OAI Tok/d"
+                  />
+                  <ProgressRing
+                    value={githubRequestsToday}
+                    max={githubDailyRequestLimit}
+                    label="GH Req/d"
+                  />
+                  <ProgressRing
+                    value={githubTokensToday}
+                    max={githubDailyTokenLimit}
+                    label="GH Tok/d"
+                  />
+                  <ProgressRing
+                    value={openAiMonthlySpend}
+                    max={openAiMonthlyBudget}
+                    label="OAI Budget"
+                  />
+                </div>
+                <div className="settings-ai-provider-meta">
+                  <span>OpenAI rate-limit events today: <strong>{aiSafetyStatus.usage.openAiRateLimitedToday ?? aiSafetyStatus.usage.providerRateLimitedToday}</strong></span>
+                  <span>GitHub rate-limit events today: <strong>{aiSafetyStatus.usage.githubRateLimitedToday ?? 0}</strong></span>
+                </div>
+              </>
+            ) : (
+              <p className="settings-meta">AI safety usage is loading or unavailable right now.</p>
+            )}
+          </div>
+
+          <div className="form-actions">
+            <button type="button" className="btn-secondary" onClick={() => { void refreshAiSafetyStatus(); }}>
+              Refresh AI Safety
+            </button>
+          </div>
         </article>
 
-        <article className="settings-card">
-          <h3>AI Service Resilience</h3>
-          <p>Set the priority order for OCR providers. Each is tried in order; the first that succeeds is used.</p>
-          <div className="ocr-provider-choices">
+        <article className={`settings-card settings-card--expandable settings-card--compact ${showAiResilience ? "settings-card--expanded" : ""}`}>
+          <div className="settings-card__head">
+            <h3>AI Service Resilience</h3>
+            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowAiResilience((previous) => !previous)}>
+              {showAiResilience ? "Hide" : "Show"}
+            </button>
+          </div>
+          {showAiResilience ? (
+            <>
+              <p>Set the priority order for OCR providers. Each is tried in order; the first that succeeds is used.</p>
+              <div className="ocr-provider-choices">
             <label className="ocr-provider-choice">
               <div className="ocr-provider-choice__header">
                 <span className="ocr-provider-choice__label">#1 — First choice</span>
@@ -1501,33 +1658,35 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
                 {renderProviderStatusBadge("local_tesseract")}
               </div>
             </div>
-          </div>
-          <div className="form-actions ocr-provider-actions">
-            <button type="button" className="btn-secondary" onClick={() => { void refreshOcrProviderHealth(true); }}>
-              Refresh Provider Health
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => { void handleReloadCloudPolicy(); }} disabled={isUpdatingOcrPolicy}>
-              {isUpdatingOcrPolicy ? "Working..." : "Load Shared Policy"}
-            </button>
-            <button type="button" onClick={() => { void handleApplyCloudPolicy(); }} disabled={isUpdatingOcrPolicy}>
-              {isUpdatingOcrPolicy ? "Working..." : "Save As Shared Policy"}
-            </button>
-          </div>
-          {ocrProviderHealth.some((provider) => provider.available !== true) ? (
-            <div className="ocr-provider-details">
-              {ocrProviderHealth.filter((provider) => provider.available !== true).map((provider) => {
-                const fallbackMessage = provider.availabilityState === "unknown"
-                  ? "Health status is currently unknown."
-                  : "Provider is currently unavailable.";
-                return (
-                  <p key={provider.id} className="ocr-provider-details__item">
-                    {getShortProviderLabel(provider.id)}: {provider.errorMessage ?? fallbackMessage}
-                  </p>
-                );
-              })}
-            </div>
+              </div>
+              <div className="form-actions ocr-provider-actions">
+                <button type="button" className="btn-secondary" onClick={() => { void refreshOcrProviderHealth(true); }}>
+                  Refresh Provider Health
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => { void handleReloadCloudPolicy(); }} disabled={isUpdatingOcrPolicy}>
+                  {isUpdatingOcrPolicy ? "Working..." : "Load Shared Policy"}
+                </button>
+                <button type="button" onClick={() => { void handleApplyCloudPolicy(); }} disabled={isUpdatingOcrPolicy}>
+                  {isUpdatingOcrPolicy ? "Working..." : "Save As Shared Policy"}
+                </button>
+              </div>
+              {ocrProviderHealth.some((provider) => provider.available !== true) ? (
+                <div className="ocr-provider-details">
+                  {ocrProviderHealth.filter((provider) => provider.available !== true).map((provider) => {
+                    const fallbackMessage = provider.availabilityState === "unknown"
+                      ? "Health status is currently unknown."
+                      : "Provider is currently unavailable.";
+                    return (
+                      <p key={provider.id} className="ocr-provider-details__item">
+                        {getShortProviderLabel(provider.id)}: {provider.errorMessage ?? fallbackMessage}
+                      </p>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {ocrProviderStatus ? <p className="settings-meta">{ocrProviderStatus}</p> : null}
+            </>
           ) : null}
-          {ocrProviderStatus ? <p className="settings-meta">{ocrProviderStatus}</p> : null}
         </article>
 
         <article className={`settings-card settings-card--expandable settings-card--compact ${showMetadataLearning ? "settings-card--expanded" : ""}`}>
@@ -1544,9 +1703,9 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
               {showMetadataLearning ? "Hide" : "Show"}
             </button>
           </div>
-          <p className="settings-meta">Sharing: {metadataSharingEnabled ? "Enabled" : "Disabled"}</p>
           {showMetadataLearning ? (
             <>
+              <p className="settings-meta">Sharing: {metadataSharingEnabled ? "Enabled" : "Disabled"}</p>
               <p>Share corrections to improve extraction accuracy for everyone.</p>
               <label className="settings-toggle">
                 <input
@@ -1587,83 +1746,101 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
           ) : null}
         </article>
 
-        <article className="settings-card settings-card--dsc-workspace" aria-live="polite">
-          <h3>Design System Controls</h3>
-          <p className="settings-meta">Install DSC to unlock advanced design controls, visual equations, and the floating workspace.</p>
-          {dscPluginInstalled ? (
+        <article className={`settings-card settings-card--dsc-workspace settings-card--expandable settings-card--compact ${showDesignSystemControls ? "settings-card--expanded" : ""}`} aria-live="polite">
+          <div className="settings-card__head">
+            <h3>Design System Controls</h3>
+            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowDesignSystemControls((previous) => !previous)}>
+              {showDesignSystemControls ? "Hide" : "Show"}
+            </button>
+          </div>
+          {showDesignSystemControls ? (
             <>
-              <div className="form-actions">
-                <button type="button" onClick={() => setShowFloatingDesignSystemCard(true)}>Open DSC Module</button>
-                <button type="button" className="btn-secondary" onClick={() => { void handleUninstallDscPlugin(); }}>Uninstall DSC Module</button>
-              </div>
+              <p className="settings-meta">Install DSC to unlock advanced design controls, visual equations, and the floating workspace.</p>
+              {dscPluginInstalled ? (
+                <>
+                  <div className="form-actions">
+                    <button type="button" onClick={() => setShowFloatingDesignSystemCard(true)}>Open DSC Module</button>
+                    <button type="button" className="btn-secondary" onClick={() => { void handleUninstallDscPlugin(); }}>Uninstall DSC Module</button>
+                  </div>
+                </>
+              ) : (
+                <div className="form-actions">
+                  <button type="button" onClick={() => { void handleInstallDscPlugin(); }}>Install DSC Module</button>
+                </div>
+              )}
+              {dscPluginStatus ? <p className="settings-meta">{dscPluginStatus}</p> : null}
             </>
-          ) : (
-            <div className="form-actions">
-              <button type="button" onClick={() => { void handleInstallDscPlugin(); }}>Install DSC Module</button>
-            </div>
-          )}
-          {dscPluginStatus ? <p className="settings-meta">{dscPluginStatus}</p> : null}
+          ) : null}
         </article>
 
-        <article className="settings-card settings-card--debug-log">
-          <h3>Debug Log</h3>
-          <p>Store local troubleshooting events for Auto Mode and sync behavior. You control whether logs are collected and when they are uploaded.</p>
-          <div className="settings-debug-log__controls">
-            <label className="settings-toggle" title="When disabled, no new local debug events are stored.">
-              <input
-                type="checkbox"
-                checked={debugEnabled}
-                onChange={(event) => handleDebugToggle(event.target.checked)}
-              />
-              Enable Debug Logging
-            </label>
-            <div className="form-actions">
-            <button type="button" className="btn-secondary" onClick={handleClearDebugLog}>
-              Clear Debug Log
+        <article className={`settings-card settings-card--debug-log settings-card--expandable settings-card--compact ${showDebugLog ? "settings-card--expanded" : ""}`}>
+          <div className="settings-card__head">
+            <h3>Debug Log</h3>
+            <button type="button" className="btn-secondary settings-card__toggle" onClick={() => setShowDebugLog((previous) => !previous)}>
+              {showDebugLog ? "Hide" : "Show"}
             </button>
-            <button type="button" className="btn-secondary" onClick={handleGenerateFullDebugReport}>
-              Generate Full Debug Report
-            </button>
-            <button type="button" onClick={() => { void handleSendDebugLogToCloud(); }} disabled={isUploadingDebugLog}>
-              {isUploadingDebugLog ? "Sending..." : "Send Debug Log to Cloud"}
-            </button>
-            </div>
           </div>
-          <p className="settings-meta">Stored entries: {debugStats.entries}</p>
-          <p className="settings-meta">Local log size: {Math.round(debugStats.totalBytes / 1024)} KB / {Math.round(debugStats.maxTotalBytes / 1024)} KB</p>
-          <p className="settings-meta">Upload limit: {Math.round(debugStats.maxUploadBytes / 1024)} KB</p>
-          <p className="settings-meta">Last upload: {debugStats.lastUploadTimestamp ? new Date(debugStats.lastUploadTimestamp).toLocaleString() : "Never"}</p>
-          {debugPolicyStatus ? <p className="settings-meta">{debugPolicyStatus}</p> : null}
-          <div className="settings-debug-log__introspection">
-            <p className="settings-meta">Page: {designTokenDebugReport.page.label}</p>
-            <p className="settings-meta">Card: {designTokenDebugReport.card.label}</p>
-            <p className="settings-meta">Components: {designTokenDebugReport.card.components.map((component) => component.label).join(", ")}</p>
-            <p className="settings-meta">MAJOR: {designTokenDebugReport.tokens.MAJOR.resolvedValue}</p>
-            <p className="settings-meta">MINOR: {designTokenDebugReport.tokens.MINOR.resolvedValue}</p>
-            <p className="settings-meta">ACCENT: {designTokenDebugReport.tokens.ACCENT.resolvedValue}</p>
-            <p className="settings-meta">Risk: {designTokenDebugReport.cascadingFailureRisk.summary}</p>
-            {designTokenDebugReport.mismatches.length > 0 ? (
-              <p className="error-text">Mismatches: {designTokenDebugReport.mismatches.map((entry) => `${entry.token} ${entry.actual} -> ${entry.expected}`).join(" | ")}</p>
-            ) : null}
-            <label className="settings-meta" htmlFor="settings-debug-report-output">Debug Report JSON</label>
-            <textarea
-              id="settings-debug-report-output"
-              className="settings-debug-log__report-output"
-              value={debugReportOutput}
-              onChange={(event) => setDebugReportOutput(event.target.value)}
-              placeholder="Generate Full Debug Report to populate this output."
-              rows={10}
-            />
-            <div className="form-actions">
-              <button type="button" className="btn-secondary" onClick={() => { void handleCopyDebugReport(); }}>
-                Copy Debug Report
-              </button>
-            </div>
-          </div>
-          {debugStatus ? <p className="settings-meta">{debugStatus}</p> : null}
+          {showDebugLog ? (
+            <>
+              <p>Store local troubleshooting events for Auto Mode and sync behavior. You control whether logs are collected and when they are uploaded.</p>
+              <div className="settings-debug-log__controls">
+                <label className="settings-toggle" title="When disabled, no new local debug events are stored.">
+                  <input
+                    type="checkbox"
+                    checked={debugEnabled}
+                    onChange={(event) => handleDebugToggle(event.target.checked)}
+                  />
+                  Enable Debug Logging
+                </label>
+                <div className="form-actions">
+                <button type="button" className="btn-secondary" onClick={handleClearDebugLog}>
+                  Clear Debug Log
+                </button>
+                <button type="button" className="btn-secondary" onClick={handleGenerateFullDebugReport}>
+                  Generate Full Debug Report
+                </button>
+                <button type="button" onClick={() => { void handleSendDebugLogToCloud(); }} disabled={isUploadingDebugLog}>
+                  {isUploadingDebugLog ? "Sending..." : "Send Debug Log to Cloud"}
+                </button>
+                </div>
+              </div>
+              <p className="settings-meta">Stored entries: {debugStats.entries}</p>
+              <p className="settings-meta">Local log size: {Math.round(debugStats.totalBytes / 1024)} KB / {Math.round(debugStats.maxTotalBytes / 1024)} KB</p>
+              <p className="settings-meta">Upload limit: {Math.round(debugStats.maxUploadBytes / 1024)} KB</p>
+              <p className="settings-meta">Last upload: {debugStats.lastUploadTimestamp ? new Date(debugStats.lastUploadTimestamp).toLocaleString() : "Never"}</p>
+              {debugPolicyStatus ? <p className="settings-meta">{debugPolicyStatus}</p> : null}
+              <div className="settings-debug-log__introspection">
+                <p className="settings-meta">Page: {designTokenDebugReport.page.label}</p>
+                <p className="settings-meta">Card: {designTokenDebugReport.card.label}</p>
+                <p className="settings-meta">Components: {designTokenDebugReport.card.components.map((component) => component.label).join(", ")}</p>
+                <p className="settings-meta">MAJOR: {designTokenDebugReport.tokens.MAJOR.resolvedValue}</p>
+                <p className="settings-meta">MINOR: {designTokenDebugReport.tokens.MINOR.resolvedValue}</p>
+                <p className="settings-meta">ACCENT: {designTokenDebugReport.tokens.ACCENT.resolvedValue}</p>
+                <p className="settings-meta">Risk: {designTokenDebugReport.cascadingFailureRisk.summary}</p>
+                {designTokenDebugReport.mismatches.length > 0 ? (
+                  <p className="error-text">Mismatches: {designTokenDebugReport.mismatches.map((entry) => `${entry.token} ${entry.actual} -> ${entry.expected}`).join(" | ")}</p>
+                ) : null}
+                <label className="settings-meta" htmlFor="settings-debug-report-output">Debug Report JSON</label>
+                <textarea
+                  id="settings-debug-report-output"
+                  className="settings-debug-log__report-output"
+                  value={debugReportOutput}
+                  onChange={(event) => setDebugReportOutput(event.target.value)}
+                  placeholder="Generate Full Debug Report to populate this output."
+                  rows={10}
+                />
+                <div className="form-actions">
+                  <button type="button" className="btn-secondary" onClick={() => { void handleCopyDebugReport(); }}>
+                    Copy Debug Report
+                  </button>
+                </div>
+              </div>
+              {debugStatus ? <p className="settings-meta">{debugStatus}</p> : null}
+            </>
+          ) : null}
         </article>
 
-        <article className="settings-card">
+        <article className="settings-card settings-card--priority-2">
           <h3>App Updates</h3>
           {currentAppVersion !== "unknown" ? (
             <p>Current version: <strong>{formatVersionLabel(currentAppVersion)}</strong></p>

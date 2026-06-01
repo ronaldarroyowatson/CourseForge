@@ -150,7 +150,20 @@ export function LoginPage(): React.JSX.Element {
     setSignInError(null);
 
     try {
-      await signInWithLocalOnlyAccount(localUsername);
+      const session = await signInWithLocalOnlyAccount(localUsername);
+      useAuthStore.getState().setAuthenticated({
+        userId: session.userId,
+        userEmail: null,
+        userDisplayName: session.displayName,
+        authMode: "local",
+        isAdmin: false,
+        isSchoolAdmin: false,
+        isSuperAdmin: false,
+        schoolId: null,
+        schoolName: null,
+        districtName: null,
+      });
+      navigate("/textbooks", { replace: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to start a local-only session.";
       setSignInError(message);

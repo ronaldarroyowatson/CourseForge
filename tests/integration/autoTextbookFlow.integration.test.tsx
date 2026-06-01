@@ -120,6 +120,14 @@ const metadataCorrectionSyncMocks = vi.hoisted(() => ({
   syncMetadataCorrectionLearning: vi.fn(async () => ({ message: null })),
 }));
 
+const autoOcrMocks = vi.hoisted(() => ({
+  extractTextFromImageWithFallback: vi.fn<(image: string) => Promise<{ text: string; providerId: string; attempts: string[] }>>(async (_image: string) => ({
+    text: "Inspire Physical Science Student Edition",
+    providerId: "local_tesseract",
+    attempts: ["local_tesseract"],
+  })),
+}));
+
 const authMocks = vi.hoisted(() => ({
   getCurrentUser: vi.fn(() => ({ uid: "teacher-sync" })),
 }));
@@ -142,6 +150,14 @@ vi.mock("../../src/core/services/syncService", async () => {
 vi.mock("../../src/core/services/metadataCorrectionSyncService", () => ({
   syncMetadataCorrectionLearning: () => metadataCorrectionSyncMocks.syncMetadataCorrectionLearning(),
 }));
+
+vi.mock("../../src/core/services/autoOcrService", async () => {
+  const actual = await vi.importActual<typeof import("../../src/core/services/autoOcrService")>("../../src/core/services/autoOcrService");
+  return {
+    ...actual,
+    extractTextFromImageWithFallback: (image: string) => autoOcrMocks.extractTextFromImageWithFallback(image),
+  };
+});
 
 vi.mock("../../src/firebase/auth", async () => {
   const actual = await vi.importActual<typeof import("../../src/firebase/auth")>("../../src/firebase/auth");
@@ -221,6 +237,7 @@ describe("auto textbook flow integration", () => {
     window.localStorage.removeItem("courseforge.autoSessionDraft.v1");
     window.localStorage.removeItem("courseforge.autoExtractionCheckpoints.v1");
     metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl.mockClear();
+    autoOcrMocks.extractTextFromImageWithFallback.mockClear();
     syncServiceMocks.syncNow.mockClear();
     syncServiceMocks.findCloudTextbookByISBN.mockReset().mockResolvedValue(undefined);
     metadataCorrectionSyncMocks.syncMetadataCorrectionLearning.mockClear();
@@ -335,6 +352,63 @@ describe("auto textbook flow integration", () => {
 
       expect(screen.getByText(/Metadata source: ocr/i)).toBeInTheDocument();
       expect(screen.getByText(/OCR: cloud_openai_vision/i)).toBeInTheDocument();
+    } finally {
+      fileReaderReadAsDataUrl.mockRestore();
+    }
+  });
+
+  it("falls back to OCR when pipeline returns refusal-style raw text", async () => {
+    const fileReaderReadAsDataUrl = vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function mockReadAsDataUrl(this: FileReader) {
+      Object.defineProperty(this, "result", {
+        configurable: true,
+        value: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6W2NcAAAAASUVORK5CYII=",
+      });
+      this.onload?.(new ProgressEvent("load") as ProgressEvent<FileReader>);
+    });
+
+    metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl.mockResolvedValueOnce({
+      result: {
+        title: "Inspire Physical Science",
+        subtitle: "with Earth Science",
+        edition: "Student Edition",
+        publisher: "McGraw Hill",
+        series: null,
+        gradeLevel: null,
+        subject: "Science",
+        confidence: 0.93,
+        rawText: "I'm unable to extract text from images. If you have a different request or need assistance with something else, feel free to ask!",
+        source: "vision",
+      },
+      originalVisionOutput: null,
+      originalOcrOutput: {
+        rawText: "",
+        providerId: "cloud_openai_vision",
+      },
+    });
+
+    autoOcrMocks.extractTextFromImageWithFallback.mockResolvedValueOnce({
+      text: "Inspire Physical Science Student Edition",
+      providerId: "local_tesseract",
+      attempts: ["local_tesseract"],
+    });
+
+    try {
+      render(
+        <AutoTextbookSetupFlow
+          onSaved={() => undefined}
+          onSwitchToManual={() => undefined}
+        />
+      );
+
+      fireEvent.drop(screen.getByRole("region", { name: "Cover image drop zone" }), {
+        dataTransfer: {
+          files: [new File(["cover"], "cover.png", { type: "image/png" })],
+        },
+      });
+
+      await waitFor(() => {
+        expect(autoOcrMocks.extractTextFromImageWithFallback).toHaveBeenCalledTimes(1);
+      });
     } finally {
       fileReaderReadAsDataUrl.mockRestore();
     }

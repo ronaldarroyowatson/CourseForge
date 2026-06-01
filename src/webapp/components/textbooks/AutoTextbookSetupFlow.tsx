@@ -71,8 +71,14 @@ import { useRepositories } from "../../hooks/useRepositories";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 import { t as translate } from "../../../core/services/i18nService";
-import { captureVisibleChromeTab, isChromeOSRuntime, isSmallChromebookViewport } from "../../utils/platform";
+import {
+  captureDisplayFrame,
+  getDisplayCaptureSupportInfo,
+  normalizeDisplayCaptureError,
+} from "../../utils/displayCapture";
+import { isChromeOSRuntime, isSmallChromebookViewport } from "../../utils/platform";
 import { getCurrentUser } from "../../../firebase/auth";
+import { emitClientDebugTrace } from "../../../core/services/clientDebugTraceService";
 
 type AutoFlowStep = "cover" | "title" | "toc" | "toc-editor";
 type AutoPrimaryHelperAction =
@@ -297,6 +303,24 @@ const KNOWN_TEXTBOOK_DOMAINS = [
 const GUIDED_CUE_TYPES: GuidedCueType[] = ["openToc", "openGlossary", "openChapter", "openSection", "nextPage"];
 
 const AUTO_CAPTURE_USAGE_STORAGE_KEY = "courseforge.autoCaptureUsageByDraft";
+
+const OCR_REFUSAL_PATTERNS: RegExp[] = [
+  /unable to extract text from images/i,
+  /can't extract text from images/i,
+  /cannot extract text from images/i,
+  /i'?m unable to/i,
+  /if you have a different request/i,
+  /feel free to ask/i,
+];
+
+function isLikelyUnusableOcrText(value: string | null | undefined): boolean {
+  const normalized = (value ?? "").trim();
+  if (!normalized) {
+    return true;
+  }
+
+  return OCR_REFUSAL_PATTERNS.some((pattern) => pattern.test(normalized));
+}
 
 function createDraftCaptureKey(): string {
   return `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -791,45 +815,6 @@ function metadataFormToResult(form: MetadataFormState, rawText: string, source: 
   };
 }
 
-async function captureDisplayFrame(input?: { preferChromeTabCapture?: boolean }): Promise<string> {
-  if (input?.preferChromeTabCapture) {
-    const chromeCapture = await captureVisibleChromeTab();
-    if (chromeCapture) {
-      return chromeCapture;
-    }
-  }
-
-  const media = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-
-  try {
-    const videoTrack = media.getVideoTracks()[0];
-    const video = document.createElement("video");
-    video.srcObject = media;
-    video.muted = true;
-    video.playsInline = true;
-
-    await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new Error("Unable to read the shared screen."));
-    });
-
-    await video.play();
-
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const context = canvas.getContext("2d");
-    if (!context) {
-      throw new Error("Unable to initialize capture canvas.");
-    }
-
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.92);
-  } finally {
-    media.getTracks().forEach((track) => track.stop());
-  }
-}
-
 async function cropToSelectionAndAutoBoundary(imageDataUrl: string, selection: SelectionRect): Promise<string> {
   const image = await loadImage(imageDataUrl);
   const firstPassCanvas = document.createElement("canvas");
@@ -1013,6 +998,13 @@ function emitAutoFlowDiagnostic(
     // Best effort diagnostics.
   });
 
+  emitClientDebugTrace({
+    channel: "auto-flow",
+    event,
+    level,
+    payload: context,
+  });
+
   if (typeof fetch === "function") {
     void fetch("/api/ocr-debug-log", {
       method: "POST",
@@ -1026,7 +1018,15 @@ function emitAutoFlowDiagnostic(
         context,
       }),
     }).catch(() => {
-      // Best effort diagnostics.
+      emitClientDebugTrace({
+        channel: "auto-flow",
+        event: "ocr_debug_endpoint_unavailable",
+        level: "warning",
+        payload: {
+          originalEvent: event,
+          traceId: traceId ?? null,
+        },
+      });
     });
   }
 }
@@ -1437,6 +1437,7 @@ export function AutoTextbookSetupFlow({
 
     return null;
   }, [activePrimaryHelper, environmentPreparationMessage]);
+  const captureSupportInfo = useMemo(() => getDisplayCaptureSupportInfo(), []);
   const hasOcrDraft = ocrDraft.trim().length > 0;
 
   useEffect(() => {
@@ -2388,8 +2389,16 @@ export function AutoTextbookSetupFlow({
         setIsRunningOcr(false);
 
         metadataResult = pipelineResult.result;
-        ocrText = pipelineResult.originalOcrOutput?.rawText ?? pipelineResult.result.rawText;
-        ocrProviderId = pipelineResult.originalOcrOutput?.providerId ?? "vision-primary";
+        const resolvedPipelineOcr = await resolveUsablePipelineOcr({
+          candidateText: pipelineResult.originalOcrOutput?.rawText ?? pipelineResult.result.rawText,
+          sourceProviderId: pipelineResult.originalOcrOutput?.providerId ?? "vision-primary",
+          imageDataUrl: cropped,
+          targetStep,
+          traceId,
+          hasOriginalOcrOutput: Boolean(pipelineResult.originalOcrOutput),
+        });
+        ocrText = resolvedPipelineOcr.text;
+        ocrProviderId = resolvedPipelineOcr.providerId;
         emitAutoFlowDiagnostic("metadata_pipeline_completed", {
           traceId,
           context: {
@@ -2399,7 +2408,7 @@ export function AutoTextbookSetupFlow({
             confidence: pipelineResult.result.confidence,
           },
         });
-        ocrProviderStatusMessage = `Metadata source: ${pipelineResult.result.source}${pipelineResult.originalOcrOutput ? ` (OCR: ${pipelineResult.originalOcrOutput.providerId})` : ""}`;
+        ocrProviderStatusMessage = `Metadata source: ${pipelineResult.result.source}${ocrProviderId ? ` (OCR: ${ocrProviderId})` : ""}`;
         lastCapturedOcrByStepRef.current[targetStep] = ocrText;
       } else {
         setIsRunningOcr(true);
@@ -2460,21 +2469,39 @@ export function AutoTextbookSetupFlow({
       };
     } catch (error) {
       setIsRunningOcr(false);
-      const message = error instanceof Error ? error.message : "Unknown capture error.";
+      const normalized = normalizeDisplayCaptureError(error);
+      const message = normalized.message;
+      const userFacingMessage = normalized.code === "permission_denied"
+        ? `Screen capture permission was denied in ${normalized.browser}. Enable macOS Screen Recording for the browser, then retry. You can also use Upload Image.`
+        : normalized.code === "chooser_cancelled"
+          ? "Screen capture was canceled before selecting a window/tab. Please select a source and retry, or use Upload Image."
+          : normalized.code === "api_unavailable"
+            ? `${normalized.browser} does not fully support this capture path. Use Chrome or Edge, or use Upload Image.`
+            : normalized.code === "device_unavailable"
+              ? "The selected capture source was not readable. Close other sharing sessions and retry, or use Upload Image."
+              : normalized.code === "frame_unavailable"
+                ? "A share source was selected, but no frame was received. Retry capture, or use Upload Image."
+                : "Unable to capture screen. Try again, or use Upload Image as fallback.";
       emitAutoFlowDiagnostic("capture_failed", {
         level: "error",
         traceId,
         context: {
           targetStep,
           message,
+          code: normalized.code,
+          browser: normalized.browser,
         },
       });
-      setErrorMessage("Unable to capture screen. Try again, or use Upload Image as fallback.");
+      setErrorMessage(userFacingMessage);
       appendDebugLogEntry({
         eventType: "error",
         message: "Display capture failed.",
         autoModeStep: targetStep,
-        context: { detail: message },
+        context: {
+          detail: message,
+          code: normalized.code,
+          browser: normalized.browser,
+        },
       });
       return null;
     } finally {
@@ -2484,6 +2511,66 @@ export function AutoTextbookSetupFlow({
 
   function runMetadataExtraction(): void {
     applyMetadataFromText(ocrDraft, step === "title" ? "title" : "cover");
+  }
+
+  async function resolveUsablePipelineOcr(
+    input: {
+      candidateText: string;
+      sourceProviderId: string;
+      imageDataUrl: string;
+      targetStep: "cover" | "title";
+      traceId: string;
+      hasOriginalOcrOutput: boolean;
+    }
+  ): Promise<{ text: string; providerId: string }> {
+    if (!isLikelyUnusableOcrText(input.candidateText)) {
+      return {
+        text: input.candidateText,
+        providerId: input.sourceProviderId,
+      };
+    }
+
+    emitAutoFlowDiagnostic("pipeline_text_unusable_forcing_ocr", {
+      level: "warning",
+      traceId: input.traceId,
+      context: {
+        targetStep: input.targetStep,
+        hasOriginalOcrOutput: input.hasOriginalOcrOutput,
+      },
+    });
+
+    try {
+      const fallback = await extractTextFromImageWithFallback(input.imageDataUrl);
+      if (!isLikelyUnusableOcrText(fallback.text)) {
+        emitAutoFlowDiagnostic("pipeline_text_fallback_ocr_success", {
+          traceId: input.traceId,
+          context: {
+            targetStep: input.targetStep,
+            fallbackProviderId: fallback.providerId,
+            textLength: fallback.text.length,
+          },
+        });
+        return {
+          text: fallback.text,
+          providerId: fallback.providerId,
+        };
+      }
+    } catch (error) {
+      emitAutoFlowDiagnostic("pipeline_text_fallback_ocr_failed", {
+        level: "warning",
+        traceId: input.traceId,
+        context: {
+          targetStep: input.targetStep,
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+
+    setErrorMessage("OCR could not read usable text from this image. Try recapturing, uploading a clearer cover, or editing OCR text manually.");
+    return {
+      text: "",
+      providerId: input.sourceProviderId,
+    };
   }
 
   function runTocExtraction(): void {
@@ -2568,8 +2655,16 @@ export function AutoTextbookSetupFlow({
       });
       setIsRunningOcr(false);
 
-      const ocrText = pipelineResult.originalOcrOutput?.rawText ?? pipelineResult.result.rawText;
-      const ocrProviderId = pipelineResult.originalOcrOutput?.providerId ?? "vision-primary";
+      const resolvedPipelineOcr = await resolveUsablePipelineOcr({
+        candidateText: pipelineResult.originalOcrOutput?.rawText ?? pipelineResult.result.rawText,
+        sourceProviderId: pipelineResult.originalOcrOutput?.providerId ?? "vision-primary",
+        imageDataUrl: dataUrl,
+        targetStep,
+        traceId,
+        hasOriginalOcrOutput: Boolean(pipelineResult.originalOcrOutput),
+      });
+      const ocrText = resolvedPipelineOcr.text;
+      const ocrProviderId = resolvedPipelineOcr.providerId;
       emitAutoFlowDiagnostic("upload_pipeline_completed", {
         traceId,
         context: {
@@ -2579,9 +2674,7 @@ export function AutoTextbookSetupFlow({
           confidence: pipelineResult.result.confidence,
         },
       });
-      setOcrProviderStatus(
-        `Metadata source: ${pipelineResult.result.source}${pipelineResult.originalOcrOutput ? ` (OCR: ${pipelineResult.originalOcrOutput.providerId})` : ""}`
-      );
+      setOcrProviderStatus(`Metadata source: ${pipelineResult.result.source}${ocrProviderId ? ` (OCR: ${ocrProviderId})` : ""}`);
 
       // Show preview dialog so the user can review image and OCR text before confirming.
       // Use a scaled-down version only for display; full-res `dataUrl` was already used for OCR.
@@ -3803,6 +3896,12 @@ export function AutoTextbookSetupFlow({
           Switch to Manual
         </button>
       </div>
+
+      {(step === "cover" || step === "title" || step === "toc") ? (
+        <p className="form-hint">
+          Capture support: {captureSupportInfo.label} ({captureSupportInfo.supportLevel}). {captureSupportInfo.guidance}
+        </p>
+      ) : null}
 
       {(step === "cover" || step === "title" || step === "toc") && primaryHelperText && primaryHelperAnchor ? (
         <div

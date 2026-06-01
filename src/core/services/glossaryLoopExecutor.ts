@@ -96,10 +96,10 @@ export async function executeGlossaryLoopBatch(input: GlossaryLoopExecutionInput
   const batchLimit = Math.max(1, Math.floor(maxTermsPerBatch));
   const extractedItems: GlossaryLoopExtractedItem[] = [];
 
-  let checkpoint = {
+  let checkpoint: AutoExtractionCheckpoint = {
     ...input.checkpoint,
     draftId,
-    stage: "glossary_capture" as const,
+    stage: "glossary_capture",
     savedAt: Date.now(),
     pauseReason: undefined,
   };

@@ -131,6 +131,40 @@ describe("autoOcrService", () => {
     expect(result.attempts[1].success).toBe(true);
   });
 
+  it("treats refusal-style cloud output as unusable and falls back to local OCR", async () => {
+    const providers: AutoOcrProvider[] = [
+      {
+        id: "cloud_openai_vision",
+        label: "Cloud",
+        isAvailable: async () => true,
+        extractText: async () => "I'm unable to extract text from images. If you have a different request, feel free to ask!",
+      },
+      {
+        id: "local_tesseract",
+        label: "Local",
+        isAvailable: async () => true,
+        extractText: async () => "Inspire Physical Science Student Edition",
+      },
+    ];
+
+    const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+      providerOrder: ["cloud_openai_vision", "local_tesseract"],
+      providersOverride: providers,
+    });
+
+    expect(result.providerId).toBe("local_tesseract");
+    expect(result.text).toContain("Inspire Physical Science");
+    expect(result.attempts).toHaveLength(2);
+    expect(result.attempts[0]).toMatchObject({
+      providerId: "cloud_openai_vision",
+      success: false,
+    });
+    expect(result.attempts[1]).toMatchObject({
+      providerId: "local_tesseract",
+      success: true,
+    });
+  });
+
   it("uses backend provider status for cloud OCR health and execution", async () => {
     callableMocks.getAiProviderStatus.mockResolvedValue({
       data: {

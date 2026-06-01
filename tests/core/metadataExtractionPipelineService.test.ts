@@ -49,7 +49,7 @@ describe("metadataExtractionPipelineService", () => {
 
     expect(result.result.source).toBe("vision");
     expect(result.result.title).toBe("Algebra 1");
-    expect(ocrMock).not.toHaveBeenCalled();
+    expect(ocrMock).toHaveBeenCalledTimes(1);
   });
 
   it("cross-validates a high-confidence vision subject against screenshot raw text", async () => {
@@ -158,7 +158,7 @@ describe("metadataExtractionPipelineService", () => {
 
     expect(result.result.source).toBe("vision");
     expect(result.result.gradeLevel).toBe("Pre-K-12");
-    expect(ocrMock).not.toHaveBeenCalled();
+    expect(ocrMock).toHaveBeenCalledTimes(1);
   });
 
   it("forces OCR fallback for copyright-like pages when vision misses critical fields", async () => {

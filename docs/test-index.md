@@ -1,11 +1,11 @@
 # Test Index
 
-Generated: 2026-06-01T20:06:29.286Z
+Generated: 2026-06-01T23:43:09.029Z
 
 ## Summary
 
-- Total test files: 79
-- Unit test files: 50
+- Total test files: 83
+- Unit test files: 54
 - Integration test files: 27
 - Rules test files: 2
 - Canonical sample files: 5
@@ -16,6 +16,7 @@ Generated: 2026-06-01T20:06:29.286Z
 - tests/core/auth.initialization.test.ts
 - tests/core/auth.provider.availability.test.ts
 - tests/core/auth.redirect.linking.test.ts
+- tests/core/autoExtractionOrchestrationService.test.ts
 - tests/core/autoOcrService.test.ts
 - tests/core/autoTextbookConflictService.test.ts
 - tests/core/autoTextbookPersistence.localization.test.ts
@@ -24,12 +25,15 @@ Generated: 2026-06-01T20:06:29.286Z
 - tests/core/debugLogService.test.ts
 - tests/core/designSystemService.test.ts
 - tests/core/designTokenDebugService.test.ts
+- tests/core/displayCapture.test.ts
 - tests/core/documentExtraction.guardrails.test.ts
 - tests/core/documentIngest.extraction.test.ts
 - tests/core/equationFormatService.test.ts
 - tests/core/findAllDuplicatePairs.test.ts
 - tests/core/gameTextService.test.ts
+- tests/core/glossaryLoopExecutor.test.ts
 - tests/core/glossaryService.test.ts
+- tests/core/guidedCaptureCueService.test.ts
 - tests/core/i18nService.test.ts
 - tests/core/installerLifecycle.macos.matrix.test.ts
 - tests/core/installerLifecycle.matrix.test.ts

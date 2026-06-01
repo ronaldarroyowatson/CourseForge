@@ -268,14 +268,12 @@ export function saveAutoExtractionCheckpoint(
   }
 
   const existing = readAutoExtractionCheckpoints(storageRef).filter((entry) => entry.draftId !== checkpoint.draftId);
-  const merged = [
-    {
-      ...checkpoint,
-      version: 1,
-      savedAt: Date.now(),
-    },
-    ...existing,
-  ].sort((a, b) => b.savedAt - a.savedAt);
+  const normalizedCheckpoint: AutoExtractionCheckpoint = {
+    ...checkpoint,
+    version: 1,
+    savedAt: Date.now(),
+  };
+  const merged: AutoExtractionCheckpoint[] = [normalizedCheckpoint, ...existing].sort((a, b) => b.savedAt - a.savedAt);
 
   try {
     storageRef.setItem(AUTO_EXTRACTION_CHECKPOINTS_STORAGE_KEY, JSON.stringify(merged.slice(0, 20)));

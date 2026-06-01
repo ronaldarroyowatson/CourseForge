@@ -4,6 +4,7 @@ import { functionsClient } from "../../firebase/functions";
 import type { RelatedIsbn } from "../models";
 import { extractTextFromImageWithFallback, type AutoOcrProviderId } from "./autoOcrService";
 import { appendDebugLogEntry } from "./debugLogService";
+import { emitClientDebugTrace } from "./clientDebugTraceService";
 import { getCurrentUser } from "../../firebase/auth";
 import {
   applyCorrectionRulesToText,
@@ -200,6 +201,13 @@ async function emitMetadataPipelineDiagnostic(
     // Best effort diagnostics.
   });
 
+  emitClientDebugTrace({
+    channel: "metadata-pipeline",
+    event,
+    level,
+    payload: context,
+  });
+
   if (typeof fetch === "function") {
     void fetch("/api/ocr-debug-log", {
       method: "POST",
@@ -213,7 +221,15 @@ async function emitMetadataPipelineDiagnostic(
         context,
       }),
     }).catch(() => {
-      // Best effort diagnostics.
+      emitClientDebugTrace({
+        channel: "metadata-pipeline",
+        event: "ocr_debug_endpoint_unavailable",
+        level: "warning",
+        payload: {
+          originalEvent: event,
+          traceId: traceId ?? null,
+        },
+      });
     });
   }
 }
@@ -765,7 +781,7 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     ? !isCopyrightLikePage(originalVisionOutput, context) || hasCriticalCopyrightFields(originalVisionOutput)
     : false;
 
-  const shouldForceOcrEnrichment = Boolean(originalVisionOutput) && context.pageType === "title";
+  const shouldForceOcrEnrichment = Boolean(originalVisionOutput) && (context.pageType === "title" || context.pageType === "cover");
   const requiresOcrForCompleteness = !visionLooksUsable || !copyrightFieldsSufficient;
   const shouldAttemptOcr = shouldForceOcrEnrichment || requiresOcrForCompleteness;
 

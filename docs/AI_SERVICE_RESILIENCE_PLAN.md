@@ -14,6 +14,12 @@ This plan defines how CourseForge remains usable when an AI service is degraded,
 
 Last updated: March 22, 2026
 
+## Temporary Re-Prioritization (June 1, 2026)
+
+- Auto extraction roadmap work is temporarily paused while an OCR regression is remediated.
+- Current blocker: cover-image upload path can surface unusable refusal-style raw text instead of OCR output in Auto setup.
+- Immediate focus: restore reliable cloud-plus-local OCR behavior for cover/title capture and add regression tests before continuing extraction feature rollout.
+
 ## Goals
 
 - Keep Auto textbook setup functional when cloud AI is down.

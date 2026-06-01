@@ -3,6 +3,7 @@ import { httpsCallable } from "firebase/functions";
 import { getCurrentUser, waitForAuthStateChange } from "../../firebase/auth";
 import { functionsClient } from "../../firebase/functions";
 import { appendDebugLogEntry } from "./debugLogService";
+import { emitClientDebugTrace } from "./clientDebugTraceService";
 
 export type AutoOcrProviderId = 
   | "local_tesseract" 
@@ -63,6 +64,14 @@ const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000;
 
 const CLOUD_PROVIDER_ORDER: CloudAutoOcrProviderId[] = ["cloud_openai_vision", "cloud_github_models_vision"];
 const DEFAULT_PROVIDER_ORDER: AutoOcrProviderId[] = [...CLOUD_PROVIDER_ORDER, "local_tesseract"];
+const UNUSABLE_OCR_PATTERNS: RegExp[] = [
+  /unable to extract text from images/i,
+  /can't extract text from images/i,
+  /cannot extract text from images/i,
+  /i'?m unable to/i,
+  /if you have a different request/i,
+  /feel free to ask/i,
+];
 
 interface CircuitStateEntry {
   consecutiveFailures: number;
@@ -126,6 +135,13 @@ async function emitOcrDiagnostic(
     // Best effort diagnostics.
   });
 
+  emitClientDebugTrace({
+    channel: "ocr",
+    event,
+    level,
+    payload: context,
+  });
+
   if (typeof fetch === "function") {
     void fetch("/api/ocr-debug-log", {
       method: "POST",
@@ -139,7 +155,15 @@ async function emitOcrDiagnostic(
         context,
       }),
     }).catch(() => {
-      // Best effort diagnostics.
+      emitClientDebugTrace({
+        channel: "ocr",
+        event: "ocr_debug_endpoint_unavailable",
+        level: "warning",
+        payload: {
+          originalEvent: event,
+          traceId: traceId ?? null,
+        },
+      });
     });
   }
 }
@@ -287,6 +311,15 @@ function getStorage(): Storage | null {
 
 function isCloudProviderId(providerId: AutoOcrProviderId): providerId is CloudAutoOcrProviderId {
   return providerId === "cloud_openai_vision" || providerId === "cloud_github_models_vision";
+}
+
+function isLikelyUnusableOcrText(value: string | null | undefined): boolean {
+  const normalized = (value ?? "").trim();
+  if (!normalized) {
+    return true;
+  }
+
+  return UNUSABLE_OCR_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function getProviderLabel(providerId: AutoOcrProviderId): string {
@@ -1007,9 +1040,9 @@ export async function extractTextFromImageWithFallback(
         ? await getLocalPreparedImage()
         : imageDataUrl;
       const text = await provider.extractText(providerImage);
-      if (!text.trim()) {
-        attempts.push({ providerId, success: false, errorMessage: "OCR returned empty text." });
-        recordProviderFailure(providerId, "OCR returned empty text.");
+      if (isLikelyUnusableOcrText(text)) {
+        attempts.push({ providerId, success: false, errorMessage: "OCR returned unusable text." });
+        recordProviderFailure(providerId, "OCR returned unusable text.");
         void emitOcrDiagnostic("provider_extract_empty_text", {
           level: "warning",
           traceId: extractionTraceId,

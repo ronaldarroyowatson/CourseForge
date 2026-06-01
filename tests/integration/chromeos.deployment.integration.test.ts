@@ -22,10 +22,12 @@ describe("chromeos deployment foundations", () => {
 
   it("has chromeos capture path and responsive breakpoints", () => {
     const autoFlow = readWorkspaceFile("src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx");
+    const displayCapture = readWorkspaceFile("src/webapp/utils/displayCapture.ts");
     const styles = readWorkspaceFile("src/webapp/styles/globals.css");
 
-    expect(autoFlow).toContain("captureVisibleChromeTab");
+    expect(autoFlow).toContain("captureDisplayFrame");
     expect(autoFlow).toContain("isChromeOSRuntime");
+    expect(displayCapture).toContain("captureVisibleChromeTab");
     expect(styles).toContain("max-width: 1366px");
     expect(styles).toContain("max-height: 900px");
   });

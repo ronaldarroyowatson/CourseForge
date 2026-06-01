@@ -2,6 +2,10 @@
 
 ## Overview
 
+For macOS and non-extension browser capture support guidance, see:
+
+- `docs/browser-capture-support-matrix.md`
+
 CourseForge supports Chromebook classrooms through:
 
 - Chrome-optimized extension packaging

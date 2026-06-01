@@ -13,6 +13,7 @@ export * from "./schoolAdminService";
 export * from "./accessibilityService";
 export * from "./autoOcrService";
 export * from "./autoExtractionOrchestrationService";
+export * from "./guidedCaptureCueService";
 export * from "./ocrCorrectionLearningService";
 export * from "./metadataCorrectionLearningService";
 export * from "./metadataCorrectionSyncService";

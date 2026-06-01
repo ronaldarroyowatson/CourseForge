@@ -50,6 +50,16 @@ import {
   type AutoExtractionCheckpoint,
 } from "../../../core/services/autoExtractionOrchestrationService";
 import {
+  clearGuidedCue,
+  createEmptyGuidedCaptureCuePlan,
+  getGuidedCueCompletion,
+  getGuidedCueLabel,
+  getMissingGuidedCues,
+  markGuidedCue,
+  type GuidedCaptureCuePlan,
+  type GuidedCueType,
+} from "../../../core/services/guidedCaptureCueService";
+import {
   extractMetadataWithOcrFallbackFromDataUrl,
   type MetadataPipelineResult,
 } from "../../../core/services/metadataExtractionPipelineService";
@@ -166,6 +176,7 @@ interface AutoTextbookSetupFlowProps {
     ocrDraft?: string;
     tocResult?: ParsedTocResult;
     tocPages?: TocPage[];
+    guidedCuePlan?: GuidedCaptureCuePlan;
     bypassImageModeration?: boolean;
   };
 }
@@ -282,6 +293,8 @@ const KNOWN_TEXTBOOK_DOMAINS = [
   "mcgrawhill.com",
 ];
 
+const GUIDED_CUE_TYPES: GuidedCueType[] = ["openToc", "openGlossary", "openChapter", "openSection", "nextPage"];
+
 const AUTO_CAPTURE_USAGE_STORAGE_KEY = "courseforge.autoCaptureUsageByDraft";
 
 function createDraftCaptureKey(): string {
@@ -377,6 +390,7 @@ interface AutoSessionDraft {
   metadataFormSnapshot?: MetadataFormState;
   relatedIsbnsSnapshot?: RelatedIsbn[];
   extractionCheckpoint?: AutoExtractionCheckpoint;
+  guidedCuePlan?: GuidedCaptureCuePlan;
   step: AutoFlowStep;
   stepsCompleted: { cover: boolean; copyright: boolean };
 }
@@ -400,6 +414,7 @@ function isAutoSessionDraft(value: unknown): value is AutoSessionDraft {
     && (draft.metadataFormSnapshot === undefined || typeof draft.metadataFormSnapshot === "object")
     && (draft.relatedIsbnsSnapshot === undefined || Array.isArray(draft.relatedIsbnsSnapshot))
     && (draft.extractionCheckpoint === undefined || typeof draft.extractionCheckpoint === "object")
+    && (draft.guidedCuePlan === undefined || typeof draft.guidedCuePlan === "object")
     && (draft.step === "cover" || draft.step === "title" || draft.step === "toc" || draft.step === "toc-editor")
     && typeof draft.stepsCompleted?.cover === "boolean"
     && typeof draft.stepsCompleted?.copyright === "boolean"
@@ -1040,6 +1055,22 @@ export function AutoTextbookSetupFlow({
   onProgressChange,
   testingSeedState,
 }: AutoTextbookSetupFlowProps): React.JSX.Element {
+  const initialGuidedCuePlan = useMemo(() => {
+    if (testingSeedState?.guidedCuePlan) {
+      return testingSeedState.guidedCuePlan;
+    }
+
+    let viewerHost: string | undefined;
+    try {
+      const url = new URL(testingSeedState?.metadataDraft?.platformUrl ?? "");
+      viewerHost = url.hostname;
+    } catch {
+      viewerHost = undefined;
+    }
+
+    return createEmptyGuidedCaptureCuePlan(viewerHost);
+  }, [testingSeedState?.guidedCuePlan, testingSeedState?.metadataDraft?.platformUrl]);
+
   const language = useUIStore((state) => state.language);
   const syncWriteCount = useUIStore((state) => state.writeCount);
   const syncReadCount = useUIStore((state) => state.readCount);
@@ -1099,6 +1130,7 @@ export function AutoTextbookSetupFlow({
     chapters: testingSeedState.tocResult.chapters,
     confidence: testingSeedState.tocResult.confidence,
   }] : []));
+  const [guidedCuePlan, setGuidedCuePlan] = useState<GuidedCaptureCuePlan>(initialGuidedCuePlan);
   const [isBusy, setIsBusy] = useState(false);
   const [activePrimaryHelper, setActivePrimaryHelper] = useState<AutoPrimaryHelperAction | null>(null);
   const [primaryHelperAnchor, setPrimaryHelperAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -1249,7 +1281,9 @@ export function AutoTextbookSetupFlow({
       cursor: {
         chapterIndex: tocResult.chapters.length > 0 ? 0 : undefined,
       },
-      completedCounts: {},
+      completedCounts: {
+        vocabulary: getGuidedCueCompletion(guidedCuePlan).completed,
+      },
       pauseReason: shouldPauseAutoExtraction({
         cloudReads: { used: syncReadCount, limit: syncReadLimit },
         cloudWrites: { used: syncWriteCount, limit: syncWriteLimit },
@@ -1277,6 +1311,7 @@ export function AutoTextbookSetupFlow({
       metadataFormSnapshot: metadataForm,
       relatedIsbnsSnapshot: relatedIsbns,
       extractionCheckpoint,
+      guidedCuePlan,
       step,
       stepsCompleted: {
         cover: Boolean(coverImageDataUrl),
@@ -1299,10 +1334,22 @@ export function AutoTextbookSetupFlow({
     syncWriteCount,
     syncWriteExceeded,
     syncWriteLimit,
+    guidedCuePlan,
     tocResult.chapters.length,
   ]);
 
   const canFinishToc = tocResult.chapters.length > 0;
+  const guidedCueCompletion = useMemo(() => getGuidedCueCompletion(guidedCuePlan), [guidedCuePlan]);
+  const missingGuidedCues = useMemo(() => getMissingGuidedCues(guidedCuePlan), [guidedCuePlan]);
+
+  function toggleGuidedCue(type: GuidedCueType): void {
+    if (guidedCuePlan.cues[type]?.acknowledged) {
+      setGuidedCuePlan((current) => clearGuidedCue(current, type));
+      return;
+    }
+
+    setGuidedCuePlan((current) => markGuidedCue(current, type));
+  }
 
   useEffect(() => {
     const currentStep: 1 | 2 | 3 | 4 = step === "cover"
@@ -3424,6 +3471,7 @@ export function AutoTextbookSetupFlow({
                             ...fromMetadataFormState(nextMetadataForm),
                             relatedIsbns: nextRelatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
                           });
+                          setGuidedCuePlan(draft.guidedCuePlan ?? createEmptyGuidedCaptureCuePlan());
                           setStep(draft.step);
                           if (draft.extractionCheckpoint) {
                             saveAutoExtractionCheckpoint(draft.extractionCheckpoint);
@@ -3788,6 +3836,37 @@ export function AutoTextbookSetupFlow({
         <button type="button" className="btn-secondary" onClick={runMetadataExtraction} disabled={isBusy}>
           Re-parse OCR Text
         </button>
+      ) : null}
+
+      {step === "toc" ? (
+        <div className="toc-capture-summary" role="region" aria-label="Guided navigation cues">
+          <p className="toc-capture-summary__header">
+            <strong>Guided navigation cues:</strong> {guidedCueCompletion.completed}/{guidedCueCompletion.total} marked ({guidedCueCompletion.percent}%).
+          </p>
+          {missingGuidedCues.length > 0 ? (
+            <p className="form-hint">
+              Required for glossary automation: {missingGuidedCues.map((cue) => getGuidedCueLabel(cue)).join(", ")}.
+            </p>
+          ) : (
+            <p className="form-hint">Required cues are marked. The extraction run can automate glossary/page navigation when capture is started.</p>
+          )}
+          <div className="form-actions">
+            {GUIDED_CUE_TYPES.map((cue) => {
+              const marked = Boolean(guidedCuePlan.cues[cue]?.acknowledged);
+              return (
+                <button
+                  key={`guided-cue-${cue}`}
+                  type="button"
+                  className={marked ? "btn-secondary" : undefined}
+                  onClick={() => toggleGuidedCue(cue)}
+                  disabled={isBusy}
+                >
+                  {marked ? "Unmark" : "Mark"} {getGuidedCueLabel(cue)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       ) : null}
 
       {step === "toc" ? (

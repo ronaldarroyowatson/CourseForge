@@ -1,4 +1,5 @@
 import React from "react";
+import { useLocation } from "react-router-dom";
 import { doc, setDoc } from "firebase/firestore";
 
 import {
@@ -49,6 +50,13 @@ interface SettingsPageProps {
   onBack?: () => void;
   onNavigate?: (path: string) => void;
 }
+
+const PROVIDER_LABEL_BY_FIREBASE_ID: Record<string, string> = {
+  "google.com": "Google",
+  "github.com": "GitHub",
+  "microsoft.com": "Microsoft",
+  "apple.com": "Apple",
+};
 
 function parseSemver(value: string): number[] | null {
   const match = value.match(/(\d+)\.(\d+)\.(\d+)/);
@@ -385,14 +393,28 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
     pageId: "settings",
     cardId: "debug-log",
   }), [debugEnabled, debugStats.entries, debugStats.totalBytes, debugPolicyStatus, debugStatus]);
-  const linkedAuthProviderIds = React.useMemo(() => getLinkedAuthProviderIds(getCurrentUser()), [authMode, userId]);
-  const providerLabelByFirebaseId: Record<string, string> = React.useMemo(() => ({
-    "google.com": "Google",
-    "github.com": "GitHub",
-    "microsoft.com": "Microsoft",
-    "apple.com": "Apple",
-  }), []);
-  const linkedAuthProviderLabels = React.useMemo(() => linkedAuthProviderIds.map((providerId) => providerLabelByFirebaseId[providerId] ?? providerId), [linkedAuthProviderIds, providerLabelByFirebaseId]);
+  const location = useLocation();
+  const [linkedProviderRefreshKey, setLinkedProviderRefreshKey] = React.useState(0);
+  const linkedAuthProviderIds = React.useMemo(() => getLinkedAuthProviderIds(getCurrentUser()), [authMode, userId, linkedProviderRefreshKey]);
+  const linkedAuthProviderLabels = React.useMemo(() => linkedAuthProviderIds.map((providerId) => PROVIDER_LABEL_BY_FIREBASE_ID[providerId] ?? providerId), [linkedAuthProviderIds]);
+
+  React.useEffect(() => {
+    const state = location.state as { linkedProvider?: string } | null;
+    if (!state?.linkedProvider) {
+      return;
+    }
+    setLinkedProviderRefreshKey((k) => k + 1);
+    const firebaseId =
+      state.linkedProvider === "google" ? "google.com"
+      : state.linkedProvider === "github" ? "github.com"
+      : state.linkedProvider === "microsoft" ? "microsoft.com"
+      : state.linkedProvider === "apple" ? "apple.com"
+      : state.linkedProvider;
+    const providerLabel = PROVIDER_LABEL_BY_FIREBASE_ID[firebaseId] ?? state.linkedProvider;
+    setAccountStatus(`\u2713 ${providerLabel} linked successfully.`);
+    // Clear the router state so the banner doesn't re-show on refresh
+    window.history.replaceState({}, "", window.location.href);
+  }, [location.state]);
 
   const refreshDscPluginStatus = React.useCallback(async () => {
     const status = await refreshPluginLifecycleStatus("dsc");

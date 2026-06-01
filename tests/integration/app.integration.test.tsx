@@ -46,6 +46,7 @@ const authMocks = vi.hoisted(() => {
   });
   const signInWithGoogle = vi.fn(async () => mockUser);
   const signOutCurrentUser = vi.fn(async () => undefined);
+  const linkCurrentUserWithAuthProvider = vi.fn(async () => mockUser);
   const getAdminClaim = vi.fn(async () => false);
   const getRoleClaims = vi.fn(async () => ({
     isAdmin: false,
@@ -64,6 +65,7 @@ const authMocks = vi.hoisted(() => {
     subscribeToAuthTokenChanges,
     signInWithGoogle,
     signOutCurrentUser,
+    linkCurrentUserWithAuthProvider,
     getAdminClaim,
     getRoleClaims,
     saveUserProfileToFirestore,
@@ -102,6 +104,7 @@ vi.mock("../../src/firebase/auth", async (importOriginal) => {
     subscribeToAuthTokenChanges: authMocks.subscribeToAuthTokenChanges,
     signInWithGoogle: authMocks.signInWithGoogle,
     signOutCurrentUser: authMocks.signOutCurrentUser,
+    linkCurrentUserWithAuthProvider: authMocks.linkCurrentUserWithAuthProvider,
     getStoredLocalAuthSession: vi.fn(() => null),
     getPendingAuthRedirect: vi.fn(() => null),
     resolvePendingAuthRedirectResult: vi.fn(async () => undefined),
@@ -326,6 +329,25 @@ describe("App admin/auth integration", () => {
 
     expect(screen.getByText(/continue linking your account/i)).toBeInTheDocument();
     expect(screen.queryByText("WORKSPACE_PAGE")).not.toBeInTheDocument();
+  });
+
+  it("navigates to settings after successful provider link in link mode", async () => {
+    authMocks.state.currentUser = mockUser;
+    authMocks.getAdminClaim.mockResolvedValue(true);
+    authMocks.linkCurrentUserWithAuthProvider.mockResolvedValue(mockUser);
+
+    renderAt("/login?from=/settings&linkMode=true");
+
+    await waitFor(() => {
+      expect(screen.getByText("Sign in to CourseForge")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /link with github/i }));
+
+    await waitFor(() => {
+      expect(authMocks.linkCurrentUserWithAuthProvider).toHaveBeenCalledWith("github");
+      expect(screen.getByText("SETTINGS_PAGE")).toBeInTheDocument();
+    });
   });
 
   it("preserves permission-denied startup state without duplicate bootstrap sync errors", async () => {

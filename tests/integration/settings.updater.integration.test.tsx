@@ -1,5 +1,6 @@
 import React from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsPage } from "../../src/webapp/components/settings/SettingsPage";
@@ -338,7 +339,7 @@ describe("Settings updater communication", () => {
       },
     ]);
 
-    render(<SettingsPage onBack={() => undefined} />);
+    render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     const metadataLearningCard = screen.getByText("Metadata Learning").closest("article");
     expect(metadataLearningCard).not.toBeNull();
@@ -410,7 +411,7 @@ describe("Settings updater communication", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SettingsPage onBack={() => undefined} />);
+    render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     await waitFor(() => {
       expect(screen.getAllByText("v1.2.80").length).toBeGreaterThanOrEqual(1);
@@ -487,7 +488,7 @@ describe("Settings updater communication", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SettingsPage onBack={() => undefined} />);
+    render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     await waitFor(() => {
       expect(screen.getByText("Current version:")).toBeInTheDocument();
@@ -546,7 +547,7 @@ describe("Settings updater communication", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SettingsPage onBack={() => undefined} />);
+    render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     await waitFor(() => {
       expect(screen.getByText("Current version:")).toBeInTheDocument();
@@ -613,7 +614,7 @@ describe("Settings updater communication", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SettingsPage onBack={() => undefined} />);
+    render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     await waitFor(() => {
       expect(screen.getByText("Current version:")).toBeInTheDocument();
@@ -676,7 +677,7 @@ describe("Settings updater communication", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<SettingsPage onBack={() => undefined} />);
+    render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     await waitFor(() => {
       expect(screen.getByText("Current version:")).toBeInTheDocument();
@@ -690,7 +691,7 @@ describe("Settings updater communication", () => {
   });
 
   it("shows unified debug controls and token introspection in the Debug Log card", async () => {
-    render(<SettingsPage onBack={() => undefined} />);
+    render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     const debugCard = screen.getByText("Debug Log").closest("article");
     expect(debugCard).not.toBeNull();
@@ -706,7 +707,7 @@ describe("Settings updater communication", () => {
   });
 
   it("shows DSC as not installed by default and renders minimal settings", async () => {
-    render(<SettingsPage onBack={() => undefined} />);
+    render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     const dscCard = (await screen.findByText("Design System Controls")).closest("article") as HTMLElement;
     expect(within(dscCard).getAllByText("Not Installed").length).toBeGreaterThan(0);
@@ -716,7 +717,7 @@ describe("Settings updater communication", () => {
   });
 
   it("installs DSC from UI and opens the floating workspace", async () => {
-    render(<SettingsPage onBack={() => undefined} />);
+    render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     const dscCard = (await screen.findByText("Design System Controls")).closest("article") as HTMLElement;
     fireEvent.click(within(dscCard).getByRole("button", { name: "Install DSC Module" }));
@@ -742,7 +743,7 @@ describe("Settings updater communication", () => {
   });
 
   it("supports floating DSC card move-and-close lifecycle from settings", async () => {
-    render(<SettingsPage onBack={() => undefined} />);
+    render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     const dscCard = (await screen.findByText("Design System Controls")).closest("article") as HTMLElement;
     fireEvent.click(within(dscCard).getByRole("button", { name: "Install DSC Module" }));
@@ -776,7 +777,7 @@ describe("Settings updater communication", () => {
   });
 
   it("uninstalls DSC from UI and returns to minimal settings", async () => {
-    render(<SettingsPage onBack={() => undefined} />);
+    render(<MemoryRouter><SettingsPage onBack={() => undefined} /></MemoryRouter>);
 
     const dscCard = (await screen.findByText("Design System Controls")).closest("article") as HTMLElement;
     fireEvent.click(within(dscCard).getByRole("button", { name: "Install DSC Module" }));

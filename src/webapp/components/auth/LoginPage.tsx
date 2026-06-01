@@ -126,6 +126,8 @@ export function LoginPage(): React.JSX.Element {
         }
 
         await linkCurrentUserWithAuthProvider(providerId);
+        const returnTo = linkState?.from ?? queryFrom ?? "/settings";
+        navigate(returnTo, { replace: true, state: { linkedProvider: providerId } });
         return;
       }
 

@@ -76,6 +76,7 @@ import {
   getDisplayCaptureSupportInfo,
   normalizeDisplayCaptureError,
 } from "../../utils/displayCapture";
+import { mergeOcrTextWithOverlap } from "../../utils/ocrTextMerge";
 import { isChromeOSRuntime, isSmallChromebookViewport } from "../../utils/platform";
 import { getCurrentUser } from "../../../firebase/auth";
 import { emitClientDebugTrace } from "../../../core/services/clientDebugTraceService";
@@ -2890,22 +2891,74 @@ export function AutoTextbookSetupFlow({
       return;
     }
 
-    lastCapturedOcrByStepRef.current.title = captured.ocrText;
-  setOwnershipProofDataUrl(captured.imageDataUrl);
+    const mergedOcrText = captured.ocrText;
+    lastCapturedOcrByStepRef.current.title = mergedOcrText;
+    setOwnershipProofDataUrl(captured.imageDataUrl);
     setLastMetadataImageDataUrl(captured.imageDataUrl);
-    setRawOcrText(captured.ocrText);
-    setOcrDraft(captured.ocrText);
+    setRawOcrText(mergedOcrText);
+    setOcrDraft(mergedOcrText);
     setStep("title");
     if (captured.pipelineResult) {
       lastMetadataPipelineRef.current = captured.pipelineResult;
     }
     lastMetadataCaptureStepRef.current = "title";
     if (captured.metadataResult) {
-      applyMetadataFromPipelineResult(captured.metadataResult, "title");
+      applyMetadataFromPipelineResult({
+        ...captured.metadataResult,
+        rawText: mergedOcrText,
+      }, "title");
     } else {
-      applyMetadataFromText(captured.ocrText, "title");
+      applyMetadataFromText(mergedOcrText, "title");
     }
     setInfoMessage(`Copyright page captured and parsed. Review merged metadata. (Source: ${captured.metadataResult?.source ?? `OCR: ${captured.ocrProviderId}`})`);
+    scrollToMetadata();
+  }
+
+  async function handleCaptureTitleAddShot(): Promise<void> {
+    if (isSessionCapacityReached) {
+      setErrorMessage("You already have 3 unfinished Auto captures. Delete one draft or finish one before starting another.");
+      return;
+    }
+
+    emitAutoFlowDiagnostic("ui_capture_title_multishot_clicked", {
+      traceId: createAutoFlowTraceId("auto-flow-ui-title-multishot"),
+      context: { step },
+    });
+
+    const captured = await captureForStep("title");
+    if (!captured) {
+      emitAutoFlowDiagnostic("ui_capture_title_multishot_no_result", {
+        level: "warning",
+        traceId: createAutoFlowTraceId("auto-flow-ui-title-multishot"),
+      });
+      return;
+    }
+
+    const baselineText = rawOcrText.trim().length > 0
+      ? rawOcrText
+      : ocrDraft;
+    const mergedOcrText = mergeOcrTextWithOverlap(baselineText, captured.ocrText);
+
+    lastCapturedOcrByStepRef.current.title = mergedOcrText;
+    setOwnershipProofDataUrl((current) => current ?? captured.imageDataUrl);
+    setLastMetadataImageDataUrl(captured.imageDataUrl);
+    setRawOcrText(mergedOcrText);
+    setOcrDraft(mergedOcrText);
+    setStep("title");
+    if (captured.pipelineResult) {
+      lastMetadataPipelineRef.current = captured.pipelineResult;
+    }
+    lastMetadataCaptureStepRef.current = "title";
+    if (captured.metadataResult) {
+      applyMetadataFromPipelineResult({
+        ...captured.metadataResult,
+        rawText: mergedOcrText,
+      }, "title");
+    } else {
+      applyMetadataFromText(mergedOcrText, "title");
+    }
+
+    setInfoMessage(`Copyright page shot added. OCR was overlap-merged into one draft. (OCR: ${captured.ocrProviderId})`);
     scrollToMetadata();
   }
 
@@ -3826,6 +3879,17 @@ export function AutoTextbookSetupFlow({
               onMouseDown={hidePrimaryHelper}
             >
               Capture Copyright Page
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                hidePrimaryHelper();
+                void handleCaptureTitleAddShot();
+              }}
+              disabled={isBusy || isSessionCapacityReached || (!rawOcrText.trim() && !ocrDraft.trim())}
+            >
+              Add Copyright Shot
             </button>
             <button
               type="button"

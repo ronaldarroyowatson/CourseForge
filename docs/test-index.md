@@ -1,11 +1,11 @@
 # Test Index
 
-Generated: 2026-06-02T01:03:37.553Z
+Generated: 2026-06-02T01:46:51.384Z
 
 ## Summary
 
-- Total test files: 83
-- Unit test files: 54
+- Total test files: 84
+- Unit test files: 55
 - Integration test files: 27
 - Rules test files: 2
 - Canonical sample files: 5
@@ -43,6 +43,7 @@ Generated: 2026-06-02T01:03:37.553Z
 - tests/core/metadataCorrectionLearningService.test.ts
 - tests/core/metadataCorrectionSafeguards.test.ts
 - tests/core/metadataExtractionPipelineService.test.ts
+- tests/core/ocrTextMerge.test.ts
 - tests/core/pluginService.test.ts
 - tests/core/premiumUsage.limits.test.ts
 - tests/core/presentationService.conversion.test.ts

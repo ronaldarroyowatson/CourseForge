@@ -164,6 +164,8 @@ const METADATA_TILE_LABELS: Record<MetadataTileKey, string> = {
 const RELATED_ISBN_TYPES: RelatedIsbnType[] = ["student", "teacher", "digital", "workbook", "assessment", "other"];
 const IMMEDIATE_UPLOAD_SYNC_TIMEOUT_MS = 4500;
 const IMMEDIATE_UPLOAD_SYNC_RETRY_DELAY_MS = 5500;
+const TEACH_MACRO_MAX_STEPS = 40;
+const TEACH_MACRO_PAUSE_MS = 280;
 
 interface AutoTextbookSetupFlowProps {
   runtime?: "webapp" | "extension";
@@ -220,6 +222,31 @@ interface CaptureResult {
   ocrProviderId: string;
   metadataResult: MetadataResult | null;
   pipelineResult: MetadataPipelineResult | null;
+}
+
+interface TeachMacroStep {
+  id: string;
+  xRatio: number;
+  yRatio: number;
+  source: "live" | "snapshot";
+  capturedAt: number;
+  anchorBox: {
+    widthRatio: number;
+    heightRatio: number;
+  };
+}
+
+interface TeachMacroReplayPayload {
+  type: "courseforge:macro-replay";
+  payload: {
+    steps: Array<{
+      xRatio: number;
+      yRatio: number;
+      pauseMs: number;
+      jitterPx: number;
+      moveSteps: number;
+    }>;
+  };
 }
 
 function describeMetadataCaptureStep(step: "cover" | "title"): string {
@@ -1215,6 +1242,9 @@ export function AutoTextbookSetupFlow({
   const [guidedCueFullscreenViewMode, setGuidedCueFullscreenViewMode] = useState<"fit" | "native">("fit");
   const [isLiveCueOverlayActive, setIsLiveCueOverlayActive] = useState(false);
   const [liveCueOverlayError, setLiveCueOverlayError] = useState<string | null>(null);
+  const [isTeachModeActive, setIsTeachModeActive] = useState(false);
+  const [teachMacroSteps, setTeachMacroSteps] = useState<TeachMacroStep[]>([]);
+  const [isTeachMacroReplayRunning, setIsTeachMacroReplayRunning] = useState(false);
   const [guidedCueCanvasZoom, setGuidedCueCanvasZoom] = useState<number>(GUIDED_CUE_ZOOM_DEFAULT);
   const [isGuidedRunActive, setIsGuidedRunActive] = useState(false);
   const [guidedRunCursor, setGuidedRunCursor] = useState(0);
@@ -1464,6 +1494,10 @@ export function AutoTextbookSetupFlow({
       label: getGuidedCueLabel(activeCueForPin),
     }));
     setInfoMessage(`${getGuidedCueLabel(activeCueForPin)} pinned.`);
+
+    if (isTeachModeActive) {
+      recordTeachMacroStep(xRatio, yRatio, "snapshot");
+    }
   }
 
   function handleLiveCueVideoClick(event: React.MouseEvent<HTMLVideoElement>): void {
@@ -1485,6 +1519,87 @@ export function AutoTextbookSetupFlow({
       label: getGuidedCueLabel(activeCueForPin),
     }));
     setInfoMessage(`${getGuidedCueLabel(activeCueForPin)} pinned from live overlay.`);
+
+    if (isTeachModeActive) {
+      recordTeachMacroStep(xRatio, yRatio, "live");
+    }
+  }
+
+  function recordTeachMacroStep(xRatio: number, yRatio: number, source: "live" | "snapshot"): void {
+    const step: TeachMacroStep = {
+      id: `teach-step-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      xRatio: Math.min(1, Math.max(0, xRatio)),
+      yRatio: Math.min(1, Math.max(0, yRatio)),
+      source,
+      capturedAt: Date.now(),
+      anchorBox: {
+        widthRatio: 0.12,
+        heightRatio: 0.08,
+      },
+    };
+
+    setTeachMacroSteps((current) => {
+      const next = [...current, step];
+      if (next.length <= TEACH_MACRO_MAX_STEPS) {
+        return next;
+      }
+
+      return next.slice(next.length - TEACH_MACRO_MAX_STEPS);
+    });
+  }
+
+  async function runTeachMacroReplayInExtensionTab(): Promise<void> {
+    if (runtime !== "extension") {
+      setErrorMessage("Teach replay in active tab is available in extension runtime.");
+      return;
+    }
+
+    if (teachMacroSteps.length === 0) {
+      setErrorMessage("Teach mode has no recorded steps yet.");
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chromeApi = (globalThis as any)?.chrome;
+    if (!chromeApi?.runtime?.sendMessage) {
+      setErrorMessage("Extension replay bridge is unavailable.");
+      return;
+    }
+
+    setErrorMessage(null);
+    setIsTeachMacroReplayRunning(true);
+
+    const message: TeachMacroReplayPayload = {
+      type: "courseforge:macro-replay",
+      payload: {
+        steps: teachMacroSteps.map((step) => ({
+          xRatio: step.xRatio,
+          yRatio: step.yRatio,
+          pauseMs: TEACH_MACRO_PAUSE_MS,
+          jitterPx: 6,
+          moveSteps: 14,
+        })),
+      },
+    };
+
+    try {
+      const response = await new Promise<{ ok?: boolean; error?: string; executed?: number }>((resolve) => {
+        chromeApi.runtime.sendMessage(message, (reply: { ok?: boolean; error?: string; executed?: number }) => {
+          resolve(reply ?? { ok: false, error: "No response from extension runtime." });
+        });
+      });
+
+      if (!response?.ok) {
+        setErrorMessage(response?.error ?? "Teach macro replay failed.");
+        return;
+      }
+
+      setInfoMessage(`Teach macro replay completed in active tab (${response.executed ?? teachMacroSteps.length} steps).`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Teach macro replay failed.");
+    } finally {
+      setIsTeachMacroReplayRunning(false);
+    }
   }
 
   function panGuidedCueViewport(deltaX: number): void {
@@ -1516,6 +1631,7 @@ export function AutoTextbookSetupFlow({
   function openCueFullscreen(): void {
     setGuidedCueFullscreenViewMode("fit");
     setLiveCueOverlayError(null);
+    setIsTeachMacroReplayRunning(false);
     setIsCueFullscreenOpen(true);
   }
 
@@ -1579,6 +1695,7 @@ export function AutoTextbookSetupFlow({
 
   function closeCueFullscreen(): void {
     stopLiveCueOverlay();
+    setIsTeachModeActive(false);
     setIsCueFullscreenOpen(false);
   }
 
@@ -4738,6 +4855,12 @@ export function AutoTextbookSetupFlow({
                 <p className="form-hint">
                   Live Overlay can pin from a real-time shared textbook tab/window. Do not share the CourseForge tab.
                 </p>
+                <p className="form-hint">
+                  Teach mode records click path steps and anchor regions so replay can automate the active textbook tab in extension runtime.
+                </p>
+                <p className="form-hint">
+                  Teach macro steps: {teachMacroSteps.length}/{TEACH_MACRO_MAX_STEPS}. {isTeachModeActive ? "Recording active." : "Recording idle."}
+                </p>
                 {liveCueOverlayError ? (
                   <p className="form-hint" role="alert">{liveCueOverlayError}</p>
                 ) : null}
@@ -4782,6 +4905,35 @@ export function AutoTextbookSetupFlow({
                     }}
                   >
                     {isLiveCueOverlayActive ? "Stop Live Overlay" : "Start Live Overlay"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      setIsTeachModeActive((current) => !current);
+                    }}
+                  >
+                    {isTeachModeActive ? "Stop Teach Mode" : "Start Teach Mode"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      setTeachMacroSteps([]);
+                    }}
+                    disabled={teachMacroSteps.length === 0}
+                  >
+                    Clear Teach Steps
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      void runTeachMacroReplayInExtensionTab();
+                    }}
+                    disabled={isTeachMacroReplayRunning || teachMacroSteps.length === 0}
+                  >
+                    {isTeachMacroReplayRunning ? "Replaying..." : "Replay in Active Tab"}
                   </button>
                   <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(-320, 0); }}>Pan Left</button>
                   <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(320, 0); }}>Pan Right</button>

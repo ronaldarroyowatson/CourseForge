@@ -14,6 +14,8 @@
    - Current implementation focus: stitched cue pinning canvas from multiple TOC captures, including edge recapture stitching.
 - Phase 3 status: Activated after Phase 2 live failure report.
    - Current implementation focus: live pass-through guided pinning overlay with explicit self-capture guardrails.
+- Phase 4 status: Activated after Phase 3 partial failure report.
+   - Current implementation focus: teach/replay macro path with recorded click steps, anchor regions, and extension-tab replay automation.
 
 ## Problem Statement
 
@@ -116,4 +118,4 @@ Before any new phase implementation begins:
 
 ## Current Next Step
 
-Run the Phase 3 workflow cycle: quality gate, release publish, and live-install manual validation.
+Run the Phase 4 workflow cycle: quality gate, release publish, and live-install manual validation.

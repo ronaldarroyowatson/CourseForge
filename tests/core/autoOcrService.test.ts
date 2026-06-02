@@ -165,6 +165,36 @@ describe("autoOcrService", () => {
     });
   });
 
+  it("treats smart-apostrophe refusal text as unusable and falls back", async () => {
+    const providers: AutoOcrProvider[] = [
+      {
+        id: "cloud_openai_vision",
+        label: "Cloud",
+        isAvailable: async () => true,
+        extractText: async () => "I\u2019m unable to extract text from images. If you have a specific text or content you need help with, feel free to share!",
+      },
+      {
+        id: "local_tesseract",
+        label: "Local",
+        isAvailable: async () => true,
+        extractText: async () => "Inspire Physical Science Teacher Edition",
+      },
+    ];
+
+    const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+      providerOrder: ["cloud_openai_vision", "local_tesseract"],
+      providersOverride: providers,
+    });
+
+    expect(result.providerId).toBe("local_tesseract");
+    expect(result.text).toContain("Teacher Edition");
+    expect(result.attempts).toHaveLength(2);
+    expect(result.attempts[0]).toMatchObject({
+      providerId: "cloud_openai_vision",
+      success: false,
+    });
+  });
+
   it("uses backend provider status for cloud OCR health and execution", async () => {
     callableMocks.getAiProviderStatus.mockResolvedValue({
       data: {

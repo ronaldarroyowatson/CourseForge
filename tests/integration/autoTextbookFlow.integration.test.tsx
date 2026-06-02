@@ -376,7 +376,7 @@ describe("auto textbook flow integration", () => {
         gradeLevel: null,
         subject: "Science",
         confidence: 0.93,
-        rawText: "I'm unable to extract text from images. If you have a different request or need assistance with something else, feel free to ask!",
+        rawText: "I\u2019m unable to extract text from images. If you have a specific text or content you need help with, feel free to share!",
         source: "vision",
       },
       originalVisionOutput: null,

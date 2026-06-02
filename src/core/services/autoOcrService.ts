@@ -68,9 +68,15 @@ const UNUSABLE_OCR_PATTERNS: RegExp[] = [
   /unable to extract text from images/i,
   /can't extract text from images/i,
   /cannot extract text from images/i,
-  /i'?m unable to/i,
+  /i[\u2019']?m unable to/i,
+  /i am unable to/i,
+  /i can(?:not|'t) (?:view|read|extract).*(?:image|images)/i,
+  /as an ai(?: language model)?[, ]+i can(?:not|'t).*(?:image|images)/i,
+  /specific text or content you need help with/i,
   /if you have a different request/i,
+  /if you have a specific text/i,
   /feel free to ask/i,
+  /feel free to share/i,
 ];
 
 interface CircuitStateEntry {

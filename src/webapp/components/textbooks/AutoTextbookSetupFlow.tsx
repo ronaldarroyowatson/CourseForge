@@ -237,35 +237,77 @@ function normalizeTocTreeMapText(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function isLikelyOcrNoiseLine(normalizedText: string): boolean {
+  if (normalizedText.length < 3) {
+    return true;
+  }
+
+  if (/^[=\-\s©®()]+$/.test(normalizedText)) {
+    return true;
+  }
+
+  if (/^i\s*=/.test(normalizedText) || /^g\s*=/.test(normalizedText)) {
+    return true;
+  }
+
+  return false;
+}
+
+function cleanOcrTocLine(line: string): string | null {
+  const compact = line
+    .replace(/\s+/g, " ")
+    .replace(/[©®]/g, " ")
+    .replace(/[|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const normalized = normalizeTocTreeMapText(compact);
+  if (!normalized || isLikelyOcrNoiseLine(normalized)) {
+    return null;
+  }
+
+  if (normalized.includes("go to current location")) {
+    return "Table of Contents";
+  }
+
+  if (normalized === "contents x") {
+    return "Contents";
+  }
+
+  return compact;
+}
+
+function getTocTreeMapNodeKey(node: TocTreeMapNode): string {
+  const normalizedText = normalizeTocTreeMapText(node.text);
+  if (node.role === "ocr-line") {
+    return [node.role, node.level ?? 0, normalizedText].join("|");
+  }
+
+  return [
+    node.role,
+    node.level ?? 0,
+    normalizedText,
+    Math.round(node.xRatio * 24),
+  ].join("|");
+}
+
 function mergeTocTreeMapNodes(existing: TocTreeMapNode[], incoming: TocTreeMapNode[]): TocTreeMapNode[] {
-  const merged = new Map<string, TocTreeMapNode>();
+  const merged: TocTreeMapNode[] = [];
+  const seen = new Set<string>();
 
-  const upsert = (node: TocTreeMapNode): void => {
-    const key = [
-      normalizeTocTreeMapText(node.text),
-      node.role,
-      node.level ?? 0,
-      Math.round(node.xRatio * 24),
-      Math.round(node.yRatio * 48),
-    ].join("|");
-
-    if (!merged.has(key)) {
-      merged.set(key, node);
+  const appendIfNew = (node: TocTreeMapNode): void => {
+    const key = getTocTreeMapNodeKey(node);
+    if (seen.has(key)) {
+      return;
     }
+
+    seen.add(key);
+    merged.push(node);
   };
 
-  existing.forEach(upsert);
-  incoming.forEach(upsert);
+  existing.forEach(appendIfNew);
+  incoming.forEach(appendIfNew);
 
-  return Array.from(merged.values())
-    .sort((a, b) => {
-      if (a.yRatio !== b.yRatio) {
-        return a.yRatio - b.yRatio;
-      }
-
-      return a.xRatio - b.xRatio;
-    })
-    .slice(0, 220);
+  return merged.slice(0, 220);
 }
 
 function describeMetadataCaptureStep(step: "cover" | "title"): string {
@@ -1624,12 +1666,55 @@ export function AutoTextbookSetupFlow({
 
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         const frameDataUrl = canvas.toDataURL("image/png");
-        const ocr = await extractTextFromImageWithFallback(frameDataUrl);
-        const lines = ocr.text
+
+        const extractCleanLines = (text: string): string[] => text
           .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter((line) => line.length >= 3)
-          .slice(0, 40);
+          .map((line) => cleanOcrTocLine(line))
+          .filter((line): line is string => Boolean(line));
+
+        const primaryOcr = await extractTextFromImageWithFallback(frameDataUrl);
+        const primaryLines = extractCleanLines(primaryOcr.text);
+
+        // Run a second OCR pass focused on the lower-left TOC panel to recover
+        // entries that are frequently missed near the bottom edge.
+        const focusedCanvas = document.createElement("canvas");
+        const focusedWidth = Math.max(1, Math.round(canvas.width * 0.46));
+        const focusedSourceTop = Math.max(0, Math.round(canvas.height * 0.42));
+        const focusedHeight = Math.max(1, canvas.height - focusedSourceTop);
+        focusedCanvas.width = focusedWidth;
+        focusedCanvas.height = focusedHeight;
+        const focusedContext = focusedCanvas.getContext("2d");
+        let focusedLines: string[] = [];
+        if (focusedContext) {
+          focusedContext.drawImage(
+            canvas,
+            0,
+            focusedSourceTop,
+            focusedWidth,
+            focusedHeight,
+            0,
+            0,
+            focusedWidth,
+            focusedHeight
+          );
+          const focusedFrameDataUrl = focusedCanvas.toDataURL("image/png");
+          const focusedOcr = await extractTextFromImageWithFallback(focusedFrameDataUrl);
+          focusedLines = extractCleanLines(focusedOcr.text);
+        }
+
+        const mergedLines: string[] = [];
+        const seenLines = new Set<string>();
+        [...primaryLines, ...focusedLines].forEach((line) => {
+          const key = normalizeTocTreeMapText(line);
+          if (seenLines.has(key)) {
+            return;
+          }
+
+          seenLines.add(key);
+          mergedLines.push(line);
+        });
+
+        const lines = mergedLines.slice(0, 80);
 
         const nodes: TocTreeMapNode[] = lines.map((text, index) => {
           const normalized = text.toLowerCase();
@@ -1654,7 +1739,7 @@ export function AutoTextbookSetupFlow({
         setTocTreeMapNodes((current) => mergeTocTreeMapNodes(current, nodes));
         setInfoMessage(
           nodes.length > 0
-            ? `TOC map scan completed from live overlay OCR. ${nodes.length} candidate targets detected. Scroll the textbook TOC and scan again to merge additional targets.`
+            ? `TOC map scan completed from live overlay OCR. ${nodes.length} candidate targets detected. Web mode does not support auto-scroll yet, so scroll the textbook TOC and scan again to merge additional targets.`
             : "TOC map scan completed from live overlay OCR, but no target candidates were detected."
         );
         return;
@@ -4480,6 +4565,11 @@ export function AutoTextbookSetupFlow({
             <p className="form-hint">
               Step 1: Start Live Overlay and select the textbook tab/window. Step 2: Ensure TOC is visible. Step 3: Scan TOC Map. Re-scan after each expand/collapse.
             </p>
+            {runtime !== "extension" ? (
+              <p className="form-hint">
+                Web runtime note: auto-scroll scanning is not available yet. Scroll in the textbook view, then scan again to merge additional TOC entries.
+              </p>
+            ) : null}
             <p className="form-hint">
               Mapper targets detected: {tocTreeMapNodes.length}.
             </p>

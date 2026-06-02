@@ -260,3 +260,10 @@ Start Phase 5 implementation planning from a docs checkpoint:
 2. Mapper scan responses now include scan metadata so UX can report multi-pass detection clearly.
 3. Added explicit `Clear TOC Map` control in the mapper modal to reset target lists when operator wants a fresh baseline.
 4. Kept manual fallback path: if auto-scroll misses targets, operator can scroll and run `Scan TOC Map` again, and results merge with de-duplication.
+
+## v1.7.76 TOC Ordering + Bottom-Line Recovery
+
+1. TOC merge logic now preserves scan sequence order instead of re-sorting by on-screen y-position, preventing merged multi-scan lists from scrambling module order.
+2. OCR-line de-duplication now keys by normalized text/level/role (instead of y-bucket), which removes repeated overlap rows when operators intentionally overlap scan boundaries.
+3. Web runtime TOC scan now runs a second OCR pass focused on the lower-left TOC panel to recover rows that were frequently missed near the bottom edge.
+4. Added runtime-specific guidance in mapper modal: web runtime does not auto-scroll yet, so scan flow should be `scroll in textbook -> Scan TOC Map -> merge`.

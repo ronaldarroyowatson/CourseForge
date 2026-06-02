@@ -1488,6 +1488,7 @@ describe("auto textbook flow integration", () => {
     expect(await screen.findByRole("dialog", { name: "Live TOC mapper" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start Live Overlay" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Scan TOC Map" })).toBeInTheDocument();
+    expect(screen.getByText(/auto-scroll scanning is not available yet/i)).toBeInTheDocument();
   });
 
   it("prompts to start live overlay before scanning TOC map in web runtime", async () => {
@@ -1615,6 +1616,119 @@ describe("auto textbook flow integration", () => {
       expect(screen.getByText(/Lesson 2: Standards of Measurement/i)).toBeInTheDocument();
       expect(screen.getByText(/Mapper targets detected:\s*3\./i)).toBeInTheDocument();
       expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    } finally {
+      (globalThis as { chrome?: unknown }).chrome = originalChrome;
+    }
+  });
+
+  it("preserves scan sequence order when merging TOC targets", async () => {
+    const sendMessageMock = vi
+      .fn()
+      .mockImplementationOnce((_message: unknown, callback: (reply: unknown) => void) => {
+        callback({
+          ok: true,
+          passCount: 1,
+          autoScrollUsed: false,
+          nodes: [
+            {
+              id: "seq-1",
+              text: "Module 11: Electromagnetic Waves",
+              role: "ocr-line",
+              level: 2,
+              xRatio: 0.22,
+              yRatio: 0.82,
+              widthRatio: 0.45,
+              heightRatio: 0.03,
+            },
+            {
+              id: "seq-2",
+              text: "Module 12: Light",
+              role: "ocr-line",
+              level: 2,
+              xRatio: 0.22,
+              yRatio: 0.12,
+              widthRatio: 0.45,
+              heightRatio: 0.03,
+            },
+          ],
+        });
+      })
+      .mockImplementationOnce((_message: unknown, callback: (reply: unknown) => void) => {
+        callback({
+          ok: true,
+          passCount: 1,
+          autoScrollUsed: false,
+          nodes: [
+            {
+              id: "seq-2-dup",
+              text: "Module 12: Light",
+              role: "ocr-line",
+              level: 2,
+              xRatio: 0.22,
+              yRatio: 0.75,
+              widthRatio: 0.45,
+              heightRatio: 0.03,
+            },
+            {
+              id: "seq-3",
+              text: "Module 13: Mirrors and Lenses",
+              role: "ocr-line",
+              level: 2,
+              xRatio: 0.22,
+              yRatio: 0.21,
+              widthRatio: 0.45,
+              heightRatio: 0.03,
+            },
+          ],
+        });
+      });
+
+    const originalChrome = (globalThis as { chrome?: unknown }).chrome;
+    (globalThis as { chrome?: { runtime: { sendMessage: typeof sendMessageMock } } }).chrome = {
+      runtime: {
+        sendMessage: sendMessageMock,
+      },
+    };
+
+    try {
+      render(
+        <AutoTextbookSetupFlow
+          runtime="extension"
+          onSaved={() => undefined}
+          onSwitchToManual={() => undefined}
+          testingSeedState={{
+            step: "toc",
+            coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+            ocrDraft: "Table of Contents",
+            tocCaptureImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+            guidedCuePlan: {
+              version: 1,
+              viewerHost: "example.viewer",
+              cues: {},
+            },
+          }}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Open Live TOC Mapper" }));
+      fireEvent.click(screen.getByRole("button", { name: "Scan TOC Map" }));
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Scan TOC Map" })).toBeEnabled();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Scan TOC Map" }));
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Scan TOC Map" })).toBeEnabled();
+      });
+
+      const mappedItems = screen
+        .getAllByRole("listitem")
+        .map((item) => item.textContent ?? "")
+        .filter((text) => text.includes("Module"));
+
+      expect(mappedItems[0]).toMatch(/Module 11: Electromagnetic Waves/i);
+      expect(mappedItems[1]).toMatch(/Module 12: Light/i);
+      expect(mappedItems[2]).toMatch(/Module 13: Mirrors and Lenses/i);
     } finally {
       (globalThis as { chrome?: unknown }).chrome = originalChrome;
     }

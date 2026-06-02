@@ -253,3 +253,10 @@ Start Phase 5 implementation planning from a docs checkpoint:
    - `Start Live Overlay`
    - `Scan TOC Map`
 5. Added web-runtime OCR fallback for scanning from the live overlay frame so scan is no longer extension-only.
+
+## v1.7.75 TOC Scan Fallback + Coverage Expansion
+
+1. Extension TOC scan now runs multi-pass auto-scroll capture (up to 4 viewport passes) and merges candidates before returning results.
+2. Mapper scan responses now include scan metadata so UX can report multi-pass detection clearly.
+3. Added explicit `Clear TOC Map` control in the mapper modal to reset target lists when operator wants a fresh baseline.
+4. Kept manual fallback path: if auto-scroll misses targets, operator can scroll and run `Scan TOC Map` again, and results merge with de-duplication.

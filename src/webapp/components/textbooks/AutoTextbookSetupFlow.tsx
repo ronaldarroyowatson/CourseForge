@@ -233,6 +233,41 @@ interface TocTreeMapNode {
   heightRatio: number;
 }
 
+function normalizeTocTreeMapText(text: string): string {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function mergeTocTreeMapNodes(existing: TocTreeMapNode[], incoming: TocTreeMapNode[]): TocTreeMapNode[] {
+  const merged = new Map<string, TocTreeMapNode>();
+
+  const upsert = (node: TocTreeMapNode): void => {
+    const key = [
+      normalizeTocTreeMapText(node.text),
+      node.role,
+      node.level ?? 0,
+      Math.round(node.xRatio * 24),
+      Math.round(node.yRatio * 48),
+    ].join("|");
+
+    if (!merged.has(key)) {
+      merged.set(key, node);
+    }
+  };
+
+  existing.forEach(upsert);
+  incoming.forEach(upsert);
+
+  return Array.from(merged.values())
+    .sort((a, b) => {
+      if (a.yRatio !== b.yRatio) {
+        return a.yRatio - b.yRatio;
+      }
+
+      return a.xRatio - b.xRatio;
+    })
+    .slice(0, 220);
+}
+
 function describeMetadataCaptureStep(step: "cover" | "title"): string {
   return step === "cover" ? "Cover" : "Copyright page";
 }
@@ -1483,7 +1518,7 @@ export function AutoTextbookSetupFlow({
         setInfoMessage("Live overlay capture ended.");
       }, { once: true });
 
-      setInfoMessage("Live overlay started. Click directly on the live capture to pin cues.");
+      setInfoMessage("Live overlay started. Keep the textbook TOC visible, then run Scan TOC Map.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to start live overlay capture.";
       setLiveCueOverlayError(message);
@@ -1616,10 +1651,10 @@ export function AutoTextbookSetupFlow({
           };
         });
 
-        setTocTreeMapNodes(nodes);
+        setTocTreeMapNodes((current) => mergeTocTreeMapNodes(current, nodes));
         setInfoMessage(
           nodes.length > 0
-            ? `TOC map scan completed from live overlay OCR. ${nodes.length} candidate targets detected.`
+            ? `TOC map scan completed from live overlay OCR. ${nodes.length} candidate targets detected. Scroll the textbook TOC and scan again to merge additional targets.`
             : "TOC map scan completed from live overlay OCR, but no target candidates were detected."
         );
         return;
@@ -1636,11 +1671,15 @@ export function AutoTextbookSetupFlow({
         ok?: boolean;
         error?: string;
         nodes?: TocTreeMapNode[];
+        passCount?: number;
+        autoScrollUsed?: boolean;
       }>((resolve) => {
         chromeApi.runtime.sendMessage({ type: "courseforge:tree-map-snapshot" }, (reply: {
           ok?: boolean;
           error?: string;
           nodes?: TocTreeMapNode[];
+          passCount?: number;
+          autoScrollUsed?: boolean;
         }) => {
           resolve(reply ?? { ok: false, error: "No response from extension runtime." });
         });
@@ -1652,10 +1691,15 @@ export function AutoTextbookSetupFlow({
       }
 
       const nodes = Array.isArray(response.nodes) ? response.nodes : [];
-      setTocTreeMapNodes(nodes);
+      const passCount = Number.isFinite(response.passCount) ? Math.max(1, Number(response.passCount)) : 1;
+      const autoScrollUsed = Boolean(response.autoScrollUsed);
+
+      setTocTreeMapNodes((current) => mergeTocTreeMapNodes(current, nodes));
       setInfoMessage(
         nodes.length > 0
-          ? `TOC map scan completed. ${nodes.length} clickable targets detected in the active tab.`
+          ? autoScrollUsed
+            ? `TOC map scan completed across ${passCount} viewport passes. ${nodes.length} clickable targets were detected and merged.`
+            : `TOC map scan completed. ${nodes.length} clickable targets detected in the active tab. If more TOC items exist below, scroll and run Scan TOC Map again to merge.`
           : "TOC map scan completed, but no clickable targets were detected. Ensure the TOC panel is visible in the active tab."
       );
     } catch (error) {
@@ -1663,6 +1707,12 @@ export function AutoTextbookSetupFlow({
     } finally {
       setIsScanningTocTreeMap(false);
     }
+  }
+
+  function handleClearTocTreeMap(): void {
+    setTocTreeMapNodes([]);
+    setInfoMessage("Cleared mapped TOC targets. Run Scan TOC Map to capture a fresh target set.");
+    setErrorMessage(null);
   }
 
   useEffect(() => {
@@ -4460,6 +4510,14 @@ export function AutoTextbookSetupFlow({
                 disabled={isScanningTocTreeMap}
               >
                 {isScanningTocTreeMap ? "Scanning TOC Map..." : "Scan TOC Map"}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleClearTocTreeMap}
+                disabled={tocTreeMapNodes.length === 0}
+              >
+                Clear TOC Map
               </button>
             </div>
             {tocTreeMapNodes.length > 0 ? (

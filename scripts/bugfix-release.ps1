@@ -421,11 +421,12 @@ $oldReleaseFolders = git ls-files "release/" |
 
 if ($oldReleaseFolders.Count -gt 0) {
   Write-Host "  Removing $($oldReleaseFolders.Count) old release files from git..."
-  $oldReleaseFolders | Set-Content "$RepoRoot\tmp-prune-list.txt"
-  git rm --pathspec-from-file="$RepoRoot\tmp-prune-list.txt" -q
-  if (Test-Path "$RepoRoot\tmp-prune-list.txt") {
+  $pruneListPath = Join-Path $RepoRoot "tmp-prune-list.txt"
+  $oldReleaseFolders | Set-Content $pruneListPath
+  git rm --pathspec-from-file="$pruneListPath" -q
+  if (Test-Path $pruneListPath) {
     git rm -q --ignore-unmatch "tmp-prune-list.txt"
-    [System.IO.File]::Delete("$RepoRoot\tmp-prune-list.txt")
+    [System.IO.File]::Delete($pruneListPath)
   }
   # Also clean gitignored files (e.g. updater.log) left in old release dirs
   Get-ChildItem "$RepoRoot\release" -Directory |

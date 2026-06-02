@@ -2547,8 +2547,13 @@ export function AutoTextbookSetupFlow({
               selectedHeight: selection.height,
             },
           });
-          const shouldAutoBoundaryCrop = targetStep !== "toc";
-          cropped = await cropToSelectionAndAutoBoundary(rawImage, selection, shouldAutoBoundaryCrop);
+          if (targetStep === "toc") {
+            // Keep the raw frame for TOC so no intermediate crop/re-encode step can
+            // remove edge controls needed for guided cue pinning.
+            cropped = rawImage;
+          } else {
+            cropped = await cropToSelectionAndAutoBoundary(rawImage, selection, true);
+          }
         }
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Unknown region capture error.";

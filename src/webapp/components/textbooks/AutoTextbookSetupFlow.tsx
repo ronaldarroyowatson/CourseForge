@@ -304,9 +304,9 @@ const KNOWN_TEXTBOOK_DOMAINS = [
 
 const GUIDED_CUE_TYPES: GuidedCueType[] = ["openToc", "openGlossary", "openChapter", "openSection", "nextPage"];
 const GUIDED_CUE_ZOOM_DEFAULT = 140;
-const GUIDED_CUE_ZOOM_MIN = 80;
+const GUIDED_CUE_ZOOM_MIN = 50;
 const GUIDED_CUE_ZOOM_MAX = 260;
-const GUIDED_CUE_ZOOM_STEP = 20;
+const GUIDED_CUE_ZOOM_STEP = 10;
 
 interface GuidedTraversalTarget {
   chapterIndex: number;
@@ -1178,6 +1178,7 @@ export function AutoTextbookSetupFlow({
     removeChapter,
   } = useRepositories();
   const draftKeyRef = useRef<string>(createDraftCaptureKey());
+  const guidedCueViewportRef = useRef<HTMLDivElement | null>(null);
   const [environmentPreparationMessage, setEnvironmentPreparationMessage] = useState<string>(
     runtime === "extension"
       ? "Checking browser tabs for textbook setup readiness..."
@@ -1454,6 +1455,19 @@ export function AutoTextbookSetupFlow({
       label: getGuidedCueLabel(activeCueForPin),
     }));
     setInfoMessage(`${getGuidedCueLabel(activeCueForPin)} pinned.`);
+  }
+
+  function panGuidedCueViewport(deltaX: number): void {
+    const viewport = guidedCueViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    viewport.scrollBy({
+      left: deltaX,
+      top: 0,
+      behavior: "smooth",
+    });
   }
 
   function handleStartGuidedCapture(): void {
@@ -4403,6 +4417,24 @@ export function AutoTextbookSetupFlow({
                   type="button"
                   className="btn-secondary"
                   onClick={() => {
+                    panGuidedCueViewport(-220);
+                  }}
+                >
+                  Pan Left
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    panGuidedCueViewport(220);
+                  }}
+                >
+                  Pan Right
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
                     setGuidedCueCanvasZoom((value) => Math.max(GUIDED_CUE_ZOOM_MIN, value - GUIDED_CUE_ZOOM_STEP));
                   }}
                   disabled={guidedCueCanvasZoom <= GUIDED_CUE_ZOOM_MIN}
@@ -4414,6 +4446,10 @@ export function AutoTextbookSetupFlow({
                   className="btn-secondary"
                   onClick={() => {
                     setGuidedCueCanvasZoom(GUIDED_CUE_ZOOM_DEFAULT);
+                    const viewport = guidedCueViewportRef.current;
+                    if (viewport) {
+                      viewport.scrollTo({ left: 0, top: 0, behavior: "smooth" });
+                    }
                   }}
                   disabled={guidedCueCanvasZoom === GUIDED_CUE_ZOOM_DEFAULT}
                 >
@@ -4431,7 +4467,7 @@ export function AutoTextbookSetupFlow({
                 </button>
                 <span className="auto-cue-canvas__zoom-label">{guidedCueCanvasZoom}%</span>
               </div>
-              <div className="auto-cue-canvas__viewport">
+              <div className="auto-cue-canvas__viewport" ref={guidedCueViewportRef}>
                 <div className="auto-cue-canvas__stage" style={{ width: `${guidedCueCanvasZoom}%` }}>
                   <img
                     data-testid="guided-cue-canvas-image"

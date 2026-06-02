@@ -1,3 +1,0 @@
-release/checksums/linux-portable.sha256
-release/checksums/windows-installer.sha256
-release/checksums/windows-portable.sha256

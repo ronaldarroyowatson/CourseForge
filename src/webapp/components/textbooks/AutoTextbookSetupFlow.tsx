@@ -303,6 +303,61 @@ const KNOWN_TEXTBOOK_DOMAINS = [
 ];
 
 const GUIDED_CUE_TYPES: GuidedCueType[] = ["openToc", "openGlossary", "openChapter", "openSection", "nextPage"];
+const GUIDED_CUE_ZOOM_DEFAULT = 140;
+const GUIDED_CUE_ZOOM_MIN = 80;
+const GUIDED_CUE_ZOOM_MAX = 260;
+const GUIDED_CUE_ZOOM_STEP = 20;
+
+interface GuidedTraversalTarget {
+  chapterIndex: number;
+  sectionIndex: number;
+  chapterTitle: string;
+  sectionTitle: string;
+  chapterNumberLabel: string;
+  sectionNumberLabel: string;
+}
+
+function buildGuidedTraversalTargets(chapters: TocChapter[]): GuidedTraversalTarget[] {
+  const targets: GuidedTraversalTarget[] = [];
+
+  for (let chapterIndex = 0; chapterIndex < chapters.length; chapterIndex += 1) {
+    const chapter = chapters[chapterIndex];
+    if (!chapter) {
+      continue;
+    }
+
+    const chapterNumberLabel = chapter.chapterNumber?.trim() || String(chapterIndex + 1);
+    if (!Array.isArray(chapter.sections) || chapter.sections.length === 0) {
+      targets.push({
+        chapterIndex,
+        sectionIndex: -1,
+        chapterTitle: chapter.title || `Chapter ${chapterNumberLabel}`,
+        sectionTitle: "Chapter intro",
+        chapterNumberLabel,
+        sectionNumberLabel: "intro",
+      });
+      continue;
+    }
+
+    for (let sectionIndex = 0; sectionIndex < chapter.sections.length; sectionIndex += 1) {
+      const section = chapter.sections[sectionIndex];
+      if (!section) {
+        continue;
+      }
+
+      targets.push({
+        chapterIndex,
+        sectionIndex,
+        chapterTitle: chapter.title || `Chapter ${chapterNumberLabel}`,
+        sectionTitle: section.title || `Section ${sectionIndex + 1}`,
+        chapterNumberLabel,
+        sectionNumberLabel: section.sectionNumber?.trim() || String(sectionIndex + 1),
+      });
+    }
+  }
+
+  return targets;
+}
 
 const AUTO_CAPTURE_USAGE_STORAGE_KEY = "courseforge.autoCaptureUsageByDraft";
 
@@ -1152,6 +1207,10 @@ export function AutoTextbookSetupFlow({
   const [tocCaptureImageDataUrl, setTocCaptureImageDataUrl] = useState<string | null>(testingSeedState?.tocCaptureImageDataUrl ?? null);
   const [guidedCuePlan, setGuidedCuePlan] = useState<GuidedCaptureCuePlan>(initialGuidedCuePlan);
   const [activeCueForPin, setActiveCueForPin] = useState<GuidedCueType | null>(null);
+  const [guidedCueCanvasZoom, setGuidedCueCanvasZoom] = useState<number>(GUIDED_CUE_ZOOM_DEFAULT);
+  const [isGuidedRunActive, setIsGuidedRunActive] = useState(false);
+  const [guidedRunCursor, setGuidedRunCursor] = useState(0);
+  const [guidedRunCapturedCount, setGuidedRunCapturedCount] = useState(0);
   const [isBusy, setIsBusy] = useState(false);
   const [activePrimaryHelper, setActivePrimaryHelper] = useState<AutoPrimaryHelperAction | null>(null);
   const [primaryHelperAnchor, setPrimaryHelperAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -1364,6 +1423,8 @@ export function AutoTextbookSetupFlow({
   const canFinishToc = tocResult.chapters.length > 0;
   const guidedCueCompletion = useMemo(() => getGuidedCueCompletion(guidedCuePlan), [guidedCuePlan]);
   const missingGuidedCues = useMemo(() => getMissingGuidedCuesForAutomation(guidedCuePlan), [guidedCuePlan]);
+  const guidedTraversalTargets = useMemo(() => buildGuidedTraversalTargets(tocResult.chapters), [tocResult.chapters]);
+  const currentGuidedTarget = guidedTraversalTargets[guidedRunCursor] ?? null;
 
   function toggleGuidedCue(type: GuidedCueType): void {
     if (guidedCuePlan.cues[type]?.acknowledged) {
@@ -1394,6 +1455,108 @@ export function AutoTextbookSetupFlow({
     }));
     setInfoMessage(`${getGuidedCueLabel(activeCueForPin)} pinned.`);
   }
+
+  function handleStartGuidedCapture(): void {
+    if (missingGuidedCues.length > 0) {
+      setErrorMessage(`Pin required cues before starting: ${missingGuidedCues.map((cue) => getGuidedCueLabel(cue)).join(", ")}.`);
+      return;
+    }
+
+    if (guidedTraversalTargets.length === 0) {
+      setErrorMessage("Parse TOC chapters/sections before starting guided capture.");
+      return;
+    }
+
+    setIsGuidedRunActive(true);
+    setGuidedRunCursor(0);
+    setGuidedRunCapturedCount(0);
+    setErrorMessage(null);
+    const firstTarget = guidedTraversalTargets[0];
+    if (firstTarget) {
+      setInfoMessage(
+        `Guided capture started. Target 1/${guidedTraversalTargets.length}: Chapter ${firstTarget.chapterNumberLabel} ${firstTarget.chapterTitle} -> ${firstTarget.sectionNumberLabel} ${firstTarget.sectionTitle}.`
+      );
+    }
+  }
+
+  async function handleGuidedCaptureCurrentTarget(): Promise<void> {
+    if (!isGuidedRunActive || !currentGuidedTarget) {
+      return;
+    }
+
+    const capture = await captureForStep("toc");
+    if (!capture) {
+      return;
+    }
+
+    setTocCaptureImageDataUrl(capture.imageDataUrl);
+    setGuidedRunCapturedCount((value) => value + 1);
+
+    const nextIndex = guidedRunCursor + 1;
+    if (nextIndex >= guidedTraversalTargets.length) {
+      setIsGuidedRunActive(false);
+      setGuidedRunCursor(guidedTraversalTargets.length);
+      setInfoMessage(
+        `Guided capture run completed. Captured ${guidedRunCapturedCount + 1} of ${guidedTraversalTargets.length} targets.`
+      );
+      return;
+    }
+
+    setGuidedRunCursor(nextIndex);
+    const nextTarget = guidedTraversalTargets[nextIndex];
+    if (nextTarget) {
+      setInfoMessage(
+        `Captured target ${nextIndex}/${guidedTraversalTargets.length}. Next: Chapter ${nextTarget.chapterNumberLabel} ${nextTarget.chapterTitle} -> ${nextTarget.sectionNumberLabel} ${nextTarget.sectionTitle}.`
+      );
+    }
+  }
+
+  function handleGuidedSkipTarget(): void {
+    if (!isGuidedRunActive) {
+      return;
+    }
+
+    const nextIndex = guidedRunCursor + 1;
+    if (nextIndex >= guidedTraversalTargets.length) {
+      setIsGuidedRunActive(false);
+      setGuidedRunCursor(guidedTraversalTargets.length);
+      setInfoMessage(
+        `Guided capture run completed. Captured ${guidedRunCapturedCount} of ${guidedTraversalTargets.length} targets.`
+      );
+      return;
+    }
+
+    setGuidedRunCursor(nextIndex);
+    const nextTarget = guidedTraversalTargets[nextIndex];
+    if (nextTarget) {
+      setInfoMessage(
+        `Skipped to target ${nextIndex + 1}/${guidedTraversalTargets.length}: Chapter ${nextTarget.chapterNumberLabel} ${nextTarget.chapterTitle} -> ${nextTarget.sectionNumberLabel} ${nextTarget.sectionTitle}.`
+      );
+    }
+  }
+
+  function handleStopGuidedCapture(): void {
+    setIsGuidedRunActive(false);
+    setInfoMessage(
+      `Guided capture paused at target ${Math.min(guidedRunCursor + 1, guidedTraversalTargets.length)}/${guidedTraversalTargets.length}.`
+    );
+  }
+
+  useEffect(() => {
+    if (!isGuidedRunActive) {
+      return;
+    }
+
+    if (guidedTraversalTargets.length === 0 || guidedRunCursor >= guidedTraversalTargets.length) {
+      setIsGuidedRunActive(false);
+    }
+  }, [guidedRunCursor, guidedTraversalTargets.length, isGuidedRunActive]);
+
+  useEffect(() => {
+    if (step !== "toc" && isGuidedRunActive) {
+      setIsGuidedRunActive(false);
+    }
+  }, [isGuidedRunActive, step]);
 
   useEffect(() => {
     const currentStep: 1 | 2 | 3 | 4 = step === "cover"
@@ -4165,38 +4328,136 @@ export function AutoTextbookSetupFlow({
                 Cancel Pinning
               </button>
             ) : null}
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={handleStartGuidedCapture}
+              disabled={isBusy || isGuidedRunActive}
+            >
+              Start Guided Capture
+            </button>
+            {isGuidedRunActive ? (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleStopGuidedCapture}
+                disabled={isBusy}
+              >
+                Pause Guided Capture
+              </button>
+            ) : null}
           </div>
           <p className="form-hint">
             {activeCueForPin
               ? `Click on the screenshot to pin ${getGuidedCueLabel(activeCueForPin)}.`
-              : "Choose a cue button, then click the screenshot to pin its location."}
+              : "Choose a cue button, then click the screenshot to pin its location. Use Start Guided Capture to validate pinned cues and begin the guided flow."}
           </p>
+
+          {guidedTraversalTargets.length > 0 ? (
+            <div className="toc-capture-summary" aria-label="Guided run status">
+              <p className="toc-capture-summary__header">
+                <strong>Run plan:</strong> {guidedTraversalTargets.length} targets. Captured {guidedRunCapturedCount}/{guidedTraversalTargets.length}.
+              </p>
+              {currentGuidedTarget ? (
+                <p className="form-hint">
+                  Current target ({Math.min(guidedRunCursor + 1, guidedTraversalTargets.length)}/{guidedTraversalTargets.length}):
+                  {" "}
+                  Chapter {currentGuidedTarget.chapterNumberLabel} {currentGuidedTarget.chapterTitle}
+                  {" "}
+                  {"->"}
+                  {" "}
+                  {currentGuidedTarget.sectionNumberLabel} {currentGuidedTarget.sectionTitle}
+                </p>
+              ) : (
+                <p className="form-hint">No remaining targets in the current run plan.</p>
+              )}
+              {isGuidedRunActive ? (
+                <div className="form-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      void handleGuidedCaptureCurrentTarget();
+                    }}
+                    disabled={isBusy || !currentGuidedTarget}
+                  >
+                    Capture Current Target
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={handleGuidedSkipTarget}
+                    disabled={isBusy || !currentGuidedTarget}
+                  >
+                    Skip Target
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {(tocCaptureImageDataUrl || lastMetadataImageDataUrl) ? (
             <div className="auto-cue-canvas" role="group" aria-label="Cue pin canvas">
-              <img
-                data-testid="guided-cue-canvas-image"
-                src={tocCaptureImageDataUrl ?? lastMetadataImageDataUrl ?? ""}
-                alt="Pin guided navigation cues"
-                className="auto-cue-canvas__image"
-                onClick={handleCueCanvasClick}
-              />
-              {GUIDED_CUE_TYPES.map((cue) => {
-                const point = guidedCuePlan.cues[cue]?.point;
-                if (typeof point?.xRatio !== "number" || typeof point?.yRatio !== "number") {
-                  return null;
-                }
-
-                return (
-                  <span
-                    key={`guided-cue-marker-${cue}`}
-                    className="auto-cue-canvas__marker"
-                    style={{ left: `${point.xRatio * 100}%`, top: `${point.yRatio * 100}%` }}
-                    aria-label={`${getGuidedCueLabel(cue)} marker`}
-                    title={getGuidedCueLabel(cue)}
+              <div className="auto-cue-canvas__toolbar" role="group" aria-label="Cue preview zoom controls">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setGuidedCueCanvasZoom((value) => Math.max(GUIDED_CUE_ZOOM_MIN, value - GUIDED_CUE_ZOOM_STEP));
+                  }}
+                  disabled={guidedCueCanvasZoom <= GUIDED_CUE_ZOOM_MIN}
+                >
+                  Zoom -
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setGuidedCueCanvasZoom(GUIDED_CUE_ZOOM_DEFAULT);
+                  }}
+                  disabled={guidedCueCanvasZoom === GUIDED_CUE_ZOOM_DEFAULT}
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setGuidedCueCanvasZoom((value) => Math.min(GUIDED_CUE_ZOOM_MAX, value + GUIDED_CUE_ZOOM_STEP));
+                  }}
+                  disabled={guidedCueCanvasZoom >= GUIDED_CUE_ZOOM_MAX}
+                >
+                  Zoom +
+                </button>
+                <span className="auto-cue-canvas__zoom-label">{guidedCueCanvasZoom}%</span>
+              </div>
+              <div className="auto-cue-canvas__viewport">
+                <div className="auto-cue-canvas__stage" style={{ width: `${guidedCueCanvasZoom}%` }}>
+                  <img
+                    data-testid="guided-cue-canvas-image"
+                    src={tocCaptureImageDataUrl ?? lastMetadataImageDataUrl ?? ""}
+                    alt="Pin guided navigation cues"
+                    className="auto-cue-canvas__image"
+                    onClick={handleCueCanvasClick}
                   />
-                );
-              })}
+                  {GUIDED_CUE_TYPES.map((cue) => {
+                    const point = guidedCuePlan.cues[cue]?.point;
+                    if (typeof point?.xRatio !== "number" || typeof point?.yRatio !== "number") {
+                      return null;
+                    }
+
+                    return (
+                      <span
+                        key={`guided-cue-marker-${cue}`}
+                        className="auto-cue-canvas__marker"
+                        style={{ left: `${point.xRatio * 100}%`, top: `${point.yRatio * 100}%` }}
+                        aria-label={`${getGuidedCueLabel(cue)} marker`}
+                        title={getGuidedCueLabel(cue)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           ) : (
             <p className="form-hint">Capture at least one TOC page to enable on-screen cue pinning.</p>

@@ -67,21 +67,57 @@ export function getTocTreeMapNodeKey(node: TocTreeMapNode): string {
 }
 
 export function mergeTocTreeMapNodes(existing: TocTreeMapNode[], incoming: TocTreeMapNode[]): TocTreeMapNode[] {
+  return mergeTocTreeMapNodesWithStats(existing, incoming).nodes;
+}
+
+export interface TocTreeMapMergeStats {
+  nodes: TocTreeMapNode[];
+  incomingCount: number;
+  addedCount: number;
+  duplicateCount: number;
+  droppedByCapCount: number;
+  totalCount: number;
+}
+
+export function mergeTocTreeMapNodesWithStats(existing: TocTreeMapNode[], incoming: TocTreeMapNode[]): TocTreeMapMergeStats {
   const merged: TocTreeMapNode[] = [];
   const seen = new Set<string>();
 
-  const appendIfNew = (node: TocTreeMapNode): void => {
+  const appendIfNew = (node: TocTreeMapNode): boolean => {
     const key = getTocTreeMapNodeKey(node);
     if (seen.has(key)) {
-      return;
+      return false;
     }
 
     seen.add(key);
     merged.push(node);
+    return true;
   };
 
-  existing.forEach(appendIfNew);
-  incoming.forEach(appendIfNew);
+  existing.forEach((node) => {
+    appendIfNew(node);
+  });
+  const baseExistingCount = Math.min(220, merged.length);
 
-  return merged.slice(0, 220);
+  let preCapAddedCount = 0;
+  incoming.forEach((node) => {
+    if (appendIfNew(node)) {
+      preCapAddedCount += 1;
+    }
+  });
+
+  const capped = merged.slice(0, 220);
+  const totalCount = capped.length;
+  const droppedByCapCount = Math.max(0, merged.length - totalCount);
+  const effectiveAddedCount = Math.max(0, totalCount - baseExistingCount);
+  const duplicateCount = Math.max(0, incoming.length - preCapAddedCount);
+
+  return {
+    nodes: capped,
+    incomingCount: incoming.length,
+    addedCount: effectiveAddedCount,
+    duplicateCount,
+    droppedByCapCount,
+    totalCount,
+  };
 }

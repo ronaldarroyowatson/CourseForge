@@ -1734,6 +1734,88 @@ describe("auto textbook flow integration", () => {
     }
   });
 
+  it("reports when a repeated TOC scan adds no new targets", async () => {
+    const sendMessageMock = vi
+      .fn()
+      .mockImplementationOnce((_message: unknown, callback: (reply: unknown) => void) => {
+        callback({
+          ok: true,
+          passCount: 2,
+          autoScrollUsed: true,
+          nodes: [
+            {
+              id: "dup-1",
+              text: "Module 7: Energy",
+              role: "treeitem",
+              level: 2,
+              xRatio: 0.24,
+              yRatio: 0.29,
+              widthRatio: 0.47,
+              heightRatio: 0.03,
+            },
+          ],
+        });
+      })
+      .mockImplementationOnce((_message: unknown, callback: (reply: unknown) => void) => {
+        callback({
+          ok: true,
+          passCount: 2,
+          autoScrollUsed: true,
+          nodes: [
+            {
+              id: "dup-1-second-scan",
+              text: "Module 7: Energy",
+              role: "treeitem",
+              level: 2,
+              xRatio: 0.24,
+              yRatio: 0.31,
+              widthRatio: 0.47,
+              heightRatio: 0.03,
+            },
+          ],
+        });
+      });
+
+    const originalChrome = (globalThis as { chrome?: unknown }).chrome;
+    (globalThis as { chrome?: { runtime: { sendMessage: typeof sendMessageMock } } }).chrome = {
+      runtime: {
+        sendMessage: sendMessageMock,
+      },
+    };
+
+    try {
+      render(
+        <AutoTextbookSetupFlow
+          runtime="extension"
+          onSaved={() => undefined}
+          onSwitchToManual={() => undefined}
+          testingSeedState={{
+            step: "toc",
+            coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+            ocrDraft: "Table of Contents",
+            tocCaptureImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+            guidedCuePlan: {
+              version: 1,
+              viewerHost: "example.viewer",
+              cues: {},
+            },
+          }}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Open Live TOC Mapper" }));
+      fireEvent.click(screen.getByRole("button", { name: "Scan TOC Map" }));
+      expect(await screen.findByText(/1 new clickable targets were merged/i)).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Scan TOC Map" }));
+
+      expect(await screen.findByText(/already mapped/i)).toBeInTheDocument();
+      expect(screen.getByText(/Mapper targets detected:\s*1\./i)).toBeInTheDocument();
+    } finally {
+      (globalThis as { chrome?: unknown }).chrome = originalChrome;
+    }
+  });
+
   it("clears mapped TOC targets on demand", async () => {
     const sendMessageMock = vi.fn((_message: unknown, callback: (reply: unknown) => void) => {
       callback({

@@ -34,7 +34,7 @@ import {
 } from "../../../core/services/textbookAutoExtractionService";
 import {
   cleanOcrTocLine,
-  mergeTocTreeMapNodes,
+  mergeTocTreeMapNodesWithStats,
   normalizeTocTreeMapText,
   type TocTreeMapNode,
 } from "../../../core/services/tocTreeMapService";
@@ -1562,8 +1562,13 @@ export function AutoTextbookSetupFlow({
   }, [isCueFullscreenOpen, tocCaptureImageDataUrl]);
 
   async function handleScanTocTreeMap(): Promise<void> {
+    const scanTraceId = createAutoFlowTraceId("auto-flow-toc-scan");
     setIsScanningTocTreeMap(true);
     setErrorMessage(null);
+    emitAutoFlowDiagnostic("toc_scan_started", {
+      traceId: scanTraceId,
+      context: { runtime },
+    });
 
     try {
       if (runtime !== "extension") {
@@ -1592,6 +1597,14 @@ export function AutoTextbookSetupFlow({
 
         const primaryOcr = await extractTextFromImageWithFallback(frameDataUrl);
         const primaryLines = extractCleanLines(primaryOcr.text);
+        emitAutoFlowDiagnostic("toc_scan_primary_ocr_completed", {
+          traceId: scanTraceId,
+          context: {
+            providerId: primaryOcr.providerId,
+            textLength: primaryOcr.text.length,
+            cleanedLineCount: primaryLines.length,
+          },
+        });
 
         // Run a second OCR pass focused on the lower-left TOC panel to recover
         // entries that are frequently missed near the bottom edge.
@@ -1616,8 +1629,28 @@ export function AutoTextbookSetupFlow({
             focusedHeight
           );
           const focusedFrameDataUrl = focusedCanvas.toDataURL("image/png");
-          const focusedOcr = await extractTextFromImageWithFallback(focusedFrameDataUrl);
-          focusedLines = extractCleanLines(focusedOcr.text);
+          try {
+            const focusedOcr = await extractTextFromImageWithFallback(focusedFrameDataUrl);
+            focusedLines = extractCleanLines(focusedOcr.text);
+            emitAutoFlowDiagnostic("toc_scan_focused_ocr_completed", {
+              traceId: scanTraceId,
+              context: {
+                providerId: focusedOcr.providerId,
+                textLength: focusedOcr.text.length,
+                cleanedLineCount: focusedLines.length,
+              },
+            });
+          } catch (focusedOcrError) {
+            emitAutoFlowDiagnostic("toc_scan_focused_ocr_failed", {
+              level: "warning",
+              traceId: scanTraceId,
+              context: {
+                message: focusedOcrError instanceof Error
+                  ? focusedOcrError.message
+                  : "Focused OCR pass failed.",
+              },
+            });
+          }
         }
 
         const mergedLines: string[] = [];
@@ -1654,10 +1687,28 @@ export function AutoTextbookSetupFlow({
           };
         });
 
-        setTocTreeMapNodes((current) => mergeTocTreeMapNodes(current, nodes));
+        const scanStats = mergeTocTreeMapNodesWithStats(tocTreeMapNodes, nodes);
+        setTocTreeMapNodes(scanStats.nodes);
+        emitAutoFlowDiagnostic("toc_scan_completed", {
+          traceId: scanTraceId,
+          context: {
+            runtime,
+            source: "live-overlay-ocr",
+            primaryLineCount: primaryLines.length,
+            focusedLineCount: focusedLines.length,
+            mergedLineCount: lines.length,
+            incomingCount: scanStats.incomingCount,
+            addedCount: scanStats.addedCount,
+            duplicateCount: scanStats.duplicateCount,
+            droppedByCapCount: scanStats.droppedByCapCount,
+            totalCount: scanStats.totalCount,
+          },
+        });
         setInfoMessage(
           nodes.length > 0
-            ? `TOC map scan completed from live overlay OCR. ${nodes.length} candidate targets detected. Web mode does not support auto-scroll yet, so scroll the textbook TOC and scan again to merge additional targets.`
+            ? scanStats.addedCount > 0
+              ? `TOC map scan completed from live overlay OCR. ${scanStats.addedCount} new candidate targets were merged (${scanStats.totalCount} total). Web mode does not support auto-scroll yet, so scroll the textbook TOC and scan again.`
+              : `TOC map scan completed from live overlay OCR, but no new targets were added (${scanStats.totalCount} total). Scroll to a new TOC region and scan again.`
             : "TOC map scan completed from live overlay OCR, but no target candidates were detected."
         );
         return;
@@ -1697,15 +1748,42 @@ export function AutoTextbookSetupFlow({
       const passCount = Number.isFinite(response.passCount) ? Math.max(1, Number(response.passCount)) : 1;
       const autoScrollUsed = Boolean(response.autoScrollUsed);
 
-      setTocTreeMapNodes((current) => mergeTocTreeMapNodes(current, nodes));
+      const scanStats = mergeTocTreeMapNodesWithStats(tocTreeMapNodes, nodes);
+      setTocTreeMapNodes(scanStats.nodes);
+      emitAutoFlowDiagnostic("toc_scan_completed", {
+        traceId: scanTraceId,
+        context: {
+          runtime,
+          source: "extension-tree-snapshot",
+          passCount,
+          autoScrollUsed,
+          incomingCount: scanStats.incomingCount,
+          addedCount: scanStats.addedCount,
+          duplicateCount: scanStats.duplicateCount,
+          droppedByCapCount: scanStats.droppedByCapCount,
+          totalCount: scanStats.totalCount,
+        },
+      });
       setInfoMessage(
         nodes.length > 0
-          ? autoScrollUsed
-            ? `TOC map scan completed across ${passCount} viewport passes. ${nodes.length} clickable targets were detected and merged.`
-            : `TOC map scan completed. ${nodes.length} clickable targets detected in the active tab. If more TOC items exist below, scroll and run Scan TOC Map again to merge.`
+          ? scanStats.addedCount > 0
+            ? autoScrollUsed
+              ? `TOC map scan completed across ${passCount} viewport passes. ${scanStats.addedCount} new clickable targets were merged (${scanStats.totalCount} total).`
+              : `TOC map scan completed. ${scanStats.addedCount} new clickable targets were merged (${scanStats.totalCount} total). If more TOC items exist below, scroll and scan again.`
+            : autoScrollUsed
+              ? `TOC map scan completed across ${passCount} viewport passes, but all ${nodes.length} detected targets were already mapped (${scanStats.totalCount} total).`
+              : `TOC map scan completed, but no new clickable targets were added (${scanStats.totalCount} total). Ensure a new TOC region is visible, then scan again.`
           : "TOC map scan completed, but no clickable targets were detected. Ensure the TOC panel is visible in the active tab."
       );
     } catch (error) {
+      emitAutoFlowDiagnostic("toc_scan_failed", {
+        level: "error",
+        traceId: scanTraceId,
+        context: {
+          runtime,
+          message: error instanceof Error ? error.message : "TOC mapping scan failed.",
+        },
+      });
       setErrorMessage(error instanceof Error ? error.message : "TOC mapping scan failed.");
     } finally {
       setIsScanningTocTreeMap(false);

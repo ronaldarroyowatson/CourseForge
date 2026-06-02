@@ -1179,6 +1179,7 @@ export function AutoTextbookSetupFlow({
   } = useRepositories();
   const draftKeyRef = useRef<string>(createDraftCaptureKey());
   const guidedCueViewportRef = useRef<HTMLDivElement | null>(null);
+  const guidedCueFullscreenViewportRef = useRef<HTMLDivElement | null>(null);
   const [environmentPreparationMessage, setEnvironmentPreparationMessage] = useState<string>(
     runtime === "extension"
       ? "Checking browser tabs for textbook setup readiness..."
@@ -1208,6 +1209,7 @@ export function AutoTextbookSetupFlow({
   const [tocCaptureImageDataUrl, setTocCaptureImageDataUrl] = useState<string | null>(testingSeedState?.tocCaptureImageDataUrl ?? null);
   const [guidedCuePlan, setGuidedCuePlan] = useState<GuidedCaptureCuePlan>(initialGuidedCuePlan);
   const [activeCueForPin, setActiveCueForPin] = useState<GuidedCueType | null>(null);
+  const [isCueFullscreenOpen, setIsCueFullscreenOpen] = useState(false);
   const [guidedCueCanvasZoom, setGuidedCueCanvasZoom] = useState<number>(GUIDED_CUE_ZOOM_DEFAULT);
   const [isGuidedRunActive, setIsGuidedRunActive] = useState(false);
   const [guidedRunCursor, setGuidedRunCursor] = useState(0);
@@ -1469,6 +1471,44 @@ export function AutoTextbookSetupFlow({
       behavior: "smooth",
     });
   }
+
+  function panGuidedCueFullscreenViewport(deltaX: number, deltaY = 0): void {
+    const viewport = guidedCueFullscreenViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    viewport.scrollBy({
+      left: deltaX,
+      top: deltaY,
+      behavior: "smooth",
+    });
+  }
+
+  function openCueFullscreen(): void {
+    setIsCueFullscreenOpen(true);
+  }
+
+  function closeCueFullscreen(): void {
+    setIsCueFullscreenOpen(false);
+  }
+
+  useEffect(() => {
+    if (!isCueFullscreenOpen) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsCueFullscreenOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isCueFullscreenOpen]);
 
   function handleStartGuidedCapture(): void {
     if (missingGuidedCues.length > 0) {
@@ -4439,6 +4479,13 @@ export function AutoTextbookSetupFlow({
                 <button
                   type="button"
                   className="btn-secondary"
+                  onClick={openCueFullscreen}
+                >
+                  Full Screen Pinning
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
                   onClick={() => {
                     setGuidedCueCanvasZoom((value) => Math.max(GUIDED_CUE_ZOOM_MIN, value - GUIDED_CUE_ZOOM_STEP));
                   }}
@@ -4503,6 +4550,71 @@ export function AutoTextbookSetupFlow({
           ) : (
             <p className="form-hint">Capture at least one TOC page to enable on-screen cue pinning.</p>
           )}
+
+          {isCueFullscreenOpen && (tocCaptureImageDataUrl || lastMetadataImageDataUrl) ? (
+            <div className="auto-cue-fullscreen" role="dialog" aria-modal="true" aria-label="Full screen guided cue pinning">
+              <div className="auto-cue-fullscreen__backdrop" onClick={closeCueFullscreen} />
+              <div className="auto-cue-fullscreen__panel">
+                <div className="auto-cue-fullscreen__header">
+                  <p className="auto-cue-fullscreen__title">Full Screen Guided Pinning</p>
+                  <button type="button" className="btn-secondary" onClick={closeCueFullscreen}>Close</button>
+                </div>
+                <p className="form-hint">
+                  Select a cue, then click on the full-size screenshot to pin it. Press Escape to close this view.
+                </p>
+                <div className="auto-cue-fullscreen__controls">
+                  {GUIDED_CUE_TYPES.map((cue) => {
+                    const marked = Boolean(guidedCuePlan.cues[cue]?.acknowledged);
+                    return (
+                      <button
+                        key={`fullscreen-guided-cue-${cue}`}
+                        type="button"
+                        className={marked ? "btn-secondary" : undefined}
+                        onClick={() => {
+                          setActiveCueForPin(cue);
+                          if (guidedCuePlan.cues[cue]?.acknowledged) {
+                            toggleGuidedCue(cue);
+                          }
+                        }}
+                      >
+                        {activeCueForPin === cue ? "Pinning" : "Pin"} {getGuidedCueLabel(cue)}
+                      </button>
+                    );
+                  })}
+                  <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(-320, 0); }}>Pan Left</button>
+                  <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(320, 0); }}>Pan Right</button>
+                  <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(0, -220); }}>Pan Up</button>
+                  <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(0, 220); }}>Pan Down</button>
+                </div>
+                <div className="auto-cue-fullscreen__viewport" ref={guidedCueFullscreenViewportRef}>
+                  <div className="auto-cue-fullscreen__stage">
+                    <img
+                      src={tocCaptureImageDataUrl ?? lastMetadataImageDataUrl ?? ""}
+                      alt="Full screen guided navigation cue pinning"
+                      className="auto-cue-fullscreen__image"
+                      onClick={handleCueCanvasClick}
+                    />
+                    {GUIDED_CUE_TYPES.map((cue) => {
+                      const point = guidedCuePlan.cues[cue]?.point;
+                      if (typeof point?.xRatio !== "number" || typeof point?.yRatio !== "number") {
+                        return null;
+                      }
+
+                      return (
+                        <span
+                          key={`fullscreen-guided-cue-marker-${cue}`}
+                          className="auto-cue-canvas__marker"
+                          style={{ left: `${point.xRatio * 100}%`, top: `${point.yRatio * 100}%` }}
+                          aria-label={`${getGuidedCueLabel(cue)} marker`}
+                          title={getGuidedCueLabel(cue)}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

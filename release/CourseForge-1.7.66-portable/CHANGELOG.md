@@ -5,9 +5,3 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
 ## [Unreleased]
-
-## [1.7.66] - 2026-06-01
-
-### Fixed (1.7.66)
-
-- Fix fullscreen TOC cue pinning workflow

@@ -4565,6 +4565,17 @@ button.cf-ds-color-wheel__dot:active {
   max-width: 100%;
 }
 
+.auto-cue-fullscreen__placeholder {
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
 @media (max-width: 768px) {
   .textbook-entry-mode-grid {
     grid-template-columns: 1fr;

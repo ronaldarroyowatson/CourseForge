@@ -164,7 +164,6 @@ const METADATA_TILE_LABELS: Record<MetadataTileKey, string> = {
 const RELATED_ISBN_TYPES: RelatedIsbnType[] = ["student", "teacher", "digital", "workbook", "assessment", "other"];
 const IMMEDIATE_UPLOAD_SYNC_TIMEOUT_MS = 4500;
 const IMMEDIATE_UPLOAD_SYNC_RETRY_DELAY_MS = 5500;
-const TEACH_MACRO_MAX_STEPS = 40;
 
 interface AutoTextbookSetupFlowProps {
   runtime?: "webapp" | "extension";
@@ -221,18 +220,6 @@ interface CaptureResult {
   ocrProviderId: string;
   metadataResult: MetadataResult | null;
   pipelineResult: MetadataPipelineResult | null;
-}
-
-interface TeachMacroStep {
-  id: string;
-  xRatio: number;
-  yRatio: number;
-  source: "live" | "snapshot";
-  capturedAt: number;
-  anchorBox: {
-    widthRatio: number;
-    heightRatio: number;
-  };
 }
 
 interface TocTreeMapNode {
@@ -329,12 +316,6 @@ const KNOWN_TEXTBOOK_DOMAINS = [
 ];
 
 const GUIDED_CUE_TYPES: GuidedCueType[] = ["openToc", "openGlossary", "openChapter", "openSection", "nextPage"];
-const CORE_GUIDED_CUE_TYPES: GuidedCueType[] = ["openToc", "openGlossary", "nextPage"];
-const OPTIONAL_GUIDED_CUE_TYPES: GuidedCueType[] = ["openChapter", "openSection"];
-const GUIDED_CUE_ZOOM_DEFAULT = 140;
-const GUIDED_CUE_ZOOM_MIN = 50;
-const GUIDED_CUE_ZOOM_MAX = 260;
-const GUIDED_CUE_ZOOM_STEP = 10;
 
 interface GuidedTraversalTarget {
   chapterIndex: number;
@@ -1206,7 +1187,6 @@ export function AutoTextbookSetupFlow({
     removeChapter,
   } = useRepositories();
   const draftKeyRef = useRef<string>(createDraftCaptureKey());
-  const guidedCueViewportRef = useRef<HTMLDivElement | null>(null);
   const guidedCueFullscreenViewportRef = useRef<HTMLDivElement | null>(null);
   const [environmentPreparationMessage, setEnvironmentPreparationMessage] = useState<string>(
     runtime === "extension"
@@ -1236,19 +1216,11 @@ export function AutoTextbookSetupFlow({
   }] : []));
   const [tocCaptureImageDataUrl, setTocCaptureImageDataUrl] = useState<string | null>(testingSeedState?.tocCaptureImageDataUrl ?? null);
   const [guidedCuePlan, setGuidedCuePlan] = useState<GuidedCaptureCuePlan>(initialGuidedCuePlan);
-  const [activeCueForPin, setActiveCueForPin] = useState<GuidedCueType | null>(null);
-  const [showOptionalCuePins, setShowOptionalCuePins] = useState(false);
   const [isCueFullscreenOpen, setIsCueFullscreenOpen] = useState(false);
   const [isLiveCueOverlayActive, setIsLiveCueOverlayActive] = useState(false);
   const [liveCueOverlayError, setLiveCueOverlayError] = useState<string | null>(null);
-  const [isTeachModeActive, setIsTeachModeActive] = useState(false);
-  const [teachMacroSteps, setTeachMacroSteps] = useState<TeachMacroStep[]>([]);
   const [isScanningTocTreeMap, setIsScanningTocTreeMap] = useState(false);
   const [tocTreeMapNodes, setTocTreeMapNodes] = useState<TocTreeMapNode[]>([]);
-  const [guidedCueCanvasZoom, setGuidedCueCanvasZoom] = useState<number>(GUIDED_CUE_ZOOM_DEFAULT);
-  const [isGuidedRunActive, setIsGuidedRunActive] = useState(false);
-  const [guidedRunCursor, setGuidedRunCursor] = useState(0);
-  const [guidedRunCapturedCount, setGuidedRunCapturedCount] = useState(0);
   const [isBusy, setIsBusy] = useState(false);
   const [activePrimaryHelper, setActivePrimaryHelper] = useState<AutoPrimaryHelperAction | null>(null);
   const [primaryHelperAnchor, setPrimaryHelperAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -1461,101 +1433,6 @@ export function AutoTextbookSetupFlow({
   ]);
 
   const canFinishToc = tocResult.chapters.length > 0;
-  const guidedCueCompletion = useMemo(() => getGuidedCueCompletion(guidedCuePlan), [guidedCuePlan]);
-  const missingGuidedCues = useMemo(() => getMissingGuidedCuesForAutomation(guidedCuePlan), [guidedCuePlan]);
-  const guidedTraversalTargets = useMemo(() => buildGuidedTraversalTargets(tocResult.chapters), [tocResult.chapters]);
-  const currentGuidedTarget = guidedTraversalTargets[guidedRunCursor] ?? null;
-
-  function toggleGuidedCue(type: GuidedCueType): void {
-    if (guidedCuePlan.cues[type]?.acknowledged) {
-      setGuidedCuePlan((current) => clearGuidedCue(current, type));
-      return;
-    }
-
-    setGuidedCuePlan((current) => markGuidedCue(current, type));
-  }
-
-  function handleCueCanvasClick(event: React.MouseEvent<HTMLImageElement>): void {
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
-      return;
-    }
-
-    const xRatio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-    const yRatio = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
-
-    if (isTeachModeActive) {
-      const count = recordTeachMacroStep(xRatio, yRatio, "snapshot");
-      setInfoMessage(`Teach step ${count} recorded from snapshot.`);
-    }
-
-    if (!activeCueForPin) {
-      return;
-    }
-
-    setGuidedCuePlan((current) => markGuidedCue(current, activeCueForPin, {
-      xRatio,
-      yRatio,
-      label: getGuidedCueLabel(activeCueForPin),
-    }));
-    setInfoMessage(`${getGuidedCueLabel(activeCueForPin)} pinned.`);
-  }
-
-  function handleLiveCueVideoClick(event: React.MouseEvent<HTMLVideoElement>): void {
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
-      return;
-    }
-
-    const xRatio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-    const yRatio = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
-
-    if (isTeachModeActive) {
-      const count = recordTeachMacroStep(xRatio, yRatio, "live");
-      setInfoMessage(`Teach step ${count} recorded from live overlay.`);
-    }
-
-    if (!activeCueForPin) {
-      return;
-    }
-
-    setGuidedCuePlan((current) => markGuidedCue(current, activeCueForPin, {
-      xRatio,
-      yRatio,
-      label: getGuidedCueLabel(activeCueForPin),
-    }));
-    setInfoMessage(`${getGuidedCueLabel(activeCueForPin)} pinned from live overlay.`);
-  }
-
-  function recordTeachMacroStep(xRatio: number, yRatio: number, source: "live" | "snapshot"): number {
-    let recordedCount = 0;
-
-    const step: TeachMacroStep = {
-      id: `teach-step-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      xRatio: Math.min(1, Math.max(0, xRatio)),
-      yRatio: Math.min(1, Math.max(0, yRatio)),
-      source,
-      capturedAt: Date.now(),
-      anchorBox: {
-        widthRatio: 0.12,
-        heightRatio: 0.08,
-      },
-    };
-
-    setTeachMacroSteps((current) => {
-      const next = [...current, step];
-      if (next.length <= TEACH_MACRO_MAX_STEPS) {
-        recordedCount = next.length;
-        return next;
-      }
-
-      const trimmed = next.slice(next.length - TEACH_MACRO_MAX_STEPS);
-      recordedCount = trimmed.length;
-      return trimmed;
-    });
-
-    return recordedCount;
-  }
 
   function openCueFullscreen(): void {
     setLiveCueOverlayError(null);
@@ -1615,7 +1492,6 @@ export function AutoTextbookSetupFlow({
 
   function closeCueFullscreen(): void {
     stopLiveCueOverlay();
-    setIsTeachModeActive(false);
     setIsCueFullscreenOpen(false);
   }
 
@@ -1690,52 +1566,72 @@ export function AutoTextbookSetupFlow({
     });
   }, [isCueFullscreenOpen, tocCaptureImageDataUrl]);
 
-  async function handleRecaptureTocCueFrame(): Promise<void> {
-    setInfoMessage("Recapturing TOC frame for cue pinning. Keep the shared textbook view visible.");
-
-    const captured = await captureForStep("toc");
-    if (!captured) {
-      setInfoMessage("TOC recapture was canceled. Existing cue preview was kept.");
-      return;
-    }
-
-    setOcrDraft(captured.ocrText);
-    setTocCaptureImageDataUrl(captured.imageDataUrl);
-    setStep("toc");
-    applyTocFromText(captured.ocrText);
-    setInfoMessage("TOC frame recaptured. Continue pinning cues in fullscreen.");
-
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.requestAnimationFrame(() => {
-      const viewport = guidedCueFullscreenViewportRef.current;
-      if (!viewport) {
-        return;
-      }
-
-      viewport.scrollTo({ left: 0, top: 0, behavior: "smooth" });
-    });
-  }
-
   async function handleScanTocTreeMap(): Promise<void> {
-    if (runtime !== "extension") {
-      setErrorMessage("TOC mapping scan is available in extension runtime only.");
-      return;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chromeApi = (globalThis as any)?.chrome;
-    if (!chromeApi?.runtime?.sendMessage) {
-      setErrorMessage("Extension TOC mapping bridge is unavailable.");
-      return;
-    }
-
     setIsScanningTocTreeMap(true);
     setErrorMessage(null);
 
     try {
+      if (runtime !== "extension") {
+        const video = liveCueVideoRef.current;
+        if (!video || !isLiveCueOverlayActive || video.videoWidth <= 0 || video.videoHeight <= 0) {
+          setErrorMessage("Start Live Overlay first, then run Scan TOC Map after the textbook TOC is visible.");
+          return;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          setErrorMessage("Unable to scan live overlay frame for TOC mapping.");
+          return;
+        }
+
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const frameDataUrl = canvas.toDataURL("image/png");
+        const ocr = await extractTextFromImageWithFallback(frameDataUrl);
+        const lines = ocr.text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length >= 3)
+          .slice(0, 40);
+
+        const nodes: TocTreeMapNode[] = lines.map((text, index) => {
+          const normalized = text.toLowerCase();
+          const level = normalized.startsWith("unit")
+            ? 1
+            : normalized.startsWith("module") || normalized.startsWith("chapter")
+              ? 2
+              : 3;
+
+          return {
+            id: `ocr-${index}`,
+            text,
+            role: "ocr-line",
+            level,
+            xRatio: 0.26,
+            yRatio: Math.min(0.95, 0.1 + (index * 0.02)),
+            widthRatio: 0.5,
+            heightRatio: 0.02,
+          };
+        });
+
+        setTocTreeMapNodes(nodes);
+        setInfoMessage(
+          nodes.length > 0
+            ? `TOC map scan completed from live overlay OCR. ${nodes.length} candidate targets detected.`
+            : "TOC map scan completed from live overlay OCR, but no target candidates were detected."
+        );
+        return;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const chromeApi = (globalThis as any)?.chrome;
+      if (!chromeApi?.runtime?.sendMessage) {
+        setErrorMessage("Extension TOC mapping bridge is unavailable.");
+        return;
+      }
+
       const response = await new Promise<{
         ok?: boolean;
         error?: string;
@@ -1768,108 +1664,6 @@ export function AutoTextbookSetupFlow({
       setIsScanningTocTreeMap(false);
     }
   }
-
-  function handleStartGuidedCapture(): void {
-    if (missingGuidedCues.length > 0) {
-      setErrorMessage(`Pin required cues before starting: ${missingGuidedCues.map((cue) => getGuidedCueLabel(cue)).join(", ")}.`);
-      return;
-    }
-
-    if (guidedTraversalTargets.length === 0) {
-      setErrorMessage("Parse TOC chapters/sections before starting guided capture.");
-      return;
-    }
-
-    setIsGuidedRunActive(true);
-    setGuidedRunCursor(0);
-    setGuidedRunCapturedCount(0);
-    setErrorMessage(null);
-    const firstTarget = guidedTraversalTargets[0];
-    if (firstTarget) {
-      setInfoMessage(
-        `Guided capture started. Target 1/${guidedTraversalTargets.length}: Chapter ${firstTarget.chapterNumberLabel} ${firstTarget.chapterTitle} -> ${firstTarget.sectionNumberLabel} ${firstTarget.sectionTitle}.`
-      );
-    }
-  }
-
-  async function handleGuidedCaptureCurrentTarget(): Promise<void> {
-    if (!isGuidedRunActive || !currentGuidedTarget) {
-      return;
-    }
-
-    const capture = await captureForStep("toc");
-    if (!capture) {
-      return;
-    }
-
-    setTocCaptureImageDataUrl(capture.imageDataUrl);
-    setGuidedRunCapturedCount((value) => value + 1);
-
-    const nextIndex = guidedRunCursor + 1;
-    if (nextIndex >= guidedTraversalTargets.length) {
-      setIsGuidedRunActive(false);
-      setGuidedRunCursor(guidedTraversalTargets.length);
-      setInfoMessage(
-        `Guided capture run completed. Captured ${guidedRunCapturedCount + 1} of ${guidedTraversalTargets.length} targets.`
-      );
-      return;
-    }
-
-    setGuidedRunCursor(nextIndex);
-    const nextTarget = guidedTraversalTargets[nextIndex];
-    if (nextTarget) {
-      setInfoMessage(
-        `Captured target ${nextIndex}/${guidedTraversalTargets.length}. Next: Chapter ${nextTarget.chapterNumberLabel} ${nextTarget.chapterTitle} -> ${nextTarget.sectionNumberLabel} ${nextTarget.sectionTitle}.`
-      );
-    }
-  }
-
-  function handleGuidedSkipTarget(): void {
-    if (!isGuidedRunActive) {
-      return;
-    }
-
-    const nextIndex = guidedRunCursor + 1;
-    if (nextIndex >= guidedTraversalTargets.length) {
-      setIsGuidedRunActive(false);
-      setGuidedRunCursor(guidedTraversalTargets.length);
-      setInfoMessage(
-        `Guided capture run completed. Captured ${guidedRunCapturedCount} of ${guidedTraversalTargets.length} targets.`
-      );
-      return;
-    }
-
-    setGuidedRunCursor(nextIndex);
-    const nextTarget = guidedTraversalTargets[nextIndex];
-    if (nextTarget) {
-      setInfoMessage(
-        `Skipped to target ${nextIndex + 1}/${guidedTraversalTargets.length}: Chapter ${nextTarget.chapterNumberLabel} ${nextTarget.chapterTitle} -> ${nextTarget.sectionNumberLabel} ${nextTarget.sectionTitle}.`
-      );
-    }
-  }
-
-  function handleStopGuidedCapture(): void {
-    setIsGuidedRunActive(false);
-    setInfoMessage(
-      `Guided capture paused at target ${Math.min(guidedRunCursor + 1, guidedTraversalTargets.length)}/${guidedTraversalTargets.length}.`
-    );
-  }
-
-  useEffect(() => {
-    if (!isGuidedRunActive) {
-      return;
-    }
-
-    if (guidedTraversalTargets.length === 0 || guidedRunCursor >= guidedTraversalTargets.length) {
-      setIsGuidedRunActive(false);
-    }
-  }, [guidedRunCursor, guidedTraversalTargets.length, isGuidedRunActive]);
-
-  useEffect(() => {
-    if (step !== "toc" && isGuidedRunActive) {
-      setIsGuidedRunActive(false);
-    }
-  }, [isGuidedRunActive, step]);
 
   useEffect(() => {
     const currentStep: 1 | 2 | 3 | 4 = step === "cover"
@@ -4606,380 +4400,101 @@ export function AutoTextbookSetupFlow({
       ) : null}
 
       {step === "toc" ? (
-        <div className="toc-capture-summary" role="region" aria-label="Guided navigation cues">
+        <div className="toc-capture-summary" role="region" aria-label="Dynamic TOC mapper">
           <p className="toc-capture-summary__header">
-            <strong>Guided navigation cues:</strong> {guidedCueCompletion.completed}/{guidedCueCompletion.total} marked ({guidedCueCompletion.percent}%).
+            <strong>Dynamic TOC mapper (Phase 5):</strong> use live overlay + scan to map current tree state.
           </p>
-          {missingGuidedCues.length > 0 ? (
-            <p className="form-hint">
-              Required for glossary automation: {missingGuidedCues.map((cue) => getGuidedCueLabel(cue)).join(", ")}.
-            </p>
-          ) : (
-            <p className="form-hint">Required cues are marked. The extraction run can automate glossary/page navigation when capture is started.</p>
-          )}
+          <p className="form-hint">
+            Legacy coordinate pinning and preview-based fullscreen were removed because they do not survive tree expansion/reflow.
+          </p>
           <div className="form-actions">
-            {GUIDED_CUE_TYPES.map((cue) => {
-              const marked = Boolean(guidedCuePlan.cues[cue]?.acknowledged);
-              return (
-                <button
-                  key={`guided-cue-${cue}`}
-                  type="button"
-                  className={marked ? "btn-secondary" : undefined}
-                  onClick={() => {
-                    setActiveCueForPin(cue);
-                    if (guidedCuePlan.cues[cue]?.acknowledged) {
-                      toggleGuidedCue(cue);
-                    }
-                  }}
-                  disabled={isBusy}
-                >
-                  {activeCueForPin === cue ? "Pinning" : "Pin"} {getGuidedCueLabel(cue)}
-                </button>
-              );
-            })}
-            {activeCueForPin ? (
-              <button
-                type="button"
-                className="btn-secondary"
-                disabled={isBusy}
-                onClick={() => setActiveCueForPin(null)}
-              >
-                Cancel Pinning
-              </button>
-            ) : null}
             <button
               type="button"
               className="btn-secondary"
-              onClick={handleStartGuidedCapture}
-              disabled={isBusy || isGuidedRunActive}
+              onClick={openCueFullscreen}
             >
-              Start Guided Capture
+              Open Live TOC Mapper
             </button>
-            {isGuidedRunActive ? (
+          </div>
+        </div>
+      ) : null}
+
+      {isCueFullscreenOpen ? (
+        <div className="auto-cue-fullscreen" role="dialog" aria-modal="true" aria-label="Live TOC mapper">
+          <div className="auto-cue-fullscreen__backdrop" onClick={closeCueFullscreen} />
+          <div className="auto-cue-fullscreen__panel">
+            <div className="auto-cue-fullscreen__header">
+              <p className="auto-cue-fullscreen__title">Live TOC Mapper</p>
+              <button type="button" className="btn-secondary" onClick={closeCueFullscreen}>Close</button>
+            </div>
+            <p className="form-hint">
+              Step 1: Start Live Overlay and select the textbook tab/window. Step 2: Ensure TOC is visible. Step 3: Scan TOC Map. Re-scan after each expand/collapse.
+            </p>
+            <p className="form-hint">
+              Mapper targets detected: {tocTreeMapNodes.length}.
+            </p>
+            {liveCueOverlayError ? (
+              <p className="form-hint" role="alert">{liveCueOverlayError}</p>
+            ) : null}
+            <div className="auto-cue-fullscreen__controls">
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={handleStopGuidedCapture}
-                disabled={isBusy}
+                onClick={() => {
+                  if (isLiveCueOverlayActive) {
+                    stopLiveCueOverlay();
+                    return;
+                  }
+
+                  void startLiveCueOverlay();
+                }}
               >
-                Pause Guided Capture
+                {isLiveCueOverlayActive ? "Stop Live Overlay" : "Start Live Overlay"}
               </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  void handleScanTocTreeMap();
+                }}
+                disabled={isScanningTocTreeMap}
+              >
+                {isScanningTocTreeMap ? "Scanning TOC Map..." : "Scan TOC Map"}
+              </button>
+            </div>
+            {tocTreeMapNodes.length > 0 ? (
+              <div className="auto-cue-fullscreen__map-panel" aria-label="TOC tree mapping snapshot">
+                <p className="auto-cue-fullscreen__map-title">Detected TOC Targets (top-to-bottom)</p>
+                <ol className="auto-cue-fullscreen__map-list">
+                  {tocTreeMapNodes.slice(0, 40).map((node) => (
+                    <li key={`toc-map-node-${node.id}`} className="auto-cue-fullscreen__map-item">
+                      <span className="auto-cue-fullscreen__map-item-text">{node.text}</span>
+                      <span className="auto-cue-fullscreen__map-item-meta">
+                        {node.level ? `L${node.level}` : "L?"} | {node.role}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
             ) : null}
-          </div>
-          <p className="form-hint">
-            {activeCueForPin
-              ? `Click on the screenshot to pin ${getGuidedCueLabel(activeCueForPin)}.`
-              : "Choose a cue button, then click the screenshot to pin its location. Use Start Guided Capture to validate pinned cues and begin the guided flow."}
-          </p>
-
-          {guidedTraversalTargets.length > 0 ? (
-            <div className="toc-capture-summary" aria-label="Guided run status">
-              <p className="toc-capture-summary__header">
-                <strong>Run plan:</strong> {guidedTraversalTargets.length} targets. Captured {guidedRunCapturedCount}/{guidedTraversalTargets.length}.
-              </p>
-              {currentGuidedTarget ? (
-                <p className="form-hint">
-                  Current target ({Math.min(guidedRunCursor + 1, guidedTraversalTargets.length)}/{guidedTraversalTargets.length}):
-                  {" "}
-                  Chapter {currentGuidedTarget.chapterNumberLabel} {currentGuidedTarget.chapterTitle}
-                  {" "}
-                  {"->"}
-                  {" "}
-                  {currentGuidedTarget.sectionNumberLabel} {currentGuidedTarget.sectionTitle}
-                </p>
-              ) : (
-                <p className="form-hint">No remaining targets in the current run plan.</p>
-              )}
-              {isGuidedRunActive ? (
-                <div className="form-actions">
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      void handleGuidedCaptureCurrentTarget();
-                    }}
-                    disabled={isBusy || !currentGuidedTarget}
-                  >
-                    Capture Current Target
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={handleGuidedSkipTarget}
-                    disabled={isBusy || !currentGuidedTarget}
-                  >
-                    Skip Target
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {(tocCaptureImageDataUrl || lastMetadataImageDataUrl) ? (
-            <div className="auto-cue-canvas" role="group" aria-label="Cue pin canvas">
-              <div className="auto-cue-canvas__toolbar" role="group" aria-label="Cue preview zoom controls">
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={openCueFullscreen}
-                >
-                  Full Screen Pinning
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => {
-                    setGuidedCueCanvasZoom((value) => Math.max(GUIDED_CUE_ZOOM_MIN, value - GUIDED_CUE_ZOOM_STEP));
-                  }}
-                  disabled={guidedCueCanvasZoom <= GUIDED_CUE_ZOOM_MIN}
-                >
-                  Zoom -
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => {
-                    setGuidedCueCanvasZoom(GUIDED_CUE_ZOOM_DEFAULT);
-                    const viewport = guidedCueViewportRef.current;
-                    if (viewport) {
-                      viewport.scrollTo({ left: 0, top: 0, behavior: "smooth" });
-                    }
-                  }}
-                  disabled={guidedCueCanvasZoom === GUIDED_CUE_ZOOM_DEFAULT}
-                >
-                  Reset
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => {
-                    setGuidedCueCanvasZoom((value) => Math.min(GUIDED_CUE_ZOOM_MAX, value + GUIDED_CUE_ZOOM_STEP));
-                  }}
-                  disabled={guidedCueCanvasZoom >= GUIDED_CUE_ZOOM_MAX}
-                >
-                  Zoom +
-                </button>
-                <span className="auto-cue-canvas__zoom-label">{guidedCueCanvasZoom}%</span>
-              </div>
-              <div className="auto-cue-canvas__viewport" ref={guidedCueViewportRef}>
-                <div className="auto-cue-canvas__stage" style={{ width: `${guidedCueCanvasZoom}%` }}>
-                  <img
-                    data-testid="guided-cue-canvas-image"
-                    src={tocCaptureImageDataUrl ?? lastMetadataImageDataUrl ?? ""}
-                    alt="Pin guided navigation cues"
-                    className="auto-cue-canvas__image"
-                    onClick={handleCueCanvasClick}
+            <div className="auto-cue-fullscreen__viewport" ref={guidedCueFullscreenViewportRef}>
+              <div className="auto-cue-fullscreen__stage auto-cue-fullscreen__stage--fit">
+                {isLiveCueOverlayActive ? (
+                  <video
+                    ref={liveCueVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="auto-cue-fullscreen__video auto-cue-fullscreen__video--fit"
                   />
-                  {GUIDED_CUE_TYPES.map((cue) => {
-                    const point = guidedCuePlan.cues[cue]?.point;
-                    if (typeof point?.xRatio !== "number" || typeof point?.yRatio !== "number") {
-                      return null;
-                    }
-
-                    return (
-                      <span
-                        key={`guided-cue-marker-${cue}`}
-                        className="auto-cue-canvas__marker"
-                        style={{ left: `${point.xRatio * 100}%`, top: `${point.yRatio * 100}%` }}
-                        aria-label={`${getGuidedCueLabel(cue)} marker`}
-                        title={getGuidedCueLabel(cue)}
-                      />
-                    );
-                  })}
-                </div>
+                ) : (
+                  <div className="auto-cue-fullscreen__placeholder">
+                    Start Live Overlay to preview the active textbook source here.
+                  </div>
+                )}
               </div>
             </div>
-          ) : (
-            <p className="form-hint">Capture at least one TOC page to enable on-screen cue pinning.</p>
-          )}
-
-          {isCueFullscreenOpen && (tocCaptureImageDataUrl || lastMetadataImageDataUrl) ? (
-            <div className="auto-cue-fullscreen" role="dialog" aria-modal="true" aria-label="Full screen guided cue pinning">
-              <div className="auto-cue-fullscreen__backdrop" onClick={closeCueFullscreen} />
-              <div className="auto-cue-fullscreen__panel">
-                <div className="auto-cue-fullscreen__header">
-                  <p className="auto-cue-fullscreen__title">Full Screen Guided Pinning</p>
-                  <button type="button" className="btn-secondary" onClick={closeCueFullscreen}>Close</button>
-                </div>
-                <p className="form-hint">
-                  Step 1: Choose a cue target. Step 2: Click the textbook preview to pin. Step 3: Recapture if layout changed.
-                </p>
-                <p className="form-hint">
-                  Live Overlay can pin from a real-time shared textbook tab/window. Do not share the CourseForge tab.
-                </p>
-                <p className="form-hint">
-                  Teach mode records click-path examples for upcoming dynamic tree-navigation logic.
-                </p>
-                <p className="form-hint">
-                  Teach macro steps: {teachMacroSteps.length}/{TEACH_MACRO_MAX_STEPS}. {isTeachModeActive ? "Recording active." : "Recording idle."}
-                </p>
-                <p className="form-hint">
-                  Phase 5 mapper targets detected: {tocTreeMapNodes.length}.
-                </p>
-                {liveCueOverlayError ? (
-                  <p className="form-hint" role="alert">{liveCueOverlayError}</p>
-                ) : null}
-                <div className="auto-cue-fullscreen__controls">
-                  {CORE_GUIDED_CUE_TYPES.map((cue) => {
-                    const marked = Boolean(guidedCuePlan.cues[cue]?.acknowledged);
-                    return (
-                      <button
-                        key={`fullscreen-guided-cue-${cue}`}
-                        type="button"
-                        className={marked ? "btn-secondary" : undefined}
-                        onClick={() => {
-                          setActiveCueForPin(cue);
-                          if (guidedCuePlan.cues[cue]?.acknowledged) {
-                            toggleGuidedCue(cue);
-                          }
-                        }}
-                      >
-                        {activeCueForPin === cue ? "Pinning" : "Pin"} {getGuidedCueLabel(cue)}
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      setShowOptionalCuePins((current) => {
-                        const next = !current;
-                        if (!next && activeCueForPin && OPTIONAL_GUIDED_CUE_TYPES.includes(activeCueForPin)) {
-                          setActiveCueForPin(null);
-                        }
-
-                        return next;
-                      });
-                    }}
-                  >
-                    {showOptionalCuePins ? "Hide Optional Cues" : "Show Optional Cues"}
-                  </button>
-                  {showOptionalCuePins ? OPTIONAL_GUIDED_CUE_TYPES.map((cue) => {
-                    const marked = Boolean(guidedCuePlan.cues[cue]?.acknowledged);
-                    return (
-                      <button
-                        key={`fullscreen-guided-cue-optional-${cue}`}
-                        type="button"
-                        className={marked ? "btn-secondary" : undefined}
-                        onClick={() => {
-                          setActiveCueForPin(cue);
-                          if (guidedCuePlan.cues[cue]?.acknowledged) {
-                            toggleGuidedCue(cue);
-                          }
-                        }}
-                      >
-                        {activeCueForPin === cue ? "Pinning" : "Pin"} {getGuidedCueLabel(cue)}
-                      </button>
-                    );
-                  }) : null}
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      if (isLiveCueOverlayActive) {
-                        stopLiveCueOverlay();
-                        return;
-                      }
-
-                      void startLiveCueOverlay();
-                    }}
-                  >
-                    {isLiveCueOverlayActive ? "Stop Live Overlay" : "Start Live Overlay"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      setIsTeachModeActive((current) => !current);
-                    }}
-                  >
-                    {isTeachModeActive ? "Stop Teach Mode" : "Start Teach Mode"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      setTeachMacroSteps([]);
-                    }}
-                    disabled={teachMacroSteps.length === 0}
-                  >
-                    Clear Teach Steps
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      void handleRecaptureTocCueFrame();
-                    }}
-                  >
-                    Recapture TOC Frame
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      void handleScanTocTreeMap();
-                    }}
-                    disabled={isScanningTocTreeMap}
-                  >
-                    {isScanningTocTreeMap ? "Scanning TOC Map..." : "Scan TOC Map"}
-                  </button>
-                </div>
-                {tocTreeMapNodes.length > 0 ? (
-                  <div className="auto-cue-fullscreen__map-panel" aria-label="TOC tree mapping snapshot">
-                    <p className="auto-cue-fullscreen__map-title">Detected TOC Targets (top-to-bottom)</p>
-                    <ol className="auto-cue-fullscreen__map-list">
-                      {tocTreeMapNodes.slice(0, 24).map((node) => (
-                        <li key={`toc-map-node-${node.id}`} className="auto-cue-fullscreen__map-item">
-                          <span className="auto-cue-fullscreen__map-item-text">{node.text}</span>
-                          <span className="auto-cue-fullscreen__map-item-meta">
-                            {node.level ? `L${node.level}` : "L?"} | {node.role}
-                          </span>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                ) : null}
-                <div className="auto-cue-fullscreen__viewport" ref={guidedCueFullscreenViewportRef}>
-                  <div className="auto-cue-fullscreen__stage auto-cue-fullscreen__stage--fit">
-                    {isLiveCueOverlayActive ? (
-                      <video
-                        ref={liveCueVideoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                        className="auto-cue-fullscreen__video auto-cue-fullscreen__video--fit"
-                        onClick={handleLiveCueVideoClick}
-                      />
-                    ) : (
-                      <img
-                        src={tocCaptureImageDataUrl ?? lastMetadataImageDataUrl ?? ""}
-                        alt="Full screen guided navigation cue pinning"
-                        className="auto-cue-fullscreen__image auto-cue-fullscreen__image--fit"
-                        onClick={handleCueCanvasClick}
-                      />
-                    )}
-                    {GUIDED_CUE_TYPES.map((cue) => {
-                      const point = guidedCuePlan.cues[cue]?.point;
-                      if (typeof point?.xRatio !== "number" || typeof point?.yRatio !== "number") {
-                        return null;
-                      }
-
-                      return (
-                        <span
-                          key={`fullscreen-guided-cue-marker-${cue}`}
-                          className="auto-cue-canvas__marker"
-                          style={{ left: `${point.xRatio * 100}%`, top: `${point.yRatio * 100}%` }}
-                          aria-label={`${getGuidedCueLabel(cue)} marker`}
-                          title={getGuidedCueLabel(cue)}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
+          </div>
         </div>
       ) : null}
 

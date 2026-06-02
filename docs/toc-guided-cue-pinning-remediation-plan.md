@@ -22,6 +22,8 @@
    - Pre-implementation cleanup: reduce Phase 1-4 UI clutter so cue workflow is linear and obvious before adding dynamic mapping controls.
    - Experiment A implementation status: In-flight baseline shipped for manual validation.
    - New capability: fullscreen `Scan TOC Map` action (extension runtime) that captures state-aware clickable TOC candidates from the active tab DOM and lists them top-to-bottom for operator verification.
+   - v1.7.73 cleanup focus: remove legacy coordinate-pinning controls and preview-driven fullscreen behavior from the user workflow.
+   - Live-mapper workflow now centers on two primary actions: `Start Live Overlay` and `Scan TOC Map`.
 
 ## UI Simplification Baseline (Before Phase 5 Build)
 
@@ -235,3 +237,19 @@ Start Phase 5 implementation planning from a docs checkpoint:
 4. Expand one node in the textbook TOC, then scan again.
 5. Verify mapping list changes to reflect the new expanded state (additional child nodes and shifted ordering).
 6. Confirm core cue pinning workflow remains usable with simplified controls.
+
+## Latest Discovery (Post v1.7.72 Manual Test)
+
+1. Preview-first fullscreen remained non-viable: enlarging the screenshot preview increased scale but not actionable TOC coverage.
+2. Live Overlay and Scan felt disconnected when operator focus was on shared-source content while scanner still depended on active-tab DOM assumptions.
+3. Legacy pin/pan/teach controls continued to distract from the only useful loop.
+
+## v1.7.73 Workflow Simplification Applied
+
+1. Removed legacy coordinate-pinning workflow from TOC mapper surface.
+2. Removed preview-canvas zoom/fullscreen pinning path from user flow.
+3. Removed phase-legacy controls from mapper modal (pin cues, optional cue toggles, teach controls, recapture controls).
+4. Replaced with minimal mapper controls:
+   - `Start Live Overlay`
+   - `Scan TOC Map`
+5. Added web-runtime OCR fallback for scanning from the live overlay frame so scan is no longer extension-only.

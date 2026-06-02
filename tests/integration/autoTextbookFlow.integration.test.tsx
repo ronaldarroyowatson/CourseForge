@@ -577,12 +577,10 @@ describe("auto textbook flow integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText("TOC opener marker")).toBeInTheDocument();
-      expect(screen.getByLabelText("Glossary opener marker")).toBeInTheDocument();
-      expect(screen.getByLabelText("Next page control marker")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Open Live TOC Mapper" })).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/Required cues are marked\./i)).toBeInTheDocument();
+    expect(screen.getByText(/Dynamic TOC mapper \(Phase 5\)/i)).toBeInTheDocument();
   });
 
   it("limits unfinished auto captures to three queue slots and allows deleting a draft to reopen capacity", async () => {
@@ -1466,7 +1464,7 @@ describe("auto textbook flow integration", () => {
     expect(screen.getAllByText(/pp\. 4-11/i).length).toBeGreaterThan(0);
   });
 
-  it("pins guided cue coordinates from TOC screenshot clicks", async () => {
+  it("opens live TOC mapper modal from TOC step", async () => {
     render(
       <AutoTextbookSetupFlow
         onSaved={() => undefined}
@@ -1485,31 +1483,14 @@ describe("auto textbook flow integration", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Pin TOC opener" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Live TOC Mapper" }));
 
-    const cueImage = screen.getByTestId("guided-cue-canvas-image");
-    Object.defineProperty(cueImage, "getBoundingClientRect", {
-      value: () => ({
-        left: 10,
-        top: 20,
-        width: 200,
-        height: 100,
-        right: 210,
-        bottom: 120,
-        x: 10,
-        y: 20,
-        toJSON: () => ({}),
-      }),
-    });
-
-    fireEvent.click(cueImage, { clientX: 110, clientY: 70 });
-
-    expect(await screen.findByText(/TOC opener pinned\./i)).toBeInTheDocument();
-    expect(screen.getByLabelText("TOC opener marker")).toBeInTheDocument();
-    expect(screen.getByText(/Required for glossary automation:/i)).toHaveTextContent("Glossary opener");
+    expect(await screen.findByRole("dialog", { name: "Live TOC mapper" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start Live Overlay" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scan TOC Map" })).toBeInTheDocument();
   });
 
-  it("records teach-mode steps from fullscreen clicks without requiring cue selection", async () => {
+  it("prompts to start live overlay before scanning TOC map in web runtime", async () => {
     render(
       <AutoTextbookSetupFlow
         onSaved={() => undefined}
@@ -1528,27 +1509,9 @@ describe("auto textbook flow integration", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Full Screen Pinning" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start Teach Mode" }));
-    expect(await screen.findByRole("button", { name: "Stop Teach Mode" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open Live TOC Mapper" }));
+    fireEvent.click(screen.getByRole("button", { name: "Scan TOC Map" }));
 
-    const fullscreenImage = screen.getByAltText("Full screen guided navigation cue pinning");
-    Object.defineProperty(fullscreenImage, "getBoundingClientRect", {
-      value: () => ({
-        left: 0,
-        top: 0,
-        width: 300,
-        height: 200,
-        right: 300,
-        bottom: 200,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-      }),
-    });
-
-    fireEvent.click(fullscreenImage, { clientX: 150, clientY: 120 });
-
-    expect(await screen.findByText(/Teach macro steps: 1\/40\./i)).toBeInTheDocument();
+    expect(await screen.findByText(/Start Live Overlay first/i)).toBeInTheDocument();
   });
 });

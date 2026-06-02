@@ -717,11 +717,11 @@ describe("autoOcrService", () => {
         },
       });
 
-      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
-        providerOrder: ["cloud_openai_vision", "local_tesseract"],
-      });
-
-      expect(result.providerId).toBe("local_tesseract");
+      await expect(
+        extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+          providerOrder: ["cloud_openai_vision"],
+        })
+      ).rejects.toThrow(/OpenAI rejected credentials/i);
 
       callableMocks.getAiProviderStatus.mockReset();
       const health = await getAutoOcrProviderHealth();

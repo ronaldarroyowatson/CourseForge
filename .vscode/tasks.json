@@ -15,7 +15,9 @@
 				"reveal": "always",
 				"panel": "dedicated"
 			},
-			"problemMatcher": ["$tsc"]
+			"problemMatcher": [
+				"$tsc"
+			]
 		},
 		{
 			"label": "bugfix: release (prompt for description)",
@@ -51,7 +53,9 @@
 				"reveal": "always",
 				"panel": "dedicated"
 			},
-			"problemMatcher": ["$tsc"]
+			"problemMatcher": [
+				"$tsc"
+			]
 		},
 		{
 			"label": "CourseForge: Setup (Windows)",
@@ -120,6 +124,55 @@
 			"command": "node scripts/verify-mcp-servers.mjs",
 			"isBackground": false,
 			"problemMatcher": []
+		},
+		{
+			"label": "release: installer matrix validation",
+			"type": "shell",
+			"command": "npm run orchestrate:installers:wait -- --description \"Fix real-image OCR regression and tesseract loader\" --ref main",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "check gh availability",
+			"type": "shell",
+			"command": "command -v gh || (command -v brew && brew --version | head -n 1)",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "check install prerequisites",
+			"type": "shell",
+			"command": "uname -m && command -v curl && command -v tar && command -v python3",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "install gh locally",
+			"type": "shell",
+			"command": "set -euo pipefail\nmkdir -p \"$HOME/.local/bin\"\nasset_url=$(python3 - <<'PY'\nimport json, urllib.request\nwith urllib.request.urlopen('https://api.github.com/repos/cli/cli/releases/latest') as response:\n    data = json.load(response)\nfor asset in data['assets']:\n    name = asset['name']\n    if '_macOS_arm64.tar.gz' in name:\n        print(asset['browser_download_url'])\n        break\nelse:\n    raise SystemExit('No macOS arm64 gh asset found')\nPY\n)\ntmpdir=$(mktemp -d)\ntrap 'rm -rf \"$tmpdir\"' EXIT\ncurl -fsSL \"$asset_url\" -o \"$tmpdir/gh.tar.gz\"\ntar -xzf \"$tmpdir/gh.tar.gz\" -C \"$tmpdir\"\ngh_bin=$(find \"$tmpdir\" -path '*/bin/gh' -type f | head -n 1)\ncp \"$gh_bin\" \"$HOME/.local/bin/gh\"\nchmod +x \"$HOME/.local/bin/gh\"\nexport PATH=\"$HOME/.local/bin:$PATH\"\ngh --version",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "list gh assets",
+			"type": "shell",
+			"command": "python3 - <<'PY'\nimport json, urllib.request\nwith urllib.request.urlopen('https://api.github.com/repos/cli/cli/releases/latest') as response:\n    data = json.load(response)\nfor asset in data['assets']:\n    print(asset['name'])\nPY",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "install gh arm64 zip",
+			"type": "shell",
+			"command": "set -euo pipefail\ncommand -v unzip >/dev/null\nmkdir -p \"$HOME/.local/bin\"\nasset_url=$(python3 - <<'PY'\nimport json, urllib.request\nwith urllib.request.urlopen('https://api.github.com/repos/cli/cli/releases/latest') as response:\n    data = json.load(response)\nfor asset in data['assets']:\n    if asset['name'].endswith('_macOS_arm64.zip'):\n        print(asset['browser_download_url'])\n        break\nelse:\n    raise SystemExit('No macOS arm64 gh asset found')\nPY\n)\ntmpdir=$(mktemp -d)\ntrap 'rm -rf \"$tmpdir\"' EXIT\ncurl -fsSL \"$asset_url\" -o \"$tmpdir/gh.zip\"\nunzip -q \"$tmpdir/gh.zip\" -d \"$tmpdir\"\ngh_bin=$(find \"$tmpdir\" -path '*/bin/gh' -type f | head -n 1)\ncp \"$gh_bin\" \"$HOME/.local/bin/gh\"\nchmod +x \"$HOME/.local/bin/gh\"\nexport PATH=\"$HOME/.local/bin:$PATH\"\ngh --version",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "release: installer matrix validation",
+			"type": "shell",
+			"command": "export PATH=\"$HOME/.local/bin:$PATH\" && npm run orchestrate:installers:wait -- --description \"Fix real-image OCR regression and tesseract loader\" --ref main",
+			"isBackground": false,
+			"group": "test"
 		}
 	],
 	"inputs": [

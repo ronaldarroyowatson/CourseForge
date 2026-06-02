@@ -559,9 +559,36 @@ export async function getEffectiveAutoOcrProviderOrder(): Promise<AutoOcrProvide
 }
 
 async function extractWithLocalTesseract(imageDataUrl: string): Promise<string> {
-  const tesseract = await import("tesseract.js");
-  const result = await tesseract.recognize(imageDataUrl, "eng");
+  const tesseract = await loadTesseractModule();
+  if (typeof process !== "undefined" && Boolean(process.versions?.node)) {
+    const requireFromWorkspace = (await import("node:module")).createRequire(`${process.cwd()}/package.json`);
+    const workerPath = requireFromWorkspace.resolve("tesseract.js/src/worker-script/node/index.js");
+    const worker = await tesseract.createWorker("eng", 1, { workerPath });
+
+    try {
+      const result = await worker.recognize(imageDataUrl);
+      return result.data.text.trim();
+    } finally {
+      await worker.terminate();
+    }
+  }
+
+  const recognize = typeof tesseract.recognize === "function" ? tesseract.recognize : null;
+  if (!recognize) {
+    throw new Error("tesseract.js recognize function is unavailable.");
+  }
+
+  const result = await recognize(imageDataUrl, "eng");
   return result.data.text.trim();
+}
+
+async function loadTesseractModule(): Promise<typeof import("tesseract.js")> {
+  if (typeof process !== "undefined" && Boolean(process.versions?.node)) {
+    const { createRequire } = await import("node:module");
+    return createRequire(`${process.cwd()}/package.json`)("tesseract.js") as typeof import("tesseract.js");
+  }
+
+  return import("tesseract.js");
 }
 
 function getCachedCloudAvailability(providerId: CloudAutoOcrProviderId): CloudProviderAvailabilityCacheEntry | null {

@@ -1,3 +1,6 @@
+import { execFileSync } from "node:child_process";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -13,6 +16,74 @@ import {
   scoreMetadataConfidence,
   stitchTocPages,
 } from "../../src/core/services/textbookAutoExtractionService";
+import {
+  cleanOcrTocLine,
+  mergeTocTreeMapNodes,
+  type TocTreeMapNode,
+} from "../../src/core/services/tocTreeMapService";
+
+async function readRealTocOcr(relativeImagePath: string): Promise<string> {
+  const imagePath = path.resolve(process.cwd(), relativeImagePath);
+  const command = process.platform === "win32" ? "npx.cmd" : "npx";
+  const script = `
+import fs from 'node:fs';
+import { extractTextFromImageWithFallback } from './src/core/services/autoOcrService';
+
+globalThis.Image = class {
+  constructor() {
+    this.naturalWidth = 1;
+    this.naturalHeight = 1;
+    this.onload = null;
+    this.onerror = null;
+  }
+
+  set src(_value) {
+    queueMicrotask(() => this.onload && this.onload());
+  }
+};
+
+(async () => {
+  const imagePath = ${JSON.stringify(imagePath)};
+  const imageBytes = fs.readFileSync(imagePath);
+  const dataUrl = 'data:image/png;base64,' + imageBytes.toString('base64');
+  const result = await extractTextFromImageWithFallback(dataUrl, { providerOrder: ['local_tesseract'] });
+  console.log('__OCR_TEXT__' + JSON.stringify(result.text));
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+`;
+
+  const output = execFileSync(command, ["tsx", "-e", script], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  const match = output.match(/__OCR_TEXT__(.*)$/m);
+
+  if (!match) {
+    throw new Error(`Failed to capture OCR text for ${relativeImagePath}. Output: ${output}`);
+  }
+
+  return JSON.parse(match[1]) as string;
+}
+
+function buildTocTreeMapNodes(sourceId: string, text: string): TocTreeMapNode[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => cleanOcrTocLine(line))
+    .filter((line): line is string => Boolean(line))
+    .map((line, index) => ({
+      id: `${sourceId}-${index}`,
+      text: line,
+      role: "ocr-line",
+      level: 0,
+      xRatio: 0,
+      yRatio: index,
+      widthRatio: 1,
+      heightRatio: 1,
+    }));
+}
 
 describe("textbookAutoExtractionService", () => {
   it("detects page boundaries inside a larger background", () => {
@@ -272,6 +343,33 @@ describe("textbookAutoExtractionService", () => {
     expect(stitched.chapters[1].sections[0].sectionNumber).toBe("2.1");
     expect(stitched.stitchingConfidence).toBeGreaterThan(0.5);
   });
+
+  it("keeps the tail TOC rows when merging real screenshot OCR fixtures", async () => {
+    const firstFixtureText = await readRealTocOcr(
+      "tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png"
+    );
+    const secondFixtureText = await readRealTocOcr(
+      "tmp-smoke/samples/ocr__toc-spread-view__expect-parse-success.png"
+    );
+
+    const mergedNodes = mergeTocTreeMapNodes(
+      buildTocTreeMapNodes("first", firstFixtureText),
+      buildTocTreeMapNodes("second", secondFixtureText)
+    );
+
+    const mergedTexts = mergedNodes.map((node) => node.text);
+    const module1Index = mergedTexts.findIndex((line) => /module 1/i.test(line));
+    const module2Index = mergedTexts.findIndex((line) => /module 2/i.test(line));
+    const module3Index = mergedTexts.findIndex((line) => /module 3/i.test(line));
+
+    expect(module1Index).toBeGreaterThanOrEqual(0);
+    expect(module2Index).toBeGreaterThan(module1Index);
+    expect(module3Index).toBeGreaterThan(module2Index);
+    expect(mergedTexts.some((line) => /lesson 3 acceleration/i.test(line))).toBe(true);
+    expect(mergedTexts.some((line) => /autonomous vehicles go subterranean/i.test(line))).toBe(true);
+    expect(mergedTexts.some((line) => /module wrap-up/i.test(line))).toBe(true);
+    expect(mergedTexts.some((line) => /data analysis lab/i.test(line))).toBe(true);
+  }, 120000);
 
   it("scores metadata confidence and marks extracted fields as auto", () => {
     const metadata = extractMetadataFromOcrText([

@@ -88,6 +88,7 @@ type AutoPrimaryHelperAction =
   | "capture-title"
   | "upload-title"
   | "capture-toc"
+  | "capture-toc-auto-two-shot"
   | "finish-toc"
   | "switch-manual";
 type MetadataTileKey =
@@ -822,7 +823,11 @@ function metadataFormToResult(form: MetadataFormState, rawText: string, source: 
   };
 }
 
-async function cropToSelectionAndAutoBoundary(imageDataUrl: string, selection: SelectionRect): Promise<string> {
+async function cropToSelectionAndAutoBoundary(
+  imageDataUrl: string,
+  selection: SelectionRect,
+  applyAutoBoundary = true
+): Promise<string> {
   const image = await loadImage(imageDataUrl);
   const firstPassCanvas = document.createElement("canvas");
   firstPassCanvas.width = Math.max(1, Math.round(selection.width));
@@ -843,6 +848,10 @@ async function cropToSelectionAndAutoBoundary(imageDataUrl: string, selection: S
     firstPassCanvas.width,
     firstPassCanvas.height
   );
+
+  if (!applyAutoBoundary) {
+    return firstPassCanvas.toDataURL("image/jpeg", 0.92);
+  }
 
   const firstPassData = firstPassCtx.getImageData(0, 0, firstPassCanvas.width, firstPassCanvas.height);
   const boundary = detectPageBoundaryFromRgba(firstPassData.data, firstPassCanvas.width, firstPassCanvas.height);
@@ -1432,6 +1441,10 @@ export function AutoTextbookSetupFlow({
 
     if (activePrimaryHelper === "capture-toc") {
       return "Capture one TOC page at a time. Keep chapter and section numbers visible so parsing remains accurate.";
+    }
+
+    if (activePrimaryHelper === "capture-toc-auto-two-shot") {
+      return "Capture TOC in two guided shots: first capture this page, then move to the next TOC page when prompted so OCR can merge overlap automatically.";
     }
 
     if (activePrimaryHelper === "finish-toc") {
@@ -2347,7 +2360,8 @@ export function AutoTextbookSetupFlow({
               selectedHeight: selection.height,
             },
           });
-          cropped = await cropToSelectionAndAutoBoundary(rawImage, selection);
+          const shouldAutoBoundaryCrop = targetStep !== "toc";
+          cropped = await cropToSelectionAndAutoBoundary(rawImage, selection, shouldAutoBoundaryCrop);
         } else {
           emitAutoFlowDiagnostic("selection_skipped_full_page", {
             traceId,
@@ -2357,7 +2371,7 @@ export function AutoTextbookSetupFlow({
               selectedHeight: selection.height,
             },
           });
-          cropped = await cropToSelectionAndAutoBoundary(rawImage, selection);
+          cropped = await cropToSelectionAndAutoBoundary(rawImage, selection, true);
         }
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Unknown region capture error.";
@@ -2981,6 +2995,61 @@ export function AutoTextbookSetupFlow({
     setStep("toc");
     applyTocFromText(captured.ocrText);
     setInfoMessage(`TOC page captured and parsed. Continue capturing or finish TOC. (OCR: ${captured.ocrProviderId})`);
+  }
+
+  async function handleCaptureTocAutoTwoShot(): Promise<void> {
+    emitAutoFlowDiagnostic("ui_capture_toc_auto_two_shot_clicked", {
+      traceId: createAutoFlowTraceId("auto-flow-ui-toc-auto-two-shot"),
+      context: { step },
+    });
+
+    const firstShot = await captureForStep("toc");
+    if (!firstShot) {
+      emitAutoFlowDiagnostic("ui_capture_toc_auto_two_shot_no_first_shot", {
+        level: "warning",
+        traceId: createAutoFlowTraceId("auto-flow-ui-toc-auto-two-shot"),
+      });
+      return;
+    }
+
+    let proceedToSecondShot = true;
+    try {
+      proceedToSecondShot = typeof window === "undefined"
+        ? true
+        : window.confirm("First TOC shot captured. Move your textbook viewer to the next TOC page, then click OK to capture the second shot. Click Cancel to keep only the first shot.");
+    } catch {
+      proceedToSecondShot = true;
+    }
+
+    if (!proceedToSecondShot) {
+      setOcrDraft(firstShot.ocrText);
+      setTocCaptureImageDataUrl(firstShot.imageDataUrl);
+      setStep("toc");
+      applyTocFromText(firstShot.ocrText);
+      setInfoMessage(`TOC auto 2-shot canceled after first shot. First TOC page was saved. (OCR: ${firstShot.ocrProviderId})`);
+      return;
+    }
+
+    const secondShot = await captureForStep("toc");
+    if (!secondShot) {
+      emitAutoFlowDiagnostic("ui_capture_toc_auto_two_shot_second_shot_failed", {
+        level: "warning",
+        traceId: createAutoFlowTraceId("auto-flow-ui-toc-auto-two-shot"),
+      });
+      setOcrDraft(firstShot.ocrText);
+      setTocCaptureImageDataUrl(firstShot.imageDataUrl);
+      setStep("toc");
+      applyTocFromText(firstShot.ocrText);
+      setInfoMessage(`Second TOC shot was not captured. First TOC page was saved. (OCR: ${firstShot.ocrProviderId})`);
+      return;
+    }
+
+    const mergedTocText = mergeOcrTextWithOverlap(firstShot.ocrText, secondShot.ocrText);
+    setOcrDraft(mergedTocText);
+    setTocCaptureImageDataUrl(firstShot.imageDataUrl);
+    setStep("toc");
+    applyTocFromText(mergedTocText);
+    setInfoMessage(`TOC auto 2-shot captured and merged. Continue capturing or finish TOC. (OCR: ${firstShot.ocrProviderId} + ${secondShot.ocrProviderId})`);
   }
 
   function updateChapter(index: number, update: Partial<TocChapter>): void {
@@ -3928,6 +3997,23 @@ export function AutoTextbookSetupFlow({
               onMouseDown={hidePrimaryHelper}
             >
               Capture TOC Page
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                hidePrimaryHelper();
+                void handleCaptureTocAutoTwoShot();
+              }}
+              disabled={isBusy}
+              onMouseEnter={(event) => handlePrimaryHelperMouseEnter("capture-toc-auto-two-shot", event)}
+              onMouseMove={handlePrimaryHelperMouseMove}
+              onMouseLeave={hidePrimaryHelper}
+              onFocus={(event) => handlePrimaryHelperFocus("capture-toc-auto-two-shot", event)}
+              onBlur={hidePrimaryHelper}
+              onMouseDown={hidePrimaryHelper}
+            >
+              Auto 2-Shot TOC
             </button>
             <button
               type="button"

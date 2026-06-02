@@ -165,7 +165,6 @@ const RELATED_ISBN_TYPES: RelatedIsbnType[] = ["student", "teacher", "digital", 
 const IMMEDIATE_UPLOAD_SYNC_TIMEOUT_MS = 4500;
 const IMMEDIATE_UPLOAD_SYNC_RETRY_DELAY_MS = 5500;
 const TEACH_MACRO_MAX_STEPS = 40;
-const TEACH_MACRO_PAUSE_MS = 280;
 
 interface AutoTextbookSetupFlowProps {
   runtime?: "webapp" | "extension";
@@ -236,17 +235,15 @@ interface TeachMacroStep {
   };
 }
 
-interface TeachMacroReplayPayload {
-  type: "courseforge:macro-replay";
-  payload: {
-    steps: Array<{
-      xRatio: number;
-      yRatio: number;
-      pauseMs: number;
-      jitterPx: number;
-      moveSteps: number;
-    }>;
-  };
+interface TocTreeMapNode {
+  id: string;
+  text: string;
+  role: string;
+  level?: number;
+  xRatio: number;
+  yRatio: number;
+  widthRatio: number;
+  heightRatio: number;
 }
 
 function describeMetadataCaptureStep(step: "cover" | "title"): string {
@@ -332,6 +329,8 @@ const KNOWN_TEXTBOOK_DOMAINS = [
 ];
 
 const GUIDED_CUE_TYPES: GuidedCueType[] = ["openToc", "openGlossary", "openChapter", "openSection", "nextPage"];
+const CORE_GUIDED_CUE_TYPES: GuidedCueType[] = ["openToc", "openGlossary", "nextPage"];
+const OPTIONAL_GUIDED_CUE_TYPES: GuidedCueType[] = ["openChapter", "openSection"];
 const GUIDED_CUE_ZOOM_DEFAULT = 140;
 const GUIDED_CUE_ZOOM_MIN = 50;
 const GUIDED_CUE_ZOOM_MAX = 260;
@@ -1238,13 +1237,14 @@ export function AutoTextbookSetupFlow({
   const [tocCaptureImageDataUrl, setTocCaptureImageDataUrl] = useState<string | null>(testingSeedState?.tocCaptureImageDataUrl ?? null);
   const [guidedCuePlan, setGuidedCuePlan] = useState<GuidedCaptureCuePlan>(initialGuidedCuePlan);
   const [activeCueForPin, setActiveCueForPin] = useState<GuidedCueType | null>(null);
+  const [showOptionalCuePins, setShowOptionalCuePins] = useState(false);
   const [isCueFullscreenOpen, setIsCueFullscreenOpen] = useState(false);
-  const [guidedCueFullscreenViewMode, setGuidedCueFullscreenViewMode] = useState<"fit" | "native">("fit");
   const [isLiveCueOverlayActive, setIsLiveCueOverlayActive] = useState(false);
   const [liveCueOverlayError, setLiveCueOverlayError] = useState<string | null>(null);
   const [isTeachModeActive, setIsTeachModeActive] = useState(false);
   const [teachMacroSteps, setTeachMacroSteps] = useState<TeachMacroStep[]>([]);
-  const [isTeachMacroReplayRunning, setIsTeachMacroReplayRunning] = useState(false);
+  const [isScanningTocTreeMap, setIsScanningTocTreeMap] = useState(false);
+  const [tocTreeMapNodes, setTocTreeMapNodes] = useState<TocTreeMapNode[]>([]);
   const [guidedCueCanvasZoom, setGuidedCueCanvasZoom] = useState<number>(GUIDED_CUE_ZOOM_DEFAULT);
   const [isGuidedRunActive, setIsGuidedRunActive] = useState(false);
   const [guidedRunCursor, setGuidedRunCursor] = useState(0);
@@ -1557,90 +1557,8 @@ export function AutoTextbookSetupFlow({
     return recordedCount;
   }
 
-  async function runTeachMacroReplayInExtensionTab(): Promise<void> {
-    if (runtime !== "extension") {
-      setErrorMessage("Teach replay in active tab is available in extension runtime.");
-      return;
-    }
-
-    if (teachMacroSteps.length === 0) {
-      setErrorMessage("Teach mode has no recorded steps yet.");
-      return;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chromeApi = (globalThis as any)?.chrome;
-    if (!chromeApi?.runtime?.sendMessage) {
-      setErrorMessage("Extension replay bridge is unavailable.");
-      return;
-    }
-
-    setErrorMessage(null);
-    setIsTeachMacroReplayRunning(true);
-
-    const message: TeachMacroReplayPayload = {
-      type: "courseforge:macro-replay",
-      payload: {
-        steps: teachMacroSteps.map((step) => ({
-          xRatio: step.xRatio,
-          yRatio: step.yRatio,
-          pauseMs: TEACH_MACRO_PAUSE_MS,
-          jitterPx: 6,
-          moveSteps: 14,
-        })),
-      },
-    };
-
-    try {
-      const response = await new Promise<{ ok?: boolean; error?: string; executed?: number }>((resolve) => {
-        chromeApi.runtime.sendMessage(message, (reply: { ok?: boolean; error?: string; executed?: number }) => {
-          resolve(reply ?? { ok: false, error: "No response from extension runtime." });
-        });
-      });
-
-      if (!response?.ok) {
-        setErrorMessage(response?.error ?? "Teach macro replay failed.");
-        return;
-      }
-
-      setInfoMessage(`Teach macro replay completed in active tab (${response.executed ?? teachMacroSteps.length} steps).`);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Teach macro replay failed.");
-    } finally {
-      setIsTeachMacroReplayRunning(false);
-    }
-  }
-
-  function panGuidedCueViewport(deltaX: number): void {
-    const viewport = guidedCueViewportRef.current;
-    if (!viewport) {
-      return;
-    }
-
-    viewport.scrollBy({
-      left: deltaX,
-      top: 0,
-      behavior: "smooth",
-    });
-  }
-
-  function panGuidedCueFullscreenViewport(deltaX: number, deltaY = 0): void {
-    const viewport = guidedCueFullscreenViewportRef.current;
-    if (!viewport) {
-      return;
-    }
-
-    viewport.scrollBy({
-      left: deltaX,
-      top: deltaY,
-      behavior: "smooth",
-    });
-  }
-
   function openCueFullscreen(): void {
-    setGuidedCueFullscreenViewMode("fit");
     setLiveCueOverlayError(null);
-    setIsTeachMacroReplayRunning(false);
     setIsCueFullscreenOpen(true);
   }
 
@@ -1682,7 +1600,6 @@ export function AutoTextbookSetupFlow({
       stopLiveCueOverlay();
       liveCueStreamRef.current = stream;
       setIsLiveCueOverlayActive(true);
-      setGuidedCueFullscreenViewMode("native");
 
       track?.addEventListener("ended", () => {
         stopLiveCueOverlay();
@@ -1769,37 +1686,24 @@ export function AutoTextbookSetupFlow({
         viewport.scrollTop = 0;
       };
 
-      if (guidedCueFullscreenViewMode === "native") {
-        resetViewport();
-        return;
-      }
-
       resetViewport();
     });
-  }, [isCueFullscreenOpen, guidedCueFullscreenViewMode, tocCaptureImageDataUrl]);
+  }, [isCueFullscreenOpen, tocCaptureImageDataUrl]);
 
-  async function handleRecaptureTocForCueEdge(direction: "left" | "right" | "top" | "bottom"): Promise<void> {
-    const directionLabel = direction.charAt(0).toUpperCase() + direction.slice(1);
-    setInfoMessage(`Recapturing TOC for ${directionLabel} edge. Move the textbook viewer so that edge controls are visible in the shared frame.`);
+  async function handleRecaptureTocCueFrame(): Promise<void> {
+    setInfoMessage("Recapturing TOC frame for cue pinning. Keep the shared textbook view visible.");
 
     const captured = await captureForStep("toc");
     if (!captured) {
-      setInfoMessage(`TOC recapture for ${directionLabel} edge was canceled. Existing capture was kept.`);
+      setInfoMessage("TOC recapture was canceled. Existing cue preview was kept.");
       return;
     }
 
     setOcrDraft(captured.ocrText);
-    const stitchedForCuePinning = tocCaptureImageDataUrl
-      ? await stitchCueImagesWithOverlap(tocCaptureImageDataUrl, captured.imageDataUrl)
-      : captured.imageDataUrl;
-    setTocCaptureImageDataUrl(stitchedForCuePinning);
+    setTocCaptureImageDataUrl(captured.imageDataUrl);
     setStep("toc");
     applyTocFromText(captured.ocrText);
-    setInfoMessage(
-      tocCaptureImageDataUrl
-        ? `TOC recaptured for ${directionLabel} edge and stitched into cue preview. Continue pinning cues in fullscreen.`
-        : `TOC recaptured for ${directionLabel} edge. Continue pinning cues in fullscreen.`
-    );
+    setInfoMessage("TOC frame recaptured. Continue pinning cues in fullscreen.");
 
     if (typeof window === "undefined") {
       return;
@@ -1811,16 +1715,58 @@ export function AutoTextbookSetupFlow({
         return;
       }
 
-      if (direction === "left") {
-        viewport.scrollTo({ left: 0, top: viewport.scrollTop, behavior: "smooth" });
-      } else if (direction === "right") {
-        viewport.scrollTo({ left: viewport.scrollWidth, top: viewport.scrollTop, behavior: "smooth" });
-      } else if (direction === "top") {
-        viewport.scrollTo({ left: viewport.scrollLeft, top: 0, behavior: "smooth" });
-      } else {
-        viewport.scrollTo({ left: viewport.scrollLeft, top: viewport.scrollHeight, behavior: "smooth" });
-      }
+      viewport.scrollTo({ left: 0, top: 0, behavior: "smooth" });
     });
+  }
+
+  async function handleScanTocTreeMap(): Promise<void> {
+    if (runtime !== "extension") {
+      setErrorMessage("TOC mapping scan is available in extension runtime only.");
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chromeApi = (globalThis as any)?.chrome;
+    if (!chromeApi?.runtime?.sendMessage) {
+      setErrorMessage("Extension TOC mapping bridge is unavailable.");
+      return;
+    }
+
+    setIsScanningTocTreeMap(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await new Promise<{
+        ok?: boolean;
+        error?: string;
+        nodes?: TocTreeMapNode[];
+      }>((resolve) => {
+        chromeApi.runtime.sendMessage({ type: "courseforge:tree-map-snapshot" }, (reply: {
+          ok?: boolean;
+          error?: string;
+          nodes?: TocTreeMapNode[];
+        }) => {
+          resolve(reply ?? { ok: false, error: "No response from extension runtime." });
+        });
+      });
+
+      if (!response?.ok) {
+        setErrorMessage(response?.error ?? "TOC mapping scan failed.");
+        return;
+      }
+
+      const nodes = Array.isArray(response.nodes) ? response.nodes : [];
+      setTocTreeMapNodes(nodes);
+      setInfoMessage(
+        nodes.length > 0
+          ? `TOC map scan completed. ${nodes.length} clickable targets detected in the active tab.`
+          : "TOC map scan completed, but no clickable targets were detected. Ensure the TOC panel is visible in the active tab."
+      );
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "TOC mapping scan failed.");
+    } finally {
+      setIsScanningTocTreeMap(false);
+    }
   }
 
   function handleStartGuidedCapture(): void {
@@ -4775,24 +4721,6 @@ export function AutoTextbookSetupFlow({
                 <button
                   type="button"
                   className="btn-secondary"
-                  onClick={() => {
-                    panGuidedCueViewport(-220);
-                  }}
-                >
-                  Pan Left
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => {
-                    panGuidedCueViewport(220);
-                  }}
-                >
-                  Pan Right
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
                   onClick={openCueFullscreen}
                 >
                   Full Screen Pinning
@@ -4874,22 +4802,25 @@ export function AutoTextbookSetupFlow({
                   <button type="button" className="btn-secondary" onClick={closeCueFullscreen}>Close</button>
                 </div>
                 <p className="form-hint">
-                  Select a cue, then click on the screenshot to pin it. Use Fit View to see the full frame or Native View for full-resolution panning.
+                  Step 1: Choose a cue target. Step 2: Click the textbook preview to pin. Step 3: Recapture if layout changed.
                 </p>
                 <p className="form-hint">
                   Live Overlay can pin from a real-time shared textbook tab/window. Do not share the CourseForge tab.
                 </p>
                 <p className="form-hint">
-                  Teach mode records click path steps and anchor regions so replay can automate the active textbook tab in extension runtime.
+                  Teach mode records click-path examples for upcoming dynamic tree-navigation logic.
                 </p>
                 <p className="form-hint">
                   Teach macro steps: {teachMacroSteps.length}/{TEACH_MACRO_MAX_STEPS}. {isTeachModeActive ? "Recording active." : "Recording idle."}
+                </p>
+                <p className="form-hint">
+                  Phase 5 mapper targets detected: {tocTreeMapNodes.length}.
                 </p>
                 {liveCueOverlayError ? (
                   <p className="form-hint" role="alert">{liveCueOverlayError}</p>
                 ) : null}
                 <div className="auto-cue-fullscreen__controls">
-                  {GUIDED_CUE_TYPES.map((cue) => {
+                  {CORE_GUIDED_CUE_TYPES.map((cue) => {
                     const marked = Boolean(guidedCuePlan.cues[cue]?.acknowledged);
                     return (
                       <button
@@ -4911,11 +4842,36 @@ export function AutoTextbookSetupFlow({
                     type="button"
                     className="btn-secondary"
                     onClick={() => {
-                      setGuidedCueFullscreenViewMode((current) => (current === "fit" ? "native" : "fit"));
+                      setShowOptionalCuePins((current) => {
+                        const next = !current;
+                        if (!next && activeCueForPin && OPTIONAL_GUIDED_CUE_TYPES.includes(activeCueForPin)) {
+                          setActiveCueForPin(null);
+                        }
+
+                        return next;
+                      });
                     }}
                   >
-                    {guidedCueFullscreenViewMode === "fit" ? "Switch to Native View" : "Switch to Fit View"}
+                    {showOptionalCuePins ? "Hide Optional Cues" : "Show Optional Cues"}
                   </button>
+                  {showOptionalCuePins ? OPTIONAL_GUIDED_CUE_TYPES.map((cue) => {
+                    const marked = Boolean(guidedCuePlan.cues[cue]?.acknowledged);
+                    return (
+                      <button
+                        key={`fullscreen-guided-cue-optional-${cue}`}
+                        type="button"
+                        className={marked ? "btn-secondary" : undefined}
+                        onClick={() => {
+                          setActiveCueForPin(cue);
+                          if (guidedCuePlan.cues[cue]?.acknowledged) {
+                            toggleGuidedCue(cue);
+                          }
+                        }}
+                      >
+                        {activeCueForPin === cue ? "Pinning" : "Pin"} {getGuidedCueLabel(cue)}
+                      </button>
+                    );
+                  }) : null}
                   <button
                     type="button"
                     className="btn-secondary"
@@ -4953,37 +4909,53 @@ export function AutoTextbookSetupFlow({
                     type="button"
                     className="btn-secondary"
                     onClick={() => {
-                      void runTeachMacroReplayInExtensionTab();
+                      void handleRecaptureTocCueFrame();
                     }}
-                    disabled={isTeachMacroReplayRunning || teachMacroSteps.length === 0}
                   >
-                    {isTeachMacroReplayRunning ? "Replaying..." : "Replay in Active Tab"}
+                    Recapture TOC Frame
                   </button>
-                  <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(-320, 0); }}>Pan Left</button>
-                  <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(320, 0); }}>Pan Right</button>
-                  <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(0, -220); }}>Pan Up</button>
-                  <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(0, 220); }}>Pan Down</button>
-                  <button type="button" className="btn-secondary" onClick={() => { void handleRecaptureTocForCueEdge("left"); }}>Recapture Left Edge</button>
-                  <button type="button" className="btn-secondary" onClick={() => { void handleRecaptureTocForCueEdge("right"); }}>Recapture Right Edge</button>
-                  <button type="button" className="btn-secondary" onClick={() => { void handleRecaptureTocForCueEdge("top"); }}>Recapture Top Edge</button>
-                  <button type="button" className="btn-secondary" onClick={() => { void handleRecaptureTocForCueEdge("bottom"); }}>Recapture Bottom Edge</button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      void handleScanTocTreeMap();
+                    }}
+                    disabled={isScanningTocTreeMap}
+                  >
+                    {isScanningTocTreeMap ? "Scanning TOC Map..." : "Scan TOC Map"}
+                  </button>
                 </div>
+                {tocTreeMapNodes.length > 0 ? (
+                  <div className="auto-cue-fullscreen__map-panel" aria-label="TOC tree mapping snapshot">
+                    <p className="auto-cue-fullscreen__map-title">Detected TOC Targets (top-to-bottom)</p>
+                    <ol className="auto-cue-fullscreen__map-list">
+                      {tocTreeMapNodes.slice(0, 24).map((node) => (
+                        <li key={`toc-map-node-${node.id}`} className="auto-cue-fullscreen__map-item">
+                          <span className="auto-cue-fullscreen__map-item-text">{node.text}</span>
+                          <span className="auto-cue-fullscreen__map-item-meta">
+                            {node.level ? `L${node.level}` : "L?"} | {node.role}
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
                 <div className="auto-cue-fullscreen__viewport" ref={guidedCueFullscreenViewportRef}>
-                  <div className={`auto-cue-fullscreen__stage ${guidedCueFullscreenViewMode === "fit" ? "auto-cue-fullscreen__stage--fit" : ""}`}>
+                  <div className="auto-cue-fullscreen__stage auto-cue-fullscreen__stage--fit">
                     {isLiveCueOverlayActive ? (
                       <video
                         ref={liveCueVideoRef}
                         autoPlay
                         playsInline
                         muted
-                        className={`auto-cue-fullscreen__video ${guidedCueFullscreenViewMode === "fit" ? "auto-cue-fullscreen__video--fit" : ""}`}
+                        className="auto-cue-fullscreen__video auto-cue-fullscreen__video--fit"
                         onClick={handleLiveCueVideoClick}
                       />
                     ) : (
                       <img
                         src={tocCaptureImageDataUrl ?? lastMetadataImageDataUrl ?? ""}
                         alt="Full screen guided navigation cue pinning"
-                        className={`auto-cue-fullscreen__image ${guidedCueFullscreenViewMode === "fit" ? "auto-cue-fullscreen__image--fit" : ""}`}
+                        className="auto-cue-fullscreen__image auto-cue-fullscreen__image--fit"
                         onClick={handleCueCanvasClick}
                       />
                     )}

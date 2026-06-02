@@ -19,7 +19,132 @@ function wait(ms) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || message.type !== "courseforge:macro-replay") {
+  if (!message) {
+    return false;
+  }
+
+  if (message.type === "courseforge:tree-map-snapshot") {
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        const activeTab = tabs.find((tab) => typeof tab.id === "number");
+        if (!activeTab?.id) {
+          sendResponse({ ok: false, error: "No active tab found for TOC mapping." });
+          return;
+        }
+
+        const executed = await chrome.scripting.executeScript({
+          target: { tabId: activeTab.id },
+          world: "MAIN",
+          func: () => {
+            const viewportWidth = Math.max(1, window.innerWidth);
+            const viewportHeight = Math.max(1, window.innerHeight);
+            const selector = [
+              "[role='treeitem']",
+              "[role='button']",
+              "button",
+              "a",
+              "summary",
+              "[aria-expanded]",
+              "[data-testid*='toc']",
+              "[class*='toc']",
+            ].join(",");
+
+            const toText = (node) => {
+              const aria = node.getAttribute("aria-label") || "";
+              const title = node.getAttribute("title") || "";
+              const visibleText = (node.innerText || "").replace(/\s+/g, " ").trim();
+              return visibleText || aria || title;
+            };
+
+            const isVisible = (node, rect) => {
+              if (!node || !rect) {
+                return false;
+              }
+
+              if (rect.width < 8 || rect.height < 8) {
+                return false;
+              }
+
+              if (rect.bottom < 0 || rect.right < 0 || rect.left > viewportWidth || rect.top > viewportHeight) {
+                return false;
+              }
+
+              const style = window.getComputedStyle(node);
+              if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) <= 0) {
+                return false;
+              }
+
+              return true;
+            };
+
+            const nodes = [];
+            const seen = new Set();
+            const candidates = Array.from(document.querySelectorAll(selector));
+
+            for (let index = 0; index < candidates.length; index += 1) {
+              const node = candidates[index];
+              const rect = node.getBoundingClientRect();
+              if (!isVisible(node, rect)) {
+                continue;
+              }
+
+              const text = toText(node);
+              if (!text || text.length < 2) {
+                continue;
+              }
+
+              // Focus on left-side navigation region where TOC trees commonly render.
+              const inLeftNavBand = rect.left <= (viewportWidth * 0.55);
+              if (!inLeftNavBand) {
+                continue;
+              }
+
+              const key = `${text.toLowerCase()}|${Math.round(rect.left)}|${Math.round(rect.top)}`;
+              if (seen.has(key)) {
+                continue;
+              }
+              seen.add(key);
+
+              const role = node.getAttribute("role") || node.tagName.toLowerCase();
+              const ariaLevel = Number(node.getAttribute("aria-level"));
+              const level = Number.isFinite(ariaLevel) && ariaLevel > 0 ? ariaLevel : undefined;
+
+              nodes.push({
+                id: `${index}-${Math.round(rect.top)}-${Math.round(rect.left)}`,
+                text,
+                role,
+                level,
+                xRatio: Math.min(1, Math.max(0, (rect.left + (rect.width / 2)) / viewportWidth)),
+                yRatio: Math.min(1, Math.max(0, (rect.top + (rect.height / 2)) / viewportHeight)),
+                widthRatio: Math.min(1, Math.max(0, rect.width / viewportWidth)),
+                heightRatio: Math.min(1, Math.max(0, rect.height / viewportHeight)),
+              });
+            }
+
+            nodes.sort((a, b) => {
+              if (a.yRatio !== b.yRatio) {
+                return a.yRatio - b.yRatio;
+              }
+
+              return a.xRatio - b.xRatio;
+            });
+
+            return nodes.slice(0, 160);
+          },
+        });
+
+        const nodes = Array.isArray(executed?.[0]?.result) ? executed[0].result : [];
+        sendResponse({ ok: true, nodes });
+      } catch (error) {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : "TOC mapping scan failed." });
+      }
+    })();
+
+    return true;
+  }
+
+  if (message.type !== "courseforge:macro-replay") {
     return false;
   }
 

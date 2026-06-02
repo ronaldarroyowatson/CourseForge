@@ -4478,6 +4478,44 @@ button.cf-ds-color-wheel__dot:active {
   gap: 0.45rem;
 }
 
+.auto-cue-fullscreen__map-panel {
+  border: 1px solid rgba(22, 160, 80, 0.35);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  background: rgba(7, 24, 19, 0.72);
+}
+
+.auto-cue-fullscreen__map-title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.auto-cue-fullscreen__map-list {
+  margin: 0.45rem 0 0;
+  padding-left: 1rem;
+  max-height: 170px;
+  overflow: auto;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.auto-cue-fullscreen__map-item {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.auto-cue-fullscreen__map-item-text {
+  font-size: 0.8rem;
+  color: var(--text-primary);
+}
+
+.auto-cue-fullscreen__map-item-meta {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
 .auto-cue-fullscreen__viewport {
   flex: 1;
   min-height: 0;

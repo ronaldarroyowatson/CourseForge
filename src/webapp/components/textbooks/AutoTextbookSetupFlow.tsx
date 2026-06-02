@@ -2333,7 +2333,7 @@ export function AutoTextbookSetupFlow({
       const defaultSelection = createDefaultSelection(image);
       let cropped = "";
       let selection = defaultSelection;
-      const requiresManualSelection = targetStep !== "title";
+      const requiresManualSelection = targetStep === "cover";
 
       try {
         if (requiresManualSelection) {
@@ -2360,8 +2360,7 @@ export function AutoTextbookSetupFlow({
               selectedHeight: selection.height,
             },
           });
-          const shouldAutoBoundaryCrop = targetStep !== "toc";
-          cropped = await cropToSelectionAndAutoBoundary(rawImage, selection, shouldAutoBoundaryCrop);
+          cropped = await cropToSelectionAndAutoBoundary(rawImage, selection, true);
         } else {
           emitAutoFlowDiagnostic("selection_skipped_full_page", {
             traceId,
@@ -2371,7 +2370,8 @@ export function AutoTextbookSetupFlow({
               selectedHeight: selection.height,
             },
           });
-          cropped = await cropToSelectionAndAutoBoundary(rawImage, selection, true);
+          const shouldAutoBoundaryCrop = targetStep !== "toc";
+          cropped = await cropToSelectionAndAutoBoundary(rawImage, selection, shouldAutoBoundaryCrop);
         }
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Unknown region capture error.";

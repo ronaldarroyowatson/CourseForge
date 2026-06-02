@@ -1210,6 +1210,7 @@ export function AutoTextbookSetupFlow({
   const [guidedCuePlan, setGuidedCuePlan] = useState<GuidedCaptureCuePlan>(initialGuidedCuePlan);
   const [activeCueForPin, setActiveCueForPin] = useState<GuidedCueType | null>(null);
   const [isCueFullscreenOpen, setIsCueFullscreenOpen] = useState(false);
+  const [guidedCueFullscreenViewMode, setGuidedCueFullscreenViewMode] = useState<"fit" | "native">("fit");
   const [guidedCueCanvasZoom, setGuidedCueCanvasZoom] = useState<number>(GUIDED_CUE_ZOOM_DEFAULT);
   const [isGuidedRunActive, setIsGuidedRunActive] = useState(false);
   const [guidedRunCursor, setGuidedRunCursor] = useState(0);
@@ -1486,6 +1487,7 @@ export function AutoTextbookSetupFlow({
   }
 
   function openCueFullscreen(): void {
+    setGuidedCueFullscreenViewMode("fit");
     setIsCueFullscreenOpen(true);
   }
 
@@ -1509,6 +1511,76 @@ export function AutoTextbookSetupFlow({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [isCueFullscreenOpen]);
+
+  useEffect(() => {
+    if (!isCueFullscreenOpen) {
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const viewport = guidedCueFullscreenViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      if (guidedCueFullscreenViewMode === "native") {
+        viewport.scrollTo({
+          left: 0,
+          top: 0,
+          behavior: "auto",
+        });
+        return;
+      }
+
+      viewport.scrollTo({
+        left: 0,
+        top: 0,
+        behavior: "auto",
+      });
+    });
+  }, [isCueFullscreenOpen, guidedCueFullscreenViewMode, tocCaptureImageDataUrl]);
+
+  async function handleRecaptureTocForCueEdge(direction: "left" | "right" | "top" | "bottom"): Promise<void> {
+    const directionLabel = direction.charAt(0).toUpperCase() + direction.slice(1);
+    setInfoMessage(`Recapturing TOC for ${directionLabel} edge. Move the textbook viewer so that edge controls are visible in the shared frame.`);
+
+    const captured = await captureForStep("toc");
+    if (!captured) {
+      setInfoMessage(`TOC recapture for ${directionLabel} edge was canceled. Existing capture was kept.`);
+      return;
+    }
+
+    setOcrDraft(captured.ocrText);
+    setTocCaptureImageDataUrl(captured.imageDataUrl);
+    setStep("toc");
+    applyTocFromText(captured.ocrText);
+    setInfoMessage(`TOC recaptured for ${directionLabel} edge. Continue pinning cues in fullscreen.`);
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const viewport = guidedCueFullscreenViewportRef.current;
+      if (!viewport) {
+        return;
+      }
+
+      if (direction === "left") {
+        viewport.scrollTo({ left: 0, top: viewport.scrollTop, behavior: "smooth" });
+      } else if (direction === "right") {
+        viewport.scrollTo({ left: viewport.scrollWidth, top: viewport.scrollTop, behavior: "smooth" });
+      } else if (direction === "top") {
+        viewport.scrollTo({ left: viewport.scrollLeft, top: 0, behavior: "smooth" });
+      } else {
+        viewport.scrollTo({ left: viewport.scrollLeft, top: viewport.scrollHeight, behavior: "smooth" });
+      }
+    });
+  }
 
   function handleStartGuidedCapture(): void {
     if (missingGuidedCues.length > 0) {
@@ -4560,7 +4632,7 @@ export function AutoTextbookSetupFlow({
                   <button type="button" className="btn-secondary" onClick={closeCueFullscreen}>Close</button>
                 </div>
                 <p className="form-hint">
-                  Select a cue, then click on the full-size screenshot to pin it. Press Escape to close this view.
+                  Select a cue, then click on the screenshot to pin it. Use Fit View to see the full frame or Native View for full-resolution panning.
                 </p>
                 <div className="auto-cue-fullscreen__controls">
                   {GUIDED_CUE_TYPES.map((cue) => {
@@ -4581,17 +4653,30 @@ export function AutoTextbookSetupFlow({
                       </button>
                     );
                   })}
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      setGuidedCueFullscreenViewMode((current) => (current === "fit" ? "native" : "fit"));
+                    }}
+                  >
+                    {guidedCueFullscreenViewMode === "fit" ? "Switch to Native View" : "Switch to Fit View"}
+                  </button>
                   <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(-320, 0); }}>Pan Left</button>
                   <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(320, 0); }}>Pan Right</button>
                   <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(0, -220); }}>Pan Up</button>
                   <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(0, 220); }}>Pan Down</button>
+                  <button type="button" className="btn-secondary" onClick={() => { void handleRecaptureTocForCueEdge("left"); }}>Recapture Left Edge</button>
+                  <button type="button" className="btn-secondary" onClick={() => { void handleRecaptureTocForCueEdge("right"); }}>Recapture Right Edge</button>
+                  <button type="button" className="btn-secondary" onClick={() => { void handleRecaptureTocForCueEdge("top"); }}>Recapture Top Edge</button>
+                  <button type="button" className="btn-secondary" onClick={() => { void handleRecaptureTocForCueEdge("bottom"); }}>Recapture Bottom Edge</button>
                 </div>
                 <div className="auto-cue-fullscreen__viewport" ref={guidedCueFullscreenViewportRef}>
-                  <div className="auto-cue-fullscreen__stage">
+                  <div className={`auto-cue-fullscreen__stage ${guidedCueFullscreenViewMode === "fit" ? "auto-cue-fullscreen__stage--fit" : ""}`}>
                     <img
                       src={tocCaptureImageDataUrl ?? lastMetadataImageDataUrl ?? ""}
                       alt="Full screen guided navigation cue pinning"
-                      className="auto-cue-fullscreen__image"
+                      className={`auto-cue-fullscreen__image ${guidedCueFullscreenViewMode === "fit" ? "auto-cue-fullscreen__image--fit" : ""}`}
                       onClick={handleCueCanvasClick}
                     />
                     {GUIDED_CUE_TYPES.map((cue) => {

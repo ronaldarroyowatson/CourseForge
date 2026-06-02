@@ -4493,12 +4493,23 @@ button.cf-ds-color-wheel__dot:active {
   min-width: 100%;
 }
 
+.auto-cue-fullscreen__stage--fit {
+  width: 100%;
+  min-width: 100%;
+}
+
 .auto-cue-fullscreen__image {
   display: block;
   width: auto;
   height: auto;
   max-width: none;
   cursor: crosshair;
+}
+
+.auto-cue-fullscreen__image--fit {
+  width: 100%;
+  height: auto;
+  max-width: 100%;
 }
 
 @media (max-width: 768px) {

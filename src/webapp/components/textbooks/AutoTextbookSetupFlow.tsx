@@ -76,6 +76,7 @@ import {
   getDisplayCaptureSupportInfo,
   normalizeDisplayCaptureError,
 } from "../../utils/displayCapture";
+import { stitchCueImagesWithOverlap } from "../../utils/cueImageStitch";
 import { mergeOcrTextWithOverlap } from "../../utils/ocrTextMerge";
 import { isChromeOSRuntime, isSmallChromebookViewport } from "../../utils/platform";
 import { getCurrentUser } from "../../../firebase/auth";
@@ -1555,10 +1556,17 @@ export function AutoTextbookSetupFlow({
     }
 
     setOcrDraft(captured.ocrText);
-    setTocCaptureImageDataUrl(captured.imageDataUrl);
+    const stitchedForCuePinning = tocCaptureImageDataUrl
+      ? await stitchCueImagesWithOverlap(tocCaptureImageDataUrl, captured.imageDataUrl)
+      : captured.imageDataUrl;
+    setTocCaptureImageDataUrl(stitchedForCuePinning);
     setStep("toc");
     applyTocFromText(captured.ocrText);
-    setInfoMessage(`TOC recaptured for ${directionLabel} edge. Continue pinning cues in fullscreen.`);
+    setInfoMessage(
+      tocCaptureImageDataUrl
+        ? `TOC recaptured for ${directionLabel} edge and stitched into cue preview. Continue pinning cues in fullscreen.`
+        : `TOC recaptured for ${directionLabel} edge. Continue pinning cues in fullscreen.`
+    );
 
     if (typeof window === "undefined") {
       return;
@@ -3339,11 +3347,12 @@ export function AutoTextbookSetupFlow({
     }
 
     const mergedTocText = mergeOcrTextWithOverlap(firstShot.ocrText, secondShot.ocrText);
+    const stitchedTocImage = await stitchCueImagesWithOverlap(firstShot.imageDataUrl, secondShot.imageDataUrl);
     setOcrDraft(mergedTocText);
-    setTocCaptureImageDataUrl(firstShot.imageDataUrl);
+    setTocCaptureImageDataUrl(stitchedTocImage);
     setStep("toc");
     applyTocFromText(mergedTocText);
-    setInfoMessage(`TOC auto 2-shot captured and merged. Continue capturing or finish TOC. (OCR: ${firstShot.ocrProviderId} + ${secondShot.ocrProviderId})`);
+    setInfoMessage(`TOC auto 2-shot captured, OCR merged, and cue preview stitched. Continue capturing or finish TOC. (OCR: ${firstShot.ocrProviderId} + ${secondShot.ocrProviderId})`);
   }
 
   function updateChapter(index: number, update: Partial<TocChapter>): void {

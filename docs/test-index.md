@@ -1,11 +1,11 @@
 # Test Index
 
-Generated: 2026-06-02T15:16:09.344Z
+Generated: 2026-06-02T16:59:11.820Z
 
 ## Summary
 
-- Total test files: 84
-- Unit test files: 55
+- Total test files: 85
+- Unit test files: 56
 - Integration test files: 27
 - Rules test files: 2
 - Canonical sample files: 5
@@ -22,6 +22,7 @@ Generated: 2026-06-02T15:16:09.344Z
 - tests/core/autoTextbookPersistence.localization.test.ts
 - tests/core/copilot.auditLogger.test.ts
 - tests/core/copilot.premiumUsageTracker.test.ts
+- tests/core/cueImageStitch.test.ts
 - tests/core/debugLogService.test.ts
 - tests/core/designSystemService.test.ts
 - tests/core/designTokenDebugService.test.ts

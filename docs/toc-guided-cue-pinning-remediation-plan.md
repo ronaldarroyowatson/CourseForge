@@ -4,7 +4,14 @@
 
 - Created: 2026-06-02
 - Scope: Auto textbook TOC guided cue pinning in `AutoTextbookSetupFlow`
-- Mode: Planning and staged execution
+- Mode: Active staged execution
+
+## Phase Outcomes
+
+- Phase 1 result: Not viable in live manual validation.
+   - Outcome summary: "window-inside-window" effect did not increase practical visible source area for hidden left-edge controls.
+- Phase 2 status: In implementation and validation cycle.
+   - Current implementation focus: stitched cue pinning canvas from multiple TOC captures, including edge recapture stitching.
 
 ## Problem Statement
 
@@ -107,4 +114,4 @@ Before any new phase implementation begins:
 
 ## Current Next Step
 
-Begin Phase 1 implementation from this docs checkpoint.
+Run the Phase 2 workflow cycle: quality gate, release publish, and live-install manual validation.

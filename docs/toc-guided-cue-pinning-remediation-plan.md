@@ -12,6 +12,8 @@
    - Outcome summary: "window-inside-window" effect did not increase practical visible source area for hidden left-edge controls.
 - Phase 2 status: In implementation and validation cycle.
    - Current implementation focus: stitched cue pinning canvas from multiple TOC captures, including edge recapture stitching.
+- Phase 3 status: Activated after Phase 2 live failure report.
+   - Current implementation focus: live pass-through guided pinning overlay with explicit self-capture guardrails.
 
 ## Problem Statement
 
@@ -114,4 +116,4 @@ Before any new phase implementation begins:
 
 ## Current Next Step
 
-Run the Phase 2 workflow cycle: quality gate, release publish, and live-install manual validation.
+Run the Phase 3 workflow cycle: quality gate, release publish, and live-install manual validation.

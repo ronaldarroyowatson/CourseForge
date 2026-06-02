@@ -77,6 +77,7 @@ import {
   normalizeDisplayCaptureError,
 } from "../../utils/displayCapture";
 import { stitchCueImagesWithOverlap } from "../../utils/cueImageStitch";
+import { isLikelyCourseForgeSelfCapture } from "../../utils/liveCueCapture";
 import { mergeOcrTextWithOverlap } from "../../utils/ocrTextMerge";
 import { isChromeOSRuntime, isSmallChromebookViewport } from "../../utils/platform";
 import { getCurrentUser } from "../../../firebase/auth";
@@ -1212,6 +1213,8 @@ export function AutoTextbookSetupFlow({
   const [activeCueForPin, setActiveCueForPin] = useState<GuidedCueType | null>(null);
   const [isCueFullscreenOpen, setIsCueFullscreenOpen] = useState(false);
   const [guidedCueFullscreenViewMode, setGuidedCueFullscreenViewMode] = useState<"fit" | "native">("fit");
+  const [isLiveCueOverlayActive, setIsLiveCueOverlayActive] = useState(false);
+  const [liveCueOverlayError, setLiveCueOverlayError] = useState<string | null>(null);
   const [guidedCueCanvasZoom, setGuidedCueCanvasZoom] = useState<number>(GUIDED_CUE_ZOOM_DEFAULT);
   const [isGuidedRunActive, setIsGuidedRunActive] = useState(false);
   const [guidedRunCursor, setGuidedRunCursor] = useState(0);
@@ -1251,6 +1254,8 @@ export function AutoTextbookSetupFlow({
     detail: "",
   });
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const liveCueVideoRef = useRef<HTMLVideoElement | null>(null);
+  const liveCueStreamRef = useRef<MediaStream | null>(null);
   const selectionResolverRef = useRef<((value: SelectionRect | null) => void) | null>(null);
   const selectionRectRef = useRef<SelectionRect | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -1461,6 +1466,27 @@ export function AutoTextbookSetupFlow({
     setInfoMessage(`${getGuidedCueLabel(activeCueForPin)} pinned.`);
   }
 
+  function handleLiveCueVideoClick(event: React.MouseEvent<HTMLVideoElement>): void {
+    if (!activeCueForPin) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+
+    const xRatio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    const yRatio = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+
+    setGuidedCuePlan((current) => markGuidedCue(current, activeCueForPin, {
+      xRatio,
+      yRatio,
+      label: getGuidedCueLabel(activeCueForPin),
+    }));
+    setInfoMessage(`${getGuidedCueLabel(activeCueForPin)} pinned from live overlay.`);
+  }
+
   function panGuidedCueViewport(deltaX: number): void {
     const viewport = guidedCueViewportRef.current;
     if (!viewport) {
@@ -1489,10 +1515,70 @@ export function AutoTextbookSetupFlow({
 
   function openCueFullscreen(): void {
     setGuidedCueFullscreenViewMode("fit");
+    setLiveCueOverlayError(null);
     setIsCueFullscreenOpen(true);
   }
 
+  function stopLiveCueOverlay(): void {
+    const stream = liveCueStreamRef.current;
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+
+    liveCueStreamRef.current = null;
+
+    const video = liveCueVideoRef.current;
+    if (video) {
+      video.srcObject = null;
+    }
+
+    setIsLiveCueOverlayActive(false);
+  }
+
+  async function startLiveCueOverlay(): Promise<void> {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== "function") {
+      setLiveCueOverlayError("Live overlay capture is not available in this browser.");
+      return;
+    }
+
+    setLiveCueOverlayError(null);
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const track = stream.getVideoTracks()[0];
+      const trackLabel = track?.label ?? "";
+
+      if (isLikelyCourseForgeSelfCapture(trackLabel)) {
+        stream.getTracks().forEach((mediaTrack) => mediaTrack.stop());
+        setLiveCueOverlayError("The shared source appears to be CourseForge. Share the textbook tab or window instead to avoid recursive capture.");
+        return;
+      }
+
+      stopLiveCueOverlay();
+      liveCueStreamRef.current = stream;
+      setIsLiveCueOverlayActive(true);
+      setGuidedCueFullscreenViewMode("native");
+
+      const video = liveCueVideoRef.current;
+      if (video) {
+        video.srcObject = stream;
+        await video.play().catch(() => undefined);
+      }
+
+      track?.addEventListener("ended", () => {
+        stopLiveCueOverlay();
+        setInfoMessage("Live overlay capture ended.");
+      }, { once: true });
+
+      setInfoMessage("Live overlay started. Click directly on the live capture to pin cues.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to start live overlay capture.";
+      setLiveCueOverlayError(message);
+    }
+  }
+
   function closeCueFullscreen(): void {
+    stopLiveCueOverlay();
     setIsCueFullscreenOpen(false);
   }
 
@@ -1503,7 +1589,7 @@ export function AutoTextbookSetupFlow({
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setIsCueFullscreenOpen(false);
+        closeCueFullscreen();
       }
     };
 
@@ -1512,6 +1598,12 @@ export function AutoTextbookSetupFlow({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [isCueFullscreenOpen]);
+
+  useEffect(() => {
+    return () => {
+      stopLiveCueOverlay();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isCueFullscreenOpen) {
@@ -4643,6 +4735,12 @@ export function AutoTextbookSetupFlow({
                 <p className="form-hint">
                   Select a cue, then click on the screenshot to pin it. Use Fit View to see the full frame or Native View for full-resolution panning.
                 </p>
+                <p className="form-hint">
+                  Live Overlay can pin from a real-time shared textbook tab/window. Do not share the CourseForge tab.
+                </p>
+                {liveCueOverlayError ? (
+                  <p className="form-hint" role="alert">{liveCueOverlayError}</p>
+                ) : null}
                 <div className="auto-cue-fullscreen__controls">
                   {GUIDED_CUE_TYPES.map((cue) => {
                     const marked = Boolean(guidedCuePlan.cues[cue]?.acknowledged);
@@ -4671,6 +4769,20 @@ export function AutoTextbookSetupFlow({
                   >
                     {guidedCueFullscreenViewMode === "fit" ? "Switch to Native View" : "Switch to Fit View"}
                   </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      if (isLiveCueOverlayActive) {
+                        stopLiveCueOverlay();
+                        return;
+                      }
+
+                      void startLiveCueOverlay();
+                    }}
+                  >
+                    {isLiveCueOverlayActive ? "Stop Live Overlay" : "Start Live Overlay"}
+                  </button>
                   <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(-320, 0); }}>Pan Left</button>
                   <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(320, 0); }}>Pan Right</button>
                   <button type="button" className="btn-secondary" onClick={() => { panGuidedCueFullscreenViewport(0, -220); }}>Pan Up</button>
@@ -4682,12 +4794,23 @@ export function AutoTextbookSetupFlow({
                 </div>
                 <div className="auto-cue-fullscreen__viewport" ref={guidedCueFullscreenViewportRef}>
                   <div className={`auto-cue-fullscreen__stage ${guidedCueFullscreenViewMode === "fit" ? "auto-cue-fullscreen__stage--fit" : ""}`}>
-                    <img
-                      src={tocCaptureImageDataUrl ?? lastMetadataImageDataUrl ?? ""}
-                      alt="Full screen guided navigation cue pinning"
-                      className={`auto-cue-fullscreen__image ${guidedCueFullscreenViewMode === "fit" ? "auto-cue-fullscreen__image--fit" : ""}`}
-                      onClick={handleCueCanvasClick}
-                    />
+                    {isLiveCueOverlayActive ? (
+                      <video
+                        ref={liveCueVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className={`auto-cue-fullscreen__video ${guidedCueFullscreenViewMode === "fit" ? "auto-cue-fullscreen__video--fit" : ""}`}
+                        onClick={handleLiveCueVideoClick}
+                      />
+                    ) : (
+                      <img
+                        src={tocCaptureImageDataUrl ?? lastMetadataImageDataUrl ?? ""}
+                        alt="Full screen guided navigation cue pinning"
+                        className={`auto-cue-fullscreen__image ${guidedCueFullscreenViewMode === "fit" ? "auto-cue-fullscreen__image--fit" : ""}`}
+                        onClick={handleCueCanvasClick}
+                      />
+                    )}
                     {GUIDED_CUE_TYPES.map((cue) => {
                       const point = guidedCuePlan.cues[cue]?.point;
                       if (typeof point?.xRatio !== "number" || typeof point?.yRatio !== "number") {

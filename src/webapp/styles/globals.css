@@ -4506,7 +4506,22 @@ button.cf-ds-color-wheel__dot:active {
   cursor: crosshair;
 }
 
+.auto-cue-fullscreen__video {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: none;
+  cursor: crosshair;
+  background: #000;
+}
+
 .auto-cue-fullscreen__image--fit {
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+
+.auto-cue-fullscreen__video--fit {
   width: 100%;
   height: auto;
   max-width: 100%;

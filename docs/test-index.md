@@ -1,11 +1,11 @@
 # Test Index
 
-Generated: 2026-06-02T16:59:11.820Z
+Generated: 2026-06-02T17:33:59.187Z
 
 ## Summary
 
-- Total test files: 85
-- Unit test files: 56
+- Total test files: 86
+- Unit test files: 57
 - Integration test files: 27
 - Rules test files: 2
 - Canonical sample files: 5
@@ -39,6 +39,7 @@ Generated: 2026-06-02T16:59:11.820Z
 - tests/core/installerLifecycle.macos.matrix.test.ts
 - tests/core/installerLifecycle.matrix.test.ts
 - tests/core/installerLifecycle.test.ts
+- tests/core/liveCueCapture.test.ts
 - tests/core/masonryLayoutService.test.ts
 - tests/core/mempalaceStartupIsolation.test.ts
 - tests/core/metadataCorrectionLearningService.test.ts

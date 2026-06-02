@@ -5,6 +5,7 @@ This file is maintained to help AI agents quickly locate code, services, tests, 
 Operational diagnostics reference:
 
 - `docs/COPILOT_CODEBASE_INDEX_DIAGNOSTICS.md` — Detailed Copilot semantic/codebase index incident report, log evidence, error codes, and remediation attempts.
+- `docs/toc-guided-cue-pinning-remediation-plan.md` — Active remediation plan for guided TOC cue pinning edge-visibility failures.
 
 ---
 

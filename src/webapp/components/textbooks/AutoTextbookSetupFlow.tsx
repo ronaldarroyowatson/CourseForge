@@ -1476,10 +1476,6 @@ export function AutoTextbookSetupFlow({
   }
 
   function handleCueCanvasClick(event: React.MouseEvent<HTMLImageElement>): void {
-    if (!activeCueForPin) {
-      return;
-    }
-
     const rect = event.currentTarget.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) {
       return;
@@ -1487,6 +1483,15 @@ export function AutoTextbookSetupFlow({
 
     const xRatio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
     const yRatio = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+
+    if (isTeachModeActive) {
+      const count = recordTeachMacroStep(xRatio, yRatio, "snapshot");
+      setInfoMessage(`Teach step ${count} recorded from snapshot.`);
+    }
+
+    if (!activeCueForPin) {
+      return;
+    }
 
     setGuidedCuePlan((current) => markGuidedCue(current, activeCueForPin, {
       xRatio,
@@ -1494,17 +1499,9 @@ export function AutoTextbookSetupFlow({
       label: getGuidedCueLabel(activeCueForPin),
     }));
     setInfoMessage(`${getGuidedCueLabel(activeCueForPin)} pinned.`);
-
-    if (isTeachModeActive) {
-      recordTeachMacroStep(xRatio, yRatio, "snapshot");
-    }
   }
 
   function handleLiveCueVideoClick(event: React.MouseEvent<HTMLVideoElement>): void {
-    if (!activeCueForPin) {
-      return;
-    }
-
     const rect = event.currentTarget.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) {
       return;
@@ -1513,19 +1510,26 @@ export function AutoTextbookSetupFlow({
     const xRatio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
     const yRatio = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
 
+    if (isTeachModeActive) {
+      const count = recordTeachMacroStep(xRatio, yRatio, "live");
+      setInfoMessage(`Teach step ${count} recorded from live overlay.`);
+    }
+
+    if (!activeCueForPin) {
+      return;
+    }
+
     setGuidedCuePlan((current) => markGuidedCue(current, activeCueForPin, {
       xRatio,
       yRatio,
       label: getGuidedCueLabel(activeCueForPin),
     }));
     setInfoMessage(`${getGuidedCueLabel(activeCueForPin)} pinned from live overlay.`);
-
-    if (isTeachModeActive) {
-      recordTeachMacroStep(xRatio, yRatio, "live");
-    }
   }
 
-  function recordTeachMacroStep(xRatio: number, yRatio: number, source: "live" | "snapshot"): void {
+  function recordTeachMacroStep(xRatio: number, yRatio: number, source: "live" | "snapshot"): number {
+    let recordedCount = 0;
+
     const step: TeachMacroStep = {
       id: `teach-step-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       xRatio: Math.min(1, Math.max(0, xRatio)),
@@ -1541,11 +1545,16 @@ export function AutoTextbookSetupFlow({
     setTeachMacroSteps((current) => {
       const next = [...current, step];
       if (next.length <= TEACH_MACRO_MAX_STEPS) {
+        recordedCount = next.length;
         return next;
       }
 
-      return next.slice(next.length - TEACH_MACRO_MAX_STEPS);
+      const trimmed = next.slice(next.length - TEACH_MACRO_MAX_STEPS);
+      recordedCount = trimmed.length;
+      return trimmed;
     });
+
+    return recordedCount;
   }
 
   async function runTeachMacroReplayInExtensionTab(): Promise<void> {
@@ -1675,12 +1684,6 @@ export function AutoTextbookSetupFlow({
       setIsLiveCueOverlayActive(true);
       setGuidedCueFullscreenViewMode("native");
 
-      const video = liveCueVideoRef.current;
-      if (video) {
-        video.srcObject = stream;
-        await video.play().catch(() => undefined);
-      }
-
       track?.addEventListener("ended", () => {
         stopLiveCueOverlay();
         setInfoMessage("Live overlay capture ended.");
@@ -1723,6 +1726,21 @@ export function AutoTextbookSetupFlow({
   }, []);
 
   useEffect(() => {
+    if (!isLiveCueOverlayActive) {
+      return;
+    }
+
+    const stream = liveCueStreamRef.current;
+    const video = liveCueVideoRef.current;
+    if (!stream || !video) {
+      return;
+    }
+
+    video.srcObject = stream;
+    void video.play().catch(() => undefined);
+  }, [isLiveCueOverlayActive]);
+
+  useEffect(() => {
     if (!isCueFullscreenOpen) {
       return;
     }
@@ -1737,20 +1755,26 @@ export function AutoTextbookSetupFlow({
     }
 
     window.requestAnimationFrame(() => {
+      const resetViewport = (): void => {
+        if (typeof viewport.scrollTo === "function") {
+          viewport.scrollTo({
+            left: 0,
+            top: 0,
+            behavior: "auto",
+          });
+          return;
+        }
+
+        viewport.scrollLeft = 0;
+        viewport.scrollTop = 0;
+      };
+
       if (guidedCueFullscreenViewMode === "native") {
-        viewport.scrollTo({
-          left: 0,
-          top: 0,
-          behavior: "auto",
-        });
+        resetViewport();
         return;
       }
 
-      viewport.scrollTo({
-        left: 0,
-        top: 0,
-        behavior: "auto",
-      });
+      resetViewport();
     });
   }, [isCueFullscreenOpen, guidedCueFullscreenViewMode, tocCaptureImageDataUrl]);
 

@@ -1508,4 +1508,47 @@ describe("auto textbook flow integration", () => {
     expect(screen.getByLabelText("TOC opener marker")).toBeInTheDocument();
     expect(screen.getByText(/Required for glossary automation:/i)).toHaveTextContent("Glossary opener");
   });
+
+  it("records teach-mode steps from fullscreen clicks without requiring cue selection", async () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc",
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          ocrDraft: "Table of Contents",
+          tocCaptureImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          guidedCuePlan: {
+            version: 1,
+            viewerHost: "example.viewer",
+            cues: {},
+          },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Full Screen Pinning" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start Teach Mode" }));
+    expect(await screen.findByRole("button", { name: "Stop Teach Mode" })).toBeInTheDocument();
+
+    const fullscreenImage = screen.getByAltText("Full screen guided navigation cue pinning");
+    Object.defineProperty(fullscreenImage, "getBoundingClientRect", {
+      value: () => ({
+        left: 0,
+        top: 0,
+        width: 300,
+        height: 200,
+        right: 300,
+        bottom: 200,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.click(fullscreenImage, { clientX: 150, clientY: 120 });
+
+    expect(await screen.findByText(/Teach macro steps: 1\/40\./i)).toBeInTheDocument();
+  });
 });

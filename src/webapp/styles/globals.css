@@ -4508,9 +4508,9 @@ button.cf-ds-color-wheel__dot:active {
 
 .auto-cue-fullscreen__video {
   display: block;
-  width: auto;
+  width: 100%;
   height: auto;
-  max-width: none;
+  max-width: 100%;
   cursor: crosshair;
   background: #000;
 }

@@ -15,7 +15,8 @@
 - Phase 3 status: Activated after Phase 2 live failure report.
    - Current implementation focus: live pass-through guided pinning overlay with explicit self-capture guardrails.
 - Phase 4 status: Activated after Phase 3 partial failure report.
-   - Current implementation focus: teach/replay macro path with recorded click steps, anchor regions, and extension-tab replay automation.
+   - Current implementation focus: teach/replay macro path with recorded click steps, anchor regions, extension-tab replay automation, and live-overlay mount reliability fixes.
+   - Active hotfix focus: attach live stream only after fullscreen video mount and allow teach-step recording even when no cue is currently selected.
 
 ## Problem Statement
 
@@ -118,4 +119,7 @@ Before any new phase implementation begins:
 
 ## Current Next Step
 
-Run the Phase 4 workflow cycle: quality gate, release publish, and live-install manual validation.
+Publish the Phase 4 hotfix build and perform live-install manual validation specifically for:
+
+1. Full-window/full-screen share no longer rendering a black placeholder square in Live Overlay.
+2. Teach mode visibly recording step counts without requiring cue selection.

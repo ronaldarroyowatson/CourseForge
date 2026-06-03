@@ -33,13 +33,6 @@ import {
   type TocChapter,
 } from "../../../core/services/textbookAutoExtractionService";
 import {
-  cleanOcrTocLine,
-  mergeTocTreeMapNodesWithStats,
-  normalizeTocTreeMapText,
-  selectTocTreeMapLines,
-  type TocTreeMapNode,
-} from "../../../core/services/tocTreeMapService";
-import {
   applyCorrectionRulesToText,
   didMetadataChange,
   getEffectiveCorrectionRules,
@@ -176,7 +169,10 @@ interface AutoTextbookSetupFlowProps {
   runtime?: "webapp" | "extension";
   onSaved: () => void;
   onSwitchToManual: () => void;
-  externalNavigationRequest?: { direction: "back" | "next"; token: number } | null;
+  externalNavigationRequest?: {
+    token: number;
+    direction: "back" | "next";
+  } | null;
   onProgressChange?: (progress: {
     currentStep: 1 | 2 | 3 | 4;
     currentLabel: string;
@@ -1183,7 +1179,6 @@ export function AutoTextbookSetupFlow({
     removeChapter,
   } = useRepositories();
   const draftKeyRef = useRef<string>(createDraftCaptureKey());
-  const guidedCueFullscreenViewportRef = useRef<HTMLDivElement | null>(null);
   const [environmentPreparationMessage, setEnvironmentPreparationMessage] = useState<string>(
     runtime === "extension"
       ? "Checking browser tabs for textbook setup readiness..."
@@ -1212,11 +1207,6 @@ export function AutoTextbookSetupFlow({
   }] : []));
   const [tocCaptureImageDataUrl, setTocCaptureImageDataUrl] = useState<string | null>(testingSeedState?.tocCaptureImageDataUrl ?? null);
   const [guidedCuePlan, setGuidedCuePlan] = useState<GuidedCaptureCuePlan>(initialGuidedCuePlan);
-  const [isCueFullscreenOpen, setIsCueFullscreenOpen] = useState(false);
-  const [isLiveCueOverlayActive, setIsLiveCueOverlayActive] = useState(false);
-  const [liveCueOverlayError, setLiveCueOverlayError] = useState<string | null>(null);
-  const [isScanningTocTreeMap, setIsScanningTocTreeMap] = useState(false);
-  const [tocTreeMapNodes, setTocTreeMapNodes] = useState<TocTreeMapNode[]>([]);
   const [isBusy, setIsBusy] = useState(false);
   const [activePrimaryHelper, setActivePrimaryHelper] = useState<AutoPrimaryHelperAction | null>(null);
   const [primaryHelperAnchor, setPrimaryHelperAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -1252,8 +1242,6 @@ export function AutoTextbookSetupFlow({
     detail: "",
   });
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const liveCueVideoRef = useRef<HTMLVideoElement | null>(null);
-  const liveCueStreamRef = useRef<MediaStream | null>(null);
   const selectionResolverRef = useRef<((value: SelectionRect | null) => void) | null>(null);
   const selectionRectRef = useRef<SelectionRect | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -1429,373 +1417,6 @@ export function AutoTextbookSetupFlow({
   ]);
 
   const canFinishToc = tocResult.chapters.length > 0;
-
-  function openCueFullscreen(): void {
-    setLiveCueOverlayError(null);
-    setIsCueFullscreenOpen(true);
-  }
-
-  function stopLiveCueOverlay(): void {
-    const stream = liveCueStreamRef.current;
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-    }
-
-    liveCueStreamRef.current = null;
-
-    const video = liveCueVideoRef.current;
-    if (video) {
-      video.srcObject = null;
-    }
-
-    setIsLiveCueOverlayActive(false);
-  }
-
-  async function startLiveCueOverlay(): Promise<void> {
-    if (typeof navigator === "undefined" || !navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== "function") {
-      setLiveCueOverlayError("Live overlay capture is not available in this browser.");
-      return;
-    }
-
-    setLiveCueOverlayError(null);
-
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-      const track = stream.getVideoTracks()[0];
-      const trackLabel = track?.label ?? "";
-
-      if (isLikelyCourseForgeSelfCapture(trackLabel)) {
-        stream.getTracks().forEach((mediaTrack) => mediaTrack.stop());
-        setLiveCueOverlayError("The shared source appears to be CourseForge. Share the textbook tab or window instead to avoid recursive capture.");
-        return;
-      }
-
-      stopLiveCueOverlay();
-      liveCueStreamRef.current = stream;
-      setIsLiveCueOverlayActive(true);
-
-      track?.addEventListener("ended", () => {
-        stopLiveCueOverlay();
-        setInfoMessage("Live overlay capture ended.");
-      }, { once: true });
-
-      setInfoMessage("Live overlay started. Keep the textbook TOC visible, then run Scan TOC Map.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to start live overlay capture.";
-      setLiveCueOverlayError(message);
-    }
-  }
-
-  function closeCueFullscreen(): void {
-    stopLiveCueOverlay();
-    setIsCueFullscreenOpen(false);
-  }
-
-  useEffect(() => {
-    if (!isCueFullscreenOpen) {
-      return;
-    }
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeCueFullscreen();
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [isCueFullscreenOpen]);
-
-  useEffect(() => {
-    return () => {
-      stopLiveCueOverlay();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isLiveCueOverlayActive) {
-      return;
-    }
-
-    const stream = liveCueStreamRef.current;
-    const video = liveCueVideoRef.current;
-    if (!stream || !video) {
-      return;
-    }
-
-    video.srcObject = stream;
-    void video.play().catch(() => undefined);
-  }, [isLiveCueOverlayActive]);
-
-  useEffect(() => {
-    if (!isCueFullscreenOpen) {
-      return;
-    }
-
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const viewport = guidedCueFullscreenViewportRef.current;
-    if (!viewport) {
-      return;
-    }
-
-    window.requestAnimationFrame(() => {
-      const resetViewport = (): void => {
-        if (typeof viewport.scrollTo === "function") {
-          viewport.scrollTo({
-            left: 0,
-            top: 0,
-            behavior: "auto",
-          });
-          return;
-        }
-
-        viewport.scrollLeft = 0;
-        viewport.scrollTop = 0;
-      };
-
-      resetViewport();
-    });
-  }, [isCueFullscreenOpen, tocCaptureImageDataUrl]);
-
-  async function handleScanTocTreeMap(): Promise<void> {
-    const scanTraceId = createAutoFlowTraceId("auto-flow-toc-scan");
-    setIsScanningTocTreeMap(true);
-    setErrorMessage(null);
-    emitAutoFlowDiagnostic("toc_scan_started", {
-      traceId: scanTraceId,
-      context: { runtime },
-    });
-
-    try {
-      if (runtime !== "extension") {
-        const video = liveCueVideoRef.current;
-        if (!video || !isLiveCueOverlayActive || video.videoWidth <= 0 || video.videoHeight <= 0) {
-          setErrorMessage("Start Live Overlay first, then run Scan TOC Map after the textbook TOC is visible.");
-          return;
-        }
-
-        const canvas = document.createElement("canvas");
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const context = canvas.getContext("2d");
-        if (!context) {
-          setErrorMessage("Unable to scan live overlay frame for TOC mapping.");
-          return;
-        }
-
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const frameDataUrl = canvas.toDataURL("image/png");
-
-        const extractCleanLines = (text: string): string[] => text
-          .split(/\r?\n/)
-          .map((line) => cleanOcrTocLine(line))
-          .filter((line): line is string => Boolean(line));
-
-        const primaryOcr = await extractTextFromImageWithFallback(frameDataUrl);
-        const primaryLines = extractCleanLines(primaryOcr.text);
-        emitAutoFlowDiagnostic("toc_scan_primary_ocr_completed", {
-          traceId: scanTraceId,
-          context: {
-            providerId: primaryOcr.providerId,
-            textLength: primaryOcr.text.length,
-            cleanedLineCount: primaryLines.length,
-          },
-        });
-
-        // Run a second OCR pass focused on the lower-left TOC panel to recover
-        // entries that are frequently missed near the bottom edge.
-        const focusedCanvas = document.createElement("canvas");
-        const focusedWidth = Math.max(1, Math.round(canvas.width * 0.46));
-        const focusedSourceTop = Math.max(0, Math.round(canvas.height * 0.42));
-        const focusedHeight = Math.max(1, canvas.height - focusedSourceTop);
-        focusedCanvas.width = focusedWidth;
-        focusedCanvas.height = focusedHeight;
-        const focusedContext = focusedCanvas.getContext("2d");
-        let focusedLines: string[] = [];
-        if (focusedContext) {
-          focusedContext.drawImage(
-            canvas,
-            0,
-            focusedSourceTop,
-            focusedWidth,
-            focusedHeight,
-            0,
-            0,
-            focusedWidth,
-            focusedHeight
-          );
-          const focusedFrameDataUrl = focusedCanvas.toDataURL("image/png");
-          try {
-            const focusedOcr = await extractTextFromImageWithFallback(focusedFrameDataUrl);
-            focusedLines = extractCleanLines(focusedOcr.text);
-            emitAutoFlowDiagnostic("toc_scan_focused_ocr_completed", {
-              traceId: scanTraceId,
-              context: {
-                providerId: focusedOcr.providerId,
-                textLength: focusedOcr.text.length,
-                cleanedLineCount: focusedLines.length,
-              },
-            });
-          } catch (focusedOcrError) {
-            emitAutoFlowDiagnostic("toc_scan_focused_ocr_failed", {
-              level: "warning",
-              traceId: scanTraceId,
-              context: {
-                message: focusedOcrError instanceof Error
-                  ? focusedOcrError.message
-                  : "Focused OCR pass failed.",
-              },
-            });
-          }
-        }
-
-        const mergedLines: string[] = [];
-        const seenLines = new Set<string>();
-        [...primaryLines, ...focusedLines].forEach((line) => {
-          const key = normalizeTocTreeMapText(line);
-          if (seenLines.has(key)) {
-            return;
-          }
-
-          seenLines.add(key);
-          mergedLines.push(line);
-        });
-
-        const lines = selectTocTreeMapLines(mergedLines, 220);
-
-        const nodes: TocTreeMapNode[] = lines.map((text, index) => {
-          const normalized = text.toLowerCase();
-          const level = normalized.startsWith("unit")
-            ? 1
-            : normalized.startsWith("module") || normalized.startsWith("chapter")
-              ? 2
-              : 3;
-
-          return {
-            id: `ocr-${index}`,
-            text,
-            role: "ocr-line",
-            level,
-            xRatio: 0.26,
-            yRatio: Math.min(0.95, 0.1 + (index * 0.02)),
-            widthRatio: 0.5,
-            heightRatio: 0.02,
-          };
-        });
-
-        const scanStats = mergeTocTreeMapNodesWithStats(tocTreeMapNodes, nodes);
-        setTocTreeMapNodes(scanStats.nodes);
-        emitAutoFlowDiagnostic("toc_scan_completed", {
-          traceId: scanTraceId,
-          context: {
-            runtime,
-            source: "live-overlay-ocr",
-            primaryLineCount: primaryLines.length,
-            focusedLineCount: focusedLines.length,
-            mergedLineCount: lines.length,
-            incomingCount: scanStats.incomingCount,
-            addedCount: scanStats.addedCount,
-            duplicateCount: scanStats.duplicateCount,
-            droppedByCapCount: scanStats.droppedByCapCount,
-            totalCount: scanStats.totalCount,
-          },
-        });
-        setInfoMessage(
-          nodes.length > 0
-            ? scanStats.addedCount > 0
-              ? `TOC map scan completed from live overlay OCR. ${scanStats.addedCount} new candidate targets were merged (${scanStats.totalCount} total). Web mode does not support auto-scroll yet, so scroll the textbook TOC and scan again.`
-              : `TOC map scan completed from live overlay OCR, but no new targets were added (${scanStats.totalCount} total). Scroll to a new TOC region and scan again.`
-            : "TOC map scan completed from live overlay OCR, but no target candidates were detected."
-        );
-        return;
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const chromeApi = (globalThis as any)?.chrome;
-      if (!chromeApi?.runtime?.sendMessage) {
-        setErrorMessage("Extension TOC mapping bridge is unavailable.");
-        return;
-      }
-
-      const response = await new Promise<{
-        ok?: boolean;
-        error?: string;
-        nodes?: TocTreeMapNode[];
-        passCount?: number;
-        autoScrollUsed?: boolean;
-      }>((resolve) => {
-        chromeApi.runtime.sendMessage({ type: "courseforge:tree-map-snapshot" }, (reply: {
-          ok?: boolean;
-          error?: string;
-          nodes?: TocTreeMapNode[];
-          passCount?: number;
-          autoScrollUsed?: boolean;
-        }) => {
-          resolve(reply ?? { ok: false, error: "No response from extension runtime." });
-        });
-      });
-
-      if (!response?.ok) {
-        setErrorMessage(response?.error ?? "TOC mapping scan failed.");
-        return;
-      }
-
-      const nodes = Array.isArray(response.nodes) ? response.nodes : [];
-      const passCount = Number.isFinite(response.passCount) ? Math.max(1, Number(response.passCount)) : 1;
-      const autoScrollUsed = Boolean(response.autoScrollUsed);
-
-      const scanStats = mergeTocTreeMapNodesWithStats(tocTreeMapNodes, nodes);
-      setTocTreeMapNodes(scanStats.nodes);
-      emitAutoFlowDiagnostic("toc_scan_completed", {
-        traceId: scanTraceId,
-        context: {
-          runtime,
-          source: "extension-tree-snapshot",
-          passCount,
-          autoScrollUsed,
-          incomingCount: scanStats.incomingCount,
-          addedCount: scanStats.addedCount,
-          duplicateCount: scanStats.duplicateCount,
-          droppedByCapCount: scanStats.droppedByCapCount,
-          totalCount: scanStats.totalCount,
-        },
-      });
-      setInfoMessage(
-        nodes.length > 0
-          ? scanStats.addedCount > 0
-            ? autoScrollUsed
-              ? `TOC map scan completed across ${passCount} viewport passes. ${scanStats.addedCount} new clickable targets were merged (${scanStats.totalCount} total).`
-              : `TOC map scan completed. ${scanStats.addedCount} new clickable targets were merged (${scanStats.totalCount} total). If more TOC items exist below, scroll and scan again.`
-            : autoScrollUsed
-              ? `TOC map scan completed across ${passCount} viewport passes, but all ${nodes.length} detected targets were already mapped (${scanStats.totalCount} total).`
-              : `TOC map scan completed, but no new clickable targets were added (${scanStats.totalCount} total). Ensure a new TOC region is visible, then scan again.`
-          : "TOC map scan completed, but no clickable targets were detected. Ensure the TOC panel is visible in the active tab."
-      );
-    } catch (error) {
-      emitAutoFlowDiagnostic("toc_scan_failed", {
-        level: "error",
-        traceId: scanTraceId,
-        context: {
-          runtime,
-          message: error instanceof Error ? error.message : "TOC mapping scan failed.",
-        },
-      });
-      setErrorMessage(error instanceof Error ? error.message : "TOC mapping scan failed.");
-    } finally {
-      setIsScanningTocTreeMap(false);
-    }
-  }
-
-  function handleClearTocTreeMap(): void {
-    setTocTreeMapNodes([]);
-    setInfoMessage("Cleared mapped TOC targets. Run Scan TOC Map to capture a fresh target set.");
-    setErrorMessage(null);
-  }
 
   useEffect(() => {
     const currentStep: 1 | 2 | 3 | 4 = step === "cover"
@@ -3404,6 +3025,70 @@ export function AutoTextbookSetupFlow({
     setInfoMessage(`TOC page captured and parsed. Continue capturing or finish TOC. (OCR: ${captured.ocrProviderId})`);
   }
 
+  function countNovelTocEntries(base: ParsedTocResult, incoming: ParsedTocResult): number {
+    const chapterKeys = new Set(base.chapters.map((chapter) => `${chapter.chapterNumber}|${chapter.title.toLowerCase()}`));
+    const sectionKeys = new Set(
+      base.chapters.flatMap((chapter) => chapter.sections.map((section) => `${section.sectionNumber}|${section.title.toLowerCase()}`))
+    );
+
+    let novelCount = 0;
+    incoming.chapters.forEach((chapter) => {
+      const chapterKey = `${chapter.chapterNumber}|${chapter.title.toLowerCase()}`;
+      if (!chapterKeys.has(chapterKey)) {
+        novelCount += 1;
+      }
+
+      chapter.sections.forEach((section) => {
+        const sectionKey = `${section.sectionNumber}|${section.title.toLowerCase()}`;
+        if (!sectionKeys.has(sectionKey)) {
+          novelCount += 1;
+        }
+      });
+    });
+
+    return novelCount;
+  }
+
+  async function tryAutoAdvanceTocForSecondShot(): Promise<boolean> {
+    if (runtime !== "extension") {
+      return false;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chromeApi = (globalThis as any)?.chrome;
+    if (!chromeApi?.runtime?.sendMessage) {
+      return false;
+    }
+
+    const response = await new Promise<{ ok?: boolean; moved?: boolean; error?: string }>((resolve) => {
+      chromeApi.runtime.sendMessage({ type: "courseforge:toc-autoscroll-step" }, (reply: {
+        ok?: boolean;
+        moved?: boolean;
+        error?: string;
+      }) => {
+        resolve(reply ?? { ok: false, moved: false, error: "No response from extension runtime." });
+      });
+    });
+
+    if (!response?.ok || !response.moved) {
+      emitAutoFlowDiagnostic("toc_auto_two_shot_autoscroll_unavailable", {
+        level: "warning",
+        traceId: createAutoFlowTraceId("auto-flow-ui-toc-auto-two-shot"),
+        context: {
+          runtime,
+          message: response?.error ?? "TOC auto-scroll step did not move the page.",
+        },
+      });
+      return false;
+    }
+
+    emitAutoFlowDiagnostic("toc_auto_two_shot_autoscroll_completed", {
+      traceId: createAutoFlowTraceId("auto-flow-ui-toc-auto-two-shot"),
+      context: { runtime },
+    });
+    return true;
+  }
+
   async function handleCaptureTocAutoTwoShot(): Promise<void> {
     emitAutoFlowDiagnostic("ui_capture_toc_auto_two_shot_clicked", {
       traceId: createAutoFlowTraceId("auto-flow-ui-toc-auto-two-shot"),
@@ -3419,13 +3104,17 @@ export function AutoTextbookSetupFlow({
       return;
     }
 
-    let proceedToSecondShot = true;
-    try {
-      proceedToSecondShot = typeof window === "undefined"
-        ? true
-        : window.confirm("First TOC shot captured. Move your textbook viewer to the next TOC page, then click OK to capture the second shot. Click Cancel to keep only the first shot.");
-    } catch {
-      proceedToSecondShot = true;
+    const autoAdvanced = await tryAutoAdvanceTocForSecondShot();
+
+    let proceedToSecondShot = autoAdvanced;
+    if (!autoAdvanced) {
+      try {
+        proceedToSecondShot = typeof window === "undefined"
+          ? true
+          : window.confirm("First TOC shot captured. Move your textbook viewer to the next TOC page, then click OK to capture the second shot. Click Cancel to keep only the first shot.");
+      } catch {
+        proceedToSecondShot = true;
+      }
     }
 
     if (!proceedToSecondShot) {
@@ -3451,13 +3140,61 @@ export function AutoTextbookSetupFlow({
       return;
     }
 
+    const firstParsed = parseTocFromOcrText(firstShot.ocrText);
+    const secondParsed = parseTocFromOcrText(secondShot.ocrText);
+    const novelEntries = countNovelTocEntries(firstParsed, secondParsed);
     const mergedTocText = mergeOcrTextWithOverlap(firstShot.ocrText, secondShot.ocrText);
+    const safety = evaluateAutoCaptureSafety(mergedTocText, "toc");
+    if (!safety.allowed) {
+      setErrorMessage(safety.message ?? "Capture blocked by safety checks.");
+      return;
+    }
+
+    if (!isLikelyTocText(mergedTocText) && firstParsed.chapters.length === 0 && secondParsed.chapters.length === 0) {
+      setErrorMessage(AUTO_MODE_SCOPE_MESSAGE);
+      return;
+    }
+
     const stitchedTocImage = await stitchCueImagesWithOverlap(firstShot.imageDataUrl, secondShot.imageDataUrl);
     setOcrDraft(mergedTocText);
     setTocCaptureImageDataUrl(stitchedTocImage);
     setStep("toc");
-    applyTocFromText(mergedTocText);
-    setInfoMessage(`TOC auto 2-shot captured, OCR merged, and cue preview stitched. Continue capturing or finish TOC. (OCR: ${firstShot.ocrProviderId} + ${secondShot.ocrProviderId})`);
+    setTocPages((current) => {
+      const firstPageIndex = current.length;
+      const nextPages = [
+        ...current,
+        {
+          pageIndex: firstPageIndex,
+          chapters: firstParsed.chapters,
+          confidence: firstParsed.confidence,
+        },
+        {
+          pageIndex: firstPageIndex + 1,
+          chapters: secondParsed.chapters,
+          confidence: secondParsed.confidence,
+        },
+      ];
+
+      const stitched = stitchTocPages(nextPages);
+      const stitchedResult: ParsedTocResult = {
+        chapters: stitched.chapters,
+        confidence: stitched.stitchingConfidence,
+      };
+
+      setTocResult(stitchedResult);
+      setMetadataForm((currentForm) => ({
+        ...currentForm,
+        tocExtractionConfidence: stitchedResult.confidence > 0 ? stitchedResult.confidence.toFixed(2) : currentForm.tocExtractionConfidence,
+      }));
+      return nextPages;
+    });
+
+    if (novelEntries <= 0) {
+      setInfoMessage(`TOC auto 2-shot captured, but second shot did not add new TOC entries. Confirm the viewer advanced before retrying. (OCR: ${firstShot.ocrProviderId} + ${secondShot.ocrProviderId})`);
+      return;
+    }
+
+    setInfoMessage(`TOC auto 2-shot captured and stitched across two TOC pages. ${novelEntries} new TOC entries were detected in shot two. (OCR: ${firstShot.ocrProviderId} + ${secondShot.ocrProviderId})`);
   }
 
   function updateChapter(index: number, update: Partial<TocChapter>): void {
@@ -4529,118 +4266,6 @@ export function AutoTextbookSetupFlow({
         <button type="button" className="btn-secondary" onClick={runMetadataExtraction} disabled={isBusy}>
           Re-parse OCR Text
         </button>
-      ) : null}
-
-      {step === "toc" ? (
-        <div className="toc-capture-summary" role="region" aria-label="Dynamic TOC mapper">
-          <p className="toc-capture-summary__header">
-            <strong>Dynamic TOC mapper (Phase 5):</strong> use live overlay + scan to map current tree state.
-          </p>
-          <p className="form-hint">
-            Legacy coordinate pinning and preview-based fullscreen were removed because they do not survive tree expansion/reflow.
-          </p>
-          <div className="form-actions">
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={openCueFullscreen}
-            >
-              Open Live TOC Mapper
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {isCueFullscreenOpen ? (
-        <div className="auto-cue-fullscreen" role="dialog" aria-modal="true" aria-label="Live TOC mapper">
-          <div className="auto-cue-fullscreen__backdrop" onClick={closeCueFullscreen} />
-          <div className="auto-cue-fullscreen__panel">
-            <div className="auto-cue-fullscreen__header">
-              <p className="auto-cue-fullscreen__title">Live TOC Mapper</p>
-              <button type="button" className="btn-secondary" onClick={closeCueFullscreen}>Close</button>
-            </div>
-            <p className="form-hint">
-              Step 1: Start Live Overlay and select the textbook tab/window. Step 2: Ensure TOC is visible. Step 3: Scan TOC Map. Re-scan after each expand/collapse.
-            </p>
-            {runtime !== "extension" ? (
-              <p className="form-hint">
-                Web runtime note: auto-scroll scanning is not available yet. Scroll in the textbook view, then scan again to merge additional TOC entries.
-              </p>
-            ) : null}
-            <p className="form-hint">
-              Mapper targets detected: {tocTreeMapNodes.length}.
-            </p>
-            {liveCueOverlayError ? (
-              <p className="form-hint" role="alert">{liveCueOverlayError}</p>
-            ) : null}
-            <div className="auto-cue-fullscreen__controls">
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => {
-                  if (isLiveCueOverlayActive) {
-                    stopLiveCueOverlay();
-                    return;
-                  }
-
-                  void startLiveCueOverlay();
-                }}
-              >
-                {isLiveCueOverlayActive ? "Stop Live Overlay" : "Start Live Overlay"}
-              </button>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => {
-                  void handleScanTocTreeMap();
-                }}
-                disabled={isScanningTocTreeMap}
-              >
-                {isScanningTocTreeMap ? "Scanning TOC Map..." : "Scan TOC Map"}
-              </button>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={handleClearTocTreeMap}
-                disabled={tocTreeMapNodes.length === 0}
-              >
-                Clear TOC Map
-              </button>
-            </div>
-            {tocTreeMapNodes.length > 0 ? (
-              <div className="auto-cue-fullscreen__map-panel" aria-label="TOC tree mapping snapshot">
-                <p className="auto-cue-fullscreen__map-title">Detected TOC Targets (top-to-bottom)</p>
-                <ol className="auto-cue-fullscreen__map-list">
-                  {tocTreeMapNodes.slice(0, 40).map((node) => (
-                    <li key={`toc-map-node-${node.id}`} className="auto-cue-fullscreen__map-item">
-                      <span className="auto-cue-fullscreen__map-item-text">{node.text}</span>
-                      <span className="auto-cue-fullscreen__map-item-meta">
-                        {node.level ? `L${node.level}` : "L?"} | {node.role}
-                      </span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            ) : null}
-            <div className="auto-cue-fullscreen__viewport" ref={guidedCueFullscreenViewportRef}>
-              <div className="auto-cue-fullscreen__stage auto-cue-fullscreen__stage--fit">
-                {isLiveCueOverlayActive ? (
-                  <video
-                    ref={liveCueVideoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="auto-cue-fullscreen__video auto-cue-fullscreen__video--fit"
-                  />
-                ) : (
-                  <div className="auto-cue-fullscreen__placeholder">
-                    Start Live Overlay to preview the active textbook source here.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
       ) : null}
 
       {step === "toc" ? (

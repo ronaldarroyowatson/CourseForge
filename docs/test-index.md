@@ -1,11 +1,11 @@
 # Test Index
 
-Generated: 2026-06-03T00:05:58.623Z
+Generated: 2026-06-03T00:44:02.017Z
 
 ## Summary
 
-- Total test files: 87
-- Unit test files: 58
+- Total test files: 86
+- Unit test files: 57
 - Integration test files: 27
 - Rules test files: 2
 - Canonical sample files: 5
@@ -61,7 +61,6 @@ Generated: 2026-06-03T00:05:58.623Z
 - tests/core/textbookRepository.crossPortPersistence.test.ts
 - tests/core/textbookRepository.deletePersistence.test.ts
 - tests/core/tocPreviewPipeline.test.ts
-- tests/core/tocTreeMapService.test.ts
 - tests/core/tokenDebugService.test.ts
 - tests/core/translationReviewService.test.ts
 - tests/core/translationWorkflowService.test.ts

@@ -19,13 +19,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
-  if (message.type === "courseforge:tree-map-snapshot") {
+  if (message.type === "courseforge:toc-autoscroll-step") {
     (async () => {
       try {
         const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
         const activeTab = tabs.find((tab) => typeof tab.id === "number");
         if (!activeTab?.id) {
-          sendResponse({ ok: false, error: "No active tab found for TOC mapping." });
+          sendResponse({ ok: false, moved: false, error: "No active tab found for TOC auto-scroll." });
           return;
         }
 
@@ -35,45 +35,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           func: async () => {
             const viewportWidth = Math.max(1, window.innerWidth);
             const viewportHeight = Math.max(1, window.innerHeight);
-            const selector = [
-              "[role='treeitem']",
-              "[role='button']",
-              "button",
-              "a",
-              "summary",
-              "[aria-expanded]",
-              "[data-testid*='toc']",
-              "[class*='toc']",
-            ].join(",");
-            const PASS_LIMIT = 4;
-
-            const toText = (node) => {
-              const aria = node.getAttribute("aria-label") || "";
-              const title = node.getAttribute("title") || "";
-              const visibleText = (node.innerText || "").replace(/\s+/g, " ").trim();
-              return visibleText || aria || title;
-            };
-
-            const isVisible = (node, rect) => {
-              if (!node || !rect) {
-                return false;
-              }
-
-              if (rect.width < 8 || rect.height < 8) {
-                return false;
-              }
-
-              if (rect.bottom < 0 || rect.right < 0 || rect.left > viewportWidth || rect.top > viewportHeight) {
-                return false;
-              }
-
-              const style = window.getComputedStyle(node);
-              if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) <= 0) {
-                return false;
-              }
-
-              return true;
-            };
 
             const getScrollableNavContainer = () => {
               const candidates = Array.from(document.querySelectorAll("nav,aside,[role='navigation'],[role='tree'],[aria-label*='contents' i],[class*='toc']"));
@@ -97,124 +58,43 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
             const scrollContainer = getScrollableNavContainer();
-            const startScrollTop = scrollContainer ? scrollContainer.scrollTop : window.scrollY;
             const maxScrollableDistance = scrollContainer
               ? Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight)
               : Math.max(0, document.documentElement.scrollHeight - viewportHeight);
-            const passCount = Math.max(1, Math.min(PASS_LIMIT, Math.floor(maxScrollableDistance / Math.max(120, Math.round(viewportHeight * 0.7))) + 1));
-            const nodes = [];
-            const seen = new Set();
-
-            const collectCandidates = (passIndex) => {
-              const candidates = Array.from(document.querySelectorAll(selector));
-
-              for (let index = 0; index < candidates.length; index += 1) {
-                const node = candidates[index];
-                const rect = node.getBoundingClientRect();
-                if (!isVisible(node, rect)) {
-                  continue;
-                }
-
-                const text = toText(node);
-                if (!text || text.length < 2) {
-                  continue;
-                }
-
-                // Focus on left-side navigation region where TOC trees commonly render.
-                const inLeftNavBand = rect.left <= (viewportWidth * 0.55);
-                if (!inLeftNavBand) {
-                  continue;
-                }
-
-                const absoluteTop = scrollContainer
-                  ? rect.top + scrollContainer.scrollTop
-                  : rect.top + window.scrollY;
-                const key = `${text.toLowerCase()}|${Math.round(rect.left)}|${Math.round(absoluteTop / 8)}`;
-                if (seen.has(key)) {
-                  continue;
-                }
-                seen.add(key);
-
-                const role = node.getAttribute("role") || node.tagName.toLowerCase();
-                const ariaLevel = Number(node.getAttribute("aria-level"));
-                const level = Number.isFinite(ariaLevel) && ariaLevel > 0 ? ariaLevel : undefined;
-
-                nodes.push({
-                  id: `${passIndex}-${index}-${Math.round(rect.top)}-${Math.round(rect.left)}`,
-                  text,
-                  role,
-                  level,
-                  absoluteTop,
-                  xRatio: Math.min(1, Math.max(0, (rect.left + (rect.width / 2)) / viewportWidth)),
-                  yRatio: Math.min(1, Math.max(0, (rect.top + (rect.height / 2)) / viewportHeight)),
-                  widthRatio: Math.min(1, Math.max(0, rect.width / viewportWidth)),
-                  heightRatio: Math.min(1, Math.max(0, rect.height / viewportHeight)),
-                });
-              }
-            };
-
-            for (let pass = 0; pass < passCount; pass += 1) {
-              collectCandidates(pass);
-              if (pass >= passCount - 1) {
-                break;
-              }
-
-              const step = Math.max(120, Math.round(viewportHeight * 0.72));
-              if (scrollContainer) {
-                const nextTop = Math.min(maxScrollableDistance, scrollContainer.scrollTop + step);
-                if (nextTop <= scrollContainer.scrollTop + 1) {
-                  break;
-                }
-                scrollContainer.scrollTop = nextTop;
-              } else {
-                const nextY = Math.min(maxScrollableDistance, window.scrollY + step);
-                if (nextY <= window.scrollY + 1) {
-                  break;
-                }
-                window.scrollTo({ top: nextY, left: 0, behavior: "auto" });
-              }
-
-              await delay(220);
-            }
+            const step = Math.max(140, Math.round(viewportHeight * 0.72));
 
             if (scrollContainer) {
-              scrollContainer.scrollTop = startScrollTop;
-            } else {
-              window.scrollTo({ top: startScrollTop, left: 0, behavior: "auto" });
-            }
-
-            nodes.sort((a, b) => {
-              if (a.absoluteTop !== b.absoluteTop) {
-                return a.absoluteTop - b.absoluteTop;
+              const startTop = scrollContainer.scrollTop;
+              const nextTop = Math.min(maxScrollableDistance, startTop + step);
+              if (nextTop <= startTop + 1) {
+                return { moved: false, atEnd: true };
               }
 
-              return a.xRatio - b.xRatio;
-            });
+              scrollContainer.scrollTop = nextTop;
+              await delay(220);
+              return { moved: true, atEnd: false };
+            }
 
-            return {
-              nodes: nodes.slice(0, 220).map((node) => ({
-                id: node.id,
-                text: node.text,
-                role: node.role,
-                level: node.level,
-                xRatio: node.xRatio,
-                yRatio: node.yRatio,
-                widthRatio: node.widthRatio,
-                heightRatio: node.heightRatio,
-              })),
-              passCount,
-              autoScrollUsed: passCount > 1,
-            };
+            const startY = window.scrollY;
+            const nextY = Math.min(maxScrollableDistance, startY + step);
+            if (nextY <= startY + 1) {
+              return { moved: false, atEnd: true };
+            }
+
+            window.scrollTo({ top: nextY, left: 0, behavior: "auto" });
+            await delay(220);
+            return { moved: true, atEnd: false };
           },
         });
 
         const result = executed?.[0]?.result;
-        const nodes = Array.isArray(result?.nodes) ? result.nodes : [];
-        const passCount = Number.isFinite(result?.passCount) ? Number(result.passCount) : 1;
-        const autoScrollUsed = Boolean(result?.autoScrollUsed);
-        sendResponse({ ok: true, nodes, passCount, autoScrollUsed });
+        sendResponse({
+          ok: true,
+          moved: Boolean(result?.moved),
+          atEnd: Boolean(result?.atEnd),
+        });
       } catch (error) {
-        sendResponse({ ok: false, error: error instanceof Error ? error.message : "TOC mapping scan failed." });
+        sendResponse({ ok: false, moved: false, error: error instanceof Error ? error.message : "TOC auto-scroll failed." });
       }
     })();
 

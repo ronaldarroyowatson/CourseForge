@@ -16,11 +16,6 @@ import {
   scoreMetadataConfidence,
   stitchTocPages,
 } from "../../src/core/services/textbookAutoExtractionService";
-import {
-  cleanOcrTocLine,
-  mergeTocTreeMapNodes,
-  type TocTreeMapNode,
-} from "../../src/core/services/tocTreeMapService";
 
 async function readRealTocOcr(relativeImagePath: string): Promise<string> {
   const imagePath = path.resolve(process.cwd(), relativeImagePath);
@@ -66,23 +61,6 @@ globalThis.Image = class {
   }
 
   return JSON.parse(match[1]) as string;
-}
-
-function buildTocTreeMapNodes(sourceId: string, text: string): TocTreeMapNode[] {
-  return text
-    .split(/\r?\n/)
-    .map((line) => cleanOcrTocLine(line))
-    .filter((line): line is string => Boolean(line))
-    .map((line, index) => ({
-      id: `${sourceId}-${index}`,
-      text: line,
-      role: "ocr-line",
-      level: 0,
-      xRatio: 0,
-      yRatio: index,
-      widthRatio: 1,
-      heightRatio: 1,
-    }));
 }
 
 describe("textbookAutoExtractionService", () => {
@@ -344,7 +322,7 @@ describe("textbookAutoExtractionService", () => {
     expect(stitched.stitchingConfidence).toBeGreaterThan(0.5);
   });
 
-  it("keeps the tail TOC rows when merging real screenshot OCR fixtures", async () => {
+  it("keeps the tail TOC rows when stitching real screenshot OCR fixtures", async () => {
     const firstFixtureText = await readRealTocOcr(
       "tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png"
     );
@@ -352,23 +330,28 @@ describe("textbookAutoExtractionService", () => {
       "tmp-smoke/samples/ocr__toc-spread-view__expect-parse-success.png"
     );
 
-    const mergedNodes = mergeTocTreeMapNodes(
-      buildTocTreeMapNodes("first", firstFixtureText),
-      buildTocTreeMapNodes("second", secondFixtureText)
-    );
+    const firstPage = parseTocFromOcrText(firstFixtureText);
+    const secondPage = parseTocFromOcrText(secondFixtureText);
+    const stitched = stitchTocPages([
+      { pageIndex: 0, confidence: firstPage.confidence, chapters: firstPage.chapters },
+      { pageIndex: 1, confidence: secondPage.confidence, chapters: secondPage.chapters },
+    ]);
 
-    const mergedTexts = mergedNodes.map((node) => node.text);
-    const module1Index = mergedTexts.findIndex((line) => /module 1/i.test(line));
-    const module2Index = mergedTexts.findIndex((line) => /module 2/i.test(line));
-    const module3Index = mergedTexts.findIndex((line) => /module 3/i.test(line));
+    const chapterNumbers = stitched.chapters.map((chapter) => String(chapter.chapterNumber).toLowerCase());
+    const module1Index = chapterNumbers.findIndex((value) => value === "1" || value === "i");
+    const module2Index = chapterNumbers.findIndex((value) => value === "2" || value === "ii");
+    const module3Index = chapterNumbers.findIndex((value) => value === "3" || value === "iii");
+    const sectionTitles = stitched.chapters.flatMap((chapter) =>
+      chapter.sections.map((section) => section.title)
+    );
 
     expect(module1Index).toBeGreaterThanOrEqual(0);
     expect(module2Index).toBeGreaterThan(module1Index);
     expect(module3Index).toBeGreaterThan(module2Index);
-    expect(mergedTexts.some((line) => /lesson 3 acceleration/i.test(line))).toBe(true);
-    expect(mergedTexts.some((line) => /autonomous vehicles go subterranean/i.test(line))).toBe(true);
-    expect(mergedTexts.some((line) => /module wrap-up/i.test(line))).toBe(true);
-    expect(mergedTexts.some((line) => /data analysis lab/i.test(line))).toBe(true);
+    expect(sectionTitles.some((line) => /accelerat/i.test(line))).toBe(true);
+    expect(sectionTitles.some((line) => /autonomous vehicles go subterranean/i.test(line))).toBe(true);
+    expect(sectionTitles.some((line) => /module wrap-up/i.test(line))).toBe(true);
+    expect(sectionTitles.some((line) => /data analysis lab/i.test(line))).toBe(true);
   }, 120000);
 
   it("scores metadata confidence and marks extracted fields as auto", () => {

@@ -560,6 +560,8 @@ export function mergeAutoMetadata(
 }
 
 export function parseTocFromOcrText(rawText: string): ParsedTocResult {
+  const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+
   const normalizeTocLineOcrArtifacts = (line: string): string => {
     let normalized = line;
 
@@ -721,7 +723,42 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     }
   }
 
-  const confidence = lines.length > 0 ? Math.min(1, lineHits / lines.length + (chapters.length > 0 ? 0.2 : 0)) : 0;
+  const looksLikeTocLine = (line: string): boolean => {
+    if (/^(unit|module|chapter|ch\.?|lesson)\b/i.test(line)) {
+      return true;
+    }
+
+    if (/^[0-9]+(?:\.[0-9]+)+\s+/.test(line)) {
+      return true;
+    }
+
+    if (/\b\d+\s*[-–]\s*\d+\b/.test(line) || /\s+\d+$/.test(line)) {
+      return true;
+    }
+
+    return false;
+  };
+
+  const candidateLineCount = lines.filter((line) => looksLikeTocLine(line)).length;
+  const sectionCount = chapters.reduce((sum, chapter) => sum + chapter.sections.length, 0);
+  const chapterWithPageCount = chapters.filter((chapter) => typeof chapter.pageStart === "number").length;
+
+  const structuralCoverage = lineHits / Math.max(1, candidateLineCount);
+  const chapterSignal = Math.min(1, chapters.length / 3);
+  const sectionSignal = Math.min(1, sectionCount / 6);
+  const chapterPageSignal = chapters.length > 0 ? chapterWithPageCount / chapters.length : 0;
+  const noisePenalty = lines.length > 0 ? Math.max(0, (lines.length - Math.max(lineHits, candidateLineCount)) / lines.length) : 0;
+
+  const confidence = lines.length > 0
+    ? clamp01(
+      0.16
+      + (0.42 * clamp01(structuralCoverage))
+      + (0.18 * chapterSignal)
+      + (0.16 * sectionSignal)
+      + (0.12 * chapterPageSignal)
+      - (0.16 * noisePenalty)
+    )
+    : 0;
 
   return { chapters, confidence };
 }

@@ -90,7 +90,6 @@ type AutoPrimaryHelperAction =
   | "capture-title"
   | "upload-title"
   | "capture-toc"
-  | "capture-toc-auto-two-shot"
   | "finish-toc"
   | "switch-manual";
 type MetadataTileKey =
@@ -1254,6 +1253,7 @@ export function AutoTextbookSetupFlow({
     cover: "",
     title: "",
   });
+  const lastTocCaptureOcrRef = useRef<string>(testingSeedState?.ocrDraft ?? "");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingUploadLimitResultRef = useRef<ReturnType<typeof enforceAutoCaptureLimit> | null>(null);
   // Scroll target â€” metadata fields section revealed after successful OCR.
@@ -1463,11 +1463,7 @@ export function AutoTextbookSetupFlow({
     }
 
     if (activePrimaryHelper === "capture-toc") {
-      return "Capture one TOC page at a time. Keep chapter and section numbers visible so parsing remains accurate.";
-    }
-
-    if (activePrimaryHelper === "capture-toc-auto-two-shot") {
-      return "Capture TOC in two guided shots: first capture this page, then move to the next TOC page when prompted so OCR can merge overlap automatically.";
+      return "Capture TOC repeatedly as needed. Overlapping captures are merged and TOC pages are stitched to reduce duplicates while keeping new entries.";
     }
 
     if (activePrimaryHelper === "finish-toc") {
@@ -3018,11 +3014,32 @@ export function AutoTextbookSetupFlow({
       return;
     }
 
-    setOcrDraft(captured.ocrText);
-    setTocCaptureImageDataUrl(captured.imageDataUrl);
+    const baselineTocText = lastTocCaptureOcrRef.current.trim().length > 0
+      ? lastTocCaptureOcrRef.current
+      : ocrDraft;
+    const mergedTocText = baselineTocText.trim().length > 0
+      ? mergeOcrTextWithOverlap(baselineTocText, captured.ocrText)
+      : captured.ocrText;
+    const stitchedTocImage = tocCaptureImageDataUrl
+      ? await stitchCueImagesWithOverlap(tocCaptureImageDataUrl, captured.imageDataUrl)
+      : captured.imageDataUrl;
+
+    const incomingParsed = parseTocFromOcrText(mergedTocText);
+    const previousParsed = parseTocFromOcrText(ocrDraft);
+    const novelEntries = countNovelTocEntries(previousParsed, incomingParsed);
+
+    lastTocCaptureOcrRef.current = captured.ocrText;
+    setOcrDraft(mergedTocText);
+    setTocCaptureImageDataUrl(stitchedTocImage);
     setStep("toc");
-    applyTocFromText(captured.ocrText);
-    setInfoMessage(`TOC page captured and parsed. Continue capturing or finish TOC. (OCR: ${captured.ocrProviderId})`);
+    applyTocFromText(mergedTocText);
+
+    if (novelEntries > 0) {
+      setInfoMessage(`TOC capture added and overlap-stitched. ${novelEntries} new TOC entries were detected. (OCR: ${captured.ocrProviderId})`);
+      return;
+    }
+
+    setInfoMessage(`TOC capture overlap-stitched, but no new TOC entries were detected. Try moving further before the next capture. (OCR: ${captured.ocrProviderId})`);
   }
 
   function countNovelTocEntries(base: ParsedTocResult, incoming: ParsedTocResult): number {
@@ -3047,154 +3064,6 @@ export function AutoTextbookSetupFlow({
     });
 
     return novelCount;
-  }
-
-  async function tryAutoAdvanceTocForSecondShot(): Promise<boolean> {
-    if (runtime !== "extension") {
-      return false;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chromeApi = (globalThis as any)?.chrome;
-    if (!chromeApi?.runtime?.sendMessage) {
-      return false;
-    }
-
-    const response = await new Promise<{ ok?: boolean; moved?: boolean; error?: string }>((resolve) => {
-      chromeApi.runtime.sendMessage({ type: "courseforge:toc-autoscroll-step" }, (reply: {
-        ok?: boolean;
-        moved?: boolean;
-        error?: string;
-      }) => {
-        resolve(reply ?? { ok: false, moved: false, error: "No response from extension runtime." });
-      });
-    });
-
-    if (!response?.ok || !response.moved) {
-      emitAutoFlowDiagnostic("toc_auto_two_shot_autoscroll_unavailable", {
-        level: "warning",
-        traceId: createAutoFlowTraceId("auto-flow-ui-toc-auto-two-shot"),
-        context: {
-          runtime,
-          message: response?.error ?? "TOC auto-scroll step did not move the page.",
-        },
-      });
-      return false;
-    }
-
-    emitAutoFlowDiagnostic("toc_auto_two_shot_autoscroll_completed", {
-      traceId: createAutoFlowTraceId("auto-flow-ui-toc-auto-two-shot"),
-      context: { runtime },
-    });
-    return true;
-  }
-
-  async function handleCaptureTocAutoTwoShot(): Promise<void> {
-    emitAutoFlowDiagnostic("ui_capture_toc_auto_two_shot_clicked", {
-      traceId: createAutoFlowTraceId("auto-flow-ui-toc-auto-two-shot"),
-      context: { step },
-    });
-
-    const firstShot = await captureForStep("toc");
-    if (!firstShot) {
-      emitAutoFlowDiagnostic("ui_capture_toc_auto_two_shot_no_first_shot", {
-        level: "warning",
-        traceId: createAutoFlowTraceId("auto-flow-ui-toc-auto-two-shot"),
-      });
-      return;
-    }
-
-    const autoAdvanced = await tryAutoAdvanceTocForSecondShot();
-
-    let proceedToSecondShot = autoAdvanced;
-    if (!autoAdvanced) {
-      try {
-        proceedToSecondShot = typeof window === "undefined"
-          ? true
-          : window.confirm("First TOC shot captured. Move your textbook viewer to the next TOC page, then click OK to capture the second shot. Click Cancel to keep only the first shot.");
-      } catch {
-        proceedToSecondShot = true;
-      }
-    }
-
-    if (!proceedToSecondShot) {
-      setOcrDraft(firstShot.ocrText);
-      setTocCaptureImageDataUrl(firstShot.imageDataUrl);
-      setStep("toc");
-      applyTocFromText(firstShot.ocrText);
-      setInfoMessage(`TOC auto 2-shot canceled after first shot. First TOC page was saved. (OCR: ${firstShot.ocrProviderId})`);
-      return;
-    }
-
-    const secondShot = await captureForStep("toc");
-    if (!secondShot) {
-      emitAutoFlowDiagnostic("ui_capture_toc_auto_two_shot_second_shot_failed", {
-        level: "warning",
-        traceId: createAutoFlowTraceId("auto-flow-ui-toc-auto-two-shot"),
-      });
-      setOcrDraft(firstShot.ocrText);
-      setTocCaptureImageDataUrl(firstShot.imageDataUrl);
-      setStep("toc");
-      applyTocFromText(firstShot.ocrText);
-      setInfoMessage(`Second TOC shot was not captured. First TOC page was saved. (OCR: ${firstShot.ocrProviderId})`);
-      return;
-    }
-
-    const firstParsed = parseTocFromOcrText(firstShot.ocrText);
-    const secondParsed = parseTocFromOcrText(secondShot.ocrText);
-    const novelEntries = countNovelTocEntries(firstParsed, secondParsed);
-    const mergedTocText = mergeOcrTextWithOverlap(firstShot.ocrText, secondShot.ocrText);
-    const safety = evaluateAutoCaptureSafety(mergedTocText, "toc");
-    if (!safety.allowed) {
-      setErrorMessage(safety.message ?? "Capture blocked by safety checks.");
-      return;
-    }
-
-    if (!isLikelyTocText(mergedTocText) && firstParsed.chapters.length === 0 && secondParsed.chapters.length === 0) {
-      setErrorMessage(AUTO_MODE_SCOPE_MESSAGE);
-      return;
-    }
-
-    const stitchedTocImage = await stitchCueImagesWithOverlap(firstShot.imageDataUrl, secondShot.imageDataUrl);
-    setOcrDraft(mergedTocText);
-    setTocCaptureImageDataUrl(stitchedTocImage);
-    setStep("toc");
-    setTocPages((current) => {
-      const firstPageIndex = current.length;
-      const nextPages = [
-        ...current,
-        {
-          pageIndex: firstPageIndex,
-          chapters: firstParsed.chapters,
-          confidence: firstParsed.confidence,
-        },
-        {
-          pageIndex: firstPageIndex + 1,
-          chapters: secondParsed.chapters,
-          confidence: secondParsed.confidence,
-        },
-      ];
-
-      const stitched = stitchTocPages(nextPages);
-      const stitchedResult: ParsedTocResult = {
-        chapters: stitched.chapters,
-        confidence: stitched.stitchingConfidence,
-      };
-
-      setTocResult(stitchedResult);
-      setMetadataForm((currentForm) => ({
-        ...currentForm,
-        tocExtractionConfidence: stitchedResult.confidence > 0 ? stitchedResult.confidence.toFixed(2) : currentForm.tocExtractionConfidence,
-      }));
-      return nextPages;
-    });
-
-    if (novelEntries <= 0) {
-      setInfoMessage(`TOC auto 2-shot captured, but second shot did not add new TOC entries. Confirm the viewer advanced before retrying. (OCR: ${firstShot.ocrProviderId} + ${secondShot.ocrProviderId})`);
-      return;
-    }
-
-    setInfoMessage(`TOC auto 2-shot captured and stitched across two TOC pages. ${novelEntries} new TOC entries were detected in shot two. (OCR: ${firstShot.ocrProviderId} + ${secondShot.ocrProviderId})`);
   }
 
   function updateChapter(index: number, update: Partial<TocChapter>): void {
@@ -4142,23 +4011,6 @@ export function AutoTextbookSetupFlow({
               onMouseDown={hidePrimaryHelper}
             >
               Capture TOC Page
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => {
-                hidePrimaryHelper();
-                void handleCaptureTocAutoTwoShot();
-              }}
-              disabled={isBusy}
-              onMouseEnter={(event) => handlePrimaryHelperMouseEnter("capture-toc-auto-two-shot", event)}
-              onMouseMove={handlePrimaryHelperMouseMove}
-              onMouseLeave={hidePrimaryHelper}
-              onFocus={(event) => handlePrimaryHelperFocus("capture-toc-auto-two-shot", event)}
-              onBlur={hidePrimaryHelper}
-              onMouseDown={hidePrimaryHelper}
-            >
-              Auto 2-Shot TOC
             </button>
             <button
               type="button"

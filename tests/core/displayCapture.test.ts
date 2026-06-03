@@ -1,10 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   captureDisplayFrame,
   getDisplayCaptureSupportInfo,
   normalizeDisplayCaptureError,
+  resetDisplayCaptureSession,
 } from "../../src/webapp/utils/displayCapture";
+
+afterEach(() => {
+  resetDisplayCaptureSession();
+});
 
 describe("displayCapture", () => {
   it("falls back to drawing a frame even when video.play rejects", async () => {
@@ -104,6 +109,54 @@ describe("displayCapture", () => {
 
     expect(result).toBe("data:image/jpeg;base64,chrome-tab");
     expect(getDisplayMedia).not.toHaveBeenCalled();
+  });
+
+  it("reuses a persistent display media session across TOC captures", async () => {
+    const stop = vi.fn();
+    const fakeTrack = {
+      stop,
+      readyState: "live",
+      getSettings: () => ({ width: 1440, height: 900 }),
+    };
+    const fakeStream = {
+      getVideoTracks: () => [fakeTrack],
+      getTracks: () => [fakeTrack],
+    };
+
+    const getDisplayMedia = vi.fn(async () => fakeStream);
+    const createImageCapture = vi.fn(() => ({
+      grabFrame: async () => ({ width: 1280, height: 720, close: () => undefined }),
+    }));
+
+    const first = await captureDisplayFrame({ keepSessionAlive: true }, {
+      getDisplayMedia,
+      createImageCapture,
+      createCanvasElement: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => ({ drawImage: vi.fn() }),
+        toDataURL: () => "data:image/jpeg;base64,first",
+      }),
+    });
+
+    const second = await captureDisplayFrame({ keepSessionAlive: true }, {
+      getDisplayMedia,
+      createImageCapture,
+      createCanvasElement: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => ({ drawImage: vi.fn() }),
+        toDataURL: () => "data:image/jpeg;base64,second",
+      }),
+    });
+
+    expect(first).toBe("data:image/jpeg;base64,first");
+    expect(second).toBe("data:image/jpeg;base64,second");
+    expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+    expect(stop).not.toHaveBeenCalled();
+
+    resetDisplayCaptureSession();
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes permission-denied capture errors", () => {

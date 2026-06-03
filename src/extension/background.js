@@ -10,6 +10,15 @@
 // 3) In Chrome/Edge extensions page, choose "Load unpacked" and select src/extension.
 //
 // Note: this file intentionally keeps runtime logic minimal.
-chrome.runtime.onInstalled.addListener(() => {
-  // Reserved for future initialization hooks.
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details?.reason !== "install") {
+    return;
+  }
+
+  // Open the onboarding page once on fresh install so users can run a capture
+  // readiness check and follow OS/browser permission guidance immediately.
+  chrome.runtime.openOptionsPage(() => {
+    // Ignore runtime errors to keep install flow resilient.
+    void chrome.runtime.lastError;
+  });
 });

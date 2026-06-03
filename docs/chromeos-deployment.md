@@ -30,6 +30,8 @@ npm run build:extension:chrome
   - `scripting`
   - `storage`
   - `tabs`
+- First-install onboarding now opens `src/extension/onboarding.html` (via `options_page`) so users can run a capture permission check immediately.
+- Onboarding includes a one-click `getDisplayMedia` readiness check and explicit macOS Screen Recording guidance for Edge/Chrome (`System Settings -> Privacy & Security -> Screen Recording`).
 
 ### Auto Mode on ChromeOS
 

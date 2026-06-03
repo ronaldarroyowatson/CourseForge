@@ -75,6 +75,7 @@ import {
   captureDisplayFrame,
   getDisplayCaptureSupportInfo,
   normalizeDisplayCaptureError,
+  resetDisplayCaptureSession,
 } from "../../utils/displayCapture";
 import { stitchCueImagesWithOverlap } from "../../utils/cueImageStitch";
 import { isLikelyCourseForgeSelfCapture } from "../../utils/liveCueCapture";
@@ -1481,12 +1482,19 @@ export function AutoTextbookSetupFlow({
 
   useEffect(() => {
     return () => {
+      resetDisplayCaptureSession();
       if (helperDelayTimerRef.current !== null) {
         window.clearTimeout(helperDelayTimerRef.current);
         helperDelayTimerRef.current = null;
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (step !== "toc") {
+      resetDisplayCaptureSession();
+    }
+  }, [step]);
 
   function clearPrimaryHelperDelay(): void {
     if (helperDelayTimerRef.current !== null) {
@@ -2340,7 +2348,10 @@ export function AutoTextbookSetupFlow({
         context: { targetStep },
       });
 
-      const rawImage = await captureDisplayFrame({ preferChromeTabCapture: chromeOs });
+      const rawImage = await captureDisplayFrame({
+        preferChromeTabCapture: chromeOs,
+        keepSessionAlive: targetStep === "toc",
+      });
       emitAutoFlowDiagnostic("frame_captured", {
         traceId,
         context: {
@@ -4017,6 +4028,7 @@ export function AutoTextbookSetupFlow({
               className="btn-secondary"
               onClick={() => {
                 hidePrimaryHelper();
+                resetDisplayCaptureSession();
                 setStep("toc-editor");
               }}
               disabled={!canFinishToc || isBusy}
@@ -4037,6 +4049,7 @@ export function AutoTextbookSetupFlow({
           className="btn-secondary"
           onClick={() => {
             hidePrimaryHelper();
+            resetDisplayCaptureSession();
             onSwitchToManual();
           }}
           onMouseEnter={(event) => handlePrimaryHelperMouseEnter("switch-manual", event)}

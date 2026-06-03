@@ -1,7 +1,10 @@
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { PNG } from "pngjs";
 
 import {
   createInitialAutoCaptureUsage,
@@ -16,9 +19,9 @@ import {
   scoreMetadataConfidence,
   stitchTocPages,
 } from "../../src/core/services/textbookAutoExtractionService";
+import { mergeOcrTextWithOverlap } from "../../src/webapp/utils/ocrTextMerge";
 
-async function readRealTocOcr(relativeImagePath: string): Promise<string> {
-  const imagePath = path.resolve(process.cwd(), relativeImagePath);
+async function readRealTocOcrFromImagePath(imagePath: string): Promise<string> {
   const command = process.platform === "win32" ? "npx.cmd" : "npx";
   const script = `
 import fs from 'node:fs';
@@ -57,11 +60,162 @@ globalThis.Image = class {
   const match = output.match(/__OCR_TEXT__(.*)$/m);
 
   if (!match) {
-    throw new Error(`Failed to capture OCR text for ${relativeImagePath}. Output: ${output}`);
+    throw new Error(`Failed to capture OCR text for ${imagePath}. Output: ${output}`);
   }
 
   return JSON.parse(match[1]) as string;
 }
+
+async function readRealTocOcr(relativeImagePath: string): Promise<string> {
+  const imagePath = path.resolve(process.cwd(), relativeImagePath);
+  return readRealTocOcrFromImagePath(imagePath);
+}
+
+function writePngSliceToFile(
+  sourceImagePath: string,
+  destinationPath: string,
+  window: { startRatio: number; endRatio: number }
+): void {
+  const source = PNG.sync.read(readFileSync(sourceImagePath));
+  const startY = Math.max(0, Math.min(source.height - 1, Math.floor(source.height * window.startRatio)));
+  const endYRaw = Math.max(startY + 1, Math.ceil(source.height * window.endRatio));
+  const endY = Math.max(startY + 1, Math.min(source.height, endYRaw));
+  const sliceHeight = Math.max(1, endY - startY);
+  const slice = new PNG({ width: source.width, height: sliceHeight });
+  const bytesPerRow = source.width * 4;
+
+  for (let row = 0; row < sliceHeight; row += 1) {
+    const sourceRowOffset = (startY + row) * bytesPerRow;
+    const targetRowOffset = row * bytesPerRow;
+    source.data.copy(slice.data, targetRowOffset, sourceRowOffset, sourceRowOffset + bytesPerRow);
+  }
+
+  writeFileSync(destinationPath, PNG.sync.write(slice));
+}
+
+function normalizeOcrLine(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s.\-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeOcrTextForComparison(value: string): string {
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => normalizeOcrLine(line))
+    .filter((line) => line.length > 0);
+
+  return lines.join("\n");
+}
+
+function normalizeParsedTocForComparison(value: ReturnType<typeof parseTocFromOcrText>): string {
+  const normalized = value.chapters.map((chapter) => ({
+    chapterNumber: normalizeOcrLine(String(chapter.chapterNumber ?? "")),
+    title: normalizeOcrLine(chapter.title ?? ""),
+    sections: chapter.sections.map((section) => ({
+      sectionNumber: normalizeOcrLine(String(section.sectionNumber ?? "")),
+      title: normalizeOcrLine(section.title ?? ""),
+      pageStart: typeof section.pageStart === "number" ? section.pageStart : null,
+    })),
+  }));
+
+  return JSON.stringify(normalized);
+}
+
+function extractStableTocSignatures(value: ReturnType<typeof parseTocFromOcrText>): string[] {
+  const signatures: string[] = [];
+
+  value.chapters.forEach((chapter) => {
+    const chapterNumber = normalizeOcrLine(String(chapter.chapterNumber ?? ""));
+    const chapterTitle = normalizeOcrLine(chapter.title ?? "");
+    if (chapterNumber && chapterTitle) {
+      signatures.push(`chapter:${chapterNumber}|${chapterTitle}`);
+    }
+
+    chapter.sections.forEach((section) => {
+      const sectionNumber = normalizeOcrLine(String(section.sectionNumber ?? ""));
+      const sectionTitle = normalizeOcrLine(section.title ?? "");
+      if (/^\d+(\.\d+)+$/.test(sectionNumber) && sectionTitle) {
+        signatures.push(`section:${sectionNumber}|${sectionTitle}`);
+      }
+    });
+  });
+
+  return Array.from(new Set(signatures)).sort();
+}
+
+function extractStableSectionNumbers(value: ReturnType<typeof parseTocFromOcrText>): string[] {
+  const numbers = value.chapters.flatMap((chapter) =>
+    chapter.sections
+      .map((section) => normalizeOcrLine(String(section.sectionNumber ?? "")))
+      .filter((sectionNumber) => /^\d+(\.\d+)+$/.test(sectionNumber))
+  );
+
+  return Array.from(new Set(numbers)).sort();
+}
+
+function extractStableChapterNumbers(value: ReturnType<typeof parseTocFromOcrText>): string[] {
+  const numbers = value.chapters
+    .map((chapter) => normalizeOcrLine(String(chapter.chapterNumber ?? "")))
+    .filter((chapterNumber) => chapterNumber.length > 0);
+
+  return Array.from(new Set(numbers)).sort();
+}
+
+const REQUIRED_TOC_ANCHOR_PATTERNS: RegExp[] = [
+  /module\s+wrap\s*up/i,
+  /autonomous\s+vehicles.*subterranean/i,
+  /data\s+analysis\s+lab/i,
+  /newtons\s+laws/i,
+  /accelerat/i,
+];
+
+function assertAnchorCoveragePreserved(fullText: string, mergedText: string): void {
+  const fullNormalized = normalizeOcrTextForComparison(fullText);
+  const mergedNormalized = normalizeOcrTextForComparison(mergedText);
+
+  REQUIRED_TOC_ANCHOR_PATTERNS.forEach((pattern) => {
+    if (pattern.test(fullNormalized)) {
+      expect(mergedNormalized).toMatch(pattern);
+    }
+  });
+}
+
+async function readMergedOcrFromSlices(
+  sourceImagePath: string,
+  windows: Array<{ startRatio: number; endRatio: number }>
+): Promise<string> {
+  const tempDir = mkdtempSync(path.join(tmpdir(), "courseforge-toc-split-"));
+
+  try {
+    const ocrTexts: string[] = [];
+
+    for (let index = 0; index < windows.length; index += 1) {
+      const window = windows[index];
+      const slicePath = path.join(tempDir, `slice-${index + 1}.png`);
+      writePngSliceToFile(sourceImagePath, slicePath, window);
+      const ocrText = await readRealTocOcrFromImagePath(slicePath);
+      ocrTexts.push(ocrText);
+    }
+
+    return ocrTexts.reduce((accumulator, current, index) => {
+      if (index === 0) {
+        return current;
+      }
+
+      return mergeOcrTextWithOverlap(accumulator, current);
+    }, "");
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+const TOC_SOURCE_OF_TRUTH_FIXTURES = [
+  "tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png",
+  "tmp-smoke/samples/ocr__toc-spread-view__expect-parse-success.png",
+];
 
 describe("textbookAutoExtractionService", () => {
   it("detects page boundaries inside a larger background", () => {
@@ -353,6 +507,132 @@ describe("textbookAutoExtractionService", () => {
     expect(sectionTitles.some((line) => /module wrap-up/i.test(line))).toBe(true);
     expect(sectionTitles.some((line) => /data analysis lab/i.test(line))).toBe(true);
   }, 120000);
+
+  it("reconstructs source-of-truth TOC OCR from 50/50 horizontal page splits", async () => {
+    for (const relativeImagePath of TOC_SOURCE_OF_TRUTH_FIXTURES) {
+      const imagePath = path.resolve(process.cwd(), relativeImagePath);
+      const fullText = await readRealTocOcr(relativeImagePath);
+      const mergedSplitText = await readMergedOcrFromSlices(imagePath, [
+        { startRatio: 0, endRatio: 0.5 },
+        { startRatio: 0.5, endRatio: 1 },
+      ]);
+
+      const fullParsed = parseTocFromOcrText(fullText);
+      const splitParsed = parseTocFromOcrText(mergedSplitText);
+
+      expect(extractStableSectionNumbers(splitParsed)).toEqual(extractStableSectionNumbers(fullParsed));
+      extractStableChapterNumbers(fullParsed).forEach((chapterNumber) => {
+        expect(extractStableChapterNumbers(splitParsed)).toContain(chapterNumber);
+      });
+      expect(extractStableTocSignatures(splitParsed).length).toBeGreaterThanOrEqual(
+        Math.floor(extractStableTocSignatures(fullParsed).length * 0.85)
+      );
+      assertAnchorCoveragePreserved(fullText, mergedSplitText);
+    }
+  }, 180000);
+
+  it("reconstructs source-of-truth TOC OCR from overlapping 2/3 page splits", async () => {
+    for (const relativeImagePath of TOC_SOURCE_OF_TRUTH_FIXTURES) {
+      const imagePath = path.resolve(process.cwd(), relativeImagePath);
+      const fullText = await readRealTocOcr(relativeImagePath);
+      const mergedSplitText = await readMergedOcrFromSlices(imagePath, [
+        { startRatio: 0, endRatio: 2 / 3 },
+        { startRatio: 1 / 3, endRatio: 1 },
+      ]);
+
+      const fullParsed = parseTocFromOcrText(fullText);
+      const splitParsed = parseTocFromOcrText(mergedSplitText);
+
+      expect(extractStableSectionNumbers(splitParsed)).toEqual(extractStableSectionNumbers(fullParsed));
+      extractStableChapterNumbers(fullParsed).forEach((chapterNumber) => {
+        expect(extractStableChapterNumbers(splitParsed)).toContain(chapterNumber);
+      });
+      expect(extractStableTocSignatures(splitParsed).length).toBeGreaterThanOrEqual(
+        Math.floor(extractStableTocSignatures(fullParsed).length * 0.85)
+      );
+      assertAnchorCoveragePreserved(fullText, mergedSplitText);
+    }
+  }, 180000);
+
+  it("preserves stitched source-of-truth TOC output across both pages for split capture scenarios", async () => {
+    const fullPages = await Promise.all(
+      TOC_SOURCE_OF_TRUTH_FIXTURES.map(async (relativeImagePath, pageIndex) => {
+        const fullText = await readRealTocOcr(relativeImagePath);
+        const parsed = parseTocFromOcrText(fullText);
+        return {
+          pageIndex,
+          confidence: parsed.confidence,
+          chapters: parsed.chapters,
+        };
+      })
+    );
+
+    const fullStitched = stitchTocPages(fullPages);
+
+    const scenarios: Array<{
+      label: string;
+      windows: Array<{ startRatio: number; endRatio: number }>;
+    }> = [
+      {
+        label: "50/50",
+        windows: [
+          { startRatio: 0, endRatio: 0.5 },
+          { startRatio: 0.5, endRatio: 1 },
+        ],
+      },
+      {
+        label: "2/3 overlap",
+        windows: [
+          { startRatio: 0, endRatio: 2 / 3 },
+          { startRatio: 1 / 3, endRatio: 1 },
+        ],
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const stitchedPages = await Promise.all(
+        TOC_SOURCE_OF_TRUTH_FIXTURES.map(async (relativeImagePath, pageIndex) => {
+          const imagePath = path.resolve(process.cwd(), relativeImagePath);
+          const mergedSplitText = await readMergedOcrFromSlices(imagePath, scenario.windows);
+          const parsed = parseTocFromOcrText(mergedSplitText);
+
+          return {
+            pageIndex,
+            confidence: parsed.confidence,
+            chapters: parsed.chapters,
+          };
+        })
+      );
+
+      const stitchedFromSplits = stitchTocPages(stitchedPages);
+      const normalizedFullStitched = normalizeParsedTocForComparison({
+        chapters: fullStitched.chapters,
+        confidence: fullStitched.stitchingConfidence,
+      });
+      const normalizedSplitStitched = normalizeParsedTocForComparison({
+        chapters: stitchedFromSplits.chapters,
+        confidence: stitchedFromSplits.stitchingConfidence,
+      });
+      expect(normalizedSplitStitched.length).toBeGreaterThan(0);
+      expect(extractStableSectionNumbers({
+        chapters: stitchedFromSplits.chapters,
+        confidence: stitchedFromSplits.stitchingConfidence,
+      })).toEqual(extractStableSectionNumbers({
+        chapters: fullStitched.chapters,
+        confidence: fullStitched.stitchingConfidence,
+      }));
+      expect(extractStableChapterNumbers({
+        chapters: stitchedFromSplits.chapters,
+        confidence: stitchedFromSplits.stitchingConfidence,
+      })).toEqual(extractStableChapterNumbers({
+        chapters: fullStitched.chapters,
+        confidence: fullStitched.stitchingConfidence,
+      }));
+
+      // Ensure split-based stitched output stays close to the full baseline.
+      expect(normalizedSplitStitched.length).toBeGreaterThanOrEqual(Math.floor(normalizedFullStitched.length * 0.65));
+    }
+  }, 240000);
 
   it("scores metadata confidence and marks extracted fields as auto", () => {
     const metadata = extractMetadataFromOcrText([

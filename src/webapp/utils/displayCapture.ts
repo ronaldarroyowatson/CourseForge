@@ -80,6 +80,8 @@ interface DisplayCaptureDeps {
   clearTimeoutFn?: (handle: unknown) => void;
 }
 
+let persistentDisplayMedia: MediaStreamLike | null = null;
+
 function detectBrowser(): DisplayCaptureSupportInfo["browser"] {
   if (typeof navigator === "undefined") {
     return "unknown";
@@ -113,7 +115,7 @@ export function getDisplayCaptureSupportInfo(): DisplayCaptureSupportInfo {
       browser,
       label: browser === "chrome" ? "Google Chrome" : "Microsoft Edge",
       supportLevel: "strong",
-      guidance: "Best support for screen/window capture. Grant Screen Recording permission in macOS if prompted.",
+      guidance: "Best support for screen/window capture. If denied, open macOS System Settings > Privacy & Security > Screen Recording and allow this browser, then retry.",
       extensionRecommended: false,
     };
   }
@@ -204,6 +206,39 @@ export function normalizeDisplayCaptureError(error: unknown): {
     message: "Unknown capture error.",
     browser: support.label,
   };
+}
+
+function isLiveTrack(track: MediaTrackLike | undefined): boolean {
+  if (!track) {
+    return false;
+  }
+
+  const state = (track as MediaStreamTrack).readyState;
+  return state !== "ended";
+}
+
+function stopMediaStream(media: MediaStreamLike | null): void {
+  if (!media) {
+    return;
+  }
+
+  media.getTracks().forEach((track) => {
+    try {
+      track.stop();
+    } catch {
+      // Best effort cleanup only.
+    }
+  });
+}
+
+export function resetDisplayCaptureSession(): void {
+  stopMediaStream(persistentDisplayMedia);
+  persistentDisplayMedia = null;
+}
+
+function getPersistentVideoTrack(media: MediaStreamLike | null): MediaTrackLike | undefined {
+  const track = media?.getVideoTracks()[0];
+  return isLiveTrack(track) ? track : undefined;
 }
 
 function getDefaultDeps(): Required<DisplayCaptureDeps> {
@@ -339,7 +374,7 @@ async function tryCaptureViaImageCapture(track: MediaTrackLike, deps: Required<D
 }
 
 export async function captureDisplayFrame(
-  input?: { preferChromeTabCapture?: boolean },
+  input?: { preferChromeTabCapture?: boolean; keepSessionAlive?: boolean },
   overrideDeps?: DisplayCaptureDeps
 ): Promise<string> {
   const deps = { ...getDefaultDeps(), ...(overrideDeps ?? {}) };
@@ -358,37 +393,62 @@ export async function captureDisplayFrame(
     });
   }
 
-  let media: MediaStreamLike;
-  try {
-    media = await deps.getDisplayMedia();
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw createDisplayCaptureError({
-        code: "chooser_cancelled",
-        detail: "Screen capture was canceled before selecting a source.",
-      });
-    }
+  let media: MediaStreamLike | null = null;
+  const keepSessionAlive = input?.keepSessionAlive === true;
 
-    if (error instanceof DOMException && error.name === "NotAllowedError") {
-      throw createDisplayCaptureError({
-        code: "permission_denied",
-        detail: "Screen capture permission was denied.",
-      });
-    }
+  const requestDisplayMedia = async (): Promise<MediaStreamLike> => {
+    try {
+      return await deps.getDisplayMedia();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw createDisplayCaptureError({
+          code: "chooser_cancelled",
+          detail: "Screen capture was canceled before selecting a source.",
+        });
+      }
 
-    if (error instanceof DOMException && error.name === "NotReadableError") {
-      throw createDisplayCaptureError({
-        code: "device_unavailable",
-        detail: "The selected capture source is not readable.",
-      });
-    }
+      if (error instanceof DOMException && error.name === "NotAllowedError") {
+        throw createDisplayCaptureError({
+          code: "permission_denied",
+          detail: "Screen capture permission was denied.",
+        });
+      }
 
-    throw error;
+      if (error instanceof DOMException && error.name === "NotReadableError") {
+        throw createDisplayCaptureError({
+          code: "device_unavailable",
+          detail: "The selected capture source is not readable.",
+        });
+      }
+
+      throw error;
+    }
+  };
+
+  if (keepSessionAlive) {
+    media = persistentDisplayMedia;
+    if (!getPersistentVideoTrack(media)) {
+      resetDisplayCaptureSession();
+      media = await requestDisplayMedia();
+      persistentDisplayMedia = media;
+    }
+  } else {
+    media = await requestDisplayMedia();
+  }
+
+  if (!media) {
+    throw createDisplayCaptureError({
+      code: "frame_unavailable",
+      detail: "Capture source could not be initialized.",
+    });
   }
 
   try {
     const videoTrack = media.getVideoTracks()[0] as MediaTrackLike | undefined;
     if (!videoTrack) {
+      if (keepSessionAlive) {
+        resetDisplayCaptureSession();
+      }
       throw createDisplayCaptureError({
         code: "no_video_track",
         detail: "No screen-sharing video track was returned.",
@@ -427,6 +487,10 @@ export async function captureDisplayFrame(
       deps.removeVideoFromDom(video);
     }
   } finally {
-    media.getTracks().forEach((track) => track.stop());
+    if (!keepSessionAlive) {
+      stopMediaStream(media);
+    } else if (!getPersistentVideoTrack(media)) {
+      resetDisplayCaptureSession();
+    }
   }
 }

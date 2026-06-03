@@ -258,6 +258,12 @@ export interface SuperAdminAiProviderLimits {
     tokensPerRequestOutputLimit: number;
     concurrentRequestsLimit: number;
   };
+  githubStatus?: {
+    isRateLimited: boolean;
+    retryAfterSeconds: number | null;
+    retryAfterUntil: string | null;
+    observedAt: string | null;
+  };
   aggregateToday: {
     aiRequestsToday: number;
     aiTokensToday: number;

@@ -862,6 +862,12 @@ interface SuperAdminAiProviderLimitsResult {
     tokensPerRequestOutputLimit: number;
     concurrentRequestsLimit: number;
   };
+  githubStatus: {
+    isRateLimited: boolean;
+    retryAfterSeconds: number | null;
+    retryAfterUntil: string | null;
+    observedAt: string | null;
+  };
   aggregateToday: {
     aiRequestsToday: number;
     aiTokensToday: number;
@@ -946,6 +952,7 @@ interface CloudOcrProbeResult {
   reasonCode: string;
   reasonMessage: string;
   httpStatus: number | null;
+  retryAfterSeconds: number | null;
   details: CloudOcrExecutionDetails;
 }
 
@@ -1012,6 +1019,7 @@ async function probeCloudOcrProvider(runtime: CloudOcrProviderRuntime): Promise<
       reasonCode: runtime.id === "cloud_openai_vision" ? "missing_openai_api_key" : "missing_github_models_token",
       reasonMessage: runtime.missingCredentialReason,
       httpStatus: null,
+      retryAfterSeconds: null,
       details,
     };
   }
@@ -1047,25 +1055,42 @@ async function probeCloudOcrProvider(runtime: CloudOcrProviderRuntime): Promise<
 
     details.providerResponseReceived = true;
     details.providerExecutionObserved = true;
+    const retryAfterSeconds = parseRetryAfterSeconds(response.headers);
 
     if (response.ok) {
+      if (runtime.id === "cloud_github_models_vision") {
+        void recordGitHubRateLimitStatusBestEffort({
+          isRateLimited: false,
+          retryAfterSeconds: null,
+          source: "probeCloudOcrProvider:success",
+        });
+      }
       return {
         available: true,
         availabilityState: "available",
         reasonCode: "ok",
         reasonMessage: `${runtime.label} authentication probe succeeded.`,
         httpStatus: response.status,
+        retryAfterSeconds,
         details,
       };
     }
 
     if (response.status === 429) {
+      if (runtime.id === "cloud_github_models_vision") {
+        void recordGitHubRateLimitStatusBestEffort({
+          isRateLimited: true,
+          retryAfterSeconds,
+          source: "probeCloudOcrProvider:429",
+        });
+      }
       return {
         available: false,
         availabilityState: "unavailable",
         reasonCode: "rate_limited",
         reasonMessage: `${runtime.label} is not currently usable because the provider returned 429 rate limiting or quota exhaustion.`,
         httpStatus: response.status,
+        retryAfterSeconds,
         details,
       };
     }
@@ -1074,12 +1099,33 @@ async function probeCloudOcrProvider(runtime: CloudOcrProviderRuntime): Promise<
     details.failureStage = "provider_response";
 
     if (response.status === 401 || response.status === 403) {
+      const lowered = snippet.toLowerCase();
+      if (
+        response.status === 403
+        && (
+          lowered.includes("no access to model")
+          || lowered.includes("no_access")
+          || lowered.includes("model_not_enabled")
+        )
+      ) {
+        return {
+          available: false,
+          availabilityState: "unavailable",
+          reasonCode: "model_access_denied",
+          reasonMessage: snippet || `${runtime.label} credentials are valid, but this account has no access to the configured model.`,
+          httpStatus: response.status,
+          retryAfterSeconds,
+          details,
+        };
+      }
+
       return {
         available: false,
         availabilityState: "unavailable",
         reasonCode: "auth_failed",
         reasonMessage: snippet || `${runtime.label} rejected credentials for OCR requests.`,
         httpStatus: response.status,
+        retryAfterSeconds,
         details,
       };
     }
@@ -1091,6 +1137,7 @@ async function probeCloudOcrProvider(runtime: CloudOcrProviderRuntime): Promise<
         reasonCode: "request_rejected",
         reasonMessage: snippet || `${runtime.label} rejected the probe request with status ${response.status}.`,
         httpStatus: response.status,
+        retryAfterSeconds,
         details,
       };
     }
@@ -1102,6 +1149,7 @@ async function probeCloudOcrProvider(runtime: CloudOcrProviderRuntime): Promise<
         reasonCode: "provider_unreachable",
         reasonMessage: snippet || `${runtime.label} returned ${response.status}.`,
         httpStatus: response.status,
+        retryAfterSeconds,
         details,
       };
     }
@@ -1112,6 +1160,7 @@ async function probeCloudOcrProvider(runtime: CloudOcrProviderRuntime): Promise<
       reasonCode: "probe_failed",
       reasonMessage: snippet || `${runtime.label} health probe failed with status ${response.status}.`,
       httpStatus: response.status,
+      retryAfterSeconds,
       details,
     };
   } catch (error) {
@@ -1126,6 +1175,7 @@ async function probeCloudOcrProvider(runtime: CloudOcrProviderRuntime): Promise<
         ? `${runtime.label} health probe timed out.`
         : `${runtime.label} health probe failed before a provider response: ${message}`,
       httpStatus: null,
+      retryAfterSeconds: null,
       details,
     };
   } finally {
@@ -1418,6 +1468,7 @@ const WEEKLY_BASELINE_MULTIPLIER = 2.7;
 const MONTHLY_LIMIT_PERCENT = 100;
 const AI_PROVIDER_POLICY_DOC_PATH = "config/aiProviderPolicy";
 const AI_SAFETY_POLICY_DOC_PATH = "config/aiSafetyPolicy";
+const AI_PROVIDER_STATUS_DOC_PATH = "config/aiProviderStatus";
 const DEBUG_POLICY_DOC_PATH = "config/debugLoggingPolicy";
 const METADATA_CORRECTION_RULES_DOC_PATH = "config/metadataCorrectionRules";
 const METADATA_CORRECTION_LIMITS_DOC_PATH = "config/metadataCorrectionLimits";
@@ -2517,6 +2568,30 @@ function parseRateLimitHeaderNumber(value: string | null): number | null {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
 }
 
+function parseRetryAfterSeconds(headers: Headers): number | null {
+  const retryAfter = headers.get("retry-after")?.trim();
+  if (!retryAfter) {
+    return null;
+  }
+
+  const seconds = Number.parseInt(retryAfter, 10);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return seconds;
+  }
+
+  const retryAt = Date.parse(retryAfter);
+  if (Number.isNaN(retryAt)) {
+    return null;
+  }
+
+  const deltaMs = retryAt - Date.now();
+  if (deltaMs <= 0) {
+    return null;
+  }
+
+  return Math.max(1, Math.ceil(deltaMs / 1000));
+}
+
 function deriveUsedPercent(limit: number | null, remaining: number | null): number | null {
   if (limit === null || remaining === null || limit <= 0) {
     return null;
@@ -2574,6 +2649,75 @@ async function recordOpenAiRateLimitSnapshotBestEffort(model: string, headers: H
       model,
       error: error instanceof Error ? error.message : String(error),
     });
+  }
+}
+
+async function recordGitHubRateLimitStatusBestEffort(input: {
+  isRateLimited: boolean;
+  retryAfterSeconds: number | null;
+  source: string;
+}): Promise<void> {
+  try {
+    const observedAt = new Date().toISOString();
+    const retryAfterSeconds = typeof input.retryAfterSeconds === "number" && input.retryAfterSeconds > 0
+      ? Math.max(1, Math.floor(input.retryAfterSeconds))
+      : null;
+    const retryAfterUntil = retryAfterSeconds !== null
+      ? new Date(Date.now() + (retryAfterSeconds * 1000)).toISOString()
+      : null;
+
+    await firestore.doc(AI_PROVIDER_STATUS_DOC_PATH).set({
+      githubRateLimit: {
+        isRateLimited: input.isRateLimited,
+        retryAfterSeconds,
+        retryAfterUntil,
+        observedAt,
+        source: input.source,
+      },
+    }, { merge: true });
+  } catch (error) {
+    console.warn("[AI limits] Failed to persist GitHub rate-limit status", {
+      error: error instanceof Error ? error.message : String(error),
+      input,
+    });
+  }
+}
+
+async function getGitHubRateLimitStatus(): Promise<{ isRateLimited: boolean; retryAfterSeconds: number | null; retryAfterUntil: string | null; observedAt: string | null; }> {
+  try {
+    const snapshot = await firestore.doc(AI_PROVIDER_STATUS_DOC_PATH).get();
+    const raw = snapshot.data()?.githubRateLimit as Record<string, unknown> | undefined;
+
+    const retryAfterSeconds = typeof raw?.retryAfterSeconds === "number" && Number.isFinite(raw.retryAfterSeconds)
+      ? Math.max(1, Math.floor(raw.retryAfterSeconds))
+      : null;
+    const retryAfterUntil = typeof raw?.retryAfterUntil === "string" ? raw.retryAfterUntil : null;
+    const observedAt = typeof raw?.observedAt === "string" ? raw.observedAt : null;
+
+    let isRateLimited = raw?.isRateLimited === true;
+    if (isRateLimited && retryAfterUntil) {
+      const until = Date.parse(retryAfterUntil);
+      if (!Number.isNaN(until) && until <= Date.now()) {
+        isRateLimited = false;
+      }
+    }
+
+    return {
+      isRateLimited,
+      retryAfterSeconds,
+      retryAfterUntil,
+      observedAt,
+    };
+  } catch (error) {
+    console.warn("[AI limits] Failed to load GitHub rate-limit status", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      isRateLimited: false,
+      retryAfterSeconds: null,
+      retryAfterUntil: null,
+      observedAt: null,
+    };
   }
 }
 
@@ -4327,6 +4471,7 @@ export const getSuperAdminAiProviderLimits = onCall(async (request) => {
 
   const policy = await getAiSafetyPolicyRecord();
   const models = await listOpenAiRateLimitSnapshots();
+  const githubStatus = await getGitHubRateLimitStatus();
 
   let aiUsageDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
   try {
@@ -4381,6 +4526,7 @@ export const getSuperAdminAiProviderLimits = onCall(async (request) => {
       tokensPerRequestOutputLimit: policy.githubTokensPerRequestOutputLimit,
       concurrentRequestsLimit: policy.githubConcurrentRequestsLimit,
     },
+    githubStatus,
     aggregateToday: {
       aiRequestsToday,
       aiTokensToday,
@@ -4501,6 +4647,7 @@ function buildCloudOcrErrorDetails(
     reasonCode: string;
     reasonMessage: string;
     httpStatus: number | null;
+    retryAfterSeconds?: number | null;
   }
 ): Record<string, unknown> {
   return {
@@ -4511,6 +4658,7 @@ function buildCloudOcrErrorDetails(
     reasonCode: failure.reasonCode,
     reasonMessage: failure.reasonMessage,
     httpStatus: failure.httpStatus,
+    retryAfterSeconds: typeof failure.retryAfterSeconds === "number" ? failure.retryAfterSeconds : null,
     traceId: details.traceId,
     failureStage: details.failureStage,
     requestAcceptedByFunction: details.requestAcceptedByFunction,
@@ -4604,6 +4752,12 @@ async function executeCloudOcrExtraction(
 
   if (runtime.id === "cloud_openai_vision") {
     void recordOpenAiRateLimitSnapshotBestEffort(runtime.model, response.headers);
+  } else if (runtime.id === "cloud_github_models_vision") {
+    void recordGitHubRateLimitStatusBestEffort({
+      isRateLimited: false,
+      retryAfterSeconds: null,
+      source: "executeCloudOcrExtraction:success",
+    });
   }
 
   if (!response.ok) {
@@ -4631,6 +4785,14 @@ async function executeCloudOcrExtraction(
     }
 
     if (response.status === 429) {
+      const retryAfterSeconds = parseRetryAfterSeconds(response.headers);
+      if (runtime.id === "cloud_github_models_vision") {
+        void recordGitHubRateLimitStatusBestEffort({
+          isRateLimited: true,
+          retryAfterSeconds,
+          source: "executeCloudOcrExtraction:429",
+        });
+      }
       throw new HttpsError(
         "resource-exhausted",
         `${runtime.label} rate limit reached (${response.status} ${response.statusText}). ${providerDetails}`.trim(),
@@ -4638,6 +4800,7 @@ async function executeCloudOcrExtraction(
           reasonCode: "rate_limited",
           reasonMessage,
           httpStatus: response.status,
+          retryAfterSeconds,
         })
       );
     }

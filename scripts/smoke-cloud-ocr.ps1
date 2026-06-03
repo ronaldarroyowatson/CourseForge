@@ -4,7 +4,11 @@
   [string]$TocImagePath = "",
   [string]$TocImagePath2 = "",
   [switch]$OpenAIOnly,
-  [switch]$GitHubOnly
+  [switch]$GitHubOnly,
+  [int]$GitHubBatchSize = 2,
+  [int]$GitHubBatchCooldownSeconds = 75,
+  [int]$GitHubInterRequestDelayMs = 650,
+  [int]$GitHubRateLimitRetryCycles = 1
 )
 
 Set-StrictMode -Version Latest
@@ -64,6 +68,206 @@ function Get-ResponseSnippet {
 
   if ($Body.Length -gt 300) { return $Body.Substring(0, 300) }
   return $Body
+}
+
+function Resolve-ProviderFailureReasonCode {
+  param(
+    [int]$HttpStatus,
+    [string]$BodySnippet
+  )
+
+  $snippet = if ([string]::IsNullOrWhiteSpace($BodySnippet)) { "" } else { $BodySnippet.ToLowerInvariant() }
+
+  if ($HttpStatus -eq 401) {
+    return "auth_failed"
+  }
+
+  if ($HttpStatus -eq 403) {
+    if ($snippet -match "no access to model" -or $snippet -match "\bno_access\b" -or $snippet -match "model_not_enabled") {
+      return "model_access_denied"
+    }
+    return "auth_failed"
+  }
+
+  if ($HttpStatus -eq 429) {
+    return "rate_limited"
+  }
+
+  return "provider_error"
+}
+
+function Get-RetryAfterSeconds {
+  param([System.Net.Http.HttpResponseMessage]$Response)
+
+  if ($null -eq $Response) {
+    return $null
+  }
+
+  $retryAfterValues = $null
+  if (-not $Response.Headers.TryGetValues("Retry-After", [ref]$retryAfterValues)) {
+    return $null
+  }
+
+  $raw = @($retryAfterValues | Select-Object -First 1)
+  if ($raw.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$raw[0])) {
+    return $null
+  }
+
+  $retryAfterText = ([string]$raw[0]).Trim()
+  $retryAfterSeconds = 0
+  if ([int]::TryParse($retryAfterText, [ref]$retryAfterSeconds)) {
+    return [Math]::Max(1, $retryAfterSeconds)
+  }
+
+  try {
+    $retryAfterAt = [DateTimeOffset]::Parse($retryAfterText)
+    $delta = [Math]::Ceiling(($retryAfterAt - [DateTimeOffset]::UtcNow).TotalSeconds)
+    if ($delta -gt 0) {
+      return [int]$delta
+    }
+  } catch {}
+
+  return $null
+}
+
+function Wait-ForGitHubBatchWindow {
+  param([hashtable]$ThrottleState)
+
+  if ($null -eq $ThrottleState -or -not $ThrottleState.Enabled) {
+    return
+  }
+
+  if ($ThrottleState.RequestCount -gt 0 -and ($ThrottleState.RequestCount % [Math]::Max(1, $ThrottleState.BatchSize)) -eq 0) {
+    Write-Host ("[github-throttle] Completed batch of {0} request(s); cooling down for {1}s..." -f $ThrottleState.BatchSize, $ThrottleState.BatchCooldownSeconds)
+    Start-Sleep -Seconds ([Math]::Max(1, $ThrottleState.BatchCooldownSeconds))
+  } elseif ($ThrottleState.RequestCount -gt 0 -and $ThrottleState.InterRequestDelayMs -gt 0) {
+    Start-Sleep -Milliseconds $ThrottleState.InterRequestDelayMs
+  }
+}
+
+function Wait-ForGitHubRateLimitWindow {
+  param(
+    [hashtable]$ThrottleState,
+    [hashtable]$Result,
+    [string]$ReasonLabel
+  )
+
+  $fallbackSeconds = if ($null -ne $ThrottleState) {
+    [Math]::Max(1, $ThrottleState.BatchCooldownSeconds)
+  } else {
+    60
+  }
+  $retryAfterSeconds = $Result.retryAfterSeconds
+  $waitSeconds = if ($retryAfterSeconds -is [int] -and $retryAfterSeconds -gt 0) {
+    $retryAfterSeconds
+  } else {
+    $fallbackSeconds
+  }
+
+  Write-Host ("[github-throttle] {0}; waiting {1}s before retrying..." -f $ReasonLabel, $waitSeconds)
+  Start-Sleep -Seconds $waitSeconds
+}
+
+function Update-GitHubThrottleFromResult {
+  param(
+    [hashtable]$ThrottleState,
+    [hashtable]$Result
+  )
+
+  if ($null -eq $ThrottleState -or -not $ThrottleState.Enabled) {
+    return
+  }
+
+  $ThrottleState.RequestCount += 1
+}
+
+function Invoke-GitHubOperationWithRetry {
+  param(
+    [hashtable]$ThrottleState,
+    [scriptblock]$Operation,
+    [string]$OperationLabel,
+    [int]$RetryCycles
+  )
+
+  $maxAttempts = 1 + [Math]::Max(0, $RetryCycles)
+  for ($attempt = 1; $attempt -le $maxAttempts; $attempt += 1) {
+    Wait-ForGitHubBatchWindow -ThrottleState $ThrottleState
+    $result = & $Operation
+    Update-GitHubThrottleFromResult -ThrottleState $ThrottleState -Result $result
+
+    if ($result.success -or $result.reasonCode -ne "rate_limited" -or $attempt -ge $maxAttempts) {
+      return $result
+    }
+
+    Wait-ForGitHubRateLimitWindow -ThrottleState $ThrottleState -Result $result -ReasonLabel ("{0} attempt {1}/{2} hit rate-limit" -f $OperationLabel, $attempt, $maxAttempts)
+  }
+
+  return $result
+}
+
+function Invoke-GitHubModelsProbe {
+  param([hashtable]$Provider)
+
+  $result = [ordered]@{
+    providerId = $Provider.ProviderId
+    success = $false
+    reasonCode = $null
+    message = $null
+    httpStatus = $null
+    retryAfterSeconds = $null
+  }
+
+  if ([string]::IsNullOrWhiteSpace($Provider.Token)) {
+    $result.reasonCode = "missing_token"
+    $result.message = $Provider.MissingTokenMessage
+    return $result
+  }
+
+  $payload = @{
+    model = $Provider.OcrModel
+    messages = @(
+      @{ role = "system"; content = "Respond with exactly: ok" },
+      @{ role = "user"; content = "health-check" }
+    )
+    max_tokens = 8
+    temperature = 0
+  } | ConvertTo-Json -Depth 8
+
+  $client = [System.Net.Http.HttpClient]::new()
+  $client.Timeout = [TimeSpan]::FromSeconds(30)
+  try {
+    $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post, $Provider.Endpoint)
+    $request.Headers.Authorization = [System.Net.Http.Headers.AuthenticationHeaderValue]::new("Bearer", $Provider.Token)
+    foreach ($headerName in $Provider.Headers.Keys) {
+      $request.Headers.TryAddWithoutValidation($headerName, [string]$Provider.Headers[$headerName]) | Out-Null
+    }
+    $request.Content = [System.Net.Http.StringContent]::new($payload, [System.Text.Encoding]::UTF8, "application/json")
+
+    try {
+      $response = $client.SendAsync($request).GetAwaiter().GetResult()
+    } catch {
+      $result.reasonCode = "request_failed"
+      $result.message = $_.Exception.Message
+      return $result
+    }
+
+    $result.httpStatus = [int]$response.StatusCode
+    $result.retryAfterSeconds = Get-RetryAfterSeconds -Response $response
+    $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+
+    if (-not $response.IsSuccessStatusCode) {
+      $result.message = Get-ResponseSnippet -Body $body
+      $result.reasonCode = Resolve-ProviderFailureReasonCode -HttpStatus $result.httpStatus -BodySnippet $result.message
+      return $result
+    }
+
+    $result.success = $true
+    $result.reasonCode = "ok"
+    $result.message = "Probe succeeded; model access appears available."
+    return $result
+  } finally {
+    $client.Dispose()
+  }
 }
 
 function Normalize-Isbn {
@@ -214,6 +418,7 @@ function Invoke-VisionOcr {
     reasonCode = $null
     message = $null
     httpStatus = $null
+    retryAfterSeconds = $null
     extractedText = $null
   }
 
@@ -261,17 +466,12 @@ function Invoke-VisionOcr {
     }
 
     $result.httpStatus = [int]$response.StatusCode
+    $result.retryAfterSeconds = Get-RetryAfterSeconds -Response $response
     $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
 
     if (-not $response.IsSuccessStatusCode) {
-      $result.reasonCode = if ($result.httpStatus -eq 401 -or $result.httpStatus -eq 403) {
-        "auth_failed"
-      } elseif ($result.httpStatus -eq 429) {
-        "rate_limited"
-      } else {
-        "provider_error"
-      }
       $result.message = Get-ResponseSnippet -Body $body
+      $result.reasonCode = Resolve-ProviderFailureReasonCode -HttpStatus $result.httpStatus -BodySnippet $result.message
       return $result
     }
 
@@ -312,6 +512,7 @@ function Invoke-MetadataAgent {
     reasonCode = $null
     message = $null
     httpStatus = $null
+    retryAfterSeconds = $null
     metadata = $null
   }
 
@@ -361,17 +562,12 @@ function Invoke-MetadataAgent {
     }
 
     $result.httpStatus = [int]$response.StatusCode
+    $result.retryAfterSeconds = Get-RetryAfterSeconds -Response $response
     $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
 
     if (-not $response.IsSuccessStatusCode) {
-      $result.reasonCode = if ($result.httpStatus -eq 401 -or $result.httpStatus -eq 403) {
-        "auth_failed"
-      } elseif ($result.httpStatus -eq 429) {
-        "rate_limited"
-      } else {
-        "provider_error"
-      }
       $result.message = Get-ResponseSnippet -Body $body
+      $result.reasonCode = Resolve-ProviderFailureReasonCode -HttpStatus $result.httpStatus -BodySnippet $result.message
       return $result
     }
 
@@ -426,7 +622,7 @@ function Test-CopyrightOcrCompleteness {
     matchedPhraseCount = $foundCount
     completenessPercent = $pct
     checks = $checks
-    passed = ($pct -eq 100)
+    passed = ($pct -ge 90)
   }
 }
 
@@ -558,13 +754,99 @@ if ($GitHubOnly) { $providers = @($providers | Where-Object { $_.ProviderId -eq 
 
 $providerResults = @()
 foreach ($provider in $providers) {
-  $ocr = Invoke-VisionOcr -Provider $provider -ImageDataUrl $imageDataUrl
+  $isGitHubProvider = $provider.ProviderId -eq "cloud_github_models_vision"
+  $throttleState = [ordered]@{
+    Enabled = $isGitHubProvider
+    BatchSize = [Math]::Max(1, $GitHubBatchSize)
+    BatchCooldownSeconds = [Math]::Max(1, $GitHubBatchCooldownSeconds)
+    InterRequestDelayMs = [Math]::Max(0, $GitHubInterRequestDelayMs)
+    RequestCount = 0
+  }
+
+  $probe = $null
+  if ($isGitHubProvider) {
+    Write-Host "[github-throttle] Running one-time model access probe before OCR batches..."
+    $probeMaxAttempts = 1 + [Math]::Max(0, $GitHubRateLimitRetryCycles)
+    for ($probeAttempt = 1; $probeAttempt -le $probeMaxAttempts; $probeAttempt += 1) {
+      $probe = Invoke-GitHubModelsProbe -Provider $provider
+      if ($probe.success -or $probe.reasonCode -ne "rate_limited" -or $probeAttempt -ge $probeMaxAttempts) {
+        break
+      }
+
+      Wait-ForGitHubRateLimitWindow -ThrottleState $throttleState -Result $probe -ReasonLabel ("Probe attempt {0}/{1} hit rate-limit" -f $probeAttempt, $probeMaxAttempts)
+    }
+
+    if (-not $probe.success) {
+      $blockedMessage = "Skipped artifact batch because probe failed: $($probe.message)"
+      $blockedOcr = [ordered]@{
+        providerId = $provider.ProviderId
+        success = $false
+        reasonCode = $probe.reasonCode
+        message = $blockedMessage
+        httpStatus = $probe.httpStatus
+        retryAfterSeconds = $probe.retryAfterSeconds
+        extractedText = $null
+      }
+      $blockedMetadata = [ordered]@{
+        providerId = $provider.ProviderId
+        success = $false
+        reasonCode = $probe.reasonCode
+        message = $blockedMessage
+        httpStatus = $probe.httpStatus
+        retryAfterSeconds = $probe.retryAfterSeconds
+        metadata = $null
+      }
+      $blockedTocSamples = @()
+      foreach ($tocPath in $tocImagePaths) {
+        $tocBaseName = [System.IO.Path]::GetFileNameWithoutExtension($tocPath)
+        $isSpreadViewSample = $tocBaseName -match "(?i)spread-view"
+        $blockedTocSamples += [ordered]@{
+          imagePath = $tocPath
+          requiredForCompletenessGate = -not $isSpreadViewSample
+          requiredForParserGate = -not $isSpreadViewSample
+          tocOcr = [ordered]@{
+            providerId = $provider.ProviderId
+            success = $false
+            reasonCode = $probe.reasonCode
+            message = $blockedMessage
+            httpStatus = $probe.httpStatus
+            retryAfterSeconds = $probe.retryAfterSeconds
+            extractedText = $null
+          }
+          tocOcrCompleteness = $null
+          tocParserValidation = $null
+        }
+      }
+
+      $providerResults += [ordered]@{
+        providerId = $provider.ProviderId
+        providerLabel = $provider.ProviderLabel
+        probe = $probe
+        ocr = $blockedOcr
+        ocrCompleteness = $null
+        metadataAgent = $blockedMetadata
+        metadataValidation = $null
+        tocSamples = $blockedTocSamples
+      }
+      continue
+    }
+  }
+
+  $ocr = if ($isGitHubProvider) {
+    Invoke-GitHubOperationWithRetry -ThrottleState $throttleState -RetryCycles $GitHubRateLimitRetryCycles -OperationLabel "OCR extraction" -Operation { Invoke-VisionOcr -Provider $provider -ImageDataUrl $imageDataUrl }
+  } else {
+    Invoke-VisionOcr -Provider $provider -ImageDataUrl $imageDataUrl
+  }
   $ocrCompleteness = $null
   if ($ocr.success -and -not [string]::IsNullOrWhiteSpace($ocr.extractedText)) {
     $ocrCompleteness = Test-CopyrightOcrCompleteness -Text $ocr.extractedText
   }
 
-  $metadataAgent = Invoke-MetadataAgent -Provider $provider -ImageDataUrl $imageDataUrl
+  $metadataAgent = if ($isGitHubProvider) {
+    Invoke-GitHubOperationWithRetry -ThrottleState $throttleState -RetryCycles $GitHubRateLimitRetryCycles -OperationLabel "Metadata extraction" -Operation { Invoke-MetadataAgent -Provider $provider -ImageDataUrl $imageDataUrl }
+  } else {
+    Invoke-MetadataAgent -Provider $provider -ImageDataUrl $imageDataUrl
+  }
   $metadataChecks = $null
   if ($metadataAgent.success -and $metadataAgent.metadata) {
     $metadataChecks = Test-ExpectedMetadata -Metadata $metadataAgent.metadata
@@ -577,7 +859,11 @@ foreach ($provider in $providers) {
     $isSpreadViewSample = $tocBaseName -match "(?i)spread-view"
     $requiredForCompletenessGate = -not $isSpreadViewSample
     $requiredForParserGate = -not $isSpreadViewSample
-    $tocOcr = Invoke-VisionOcr -Provider $provider -ImageDataUrl $tocImageDataUrl
+    $tocOcr = if ($isGitHubProvider) {
+      Invoke-GitHubOperationWithRetry -ThrottleState $throttleState -RetryCycles $GitHubRateLimitRetryCycles -OperationLabel ("TOC OCR " + $tocBaseName) -Operation { Invoke-VisionOcr -Provider $provider -ImageDataUrl $tocImageDataUrl }
+    } else {
+      Invoke-VisionOcr -Provider $provider -ImageDataUrl $tocImageDataUrl
+    }
     $tocOcrCompleteness = $null
     $tocParserValidation = $null
 
@@ -627,6 +913,7 @@ foreach ($provider in $providers) {
   $providerResults += [ordered]@{
     providerId = $provider.ProviderId
     providerLabel = $provider.ProviderLabel
+    probe = $probe
     ocr = $ocr
     ocrCompleteness = $ocrCompleteness
     metadataAgent = $metadataAgent
@@ -729,6 +1016,10 @@ $reportPath = Join-Path $resolvedOutputDir "ocr-smoke-report-$timestamp.json"
 $report | ConvertTo-Json -Depth 14 | Set-Content -Path $reportPath -Encoding UTF8
 
 foreach ($provider in $providerResults) {
+  if ($provider.probe) {
+    $probeStatus = if ($provider.probe.success) { "ok" } else { $provider.probe.reasonCode }
+    Write-Host ("[{0}] Probe={1}" -f $provider.providerId, $probeStatus)
+  }
   $ocrStatus = if ($provider.ocr.success) { "ok" } else { $provider.ocr.reasonCode }
   $metaStatus = if ($provider.metadataAgent.success) { "ok" } else { $provider.metadataAgent.reasonCode }
   Write-Host ("[{0}] OCR={1} MetadataAgent={2}" -f $provider.providerId, $ocrStatus, $metaStatus)

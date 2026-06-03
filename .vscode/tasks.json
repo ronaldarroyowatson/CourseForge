@@ -173,6 +173,84 @@
 			"command": "export PATH=\"$HOME/.local/bin:$PATH\" && npm run orchestrate:installers:wait -- --description \"Fix real-image OCR regression and tesseract loader\" --ref main",
 			"isBackground": false,
 			"group": "test"
+		},
+		{
+			"label": "check cloud ocr smoke gate",
+			"type": "shell",
+			"command": "npm run test:smoke:ocr:cloud:gate",
+			"group": "test"
+		},
+		{
+			"label": "check cloud token env presence",
+			"type": "shell",
+			"command": "for k in OPENAI_API_KEY COURSEFORGE_GITHUB_TOKEN GITHUB_TOKEN; do if [ -n \"${!k}\" ]; then echo \"$k=present\"; else echo \"$k=missing\"; fi; done",
+			"group": "test"
+		},
+		{
+			"label": "check cloud token env presence zsh",
+			"type": "shell",
+			"command": "for k in OPENAI_API_KEY COURSEFORGE_GITHUB_TOKEN GITHUB_TOKEN; do eval \"v=\\${$k}\"; if [ -n \"$v\" ]; then echo \"$k=present\"; else echo \"$k=missing\"; fi; done",
+			"group": "test"
+		},
+		{
+			"label": "check powershell on mac",
+			"type": "shell",
+			"command": "(command -v powershell && echo powershell=present) || (command -v pwsh && echo pwsh=present) || echo powershell=missing",
+			"group": "test"
+		},
+		{
+			"label": "recheck cloud ocr smoke gate",
+			"type": "shell",
+			"command": "npm run test:smoke:ocr:cloud:gate",
+			"group": "test"
+		},
+		{
+			"label": "check gh auth status",
+			"type": "shell",
+			"command": "if command -v gh >/dev/null; then gh auth status; else echo gh=missing; fi",
+			"group": "test"
+		},
+		{
+			"label": "validate secure token helper usage",
+			"type": "shell",
+			"command": "bash scripts/secure-cloud-ocr-token.sh",
+			"group": "test"
+		},
+		{
+			"label": "re-run cloud smoke gate after keychain integration",
+			"type": "shell",
+			"command": "npm run test:smoke:ocr:cloud:gate",
+			"group": "test"
+		},
+		{
+			"label": "run live cloud smoke secure",
+			"type": "shell",
+			"command": "npm run test:smoke:ocr:cloud:secure",
+			"group": "test"
+		},
+		{
+			"label": "show changed files",
+			"type": "shell",
+			"command": "git status --short",
+			"group": "test"
+		},
+		{
+			"label": "direct github models auth probe",
+			"type": "shell",
+			"command": "set -euo pipefail\nTOKEN=$(security find-generic-password -a \"$USER\" -s courseforge.COURSEFORGE_GITHUB_TOKEN -w)\nif [ -z \"$TOKEN\" ]; then echo \"missing token\"; exit 1; fi\nHTTP_CODE=$(curl -sS -o /tmp/courseforge-github-models-probe.json -w \"%{http_code}\" \\\n  -X POST \"https://models.github.ai/inference/chat/completions\" \\\n  -H \"Authorization: Bearer $TOKEN\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Accept: application/vnd.github+json\" \\\n  -H \"X-GitHub-Api-Version: 2026-03-10\" \\\n  -d '{\"model\":\"openai/gpt-4.1\",\"messages\":[{\"role\":\"user\",\"content\":\"Respond with ok\"}],\"max_tokens\":4,\"temperature\":0}')\necho \"http=$HTTP_CODE\"\ncat /tmp/courseforge-github-models-probe.json",
+			"group": "test"
+		},
+		{
+			"label": "probe github models candidates",
+			"type": "shell",
+			"command": "set -euo pipefail\nTOKEN=$(security find-generic-password -a \"$USER\" -s courseforge.COURSEFORGE_GITHUB_TOKEN -w)\nfor model in openai/gpt-4.1 openai/gpt-4.1-mini openai/gpt-4o openai/gpt-4o-mini; do\n  code=$(curl -sS -o /tmp/courseforge-model-probe.json -w \"%{http_code}\" \\\n    -X POST \"https://models.github.ai/inference/chat/completions\" \\\n    -H \"Authorization: Bearer $TOKEN\" \\\n    -H \"Content-Type: application/json\" \\\n    -H \"Accept: application/vnd.github+json\" \\\n    -H \"X-GitHub-Api-Version: 2026-03-10\" \\\n    -d \"{\\\"model\\\":\\\"$model\\\",\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"Respond with ok\\\"}],\\\"max_tokens\\\":4,\\\"temperature\\\":0}\")\n  printf \"%s => http=%s\\n\" \"$model\" \"$code\"\n  cat /tmp/courseforge-model-probe.json\n  echo\n done",
+			"group": "test"
+		},
+		{
+			"label": "rerun secure cloud smoke for auth diagnosis",
+			"type": "shell",
+			"command": "npm run test:smoke:ocr:cloud:secure",
+			"group": "test"
 		}
 	],
 	"inputs": [

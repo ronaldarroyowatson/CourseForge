@@ -22,3 +22,6 @@ tmp-smoke/*.txt
 tmp-smoke/*.png
 tmp-smoke/debug/*.jsonl
 tmp-smoke/debug/*.json
+
+# Release packaging transient artifacts
+release/.tmp-*

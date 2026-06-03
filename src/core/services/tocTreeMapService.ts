@@ -52,6 +52,31 @@ export function cleanOcrTocLine(line: string): string | null {
   return compact;
 }
 
+export function isTopLevelTocHeading(text: string): boolean {
+  const normalized = normalizeTocTreeMapText(text);
+  return /^(unit|module|chapter)\b/.test(normalized);
+}
+
+export function selectTocTreeMapLines(lines: string[], maxCount = 220): string[] {
+  if (maxCount <= 0) {
+    return [];
+  }
+
+  const topLevel: string[] = [];
+  const remaining: string[] = [];
+
+  lines.forEach((line) => {
+    if (isTopLevelTocHeading(line)) {
+      topLevel.push(line);
+      return;
+    }
+
+    remaining.push(line);
+  });
+
+  return [...topLevel, ...remaining].slice(0, maxCount);
+}
+
 export function getTocTreeMapNodeKey(node: TocTreeMapNode): string {
   const normalizedText = normalizeTocTreeMapText(node.text);
   if (node.role === "ocr-line") {

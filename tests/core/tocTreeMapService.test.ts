@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   cleanOcrTocLine,
+  isTopLevelTocHeading,
   mergeTocTreeMapNodesWithStats,
+  selectTocTreeMapLines,
   type TocTreeMapNode,
 } from "../../src/core/services/tocTreeMapService";
 
@@ -78,5 +80,37 @@ describe("tocTreeMapService", () => {
   it("normalizes special OCR navigation text", () => {
     expect(cleanOcrTocLine("Go To Current Location")).toBe("Table of Contents");
     expect(cleanOcrTocLine("contents x")).toBe("Contents");
+  });
+
+  it("detects top-level TOC headings", () => {
+    expect(isTopLevelTocHeading("Module 21: Chemistry in Action")).toBe(true);
+    expect(isTopLevelTocHeading("Chapter 9: Waves")).toBe(true);
+    expect(isTopLevelTocHeading("Unit 4: Electricity")).toBe(true);
+    expect(isTopLevelTocHeading("Lesson 9.1: Thermal Energy")).toBe(false);
+  });
+
+  it("prioritizes top-level headings before sub-level lines", () => {
+    const ordered = selectTocTreeMapLines([
+      "Lesson 20.1: Temperature",
+      "Module 21: Chemistry in Action",
+      "Lesson 20.2: Heat Transfer",
+      "Chapter 22: Carbon and Life",
+      "Section 20.3: Applications",
+    ], 5);
+
+    expect(ordered[0]).toBe("Module 21: Chemistry in Action");
+    expect(ordered[1]).toBe("Chapter 22: Carbon and Life");
+    expect(ordered).toHaveLength(5);
+  });
+
+  it("applies the requested cap after top-level prioritization", () => {
+    const ordered = selectTocTreeMapLines([
+      "Lesson 1.1: A",
+      "Module 2: B",
+      "Chapter 3: C",
+      "Lesson 1.2: D",
+    ], 2);
+
+    expect(ordered).toEqual(["Module 2: B", "Chapter 3: C"]);
   });
 });

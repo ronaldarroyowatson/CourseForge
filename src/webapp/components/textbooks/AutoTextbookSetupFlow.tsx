@@ -36,6 +36,7 @@ import {
   cleanOcrTocLine,
   mergeTocTreeMapNodesWithStats,
   normalizeTocTreeMapText,
+  selectTocTreeMapLines,
   type TocTreeMapNode,
 } from "../../../core/services/tocTreeMapService";
 import {
@@ -1665,7 +1666,7 @@ export function AutoTextbookSetupFlow({
           mergedLines.push(line);
         });
 
-        const lines = mergedLines.slice(0, 80);
+        const lines = selectTocTreeMapLines(mergedLines, 220);
 
         const nodes: TocTreeMapNode[] = lines.map((text, index) => {
           const normalized = text.toLowerCase();

@@ -260,6 +260,13 @@
 			"type": "shell",
 			"command": "export PATH=\"$HOME/.local/bin:$PATH\" && gh run view 26929903395 --json status,conclusion,url,displayTitle,createdAt,updatedAt",
 			"group": "test"
+		},
+		{
+			"label": "release now skip throttled smoke",
+			"type": "shell",
+			"command": "npm run bugfix:release -- -Description \"TOC OCR: prefer best color crop with grayscale fallback and docs\" -SkipTests -AllowUnsignedMacOS",
+			"isBackground": false,
+			"group": "test"
 		}
 	],
 	"inputs": [

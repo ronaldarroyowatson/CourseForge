@@ -448,6 +448,36 @@ describe("textbookAutoExtractionService", () => {
     expect(parsed.chapters[0].sections.some((section) => /Teacher Edition/i.test(section.title))).toBe(false);
   });
 
+  it("repairs repeated ancillary TOC patterns including SEP prefix OCR drift", () => {
+    const parsed = parseTocFromOcrText([
+      "MODULE 1: THE NATURE OF SCIENCE 3",
+      "Claim, Evidence, Reasoning 3",
+      "ED Go Further Data Analysis 33",
+      "module wrap up 35",
+      "MODULE 2: MOTION 37",
+    ].join("\n"));
+
+    expect(parsed.chapters).toHaveLength(2);
+
+    const firstSections = parsed.chapters[0]?.sections ?? [];
+    expect(firstSections.some((section) => section.title === "CER Claim, Evidence, Reasoning" && section.pageStart === 3)).toBe(true);
+    expect(firstSections.some((section) => section.title === "SEP Go Further Data Analysis" && section.pageStart === 33)).toBe(true);
+    expect(firstSections.some((section) => section.title === "Module Wrap-Up" && section.pageStart === 35)).toBe(true);
+  });
+
+  it("drops lines that begin with special-character garbage before TOC parsing", () => {
+    const parsed = parseTocFromOcrText([
+      "MODULE 1: THE NATURE OF SCIENCE 3",
+      "#@%@@ broken header 99",
+      "Lesson 1 The Methods of Science 4",
+      "MODULE 2: MOTION 37",
+    ].join("\n"));
+
+    expect(parsed.chapters).toHaveLength(2);
+    expect(parsed.chapters[0]?.sections.some((section) => /broken header/i.test(section.title))).toBe(false);
+    expect(parsed.chapters[0]?.sections.some((section) => /Methods of Science/i.test(section.title))).toBe(true);
+  });
+
   it("merges TOC captures from multiple pages", () => {
     const first = parseTocFromOcrText("Chapter 1 Integers 10\n1.1 Absolute Value 12");
     const second = parseTocFromOcrText("Chapter 1 Integers 10\n1.2 Number Lines 18");

@@ -652,20 +652,44 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
   };
 
   const normalizeTocLineOcrArtifacts = (line: string): string => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return "";
+    }
+
     let normalized = line;
 
+    // OCR sometimes prefixes known TOC lines with decorative symbols (for example emoji/globes).
+    // Recover only clearly structural/repeated TOC lines after stripping symbols.
+    if (/^[^A-Za-z0-9]/.test(trimmed)) {
+      const recovered = trimmed.replace(/^[^A-Za-z0-9]+/, "").trim();
+      if (!recovered) {
+        return "";
+      }
+
+      const recoverablePattern = /^(?:module|chapter|ch\.?|lesson|unit|[0-9]+(?:\.[0-9]+)+)\b|\b(?:claim\s*,\s*evidence\s*,\s*reasoning|go\s+further|module\s+wrap\s*[-–—]?\s*up|scientific\s+methods|stem\s+unit\s+[0-9]+\s+project)\b/i;
+      if (!recoverablePattern.test(recovered)) {
+        return "";
+      }
+
+      normalized = recovered;
+    }
+
     if (/\bclaim\s*,\s*evidence\s*,\s*reasoning\b/i.test(normalized)) {
-      normalized = normalized.replace(/\bC[1I][T7][1I]\b/g, "CER");
+      normalized = normalized.replace(/\bC[1I][T7][1I]\b/gi, "CER");
+      normalized = normalized.replace(/^\s*(?:[A-Z0-9]{1,3}\s+)?(Claim\s*,\s*Evidence\s*,\s*Reasoning\b)/i, "CER $1");
       if (!/^\s*CER\b/i.test(normalized)) {
         normalized = normalized.replace(/^(\s*)(Claim\s*,\s*Evidence\s*,\s*Reasoning\b)/i, "$1CER $2");
       }
     }
 
-    if (/\bgo\s+further\b/i.test(normalized) && /\bdata\s+analysis\s+lab\b/i.test(normalized)) {
+    if (/\bgo\s+further\b/i.test(normalized) && /\bdata\s+analysis(?:\s+lab)?\b/i.test(normalized)) {
       if (!/^\s*SEP\b/i.test(normalized)) {
-        normalized = normalized.replace(/^(\s*)(Go\s+Further\b)/i, "$1SEP $2");
+        normalized = normalized.replace(/^\s*(?:[A-Z0-9]{1,3}\s+)?(Go\s+Further\b)/i, "SEP $1");
       }
     }
+
+    normalized = normalized.replace(/\bmodule\s+wrap\s*[-–—]?\s*up\b/gi, "Module Wrap-Up");
 
     return normalized;
   };

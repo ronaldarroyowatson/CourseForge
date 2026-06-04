@@ -34,6 +34,9 @@
 			"label": "Start MemPalace MCP Server",
 			"type": "shell",
 			"command": "node scripts/mempalace-startup-check.mjs && mempalace mcp",
+			"runOptions": {
+				"runOn": "folderOpen"
+			},
 			"isBackground": true,
 			"presentation": {
 				"reveal": "never",
@@ -250,6 +253,12 @@
 			"label": "rerun secure cloud smoke for auth diagnosis",
 			"type": "shell",
 			"command": "npm run test:smoke:ocr:cloud:secure",
+			"group": "test"
+		},
+		{
+			"label": "gh run status check",
+			"type": "shell",
+			"command": "export PATH=\"$HOME/.local/bin:$PATH\" && gh run view 26929903395 --json status,conclusion,url,displayTitle,createdAt,updatedAt",
 			"group": "test"
 		}
 	],

@@ -1298,6 +1298,7 @@ export function AutoTextbookSetupFlow({
   const pendingHelperActionRef = useRef<AutoPrimaryHelperAction | null>(null);
   const pendingHelperAnchorRef = useRef<{ x: number; y: number } | null>(null);
   const [isRunningOcr, setIsRunningOcr] = useState(false);
+  const [ocrProgressMessage, setOcrProgressMessage] = useState("Analyzing image - OCR is reading your page. This usually takes a few seconds...");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [ocrProviderStatus, setOcrProviderStatus] = useState<string | null>(null);
@@ -2554,6 +2555,7 @@ export function AutoTextbookSetupFlow({
       let pipelineResult: MetadataPipelineResult | null = null;
 
       if (targetStep === "cover" || targetStep === "title") {
+        setOcrProgressMessage("Analyzing image - OCR is reading your page. This usually takes a few seconds...");
         setIsRunningOcr(true);
         emitAutoFlowDiagnostic("metadata_pipeline_started", {
           traceId,
@@ -2591,6 +2593,7 @@ export function AutoTextbookSetupFlow({
         ocrProviderStatusMessage = `Metadata source: ${pipelineResult.result.source}${ocrProviderId ? ` (OCR: ${ocrProviderId})` : ""}`;
         lastCapturedOcrByStepRef.current[targetStep] = ocrText;
       } else {
+        setOcrProgressMessage("Analyzing image - OCR is reading your TOC capture. This usually takes a few seconds...");
         setIsRunningOcr(true);
         emitAutoFlowDiagnostic("toc_ocr_started", {
           traceId,
@@ -2828,6 +2831,7 @@ export function AutoTextbookSetupFlow({
         },
       });
 
+      setOcrProgressMessage("Analyzing image - OCR is reading your page. This usually takes a few seconds...");
       setIsRunningOcr(true);
       const pipelineResult = await extractMetadataWithOcrFallbackFromDataUrl(dataUrl, {
         pageType: targetStep,
@@ -3157,15 +3161,37 @@ export function AutoTextbookSetupFlow({
     }
 
     let selectedTocText = captured.ocrText;
+    let selectedProviderId = captured.ocrProviderId;
+    let rescueApplied = false;
     const primaryNoiseScore = scoreTocNoise(selectedTocText);
-    if (primaryNoiseScore >= 0.55) {
+    const primarySanitized = sanitizeTocDraftText(selectedTocText);
+    const primaryParsed = parseTocFromOcrText(primarySanitized);
+    const primaryMissingChapterStarts = primaryParsed.chapters.some((chapter) => typeof chapter.pageStart !== "number");
+    const countTocEntries = (result: ParsedTocResult): number => result.chapters.reduce((sum, chapter) => sum + 1 + chapter.sections.length, 0);
+    const shouldAttemptRescue = primaryNoiseScore >= 0.45
+      || primaryParsed.confidence < 0.9
+      || primaryMissingChapterStarts;
+
+    if (shouldAttemptRescue) {
       try {
+        setOcrProgressMessage("Analyzing image - noisy TOC text detected, rescanning for cleaner text...");
+        setIsRunningOcr(true);
         const rescue = await extractTextFromImageWithFallback(captured.imageDataUrl, {
           providerOrder: TOC_RESCUE_PROVIDER_ORDER,
         });
         const rescueNoiseScore = scoreTocNoise(rescue.text);
-        if (rescueNoiseScore < primaryNoiseScore) {
+        const rescueSanitized = sanitizeTocDraftText(rescue.text);
+        const rescueParsed = parseTocFromOcrText(rescueSanitized);
+        const rescueMissingChapterStarts = rescueParsed.chapters.some((chapter) => typeof chapter.pageStart !== "number");
+        const rescueLooksStronger = rescueNoiseScore < primaryNoiseScore
+          || rescueParsed.confidence > primaryParsed.confidence
+          || countTocEntries(rescueParsed) > countTocEntries(primaryParsed)
+          || (primaryMissingChapterStarts && !rescueMissingChapterStarts);
+
+        if (rescueLooksStronger) {
           selectedTocText = rescue.text;
+          selectedProviderId = rescue.providerId;
+          rescueApplied = true;
           appendDebugLogEntry({
             eventType: "warning",
             message: "TOC OCR rescue path selected cleaner text.",
@@ -3175,11 +3201,17 @@ export function AutoTextbookSetupFlow({
               rescueProviderId: rescue.providerId,
               primaryNoiseScore,
               rescueNoiseScore,
+              primaryConfidence: primaryParsed.confidence,
+              rescueConfidence: rescueParsed.confidence,
+              primaryMissingChapterStarts,
+              rescueMissingChapterStarts,
             },
           });
         }
       } catch {
         // Best effort rescue path.
+      } finally {
+        setIsRunningOcr(false);
       }
     }
 
@@ -3204,15 +3236,18 @@ export function AutoTextbookSetupFlow({
     setRawOcrText(selectedTocText);
     setOcrDraft(mergedTocText);
     setTocCaptureImageDataUrl(stitchedTocImage);
+    setOcrProviderStatus(rescueApplied
+      ? `OCR provider: ${selectedProviderId} (rescanned due to noisy text)`
+      : `OCR provider: ${selectedProviderId}`);
     setStep("toc");
     applyTocFromText(mergedTocText);
 
     if (novelEntries > 0) {
-      setInfoMessage(`TOC capture added and overlap-stitched. ${novelEntries} new TOC entries were detected. (OCR: ${captured.ocrProviderId})`);
+      setInfoMessage(`TOC capture added and overlap-stitched. ${novelEntries} new TOC entries were detected. (OCR: ${selectedProviderId}${rescueApplied ? ", auto-rescanned" : ""})`);
       return;
     }
 
-    setInfoMessage(`TOC capture overlap-stitched, but no new TOC entries were detected. Try moving further before the next capture. (OCR: ${captured.ocrProviderId})`);
+    setInfoMessage(`TOC capture overlap-stitched, but no new TOC entries were detected. Try moving further before the next capture. (OCR: ${selectedProviderId}${rescueApplied ? ", auto-rescanned" : ""})`);
   }
 
   function countNovelTocEntries(base: ParsedTocResult, incoming: ParsedTocResult): number {
@@ -3987,7 +4022,7 @@ export function AutoTextbookSetupFlow({
       {isRunningOcr ? (
         <div className="ocr-loading-banner" role="status" aria-live="polite">
           <span className="ocr-loading-spinner" aria-hidden="true" />
-          <span className="ocr-loading-text">Analyzing image {"\u2014"} OCR is reading your page. This usually takes a few seconds&hellip;</span>
+          <span className="ocr-loading-text">{ocrProgressMessage}</span>
         </div>
       ) : null}
 

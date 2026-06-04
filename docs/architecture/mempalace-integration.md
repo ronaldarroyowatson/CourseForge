@@ -68,6 +68,21 @@ MemPalace startup now runs a repository change check before launching the MCP se
 
 This keeps MemPalace startup aware of repository drift without coupling app runtime startup to MemPalace availability.
 
+## No-Gemini Operation Mode
+
+When `GEMINI_API_KEY` is not configured, use payload-only memory persistence.
+
+1. Use `npm run mempalace:store:no-gemini -- <prompt.txt> <payload.json>` to store session memory without requiring image generation success.
+2. Use `mempalace recover <short_id>` to restore memory.
+3. Use `mempalace scan <qr.png>` for QR-driven recovery when a QR exists.
+4. Avoid `mempalace store <prompt> <payload>` in this mode, because it attempts Gemini image generation and fails without an API key.
+
+Workspace shortcuts are available via npm scripts:
+
+1. `npm run mempalace:store:no-gemini -- <prompt.txt> <payload.json>`
+2. `npm run mempalace:recover -- <short_id>`
+3. `npm run mempalace:scan -- <qr.png>`
+
 ## Auditability
 
 Every memory record must be deterministic and attributable to a specific change set. This ensures maintainers can reconstruct architecture evolution without relying on ephemeral chat context.

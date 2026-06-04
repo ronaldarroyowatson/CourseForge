@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-  "version": "1.7.90",
+  "version": "1.7.93",
   "private": true,
   "type": "module",
   "engines": {
@@ -28,6 +28,9 @@
     "test:samples:validate": "node scripts/validate-test-samples.mjs",
     "program": "node scripts/program-cli.mjs",
     "courseforge": "node scripts/program-cli.mjs",
+    "mempalace:store:no-gemini": "node scripts/mempalace-store-no-gemini.mjs",
+    "mempalace:recover": "mempalace recover",
+    "mempalace:scan": "mempalace scan",
     "test:core": "tsx tests/core/runCoreTests.ts",
     "test:unit": "vitest run tests/core",
     "test:integration": "vitest run tests/integration",

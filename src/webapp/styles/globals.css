@@ -5394,6 +5394,19 @@ button:not(:disabled):active {
   overflow: hidden;
 }
 
+.cf-countdown-ring--compact {
+  padding: 0.55rem 0.6rem;
+  gap: 0.3rem;
+}
+
+.cf-countdown-ring--compact .cf-countdown-ring__center-value {
+  font-size: 0.96rem;
+}
+
+.cf-countdown-ring--compact .cf-countdown-ring__label {
+  font-size: 0.62rem;
+}
+
 .cf-countdown-ring__visual {
   position: relative;
   display: grid;
@@ -5543,6 +5556,7 @@ button:not(:disabled):active {
 .cf-quota-right {
   display: grid;
   gap: 0.75rem;
+  align-content: start;
 }
 
 .cf-quota-right__items {
@@ -5574,6 +5588,52 @@ button:not(:disabled):active {
   background: var(--bg-panel);
   border: 1px solid var(--border-default);
   border-radius: 8px;
+}
+
+.cf-quota-item--github-service {
+  gap: 0.55rem;
+}
+
+.cf-quota-item--github-standalone {
+  padding: 0.75rem;
+}
+
+.cf-github-service-layout {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: start;
+}
+
+.cf-github-service-layout__timers {
+  display: grid;
+  gap: 0.55rem;
+  align-content: start;
+}
+
+.cf-github-service-layout__metrics {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.cf-quota-meta-row--chips {
+  padding: 0.4rem 0.5rem;
+  gap: 0.35rem 0.45rem;
+}
+
+.cf-quota-rings-grid--github {
+  gap: 0.5rem;
+}
+
+@media (max-width: 1150px) {
+  .cf-github-service-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .cf-github-service-layout__timers {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
 }
 
 .cf-quota-item h4 {

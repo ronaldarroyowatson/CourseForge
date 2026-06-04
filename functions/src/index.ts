@@ -4,6 +4,7 @@ import { CosmosClient, type Container } from "@azure/cosmos";
 import * as admin from "firebase-admin";
 import { defineSecret } from "firebase-functions/params";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import type { CallableOptions } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import {
   analyzeDocumentQuality,
@@ -95,6 +96,7 @@ interface AdminUserRecord {
   isSuperAdmin?: boolean;
   schoolId?: string | null;
   schoolName?: string | null;
+  districtId?: string | null;
   districtName?: string | null;
   isContentBlocked?: boolean;
   contentBlockReason?: string | null;
@@ -103,6 +105,7 @@ interface AdminUserRecord {
 interface SchoolDirectoryRow {
   schoolId: string;
   schoolName: string;
+  districtId?: string | null;
   districtName?: string | null;
   memberCount: number;
 }
@@ -115,6 +118,7 @@ interface SchoolUserRow {
   isSchoolAdmin: boolean;
   schoolId?: string | null;
   schoolName?: string | null;
+  districtId?: string | null;
   districtName?: string | null;
   lastLoginAt?: string | null;
 }
@@ -138,6 +142,7 @@ interface SchoolInviteRow {
   email: string;
   schoolId: string;
   schoolName: string;
+  districtId?: string | null;
   districtName?: string | null;
   invitedByUid: string;
   invitedByEmail?: string | null;
@@ -148,6 +153,7 @@ interface SchoolInviteRow {
 interface SchoolDashboardResult {
   schoolId: string;
   schoolName: string;
+  districtId?: string | null;
   districtName?: string | null;
   users: SchoolUserRow[];
   textbooks: SchoolTextbookRow[];
@@ -161,6 +167,7 @@ interface PromotionRequestRow {
   displayName: string;
   schoolId: string;
   schoolName: string;
+  districtId?: string | null;
   districtName?: string | null;
   reason?: string | null;
   status: "pending" | "approved" | "rejected";
@@ -1024,33 +1031,35 @@ async function probeCloudOcrProvider(runtime: CloudOcrProviderRuntime): Promise<
     };
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => {
-    controller.abort();
-  }, 6500);
-
   try {
     details.providerRequestPrepared = true;
     details.providerRequestSent = true;
-    const response = await fetch(runtime.endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${runtime.apiKey}`,
-        ...(runtime.headers ?? {}),
+    const response = await resilientFetch({
+      providerKey: runtime.id,
+      url: runtime.endpoint,
+      timeoutMs: 6500,
+      maxAttempts: 2,
+      baseDelayMs: 450,
+      rateLimit: PROVIDER_RATE_LIMITS[runtime.id],
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${runtime.apiKey}`,
+          ...(runtime.headers ?? {}),
+        },
+        body: JSON.stringify({
+          model: runtime.model,
+          messages: [
+            {
+              role: "user",
+              content: "Respond with: ok",
+            },
+          ],
+          max_tokens: 4,
+          temperature: 0,
+        }),
       },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: runtime.model,
-        messages: [
-          {
-            role: "user",
-            content: "Respond with: ok",
-          },
-        ],
-        max_tokens: 4,
-        temperature: 0,
-      }),
     });
 
     details.providerResponseReceived = true;
@@ -1178,8 +1187,6 @@ async function probeCloudOcrProvider(runtime: CloudOcrProviderRuntime): Promise<
       retryAfterSeconds: null,
       details,
     };
-  } finally {
-    clearTimeout(timeoutId);
   }
 }
 
@@ -1450,6 +1457,161 @@ function normalizeSchoolId(raw: string): string {
     .slice(0, 80);
 }
 
+function normalizeDistrictId(raw: string): string {
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+const DEFAULT_CALLABLE_CORS: Array<string | RegExp> = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://courseforge.app",
+  "https://www.courseforge.app",
+  /^chrome-extension:\/\/[a-p]{32}$/,
+];
+
+const CALLABLE_RATE_LIMIT_WINDOW_SECONDS = 60;
+const CALLABLE_RATE_LIMIT_MAX_REQUESTS = 120;
+
+function sanitizePlainText(value: unknown, maxLength = 512): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmed = value.trim().slice(0, maxLength);
+  return trimmed
+    .replace(/<\/?script[^>]*>/gi, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+}
+
+function requireNonEmptyText(value: unknown, fieldName: string, maxLength = 512): string {
+  const sanitized = sanitizePlainText(value, maxLength);
+  if (!sanitized) {
+    throw new HttpsError("invalid-argument", `${fieldName} is required.`);
+  }
+  return sanitized;
+}
+
+function sanitizeEmail(value: unknown): string {
+  const email = sanitizePlainText(value, 254).toLowerCase();
+  if (!email) {
+    return "";
+  }
+
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return valid ? email : "";
+}
+
+function uidFromValue(value: unknown): string {
+  const uid = sanitizePlainText(value, 128);
+  return /^[A-Za-z0-9:_-]{6,128}$/.test(uid) ? uid : "";
+}
+
+function resolveCallableCors(existing: unknown): unknown {
+  if (existing === false || existing === true) {
+    return existing;
+  }
+
+  if (typeof existing === "string" || existing instanceof RegExp) {
+    return existing;
+  }
+
+  if (Array.isArray(existing) && existing.length > 0) {
+    return existing;
+  }
+
+  const csv = typeof process.env.COURSEFORGE_CALLABLE_CORS_ORIGINS === "string"
+    ? process.env.COURSEFORGE_CALLABLE_CORS_ORIGINS
+    : "";
+
+  const fromEnv = csv
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (fromEnv.length > 0) {
+    return [...fromEnv, /^chrome-extension:\/\/[a-p]{32}$/];
+  }
+
+  return DEFAULT_CALLABLE_CORS;
+}
+
+function getRequestIdentity(request: { auth?: { uid?: string | null } | null; rawRequest?: { ip?: string; headers?: Record<string, unknown> } }): string {
+  const uid = typeof request.auth?.uid === "string" ? request.auth.uid.trim() : "";
+  if (uid) {
+    return `uid:${uid}`;
+  }
+
+  const forwarded = request.rawRequest?.headers?.["x-forwarded-for"];
+  const forwardedValue = Array.isArray(forwarded)
+    ? String(forwarded[0] ?? "")
+    : typeof forwarded === "string"
+      ? forwarded
+      : "";
+  const ip = forwardedValue.split(",")[0]?.trim()
+    || request.rawRequest?.ip?.trim()
+    || "unknown";
+  return `ip:${ip}`;
+}
+
+async function enforceCallableRateLimit(request: { auth?: { uid?: string | null } | null; rawRequest?: { ip?: string; headers?: Record<string, unknown> } }, functionName: string): Promise<void> {
+  const now = Date.now();
+  const windowStartMs = now - (now % (CALLABLE_RATE_LIMIT_WINDOW_SECONDS * 1000));
+  const identity = getRequestIdentity(request);
+  const rateKey = createHash("sha256").update(`${functionName}:${identity}:${windowStartMs}`).digest("hex");
+  const docRef = firestore.doc(`apiRateLimits/${functionName}_${rateKey}`);
+
+  const nextCount = await firestore.runTransaction(async (tx) => {
+    const snapshot = await tx.get(docRef);
+    const current = snapshot.exists && typeof snapshot.data()?.count === "number"
+      ? Math.max(0, Math.floor(snapshot.data()!.count))
+      : 0;
+    const updated = current + 1;
+
+    tx.set(docRef, {
+      functionName,
+      identity,
+      count: updated,
+      windowStartMs,
+      windowSeconds: CALLABLE_RATE_LIMIT_WINDOW_SECONDS,
+      updatedAt: new Date(now).toISOString(),
+      expiresAtMs: windowStartMs + (CALLABLE_RATE_LIMIT_WINDOW_SECONDS * 2 * 1000),
+    }, { merge: true });
+
+    return updated;
+  });
+
+  if (nextCount > CALLABLE_RATE_LIMIT_MAX_REQUESTS) {
+    throw new HttpsError("resource-exhausted", "Rate limit reached. Please retry shortly.");
+  }
+}
+
+function guardedOnCall(
+  functionName: string,
+  optionsOrHandler: Record<string, unknown> | ((request: any) => Promise<unknown> | unknown),
+  maybeHandler?: (request: any) => Promise<unknown> | unknown,
+) {
+  const handler = typeof optionsOrHandler === "function" ? optionsOrHandler : maybeHandler;
+  if (!handler) {
+    throw new Error(`guardedOnCall misconfigured for ${functionName}`);
+  }
+
+  const options = typeof optionsOrHandler === "function" ? {} : optionsOrHandler;
+  const nextOptions = {
+    ...options,
+    cors: resolveCallableCors(options.cors),
+  };
+
+  return onCall(nextOptions as CallableOptions, async (request) => {
+    await enforceCallableRateLimit(request, functionName);
+    return handler(request);
+  });
+}
+
 function toIsoString(value: unknown): string | null {
   if (value instanceof admin.firestore.Timestamp) {
     return value.toDate().toISOString();
@@ -1468,6 +1630,7 @@ const WEEKLY_BASELINE_MULTIPLIER = 2.7;
 const MONTHLY_LIMIT_PERCENT = 100;
 const AI_PROVIDER_POLICY_DOC_PATH = "config/aiProviderPolicy";
 const AI_SAFETY_POLICY_DOC_PATH = "config/aiSafetyPolicy";
+const AI_CONNECTIVITY_POLICY_DOC_PATH = "config/aiConnectivityPolicy";
 const AI_PROVIDER_STATUS_DOC_PATH = "config/aiProviderStatus";
 const DEBUG_POLICY_DOC_PATH = "config/debugLoggingPolicy";
 const METADATA_CORRECTION_RULES_DOC_PATH = "config/metadataCorrectionRules";
@@ -2333,9 +2496,17 @@ async function resolveServiceUsageProjectResource(projectId: string, accessToken
   }
 
   try {
-    const response = await fetch(`https://cloudresourcemanager.googleapis.com/v1/projects/${projectId}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
+    const response = await resilientFetch({
+      providerKey: "google_cloud_resource_manager",
+      url: `https://cloudresourcemanager.googleapis.com/v1/projects/${projectId}`,
+      timeoutMs: 10000,
+      maxAttempts: 2,
+      baseDelayMs: 350,
+      rateLimit: PROVIDER_RATE_LIMITS.google_cloud_resource_manager,
+      init: {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
       },
     });
 
@@ -2590,6 +2761,392 @@ function parseRetryAfterSeconds(headers: Headers): number | null {
   }
 
   return Math.max(1, Math.ceil(deltaMs / 1000));
+}
+
+interface ExternalProviderRateLimitConfig {
+  maxRequests: number;
+  windowSeconds: number;
+}
+
+interface ExternalProviderPolicyRow extends ExternalProviderRateLimitConfig {
+  circuitFailureThreshold: number;
+  circuitOpenSeconds: number;
+}
+
+interface AiConnectivityPolicyRecord {
+  providers: Record<string, ExternalProviderPolicyRow>;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+interface ExternalCircuitState {
+  consecutiveFailures: number;
+  openUntilMs: number;
+  lastFailureReason: string | null;
+}
+
+interface ResilientFetchOptions {
+  providerKey: string;
+  url: string;
+  init: RequestInit;
+  timeoutMs?: number;
+  maxAttempts?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  rateLimit: ExternalProviderRateLimitConfig;
+}
+
+const externalCircuitBreakerState = new Map<string, ExternalCircuitState>();
+
+const EXTERNAL_PROVIDER_DEFAULT_BREAKER_OPEN_SECONDS = 30;
+const EXTERNAL_PROVIDER_FAILURE_THRESHOLD = 3;
+const EXTERNAL_PROVIDER_POLICY_CACHE_TTL_MS = 60_000;
+
+const PROVIDER_RATE_LIMITS: Record<string, ExternalProviderRateLimitConfig> = {
+  cloud_openai_vision: { maxRequests: 30, windowSeconds: 60 },
+  cloud_github_models_vision: { maxRequests: 20, windowSeconds: 60 },
+  openai_document_content: { maxRequests: 20, windowSeconds: 60 },
+  openai_tiered_variations: { maxRequests: 20, windowSeconds: 60 },
+  openai_design_suggestions: { maxRequests: 20, windowSeconds: 60 },
+  openai_image_metadata: { maxRequests: 20, windowSeconds: 60 },
+  conversion_api: { maxRequests: 20, windowSeconds: 60 },
+  google_cloud_resource_manager: { maxRequests: 20, windowSeconds: 60 },
+  google_service_usage: { maxRequests: 20, windowSeconds: 60 },
+};
+
+let aiConnectivityPolicyCache: { policy: AiConnectivityPolicyRecord; expiresAtMs: number } | null = null;
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function getExternalCircuitState(providerKey: string): ExternalCircuitState {
+  const existing = externalCircuitBreakerState.get(providerKey);
+  if (existing) {
+    return existing;
+  }
+
+  const initial: ExternalCircuitState = {
+    consecutiveFailures: 0,
+    openUntilMs: 0,
+    lastFailureReason: null,
+  };
+  externalCircuitBreakerState.set(providerKey, initial);
+  return initial;
+}
+
+function assertExternalCircuitClosed(providerKey: string): void {
+  const state = getExternalCircuitState(providerKey);
+  if (state.openUntilMs > Date.now()) {
+    const retryInSeconds = Math.max(1, Math.ceil((state.openUntilMs - Date.now()) / 1000));
+    throw new HttpsError(
+      "resource-exhausted",
+      `Circuit breaker open for ${providerKey}. Retry in about ${retryInSeconds}s.`,
+      {
+        providerKey,
+        reasonCode: "circuit_open",
+        retryAfterSeconds: retryInSeconds,
+        lastFailureReason: state.lastFailureReason,
+      }
+    );
+  }
+}
+
+function defaultProviderPolicyFor(providerKey: string, fallback: ExternalProviderRateLimitConfig): ExternalProviderPolicyRow {
+  return {
+    maxRequests: Math.max(1, Math.floor(fallback.maxRequests)),
+    windowSeconds: Math.max(1, Math.floor(fallback.windowSeconds)),
+    circuitFailureThreshold: EXTERNAL_PROVIDER_FAILURE_THRESHOLD,
+    circuitOpenSeconds: EXTERNAL_PROVIDER_DEFAULT_BREAKER_OPEN_SECONDS,
+  };
+}
+
+function buildDefaultAiConnectivityPolicyRecord(): AiConnectivityPolicyRecord {
+  const providers = Object.fromEntries(
+    Object.entries(PROVIDER_RATE_LIMITS).map(([providerKey, rateLimit]) => {
+      return [providerKey, defaultProviderPolicyFor(providerKey, rateLimit)];
+    })
+  );
+
+  return {
+    providers,
+    updatedBy: "system",
+    updatedAt: new Date(0).toISOString(),
+  };
+}
+
+function normalizeProviderPolicyRow(value: unknown, fallback: ExternalProviderPolicyRow): ExternalProviderPolicyRow {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+
+  const maxRequests = typeof record.maxRequests === "number"
+    ? Math.max(1, Math.floor(record.maxRequests))
+    : fallback.maxRequests;
+  const windowSeconds = typeof record.windowSeconds === "number"
+    ? Math.max(1, Math.floor(record.windowSeconds))
+    : fallback.windowSeconds;
+  const circuitFailureThreshold = typeof record.circuitFailureThreshold === "number"
+    ? Math.max(1, Math.floor(record.circuitFailureThreshold))
+    : fallback.circuitFailureThreshold;
+  const circuitOpenSeconds = typeof record.circuitOpenSeconds === "number"
+    ? Math.max(1, Math.floor(record.circuitOpenSeconds))
+    : fallback.circuitOpenSeconds;
+
+  return {
+    maxRequests,
+    windowSeconds,
+    circuitFailureThreshold,
+    circuitOpenSeconds,
+  };
+}
+
+function normalizeAiConnectivityPolicyRecord(value: unknown): AiConnectivityPolicyRecord {
+  const defaults = buildDefaultAiConnectivityPolicyRecord();
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const providersInput = record.providers && typeof record.providers === "object"
+    ? record.providers as Record<string, unknown>
+    : {};
+
+  const providers = Object.fromEntries(
+    Object.entries(defaults.providers).map(([providerKey, fallback]) => {
+      return [providerKey, normalizeProviderPolicyRow(providersInput[providerKey], fallback)];
+    })
+  );
+
+  return {
+    providers,
+    updatedBy: typeof record.updatedBy === "string" ? record.updatedBy : defaults.updatedBy,
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : defaults.updatedAt,
+  };
+}
+
+async function getAiConnectivityPolicyRecord(): Promise<AiConnectivityPolicyRecord> {
+  const now = Date.now();
+  if (aiConnectivityPolicyCache && aiConnectivityPolicyCache.expiresAtMs > now) {
+    return aiConnectivityPolicyCache.policy;
+  }
+
+  const docRef = firestore.doc(AI_CONNECTIVITY_POLICY_DOC_PATH);
+  const snapshot = await docRef.get();
+  const normalized = normalizeAiConnectivityPolicyRecord(snapshot.data());
+
+  if (!snapshot.exists) {
+    await docRef.set(normalized, { merge: true });
+  }
+
+  aiConnectivityPolicyCache = {
+    policy: normalized,
+    expiresAtMs: now + EXTERNAL_PROVIDER_POLICY_CACHE_TTL_MS,
+  };
+
+  return normalized;
+}
+
+async function getProviderResiliencePolicy(providerKey: string, fallbackRateLimit: ExternalProviderRateLimitConfig): Promise<ExternalProviderPolicyRow> {
+  const policy = await getAiConnectivityPolicyRecord();
+  const fallback = defaultProviderPolicyFor(providerKey, fallbackRateLimit);
+  return normalizeProviderPolicyRow(policy.providers[providerKey], fallback);
+}
+
+function recordExternalCircuitSuccess(providerKey: string): void {
+  const state = getExternalCircuitState(providerKey);
+  state.consecutiveFailures = 0;
+  state.openUntilMs = 0;
+  state.lastFailureReason = null;
+}
+
+function recordExternalCircuitFailure(
+  providerKey: string,
+  input: { retryAfterSeconds?: number | null; reason: string },
+  policy: ExternalProviderPolicyRow,
+): number | null {
+  const state = getExternalCircuitState(providerKey);
+  state.consecutiveFailures += 1;
+  state.lastFailureReason = input.reason;
+
+  const retryAfterSeconds = typeof input.retryAfterSeconds === "number" && input.retryAfterSeconds > 0
+    ? Math.max(1, Math.floor(input.retryAfterSeconds))
+    : null;
+
+  if (retryAfterSeconds !== null) {
+    state.openUntilMs = Date.now() + (retryAfterSeconds * 1000);
+    return state.openUntilMs;
+  }
+
+  if (state.consecutiveFailures >= policy.circuitFailureThreshold) {
+    state.openUntilMs = Date.now() + (policy.circuitOpenSeconds * 1000);
+    return state.openUntilMs;
+  }
+
+  return null;
+}
+
+async function assertDistributedCircuitClosed(providerKey: string): Promise<void> {
+  const snapshot = await firestore.doc(`externalApiCircuitBreakers/${providerKey}`).get();
+  if (!snapshot.exists) {
+    return;
+  }
+
+  const openUntilMs = typeof snapshot.data()?.openUntilMs === "number"
+    ? Math.max(0, Math.floor(snapshot.data()!.openUntilMs))
+    : 0;
+
+  if (openUntilMs <= Date.now()) {
+    return;
+  }
+
+  const retryAfterSeconds = Math.max(1, Math.ceil((openUntilMs - Date.now()) / 1000));
+  throw new HttpsError(
+    "resource-exhausted",
+    `Distributed circuit breaker open for ${providerKey}. Retry in about ${retryAfterSeconds}s.`,
+    {
+      providerKey,
+      reasonCode: "distributed_circuit_open",
+      retryAfterSeconds,
+    }
+  );
+}
+
+async function openDistributedCircuit(providerKey: string, openUntilMs: number, reason: string): Promise<void> {
+  await firestore.doc(`externalApiCircuitBreakers/${providerKey}`).set({
+    providerKey,
+    openUntilMs,
+    reason,
+    updatedAt: new Date().toISOString(),
+  }, { merge: true });
+}
+
+async function enforceExternalProviderRateLimit(providerKey: string, config: ExternalProviderRateLimitConfig): Promise<void> {
+  const now = Date.now();
+  const windowMs = config.windowSeconds * 1000;
+  const windowStartMs = now - (now % windowMs);
+  const rateKey = createHash("sha256").update(`${providerKey}:${windowStartMs}`).digest("hex");
+  const docRef = firestore.doc(`externalApiRateLimits/${providerKey}_${rateKey}`);
+
+  const nextCount = await firestore.runTransaction(async (tx) => {
+    const snapshot = await tx.get(docRef);
+    const current = snapshot.exists && typeof snapshot.data()?.count === "number"
+      ? Math.max(0, Math.floor(snapshot.data()!.count))
+      : 0;
+    const updated = current + 1;
+
+    tx.set(docRef, {
+      providerKey,
+      count: updated,
+      windowStartMs,
+      windowSeconds: config.windowSeconds,
+      updatedAt: new Date(now).toISOString(),
+      expiresAtMs: windowStartMs + (config.windowSeconds * 2 * 1000),
+    }, { merge: true });
+
+    return updated;
+  });
+
+  if (nextCount > config.maxRequests) {
+    throw new HttpsError("resource-exhausted", `${providerKey} rate limit reached. Please retry shortly.`);
+  }
+}
+
+function computeRetryDelayMs(attempt: number, baseDelayMs: number, maxDelayMs: number, retryAfterSeconds?: number | null): number {
+  if (typeof retryAfterSeconds === "number" && retryAfterSeconds > 0) {
+    return Math.min(maxDelayMs, Math.max(250, retryAfterSeconds * 1000));
+  }
+
+  const expDelay = Math.min(maxDelayMs, baseDelayMs * (2 ** Math.max(0, attempt - 1)));
+  const jitter = Math.floor(Math.random() * Math.max(100, Math.floor(expDelay * 0.4)));
+  return expDelay + jitter;
+}
+
+function isRetriableStatus(status: number): boolean {
+  return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+}
+
+async function resilientFetch(options: ResilientFetchOptions): Promise<Response> {
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+  const baseDelayMs = Math.max(100, options.baseDelayMs ?? 400);
+  const maxDelayMs = Math.max(baseDelayMs, options.maxDelayMs ?? 12_000);
+  const timeoutMs = Math.max(2_000, options.timeoutMs ?? 30_000);
+  const providerPolicy = await getProviderResiliencePolicy(options.providerKey, options.rateLimit);
+
+  await assertDistributedCircuitClosed(options.providerKey);
+  assertExternalCircuitClosed(options.providerKey);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    await enforceExternalProviderRateLimit(options.providerKey, {
+      maxRequests: providerPolicy.maxRequests,
+      windowSeconds: providerPolicy.windowSeconds,
+    });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(options.url, {
+        ...options.init,
+        signal: controller.signal,
+      });
+
+      if (response.ok) {
+        recordExternalCircuitSuccess(options.providerKey);
+        return response;
+      }
+
+      if (!isRetriableStatus(response.status) || attempt >= maxAttempts) {
+        if (response.status === 429) {
+          const retryAfterSeconds = parseRetryAfterSeconds(response.headers);
+          const openedUntilMs = recordExternalCircuitFailure(options.providerKey, {
+            retryAfterSeconds,
+            reason: `http_${response.status}`,
+          }, providerPolicy);
+          if (openedUntilMs && openedUntilMs > Date.now()) {
+            await openDistributedCircuit(options.providerKey, openedUntilMs, `http_${response.status}`);
+          }
+        } else if (response.status >= 500) {
+          const openedUntilMs = recordExternalCircuitFailure(options.providerKey, {
+            reason: `http_${response.status}`,
+          }, providerPolicy);
+          if (openedUntilMs && openedUntilMs > Date.now()) {
+            await openDistributedCircuit(options.providerKey, openedUntilMs, `http_${response.status}`);
+          }
+        }
+        return response;
+      }
+
+      const retryAfterSeconds = response.status === 429 ? parseRetryAfterSeconds(response.headers) : null;
+      const openedUntilMs = recordExternalCircuitFailure(options.providerKey, {
+        retryAfterSeconds,
+        reason: `http_${response.status}`,
+      }, providerPolicy);
+      if (openedUntilMs && openedUntilMs > Date.now()) {
+        await openDistributedCircuit(options.providerKey, openedUntilMs, `http_${response.status}`);
+      }
+
+      const delayMs = computeRetryDelayMs(attempt, baseDelayMs, maxDelayMs, retryAfterSeconds);
+      await sleepMs(delayMs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isAbort = message.toLowerCase().includes("abort");
+
+      const openedUntilMs = recordExternalCircuitFailure(options.providerKey, {
+        reason: isAbort ? "timeout" : "network_error",
+      }, providerPolicy);
+      if (openedUntilMs && openedUntilMs > Date.now()) {
+        await openDistributedCircuit(options.providerKey, openedUntilMs, isAbort ? "timeout" : "network_error");
+      }
+
+      if (attempt >= maxAttempts) {
+        throw error;
+      }
+
+      const delayMs = computeRetryDelayMs(attempt, baseDelayMs, maxDelayMs);
+      await sleepMs(delayMs);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  throw new HttpsError("internal", `Failed to execute ${options.providerKey} request after retries.`);
 }
 
 function deriveUsedPercent(limit: number | null, remaining: number | null): number | null {
@@ -3170,6 +3727,7 @@ function toAdminUserRecord(snapshot: FirebaseFirestore.QueryDocumentSnapshot): A
     isSuperAdmin: data.isSuperAdmin === true,
     schoolId: typeof data.schoolId === "string" ? data.schoolId : null,
     schoolName: typeof data.schoolName === "string" ? data.schoolName : null,
+    districtId: typeof data.districtId === "string" ? data.districtId : null,
     districtName: typeof data.districtName === "string" ? data.districtName : null,
     isContentBlocked: data.isContentBlocked === true,
     contentBlockReason: typeof data.contentBlockReason === "string" ? data.contentBlockReason : null,
@@ -3232,11 +3790,11 @@ function buildModerationItem(
   };
 }
 
-export const setUserAdminStatus = onCall(async (request) => {
+export const setUserAdminStatus = guardedOnCall("setUserAdminStatus", async (request) => {
   assertAdmin(request.auth);
 
   const data = request.data;
-  const uid = typeof data?.uid === "string" ? data.uid.trim() : "";
+  const uid = uidFromValue(data?.uid);
   const isAdmin = data?.isAdmin === true;
 
   if (!uid) {
@@ -3271,15 +3829,13 @@ export const setUserAdminStatus = onCall(async (request) => {
   return success(message, message);
 });
 
-export const setUserContentBlockStatus = onCall(async (request) => {
+export const setUserContentBlockStatus = guardedOnCall("setUserContentBlockStatus", async (request) => {
   assertAdmin(request.auth);
 
   const data = request.data;
-  const uid = typeof data?.uid === "string" ? data.uid.trim() : "";
+  const uid = uidFromValue(data?.uid);
   const isContentBlocked = data?.isContentBlocked === true;
-  const contentBlockReason = typeof data?.contentBlockReason === "string"
-    ? data.contentBlockReason.trim()
-    : "";
+  const contentBlockReason = sanitizePlainText(data?.contentBlockReason, 512);
 
   if (!uid) {
     throw new HttpsError("invalid-argument", "A user id is required.");
@@ -3320,7 +3876,7 @@ export const setUserContentBlockStatus = onCall(async (request) => {
   return success(message, message);
 });
 
-export const listAdminUsers = onCall(async (request) => {
+export const listAdminUsers = guardedOnCall("listAdminUsers", async (request) => {
   assertAdmin(request.auth);
 
   const snapshot = await firestore.collection("users").orderBy("email").get();
@@ -3346,10 +3902,10 @@ export const listAdminUsers = onCall(async (request) => {
   return success("Loaded users.", merged);
 });
 
-export const listSchoolDirectory = onCall(async (request) => {
+export const listSchoolDirectory = guardedOnCall("listSchoolDirectory", async (request) => {
   assertSignedIn(request.auth);
 
-  const query = typeof request.data?.query === "string" ? request.data.query.trim().toLowerCase() : "";
+  const query = sanitizePlainText(request.data?.query, 120).toLowerCase();
   const snapshot = await firestore.collection("schools").orderBy("schoolName").limit(120).get();
   const rows = snapshot.docs
     .map((docSnap): SchoolDirectoryRow => {
@@ -3357,6 +3913,7 @@ export const listSchoolDirectory = onCall(async (request) => {
       return {
         schoolId: docSnap.id,
         schoolName: typeof data.schoolName === "string" ? data.schoolName : docSnap.id,
+        districtId: typeof data.districtId === "string" ? data.districtId : null,
         districtName: typeof data.districtName === "string" ? data.districtName : null,
         memberCount: typeof data.memberCount === "number" ? data.memberCount : 0,
       };
@@ -3368,19 +3925,17 @@ export const listSchoolDirectory = onCall(async (request) => {
   return success("Loaded school directory.", rows);
 });
 
-export const setUserSchoolAffiliation = onCall(async (request) => {
+export const setUserSchoolAffiliation = guardedOnCall("setUserSchoolAffiliation", async (request) => {
   assertSignedIn(request.auth);
 
   const uid = request.auth.uid;
-  const schoolName = typeof request.data?.schoolName === "string" ? request.data.schoolName.trim() : "";
-  const districtName = typeof request.data?.districtName === "string" ? request.data.districtName.trim() : "";
-  const requestedSchoolId = typeof request.data?.schoolId === "string" ? request.data.schoolId.trim() : "";
-
-  if (!schoolName) {
-    throw new HttpsError("invalid-argument", "School name is required.");
-  }
+  const schoolName = requireNonEmptyText(request.data?.schoolName, "School name", 180);
+  const districtName = sanitizePlainText(request.data?.districtName, 180);
+  const requestedDistrictId = sanitizePlainText(request.data?.districtId, 120);
+  const requestedSchoolId = sanitizePlainText(request.data?.schoolId, 120);
 
   const schoolId = normalizeSchoolId(requestedSchoolId || schoolName);
+  const districtId = normalizeDistrictId(requestedDistrictId || districtName);
   if (!schoolId) {
     throw new HttpsError("invalid-argument", "Unable to normalize school id from school name.");
   }
@@ -3394,6 +3949,7 @@ export const setUserSchoolAffiliation = onCall(async (request) => {
     {
       schoolId,
       schoolName,
+      districtId: districtId || null,
       districtName: districtName || null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
@@ -3406,6 +3962,7 @@ export const setUserSchoolAffiliation = onCall(async (request) => {
       uid,
       schoolId,
       schoolName,
+      districtId: districtId || null,
       districtName: districtName || null,
       isSchoolAdmin: shouldAssignSchoolAdmin,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -3416,6 +3973,11 @@ export const setUserSchoolAffiliation = onCall(async (request) => {
   const userRecord = await auth.getUser(uid);
   const claims = { ...(userRecord.customClaims ?? {}) } as Record<string, unknown>;
   claims.schoolId = schoolId;
+  if (districtId) {
+    claims.districtId = districtId;
+  } else {
+    delete claims.districtId;
+  }
   if (shouldAssignSchoolAdmin) {
     claims.schoolAdmin = true;
   }
@@ -3433,6 +3995,7 @@ export const setUserSchoolAffiliation = onCall(async (request) => {
   return success("School affiliation saved.", {
     schoolId,
     schoolName,
+    districtId: districtId || null,
     districtName: districtName || null,
     assignedSchoolAdmin: shouldAssignSchoolAdmin,
   });
@@ -3441,17 +4004,29 @@ export const setUserSchoolAffiliation = onCall(async (request) => {
 function resolveSchoolIdForRequest(authData: { uid?: string; token?: Record<string, unknown> } | null | undefined, requestedSchoolId: unknown): string {
   const schoolIdFromInput = typeof requestedSchoolId === "string" ? requestedSchoolId.trim() : "";
   const schoolIdFromClaim = typeof authData?.token?.schoolId === "string" ? String(authData.token.schoolId).trim() : "";
-  const schoolId = schoolIdFromInput || schoolIdFromClaim;
+  const schoolId = schoolIdFromClaim || schoolIdFromInput;
   if (!schoolId) {
     throw new HttpsError("failed-precondition", "No school is associated with this account yet.");
   }
+
+  if (authData?.token?.schoolAdmin === true && schoolIdFromInput && schoolIdFromClaim && schoolIdFromInput !== schoolIdFromClaim) {
+    throw new HttpsError("permission-denied", "School admin access is limited to your assigned school.");
+  }
+
   return schoolId;
 }
 
 async function ensureSchoolAccess(authData: { uid?: string; token?: Record<string, unknown> } | null | undefined, schoolId: string): Promise<void> {
   assertSignedIn(authData);
-  if (isSuperAdminToken(authData) || authData.token?.schoolAdmin === true) {
+  if (isSuperAdminToken(authData)) {
     return;
+  }
+
+  if (authData.token?.schoolAdmin === true) {
+    const claimedSchoolId = typeof authData.token?.schoolId === "string" ? String(authData.token.schoolId).trim() : "";
+    if (!claimedSchoolId || claimedSchoolId !== schoolId) {
+      throw new HttpsError("permission-denied", "School admin access is limited to your assigned school.");
+    }
   }
 
   const userSnapshot = await firestore.doc(`users/${authData.uid}`).get();
@@ -3461,7 +4036,7 @@ async function ensureSchoolAccess(authData: { uid?: string; token?: Record<strin
   }
 }
 
-export const getSchoolAdminDashboard = onCall(async (request) => {
+export const getSchoolAdminDashboard = guardedOnCall("getSchoolAdminDashboard", async (request) => {
   assertSchoolAdmin(request.auth);
   assertSignedIn(request.auth);
   const schoolId = resolveSchoolIdForRequest(request.auth, request.data?.schoolId);
@@ -3480,6 +4055,7 @@ export const getSchoolAdminDashboard = onCall(async (request) => {
       isSchoolAdmin: row.isSchoolAdmin === true,
       schoolId: row.schoolId ?? null,
       schoolName: row.schoolName ?? null,
+      districtId: row.districtId ?? null,
       districtName: row.districtName ?? null,
       lastLoginAt: row.lastLoginAt ?? null,
     };
@@ -3520,6 +4096,7 @@ export const getSchoolAdminDashboard = onCall(async (request) => {
       email: typeof data.email === "string" ? data.email : "",
       schoolId,
       schoolName: typeof data.schoolName === "string" ? data.schoolName : users[0]?.schoolName ?? schoolId,
+      districtId: typeof data.districtId === "string" ? data.districtId : null,
       districtName: typeof data.districtName === "string" ? data.districtName : null,
       invitedByUid: typeof data.invitedByUid === "string" ? data.invitedByUid : "",
       invitedByEmail: typeof data.invitedByEmail === "string" ? data.invitedByEmail : null,
@@ -3533,6 +4110,7 @@ export const getSchoolAdminDashboard = onCall(async (request) => {
   const result: SchoolDashboardResult = {
     schoolId,
     schoolName: typeof schoolData.schoolName === "string" ? schoolData.schoolName : users[0]?.schoolName ?? schoolId,
+    districtId: typeof schoolData.districtId === "string" ? schoolData.districtId : users[0]?.districtId ?? null,
     districtName: typeof schoolData.districtName === "string" ? schoolData.districtName : users[0]?.districtName ?? null,
     users,
     textbooks,
@@ -3542,15 +4120,15 @@ export const getSchoolAdminDashboard = onCall(async (request) => {
   return success("Loaded school admin dashboard.", result);
 });
 
-export const inviteSchoolUser = onCall(async (request) => {
+export const inviteSchoolUser = guardedOnCall("inviteSchoolUser", async (request) => {
   assertSchoolAdmin(request.auth);
   assertSignedIn(request.auth);
   const schoolId = resolveSchoolIdForRequest(request.auth, request.data?.schoolId);
   await ensureSchoolAccess(request.auth, schoolId);
 
-  const email = typeof request.data?.email === "string" ? request.data.email.trim().toLowerCase() : "";
+  const email = sanitizeEmail(request.data?.email);
   if (!email) {
-    throw new HttpsError("invalid-argument", "Invite email is required.");
+    throw new HttpsError("invalid-argument", "A valid invite email is required.");
   }
 
   const schoolSnapshot = await firestore.doc(`schools/${schoolId}`).get();
@@ -3561,6 +4139,7 @@ export const inviteSchoolUser = onCall(async (request) => {
     email,
     schoolId,
     schoolName: typeof schoolData.schoolName === "string" ? schoolData.schoolName : schoolId,
+    districtId: typeof schoolData.districtId === "string" ? schoolData.districtId : null,
     districtName: typeof schoolData.districtName === "string" ? schoolData.districtName : null,
     invitedByUid: request.auth.uid,
     invitedByEmail: typeof request.auth.token?.email === "string" ? String(request.auth.token.email) : null,
@@ -3576,13 +4155,13 @@ export const inviteSchoolUser = onCall(async (request) => {
   return success("Invite created.", row);
 });
 
-export const removeSchoolUser = onCall(async (request) => {
+export const removeSchoolUser = guardedOnCall("removeSchoolUser", async (request) => {
   assertSchoolAdmin(request.auth);
   assertSignedIn(request.auth);
   const schoolId = resolveSchoolIdForRequest(request.auth, request.data?.schoolId);
   await ensureSchoolAccess(request.auth, schoolId);
 
-  const uid = typeof request.data?.uid === "string" ? request.data.uid.trim() : "";
+  const uid = uidFromValue(request.data?.uid);
   if (!uid) {
     throw new HttpsError("invalid-argument", "User id is required.");
   }
@@ -3601,6 +4180,7 @@ export const removeSchoolUser = onCall(async (request) => {
   await targetRef.set({
     schoolId: admin.firestore.FieldValue.delete(),
     schoolName: admin.firestore.FieldValue.delete(),
+    districtId: admin.firestore.FieldValue.delete(),
     districtName: admin.firestore.FieldValue.delete(),
     isSchoolAdmin: false,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -3609,6 +4189,7 @@ export const removeSchoolUser = onCall(async (request) => {
   const userRecord = await auth.getUser(uid);
   const claims = { ...(userRecord.customClaims ?? {}) } as Record<string, unknown>;
   delete claims.schoolId;
+  delete claims.districtId;
   delete claims.schoolAdmin;
   await auth.setCustomUserClaims(uid, claims);
 
@@ -3621,7 +4202,7 @@ export const removeSchoolUser = onCall(async (request) => {
   return success("User removed from school.", "User removed from school.");
 });
 
-export const setSchoolTextbookDeletionState = onCall(async (request) => {
+export const setSchoolTextbookDeletionState = guardedOnCall("setSchoolTextbookDeletionState", async (request) => {
   assertSchoolAdmin(request.auth);
   assertSignedIn(request.auth);
   const schoolId = resolveSchoolIdForRequest(request.auth, request.data?.schoolId);
@@ -3668,7 +4249,7 @@ export const setSchoolTextbookDeletionState = onCall(async (request) => {
   return success(isDeleted ? "Textbook moved to recycle bin." : "Textbook restored.", isDeleted ? "Textbook moved to recycle bin." : "Textbook restored.");
 });
 
-export const requestSchoolAdminPromotion = onCall(async (request) => {
+export const requestSchoolAdminPromotion = guardedOnCall("requestSchoolAdminPromotion", async (request) => {
   assertSignedIn(request.auth);
 
   const uid = request.auth.uid;
@@ -3683,7 +4264,7 @@ export const requestSchoolAdminPromotion = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "Set your school affiliation before requesting promotion.");
   }
 
-  const reason = typeof request.data?.reason === "string" ? request.data.reason.trim() : "";
+  const reason = sanitizePlainText(request.data?.reason, 1000);
   const existingPending = await firestore.collection("schoolAdminPromotionRequests")
     .where("uid", "==", uid)
     .where("schoolId", "==", schoolId)
@@ -3701,6 +4282,7 @@ export const requestSchoolAdminPromotion = onCall(async (request) => {
     displayName: typeof userData.displayName === "string" ? userData.displayName : "",
     schoolId,
     schoolName: typeof userData.schoolName === "string" ? userData.schoolName : schoolId,
+    districtId: typeof userData.districtId === "string" ? userData.districtId : null,
     districtName: typeof userData.districtName === "string" ? userData.districtName : null,
     reason: reason || null,
     status: "pending",
@@ -3710,7 +4292,7 @@ export const requestSchoolAdminPromotion = onCall(async (request) => {
   return success("Promotion request submitted.", "Promotion request submitted.");
 });
 
-export const listSchoolAdminPromotionRequests = onCall(async (request) => {
+export const listSchoolAdminPromotionRequests = guardedOnCall("listSchoolAdminPromotionRequests", async (request) => {
   assertSuperAdmin(request.auth);
 
   const status = typeof request.data?.status === "string" ? request.data.status : "pending";
@@ -3725,6 +4307,7 @@ export const listSchoolAdminPromotionRequests = onCall(async (request) => {
       displayName: typeof data.displayName === "string" ? data.displayName : "",
       schoolId: typeof data.schoolId === "string" ? data.schoolId : "",
       schoolName: typeof data.schoolName === "string" ? data.schoolName : "",
+      districtId: typeof data.districtId === "string" ? data.districtId : null,
       districtName: typeof data.districtName === "string" ? data.districtName : null,
       reason: typeof data.reason === "string" ? data.reason : null,
       status: data.status === "approved" || data.status === "rejected" ? data.status : "pending",
@@ -3740,11 +4323,11 @@ export const listSchoolAdminPromotionRequests = onCall(async (request) => {
   return success("Loaded promotion requests.", rows);
 });
 
-export const resolveSchoolAdminPromotionRequest = onCall(async (request) => {
+export const resolveSchoolAdminPromotionRequest = guardedOnCall("resolveSchoolAdminPromotionRequest", async (request) => {
   assertSuperAdmin(request.auth);
   assertSignedIn(request.auth);
 
-  const requestId = typeof request.data?.requestId === "string" ? request.data.requestId.trim() : "";
+  const requestId = sanitizePlainText(request.data?.requestId, 128);
   const approve = request.data?.approve === true;
   if (!requestId) {
     throw new HttpsError("invalid-argument", "Promotion request id is required.");
@@ -3759,6 +4342,7 @@ export const resolveSchoolAdminPromotionRequest = onCall(async (request) => {
   const data = requestSnapshot.data() ?? {};
   const targetUid = typeof data.uid === "string" ? data.uid : "";
   const schoolId = typeof data.schoolId === "string" ? data.schoolId : "";
+  const districtId = typeof data.districtId === "string" ? data.districtId : "";
   if (!targetUid || !schoolId) {
     throw new HttpsError("failed-precondition", "Promotion request is missing user or school metadata.");
   }
@@ -3768,10 +4352,14 @@ export const resolveSchoolAdminPromotionRequest = onCall(async (request) => {
     const claims = { ...(userRecord.customClaims ?? {}) } as Record<string, unknown>;
     claims.schoolAdmin = true;
     claims.schoolId = schoolId;
+    if (districtId) {
+      claims.districtId = districtId;
+    }
     await auth.setCustomUserClaims(targetUid, claims);
     await firestore.doc(`users/${targetUid}`).set({
       isSchoolAdmin: true,
       schoolId,
+      districtId: districtId || null,
       lastClaimsUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
   }
@@ -3785,11 +4373,11 @@ export const resolveSchoolAdminPromotionRequest = onCall(async (request) => {
   return success(approve ? "Promotion approved." : "Promotion rejected.", approve ? "Promotion approved." : "Promotion rejected.");
 });
 
-export const setUserSuperAdminStatus = onCall(async (request) => {
+export const setUserSuperAdminStatus = guardedOnCall("setUserSuperAdminStatus", async (request) => {
   assertOwnerSuperAdminOperator(request.auth);
   assertSignedIn(request.auth);
 
-  const uid = typeof request.data?.uid === "string" ? request.data.uid.trim() : "";
+  const uid = uidFromValue(request.data?.uid);
   const isSuperAdmin = request.data?.isSuperAdmin === true;
   if (!uid) {
     throw new HttpsError("invalid-argument", "A user id is required.");
@@ -3828,7 +4416,7 @@ export const setUserSuperAdminStatus = onCall(async (request) => {
   return success(isSuperAdmin ? "Granted super admin access." : "Removed super admin access.", isSuperAdmin ? "Granted super admin access." : "Removed super admin access.");
 });
 
-export const listAllSchoolsForSuperAdmin = onCall(async (request) => {
+export const listAllSchoolsForSuperAdmin = guardedOnCall("listAllSchoolsForSuperAdmin", async (request) => {
   assertSuperAdmin(request.auth);
 
   const snapshot = await firestore.collection("schools").orderBy("schoolName").limit(500).get();
@@ -3845,7 +4433,7 @@ export const listAllSchoolsForSuperAdmin = onCall(async (request) => {
   return success("Loaded schools.", rows);
 });
 
-export const getSuperAdminDashboardStats = onCall(async (request) => {
+export const getSuperAdminDashboardStats = guardedOnCall("getSuperAdminDashboardStats", async (request) => {
   assertSuperAdmin(request.auth);
 
   const todayKey = getUtcDateKey();
@@ -3960,7 +4548,7 @@ export const getSuperAdminDashboardStats = onCall(async (request) => {
   return success("Loaded super admin stats.", stats);
 });
 
-export const getSuperAdminGlobalQuota = onCall(async (request) => {
+export const getSuperAdminGlobalQuota = guardedOnCall("getSuperAdminGlobalQuota", async (request) => {
   assertSuperAdmin(request.auth);
 
   const projectId = process.env.GCLOUD_PROJECT ?? "";
@@ -3984,9 +4572,17 @@ export const getSuperAdminGlobalQuota = onCall(async (request) => {
     const accessToken = await admin.credential.applicationDefault().getAccessToken();
     const serviceUsageProject = await resolveServiceUsageProjectResource(projectId, accessToken.access_token ?? "");
     const url = `https://serviceusage.googleapis.com/v1/${serviceUsageProject}/services/firestore.googleapis.com/consumerQuotaMetrics?view=FULL`;
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken.access_token}`,
+    const response = await resilientFetch({
+      providerKey: "google_service_usage",
+      url,
+      timeoutMs: 15000,
+      maxAttempts: 3,
+      baseDelayMs: 400,
+      rateLimit: PROVIDER_RATE_LIMITS.google_service_usage,
+      init: {
+        headers: {
+          Authorization: `Bearer ${accessToken.access_token}`,
+        },
       },
     });
 
@@ -4027,7 +4623,7 @@ export const getSuperAdminGlobalQuota = onCall(async (request) => {
   }
 });
 
-export const getSuperAdminAzureQuota = onCall({ secrets: [azureCosmosConnectionStringSecret] }, async (request) => {
+export const getSuperAdminAzureQuota = guardedOnCall("getSuperAdminAzureQuota", { secrets: [azureCosmosConnectionStringSecret] }, async (request) => {
   assertSuperAdmin(request.auth);
 
   const projectId = process.env.GCLOUD_PROJECT ?? "";
@@ -4080,7 +4676,7 @@ export const getSuperAdminAzureQuota = onCall({ secrets: [azureCosmosConnectionS
   return success("Loaded Azure Cosmos quota and telemetry status.", result);
 });
 
-export const getSuperAdminBackupConfig = onCall(async (request) => {
+export const getSuperAdminBackupConfig = guardedOnCall("getSuperAdminBackupConfig", async (request) => {
   assertSuperAdmin(request.auth);
 
   const snapshot = await getBackupConfigDocRef().get();
@@ -4088,7 +4684,7 @@ export const getSuperAdminBackupConfig = onCall(async (request) => {
   return success("Loaded backup configuration.", config);
 });
 
-export const setSuperAdminBackupConfig = onCall(async (request) => {
+export const setSuperAdminBackupConfig = guardedOnCall("setSuperAdminBackupConfig", async (request) => {
   assertSuperAdmin(request.auth);
   const data = typeof request.data === "object" && request.data !== null ? request.data as Record<string, unknown> : {};
   const existing = normalizeBackupConfig((await getBackupConfigDocRef().get()).data());
@@ -4118,7 +4714,7 @@ export const setSuperAdminBackupConfig = onCall(async (request) => {
   return success("Saved backup configuration.", merged);
 });
 
-export const runSuperAdminBackupNow = onCall({ secrets: [azureCosmosConnectionStringSecret] }, async (request) => {
+export const runSuperAdminBackupNow = guardedOnCall("runSuperAdminBackupNow", { secrets: [azureCosmosConnectionStringSecret] }, async (request) => {
   assertSuperAdmin(request.auth);
   const config = normalizeBackupConfig((await getBackupConfigDocRef().get()).data());
   if (!config.mirrorEnabled || !config.cosmosEnabled) {
@@ -4129,7 +4725,7 @@ export const runSuperAdminBackupNow = onCall({ secrets: [azureCosmosConnectionSt
   return success("Executed backup run.", result);
 });
 
-export const listSuperAdminBackupJobs = onCall(async (request) => {
+export const listSuperAdminBackupJobs = guardedOnCall("listSuperAdminBackupJobs", async (request) => {
   assertSuperAdmin(request.auth);
   const requestedLimit = typeof request.data?.limit === "number" ? Math.floor(request.data.limit) : 10;
   const limitCount = Math.max(1, Math.min(50, requestedLimit));
@@ -4171,7 +4767,7 @@ export const runScheduledAzureBackup = onSchedule({ schedule: "every 15 minutes"
   }
 });
 
-export const getModerationQueue = onCall(async (request) => {
+export const getModerationQueue = guardedOnCall("getModerationQueue", async (request) => {
   assertAdmin(request.auth);
 
   const ownerEmailMap = await getOwnerEmailMap();
@@ -4190,11 +4786,11 @@ export const getModerationQueue = onCall(async (request) => {
   return success("Loaded moderation queue.", items);
 });
 
-export const updateModerationStatus = onCall(async (request) => {
+export const updateModerationStatus = guardedOnCall("updateModerationStatus", async (request) => {
   assertAdmin(request.auth);
 
   const data = request.data;
-  const docPath = typeof data?.docPath === "string" ? data.docPath : "";
+  const docPath = sanitizePlainText(data?.docPath, 280);
   const status = typeof data?.status === "string" ? data.status as ContentStatus : null;
 
   if (!docPath || !status) {
@@ -4212,11 +4808,11 @@ export const updateModerationStatus = onCall(async (request) => {
   return success(`Updated status to ${status}.`, `Updated status to ${status}.`);
 });
 
-export const archiveAdminContent = onCall(async (request) => {
+export const archiveAdminContent = guardedOnCall("archiveAdminContent", async (request) => {
   assertAdmin(request.auth);
 
   const data = request.data;
-  const docPath = typeof data?.docPath === "string" ? data.docPath : "";
+  const docPath = sanitizePlainText(data?.docPath, 280);
   const isArchived = data?.isArchived !== false;
 
   if (!docPath) {
@@ -4234,11 +4830,11 @@ export const archiveAdminContent = onCall(async (request) => {
   return success(isArchived ? "Content archived." : "Content restored from archive.", isArchived ? "Content archived." : "Content restored from archive.");
 });
 
-export const softDeleteAdminContent = onCall(async (request) => {
+export const softDeleteAdminContent = guardedOnCall("softDeleteAdminContent", async (request) => {
   assertAdmin(request.auth);
 
   const data = request.data;
-  const docPath = typeof data?.docPath === "string" ? data.docPath : "";
+  const docPath = sanitizePlainText(data?.docPath, 280);
   const isDeleted = data?.isDeleted !== false;
 
   if (!docPath) {
@@ -4256,14 +4852,14 @@ export const softDeleteAdminContent = onCall(async (request) => {
   return success(isDeleted ? "Content hidden from non-admin users." : "Content restored.", isDeleted ? "Content hidden from non-admin users." : "Content restored.");
 });
 
-export const searchAdminContent = onCall(async (request) => {
+export const searchAdminContent = guardedOnCall("searchAdminContent", async (request) => {
   assertAdmin(request.auth);
 
   const data = request.data;
-  const titleContains = typeof data?.titleContains === "string" ? data.titleContains.toLowerCase() : "";
-  const isbn = typeof data?.isbn === "string" ? data.isbn.replace(/-/g, "") : "";
-  const ownerEmailFilter = typeof data?.ownerEmail === "string" ? data.ownerEmail.toLowerCase() : "";
-  const ownerUidFilter = typeof data?.ownerUid === "string" ? data.ownerUid : "";
+  const titleContains = sanitizePlainText(data?.titleContains, 180).toLowerCase();
+  const isbn = sanitizePlainText(data?.isbn, 32).replace(/-/g, "");
+  const ownerEmailFilter = sanitizeEmail(data?.ownerEmail);
+  const ownerUidFilter = uidFromValue(data?.ownerUid);
   const requestedCollection = typeof data?.collectionName === "string" ? data.collectionName : "all";
 
   const collections = requestedCollection === "all"
@@ -4313,11 +4909,11 @@ export const searchAdminContent = onCall(async (request) => {
   return success("Loaded admin content.", records);
 });
 
-export const updateAdminContent = onCall(async (request) => {
+export const updateAdminContent = guardedOnCall("updateAdminContent", async (request) => {
   assertAdmin(request.auth);
 
   const data = request.data;
-  const docPath = typeof data?.docPath === "string" ? data.docPath : "";
+  const docPath = sanitizePlainText(data?.docPath, 280);
   const updates = typeof data?.data === "object" && data?.data !== null ? data.data as Record<string, unknown> : null;
 
   if (!docPath || !updates) {
@@ -4335,8 +4931,36 @@ export const updateAdminContent = onCall(async (request) => {
     keyIdeas: ["text", "status"],
   };
 
+  const stringFieldMaxLength: Record<string, number> = {
+    title: 240,
+    grade: 24,
+    subject: 120,
+    edition: 60,
+    name: 240,
+    description: 2000,
+    notes: 3000,
+    word: 120,
+    definition: 1500,
+    latex: 1200,
+    explanation: 3000,
+    text: 3000,
+    status: 24,
+  };
+
   const sanitizedUpdates = Object.fromEntries(
-    Object.entries(updates).filter(([key, value]) => allowedFields[collectionName].includes(key) && value !== undefined)
+    Object.entries(updates)
+      .filter(([key, value]) => allowedFields[collectionName].includes(key) && value !== undefined)
+      .map(([key, value]) => {
+        if (typeof value === "string") {
+          return [key, sanitizePlainText(value, stringFieldMaxLength[key] ?? 512)];
+        }
+
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return [key, Math.round(value)];
+        }
+
+        return [key, value];
+      })
   );
 
   if (Object.keys(sanitizedUpdates).length === 0) {
@@ -4353,7 +4977,7 @@ export const updateAdminContent = onCall(async (request) => {
   return success("Content updated.", "Content updated.");
 });
 
-export const getPremiumUsageReport = onCall(async (request) => {
+export const getPremiumUsageReport = guardedOnCall("getPremiumUsageReport", async (request) => {
   assertAdmin(request.auth);
 
   const usersSnapshot = await firestore.collection("users").orderBy("email").get();
@@ -4377,11 +5001,11 @@ export const getPremiumUsageReport = onCall(async (request) => {
   return success("Loaded premium usage report.", rows);
 });
 
-export const managePremiumUser = onCall(async (request) => {
-  assertAdmin(request.auth);
+export const managePremiumUser = guardedOnCall("managePremiumUser", async (request) => {
+  assertSuperAdmin(request.auth);
 
   const data = request.data;
-  const uid = typeof data?.uid === "string" ? data.uid.trim() : "";
+  const uid = uidFromValue(data?.uid);
   const action = typeof data?.action === "string" ? data.action : "";
   const freezePremium = data?.freezePremium === true;
 
@@ -4441,7 +5065,7 @@ export const managePremiumUser = onCall(async (request) => {
   return success("Premium usage updated.", row);
 });
 
-export const getCurrentPremiumUsage = onCall(async (request) => {
+export const getCurrentPremiumUsage = guardedOnCall("getCurrentPremiumUsage", async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in.");
   }
@@ -4450,7 +5074,7 @@ export const getCurrentPremiumUsage = onCall(async (request) => {
   return success("Loaded premium usage.", usage);
 });
 
-export const getCurrentAiSafetyStatus = onCall(async (request) => {
+export const getCurrentAiSafetyStatus = guardedOnCall("getCurrentAiSafetyStatus", async (request) => {
   assertSignedIn(request.auth);
 
   const usageSnapshot = await firestore.doc(`users/${request.auth.uid}/aiUsage/current`).get();
@@ -4466,7 +5090,7 @@ export const getCurrentAiSafetyStatus = onCall(async (request) => {
   return success("Loaded current AI safety status.", status);
 });
 
-export const getSuperAdminAiProviderLimits = onCall(async (request) => {
+export const getSuperAdminAiProviderLimits = guardedOnCall("getSuperAdminAiProviderLimits", async (request) => {
   assertSuperAdmin(request.auth);
 
   const policy = await getAiSafetyPolicyRecord();
@@ -4545,7 +5169,7 @@ export const getSuperAdminAiProviderLimits = onCall(async (request) => {
   return success("Loaded super admin AI provider limits.", result);
 });
 
-export const setGlobalAiSafetyPolicy = onCall(async (request) => {
+export const setGlobalAiSafetyPolicy = guardedOnCall("setGlobalAiSafetyPolicy", async (request) => {
   assertSuperAdmin(request.auth);
   assertSignedIn(request.auth);
 
@@ -4562,7 +5186,7 @@ export const setGlobalAiSafetyPolicy = onCall(async (request) => {
   return success("Updated global AI safety policy.", next);
 });
 
-export const setUserAiSafetyOverride = onCall(async (request) => {
+export const setUserAiSafetyOverride = guardedOnCall("setUserAiSafetyOverride", async (request) => {
   assertSuperAdmin(request.auth);
   assertSignedIn(request.auth);
 
@@ -4575,7 +5199,7 @@ export const setUserAiSafetyOverride = onCall(async (request) => {
     githubDailyTokenLimit?: unknown;
   };
 
-  const uid = typeof payload.uid === "string" ? payload.uid.trim() : "";
+  const uid = uidFromValue(payload.uid);
   if (!uid) {
     throw new HttpsError("invalid-argument", "A target uid is required.");
   }
@@ -4594,7 +5218,7 @@ export const setUserAiSafetyOverride = onCall(async (request) => {
   return success("Updated user AI safety override.", { uid, override: next });
 });
 
-export const getAiProviderPolicy = onCall(async (request) => {
+export const getAiProviderPolicy = guardedOnCall("getAiProviderPolicy", async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in.");
   }
@@ -4608,6 +5232,38 @@ export const getAiProviderPolicy = onCall(async (request) => {
   };
 
   return success("Loaded AI provider policy.", normalized);
+});
+
+export const getAiConnectivityPolicy = guardedOnCall("getAiConnectivityPolicy", async (request) => {
+  assertSuperAdmin(request.auth);
+  const policy = await getAiConnectivityPolicyRecord();
+  return success("Loaded AI connectivity policy.", policy);
+});
+
+export const setAiConnectivityPolicy = guardedOnCall("setAiConnectivityPolicy", async (request) => {
+  assertSuperAdmin(request.auth);
+
+  const payload = request.data as { providers?: unknown };
+  const current = await getAiConnectivityPolicyRecord();
+  const providersInput = payload.providers && typeof payload.providers === "object"
+    ? payload.providers as Record<string, unknown>
+    : {};
+
+  const providers = Object.fromEntries(
+    Object.entries(current.providers).map(([providerKey, existing]) => {
+      return [providerKey, normalizeProviderPolicyRow(providersInput[providerKey], existing)];
+    })
+  );
+
+  const next: AiConnectivityPolicyRecord = {
+    providers,
+    updatedBy: request.auth?.uid ?? "unknown",
+    updatedAt: new Date().toISOString(),
+  };
+
+  await firestore.doc(AI_CONNECTIVITY_POLICY_DOC_PATH).set(next, { merge: true });
+  aiConnectivityPolicyCache = null;
+  return success("Updated AI connectivity policy.", next);
 });
 
 function getCloudOcrProviderRuntime(providerId: AutoOcrProviderId): CloudOcrProviderRuntime | null {
@@ -4693,42 +5349,46 @@ async function executeCloudOcrExtraction(
   await consumeOcrRequestQuota(userId);
   inferImageMimeType(imageDataUrl);
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
-
   let response: Response;
   try {
     details.providerRequestPrepared = true;
     details.providerRequestSent = true;
-    response = await fetch(runtime.endpoint, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${runtime.apiKey}`,
-        ...(runtime.headers ?? {}),
+    response = await resilientFetch({
+      providerKey: runtime.id,
+      url: runtime.endpoint,
+      timeoutMs: 30000,
+      maxAttempts: 3,
+      baseDelayMs: 700,
+      rateLimit: PROVIDER_RATE_LIMITS[runtime.id],
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${runtime.apiKey}`,
+          ...(runtime.headers ?? {}),
+        },
+        body: JSON.stringify({
+          model: runtime.model,
+          messages: [
+            {
+              role: "system",
+              content: "You perform OCR from educational screenshots. Transcribe every readable character from the entire page. Preserve line breaks and include all columns, headers, footers, legal notices, addresses, URLs, ISBN/MHID lines, and image-credit text. For multi-column layouts, read left column top-to-bottom first, then right column top-to-bottom. Do not skip any section, sidebar, or inset box. Return only plain extracted text with no commentary.",
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Extract ALL readable text from this screenshot. Important:\n- Include URL or domain text near the top (e.g. mheducation.com/prek-12)\n- Include all legal/copyright paragraphs verbatim\n- Include any 'Send all inquiries to:' address block with every address line, city, state, ZIP\n- Include all ISBN and MHID lines\n- Include any text in right-hand columns or boxes (e.g. STEM descriptions)\n- Include printing/edition codes at the bottom\nDo not summarize. Do not omit any section. Return plain text only.",
+                },
+                { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
+              ],
+            },
+          ],
+          max_tokens: 3600,
+          temperature: 0,
+        }),
       },
-      body: JSON.stringify({
-        model: runtime.model,
-        messages: [
-          {
-            role: "system",
-            content: "You perform OCR from educational screenshots. Transcribe every readable character from the entire page. Preserve line breaks and include all columns, headers, footers, legal notices, addresses, URLs, ISBN/MHID lines, and image-credit text. For multi-column layouts, read left column top-to-bottom first, then right column top-to-bottom. Do not skip any section, sidebar, or inset box. Return only plain extracted text with no commentary.",
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "Extract ALL readable text from this screenshot. Important:\n- Include URL or domain text near the top (e.g. mheducation.com/prek-12)\n- Include all legal/copyright paragraphs verbatim\n- Include any 'Send all inquiries to:' address block with every address line, city, state, ZIP\n- Include all ISBN and MHID lines\n- Include any text in right-hand columns or boxes (e.g. STEM descriptions)\n- Include printing/edition codes at the bottom\nDo not summarize. Do not omit any section. Return plain text only.",
-              },
-              { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
-            ],
-          },
-        ],
-        max_tokens: 3600,
-        temperature: 0,
-      }),
     });
     details.providerResponseReceived = true;
     details.providerExecutionObserved = true;
@@ -4746,8 +5406,6 @@ async function executeCloudOcrExtraction(
         httpStatus: null,
       })
     );
-  } finally {
-    clearTimeout(timeoutId);
   }
 
   if (runtime.id === "cloud_openai_vision") {
@@ -4881,7 +5539,7 @@ async function executeCloudOcrExtraction(
   return { text: extractedText, tokenCount, details };
 }
 
-export const getAiProviderStatus = onCall({ invoker: "public", secrets: [openAiKeySecret, githubModelsTokenSecret] }, async (request) => {
+export const getAiProviderStatus = guardedOnCall("getAiProviderStatus", { invoker: "public", secrets: [openAiKeySecret, githubModelsTokenSecret] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to check AI provider status.");
   }
@@ -4954,8 +5612,8 @@ export const getAiProviderStatus = onCall({ invoker: "public", secrets: [openAiK
   });
 });
 
-export const setAiProviderPolicy = onCall(async (request) => {
-  assertAdmin(request.auth);
+export const setAiProviderPolicy = guardedOnCall("setAiProviderPolicy", async (request) => {
+  assertSuperAdmin(request.auth);
 
   const data = request.data as { providerOrder?: unknown };
   const providerOrder = normalizeAutoOcrProviderOrder(data.providerOrder);
@@ -4969,7 +5627,7 @@ export const setAiProviderPolicy = onCall(async (request) => {
   return success("Updated AI provider policy.", nextPolicy);
 });
 
-export const getDebugLoggingPolicy = onCall(async (request) => {
+export const getDebugLoggingPolicy = guardedOnCall("getDebugLoggingPolicy", async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in.");
   }
@@ -4978,7 +5636,7 @@ export const getDebugLoggingPolicy = onCall(async (request) => {
   return success("Loaded debug logging policy.", policy);
 });
 
-export const setDebugLoggingPolicy = onCall(async (request) => {
+export const setDebugLoggingPolicy = guardedOnCall("setDebugLoggingPolicy", async (request) => {
   assertAdmin(request.auth);
 
   const payload = request.data as Partial<DebugLoggingPolicyRecord>;
@@ -4994,7 +5652,7 @@ export const setDebugLoggingPolicy = onCall(async (request) => {
   return success("Updated debug logging policy.", next);
 });
 
-export const uploadDebugLogReport = onCall(async (request) => {
+export const uploadDebugLogReport = guardedOnCall("uploadDebugLogReport", async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in.");
   }
@@ -5009,7 +5667,7 @@ export const uploadDebugLogReport = onCall(async (request) => {
     osInfo?: unknown;
   };
 
-  const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
+  const userId = uidFromValue(payload.userId);
   if (!userId || userId !== request.auth.uid) {
     throw new HttpsError("permission-denied", "Debug upload user mismatch.");
   }
@@ -5056,7 +5714,7 @@ export const uploadDebugLogReport = onCall(async (request) => {
   });
 });
 
-export const listRecentDebugUploads = onCall(async (request) => {
+export const listRecentDebugUploads = guardedOnCall("listRecentDebugUploads", async (request) => {
   assertAdmin(request.auth);
 
   const snapshot = await firestore
@@ -5083,7 +5741,7 @@ export const listRecentDebugUploads = onCall(async (request) => {
   return success("Loaded recent debug uploads.", rows);
 });
 
-export const extractScreenshotText = onCall({ secrets: [openAiKeySecret, githubModelsTokenSecret], invoker: "public" }, async (request) => {
+export const extractScreenshotText = guardedOnCall("extractScreenshotText", { secrets: [openAiKeySecret, githubModelsTokenSecret], invoker: "public" }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to extract screenshot text.");
   }
@@ -5169,7 +5827,7 @@ export const extractScreenshotText = onCall({ secrets: [openAiKeySecret, githubM
   }
 });
 
-export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret] }, async (request) => {
+export const extractMetadataFromImageVision = guardedOnCall("extractMetadataFromImageVision", { secrets: [openAiKeySecret] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to extract metadata from images.");
   }
@@ -5206,67 +5864,75 @@ export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret
     await consumeOcrRequestQuota(uid);
     inferImageMimeType(imageDataUrl);
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${openaiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: "You are a specialized textbook metadata extractor. Extract textbook metadata from cover and copyright-page images with high precision. Return strict JSON only, no markdown fences or extra text.",
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: [
-                  "Extract textbook metadata from this image. Return JSON with these fields (all as strings except confidence/numbers, or null if not found):",
-                  "title, subtitle, edition, publisher, publisherLocation, series, gradeLevel, subject, copyrightYear, isbn, additionalIsbns, relatedIsbns, platformUrl, mhid, confidence, rawText.",
-                  "",
-                  "CRITICAL EXTRACTION RULES:",
-                  "1. TITLE: Main title of the textbook (not subtitle or edition)",
-                  "2. SUBTITLE: Secondary subtitle if present (e.g., 'with Earth Science')",
-                  "3. EDITION: Edition information (e.g., '3rd Edition')",
-                  "4. PUBLISHER: Publisher name (e.g., 'McGraw-Hill Education', 'Pearson')",
-                  "5. PUBLISHER LOCATION: Full mailing/business address including street address, city, state, ZIP code",
-                  "6. SERIES: Series name if identifiable from title start word",
-                  "7. GRADE LEVEL: Grade span (e.g., 'Grades 7-9', 'Pre-K-12', '8')",
-                  "8. SUBJECT: Primary subject area (e.g., 'Science', 'Math', 'English', 'Social Studies') - set to null, we fill this separately",
-                  "9. COPYRIGHT YEAR: Year from copyright line (e.g., 2021), must be 4 digits",
-                  "10. ISBN: Primary ISBN-13 or ISBN-10 (REQUIRED - look for 978/979 prefix or 10-digit with checksum)",
-                  "11. ADDITIONAL ISBNS: Other ISBN numbers on page (array of strings)",
-                  "12. RELATED ISBNS: Array of {isbn, type, note} where type is: student|teacher|digital|workbook|assessment|other",
-                  "13. PLATFORM URL: Publisher website URL (e.g., 'https://mheducation.com', starts with http/www or .com/.edu etc)",
-                  "14. MHID: McGraw-Hill ID if present",
-                  "15. rawText: CRITICAL â€” Copy ALL visible text from the image verbatim, preserving every line break. Include every line: URL, full address block, every ISBN line, MHID line, legal notices, footer codes. Do NOT summarize or truncate.",
-                  "",
-                  "FIELD EXTRACTION DETAILS:",
-                  "- For PUBLISHER LOCATION: Look for 'Send all inquiries to:' section or address blocks with street + city, state ZIP",
-                  "- For COPYRIGHT PAGE images, always extract address if visible",
-                  "- For ISBN: Never skip - search entire image for 10-13 digit sequences, ISBN labels",
-                  "- For platformUrl: Look for domain names, website text, typically 'mheducation.com' or similar",
-                  "- For copyrightYear: Extract from 'Copyright Â© YYYY' or 'Â© YYYY'",
-                  "- confidence: 0.0-1.0 based on overall extraction quality",
-                  "",
-                  `- pageType context: ${pageType} (use this to focus extraction on relevant fields)`,
-                  publisherHint ? `- publisherHint context: ${publisherHint} (verified publisher name for this book)` : "",
-                ].filter(Boolean).join("\n"),
-              },
-              { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
-            ],
-          },
-        ],
-        max_tokens: 2500,
-        temperature: 0,
-        response_format: {
-          type: "json_object",
+    const response = await resilientFetch({
+      providerKey: "openai_image_metadata",
+      url: "https://api.openai.com/v1/chat/completions",
+      timeoutMs: 30000,
+      maxAttempts: 3,
+      baseDelayMs: 600,
+      rateLimit: PROVIDER_RATE_LIMITS.openai_image_metadata,
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiKey}`,
         },
-      }),
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: "You are a specialized textbook metadata extractor. Extract textbook metadata from cover and copyright-page images with high precision. Return strict JSON only, no markdown fences or extra text.",
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: [
+                    "Extract textbook metadata from this image. Return JSON with these fields (all as strings except confidence/numbers, or null if not found):",
+                    "title, subtitle, edition, publisher, publisherLocation, series, gradeLevel, subject, copyrightYear, isbn, additionalIsbns, relatedIsbns, platformUrl, mhid, confidence, rawText.",
+                    "",
+                    "CRITICAL EXTRACTION RULES:",
+                    "1. TITLE: Main title of the textbook (not subtitle or edition)",
+                    "2. SUBTITLE: Secondary subtitle if present (e.g., 'with Earth Science')",
+                    "3. EDITION: Edition information (e.g., '3rd Edition')",
+                    "4. PUBLISHER: Publisher name (e.g., 'McGraw-Hill Education', 'Pearson')",
+                    "5. PUBLISHER LOCATION: Full mailing/business address including street address, city, state, ZIP code",
+                    "6. SERIES: Series name if identifiable from title start word",
+                    "7. GRADE LEVEL: Grade span (e.g., 'Grades 7-9', 'Pre-K-12', '8')",
+                    "8. SUBJECT: Primary subject area (e.g., 'Science', 'Math', 'English', 'Social Studies') - set to null, we fill this separately",
+                    "9. COPYRIGHT YEAR: Year from copyright line (e.g., 2021), must be 4 digits",
+                    "10. ISBN: Primary ISBN-13 or ISBN-10 (REQUIRED - look for 978/979 prefix or 10-digit with checksum)",
+                    "11. ADDITIONAL ISBNS: Other ISBN numbers on page (array of strings)",
+                    "12. RELATED ISBNS: Array of {isbn, type, note} where type is: student|teacher|digital|workbook|assessment|other",
+                    "13. PLATFORM URL: Publisher website URL (e.g., 'https://mheducation.com', starts with http/www or .com/.edu etc)",
+                    "14. MHID: McGraw-Hill ID if present",
+                    "15. rawText: CRITICAL â€” Copy ALL visible text from the image verbatim, preserving every line break. Include every line: URL, full address block, every ISBN line, MHID line, legal notices, footer codes. Do NOT summarize or truncate.",
+                    "",
+                    "FIELD EXTRACTION DETAILS:",
+                    "- For PUBLISHER LOCATION: Look for 'Send all inquiries to:' section or address blocks with street + city, state ZIP",
+                    "- For COPYRIGHT PAGE images, always extract address if visible",
+                    "- For ISBN: Never skip - search entire image for 10-13 digit sequences, ISBN labels",
+                    "- For platformUrl: Look for domain names, website text, typically 'mheducation.com' or similar",
+                    "- For copyrightYear: Extract from 'Copyright Â© YYYY' or 'Â© YYYY'",
+                    "- confidence: 0.0-1.0 based on overall extraction quality",
+                    "",
+                    `- pageType context: ${pageType} (use this to focus extraction on relevant fields)`,
+                    publisherHint ? `- publisherHint context: ${publisherHint} (verified publisher name for this book)` : "",
+                  ].filter(Boolean).join("\n"),
+                },
+                { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } },
+              ],
+            },
+          ],
+          max_tokens: 2500,
+          temperature: 0,
+          response_format: {
+            type: "json_object",
+          },
+        }),
+      },
     });
 
     if (!response.ok) {
@@ -5339,7 +6005,7 @@ export const extractMetadataFromImageVision = onCall({ secrets: [openAiKeySecret
   }
 });
 
-export const correctionsUpload = onCall(async (request) => {
+export const correctionsUpload = guardedOnCall("correctionsUpload", async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to sync metadata corrections.");
   }
@@ -5425,7 +6091,7 @@ export const correctionsUpload = onCall(async (request) => {
   });
 });
 
-export const correctionsList = onCall(async (request) => {
+export const correctionsList = guardedOnCall("correctionsList", async (request) => {
   assertAdmin(request.auth);
 
   const payload = request.data as {
@@ -5482,7 +6148,7 @@ export const correctionsList = onCall(async (request) => {
   });
 });
 
-export const correctionsReview = onCall(async (request) => {
+export const correctionsReview = guardedOnCall("correctionsReview", async (request) => {
   assertAdmin(request.auth);
 
   const payload = request.data as {
@@ -5557,7 +6223,7 @@ export const correctionsReview = onCall(async (request) => {
   return success("Applied correction review action.", { updated });
 });
 
-export const correctionsRules = onCall(async (request) => {
+export const correctionsRules = guardedOnCall("correctionsRules", async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to fetch metadata correction rules.");
   }
@@ -5568,7 +6234,7 @@ export const correctionsRules = onCall(async (request) => {
   return success("Loaded metadata correction rules.", rules);
 });
 
-export const correctionsRulesUpdate = onCall(async (request) => {
+export const correctionsRulesUpdate = guardedOnCall("correctionsRulesUpdate", async (request) => {
   assertAdmin(request.auth);
 
   const payload = request.data as { rules?: unknown };
@@ -5836,7 +6502,7 @@ function isTieredQuestionItem(value: unknown): value is TieredQuestionItem {
  * Falls back to an empty extraction result rather than throwing when the key is not configured,
  * so the UI can still display the review screen with a prompt to configure the key.
  */
-export const extractDocumentContent = onCall({ secrets: [openAiKeySecret] }, async (request) => {
+export const extractDocumentContent = guardedOnCall("extractDocumentContent", { secrets: [openAiKeySecret] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to use document extraction.");
   }
@@ -5849,8 +6515,8 @@ export const extractDocumentContent = onCall({ secrets: [openAiKeySecret] }, asy
     context?: unknown;
   };
 
-  const fileName = typeof data.fileName === "string" ? data.fileName : "document";
-  const mimeType = typeof data.mimeType === "string" ? data.mimeType : "text/plain";
+  const fileName = sanitizePlainText(data.fileName, 240) || "document";
+  const mimeType = sanitizePlainText(data.mimeType, 120) || "text/plain";
   const rawText = typeof data.text === "string" ? data.text : null;
   const base64Data = typeof data.base64 === "string" ? data.base64 : null;
   const context = sanitizeExtractionContext(data.context);
@@ -5913,24 +6579,31 @@ export const extractDocumentContent = onCall({ secrets: [openAiKeySecret] }, asy
     quality: heuristicQuality,
   });
 
-  let extracted: ExtractedDocumentData = createEmptyExtractionData();
-
-  try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${openaiKey}`,
+  const requestKey = buildAiRequestKey("document_content", request.auth.uid, `${fileName}:${mimeType}:${truncated}`);
+  const { promise, isPrimary } = getOrStartAiRequest(requestKey, async () => {
+    const response = await resilientFetch({
+      providerKey: "openai_document_content",
+      url: "https://api.openai.com/v1/chat/completions",
+      timeoutMs: 35000,
+      maxAttempts: 3,
+      baseDelayMs: 650,
+      rateLimit: PROVIDER_RATE_LIMITS.openai_document_content,
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 1500,
+          temperature: 0.2,
+        }),
       },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        max_tokens: 1500,
-        temperature: 0.2,
-      }),
     });
 
     if (!response.ok) {
@@ -5943,6 +6616,26 @@ export const extractDocumentContent = onCall({ secrets: [openAiKeySecret] }, asy
       choices?: Array<{ message?: { content?: string } }>;
       usage?: { total_tokens?: number };
     };
+
+    return {
+      json,
+      tokenCount: typeof json.usage?.total_tokens === "number" ? Math.max(0, Math.floor(json.usage.total_tokens)) : 0,
+    };
+  });
+
+  if (!isPrimary) {
+    void recordAiUsageBestEffort(request.auth.uid, {
+      kind: "document_content",
+      provider: "openai",
+      requestCount: 1,
+      bucketHitCount: 1,
+    });
+  }
+
+  let extracted: ExtractedDocumentData = createEmptyExtractionData();
+
+  try {
+    const { json, tokenCount } = await promise;
 
     const content = json.choices?.[0]?.message?.content?.trim() ?? "";
 
@@ -6028,20 +6721,27 @@ export const extractDocumentContent = onCall({ secrets: [openAiKeySecret] }, asy
       },
     };
 
-    void recordAiUsageBestEffort(request.auth.uid, {
-      kind: "document_content",
-      provider: "openai",
-      requestCount: 1,
-      tokenCount: typeof json.usage?.total_tokens === "number" ? Math.max(0, Math.floor(json.usage.total_tokens)) : 0,
-      executionCount: 1,
-    });
-  } catch {
-    void recordAiUsageBestEffort(request.auth.uid, {
-      kind: "document_content",
-      provider: "openai",
-      requestCount: 1,
-      failureCount: 1,
-    });
+    if (isPrimary) {
+      void recordAiUsageBestEffort(request.auth.uid, {
+        kind: "document_content",
+        provider: "openai",
+        requestCount: 1,
+        tokenCount,
+        executionCount: 1,
+      });
+    }
+  } catch (error) {
+    if (isPrimary) {
+      void recordAiUsageBestEffort(request.auth.uid, {
+        kind: "document_content",
+        provider: "openai",
+        requestCount: 1,
+        failureCount: 1,
+      });
+    }
+    if (error instanceof HttpsError) {
+      throw error;
+    }
     throw new HttpsError("internal", "AI returned malformed JSON. Please try again.");
   }
 
@@ -6051,7 +6751,7 @@ export const extractDocumentContent = onCall({ secrets: [openAiKeySecret] }, asy
   );
 });
 
-export const generateTieredQuestionVariations = onCall({ secrets: [openAiKeySecret] }, async (request) => {
+export const generateTieredQuestionVariations = guardedOnCall("generateTieredQuestionVariations", { secrets: [openAiKeySecret] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to generate tiered question variations.");
   }
@@ -6158,23 +6858,36 @@ export const generateTieredQuestionVariations = onCall({ secrets: [openAiKeySecr
     },
   });
 
-  try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${openaiKey}`,
+  const requestKey = buildAiRequestKey("document_content", request.auth.uid, `${JSON.stringify(seedItems)}:${JSON.stringify(chapterTerms)}:${JSON.stringify(generationContext)}`);
+  const { promise } = getOrStartAiRequest(requestKey, async () => {
+    return await resilientFetch({
+      providerKey: "openai_tiered_variations",
+      url: "https://api.openai.com/v1/chat/completions",
+      timeoutMs: 35000,
+      maxAttempts: 3,
+      baseDelayMs: 700,
+      rateLimit: PROVIDER_RATE_LIMITS.openai_tiered_variations,
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 2200,
+          temperature: 0.45,
+        }),
       },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        max_tokens: 2200,
-        temperature: 0.45,
-      }),
     });
+  });
+
+  try {
+    const response = await promise;
 
     if (!response.ok) {
       return success("Tiered variations generated with fallback after AI error.", { items: fallbackItems });
@@ -6223,7 +6936,7 @@ export const generateTieredQuestionVariations = onCall({ secrets: [openAiKeySecr
 /**
  * Generate theme and visual redesign suggestions for imported slide decks.
  */
-export const generatePresentationDesignSuggestions = onCall({ secrets: [openAiKeySecret] }, async (request) => {
+export const generatePresentationDesignSuggestions = guardedOnCall("generatePresentationDesignSuggestions", { secrets: [openAiKeySecret] }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to generate design suggestions.");
   }
@@ -6282,22 +6995,35 @@ export const generatePresentationDesignSuggestions = onCall({ secrets: [openAiKe
     ...slideTexts.map((text, index) => `${index + 1}. ${text}`),
   ].join("\n");
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${openaiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      max_tokens: 900,
-      temperature: 0.35,
-    }),
+  const requestKey = buildAiRequestKey("document_content", request.auth.uid, `${presentationTitle}:${topic}:${slideTexts.join("\n")}`);
+  const { promise } = getOrStartAiRequest(requestKey, async () => {
+    return await resilientFetch({
+      providerKey: "openai_design_suggestions",
+      url: "https://api.openai.com/v1/chat/completions",
+      timeoutMs: 30000,
+      maxAttempts: 3,
+      baseDelayMs: 700,
+      rateLimit: PROVIDER_RATE_LIMITS.openai_design_suggestions,
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 900,
+          temperature: 0.35,
+        }),
+      },
+    });
   });
+
+  const response = await promise;
 
   if (!response.ok) {
     throw new HttpsError("internal", `OpenAI API error: ${response.status} ${response.statusText}`);
@@ -6364,13 +7090,21 @@ async function callConversionEndpoint(input: {
   apiKey: string;
   payload: ConvertPresentationApiPayload;
 }): Promise<ConvertPresentationApiResponse> {
-  const response = await fetch(input.url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${input.apiKey}`,
+  const response = await resilientFetch({
+    providerKey: "conversion_api",
+    url: input.url,
+    timeoutMs: 30000,
+    maxAttempts: 3,
+    baseDelayMs: 700,
+    rateLimit: PROVIDER_RATE_LIMITS.conversion_api,
+    init: {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${input.apiKey}`,
+      },
+      body: JSON.stringify(input.payload),
     },
-    body: JSON.stringify(input.payload),
   });
 
   if (!response.ok) {
@@ -6388,7 +7122,7 @@ async function callConversionEndpoint(input: {
  * - CONVERSION_API_KEY: bearer token for conversion service
  * - CONVERSION_FALLBACK_API_URL: optional backup endpoint
  */
-export const convertPresentationFile = onCall(async (request) => {
+export const convertPresentationFile = guardedOnCall("convertPresentationFile", async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to convert presentation files.");
   }

@@ -14,6 +14,10 @@ import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
 const PROJECT_ID = "courseforge-rules-test";
 const OWNER_UID = "owner-user";
 const OTHER_UID = "other-user";
+const DISTRICT_ADMIN_UID = "district-admin-user";
+const SUPER_ADMIN_UID = "super-admin-user";
+const DISTRICT_ALPHA = "district-alpha";
+const DISTRICT_BRAVO = "district-bravo";
 
 let rulesEnv: RulesTestEnvironment;
 
@@ -97,6 +101,21 @@ function baseSyncFields() {
   } as const;
 }
 
+async function seedUserProfile(uid: string, data: Record<string, unknown>): Promise<void> {
+  await rulesEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "users", uid), {
+      uid,
+      ...data,
+    });
+  });
+}
+
+async function seedCanonicalDoc(path: string, data: Record<string, unknown>): Promise<void> {
+  await rulesEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), path), data);
+  });
+}
+
 beforeAll(async () => {
   // Rules tests intentionally assert denied writes/reads; silence SDK transport
   // logs so stderr only reflects unexpected failures.
@@ -170,6 +189,30 @@ describe("Firestore rules: users + canonical hierarchy", () => {
         })
       );
     }
+  });
+
+  it("blocks client reads/writes on config and rate-limit policy documents", async () => {
+    const ownerDb = rulesEnv.authenticatedContext(OWNER_UID).firestore();
+
+    await assertFails(
+      setDoc(doc(ownerDb, "config/aiSafetyPolicy"), {
+        defaultDailyRequestLimit: 10,
+      })
+    );
+
+    await assertFails(
+      setDoc(doc(ownerDb, "apiRateLimits/setAiProviderPolicy_abcd"), {
+        count: 999,
+      })
+    );
+
+    await rulesEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), "config/aiSafetyPolicy"), {
+        defaultDailyRequestLimit: 10,
+      });
+    });
+
+    await assertFails(getDoc(doc(ownerDb, "config/aiSafetyPolicy")));
   });
 
   it("allows owner writes on canonical hierarchy paths with sync payload fields", async () => {
@@ -335,21 +378,90 @@ describe("Firestore rules: users + canonical hierarchy", () => {
     }
   });
 
-  it("allows admin override writes on canonical docs and users profile access", async () => {
-    const adminDb = rulesEnv.authenticatedContext("admin-user", { admin: true }).firestore();
+  it("allows district admin reads for in-district users only", async () => {
+    const districtAdminDb = rulesEnv.authenticatedContext(DISTRICT_ADMIN_UID, {
+      admin: true,
+      districtId: DISTRICT_ALPHA,
+    }).firestore();
+
+    await seedUserProfile(OWNER_UID, {
+      displayName: "Owner",
+      districtId: DISTRICT_ALPHA,
+      districtName: DISTRICT_ALPHA,
+      schoolId: "school-alpha",
+    });
+    await seedUserProfile(OTHER_UID, {
+      displayName: "Other",
+      districtId: DISTRICT_BRAVO,
+      districtName: DISTRICT_BRAVO,
+      schoolId: "school-bravo",
+    });
+    await seedUserProfile(DISTRICT_ADMIN_UID, {
+      displayName: "District Admin",
+      districtId: DISTRICT_ALPHA,
+      districtName: DISTRICT_ALPHA,
+      schoolId: "school-alpha",
+    });
+
+    await seedCanonicalDoc("textbooks/tb-district-alpha", {
+      ...baseSyncFields(),
+      userId: OWNER_UID,
+      ownerId: OWNER_UID,
+      title: "District Alpha Textbook",
+    });
+
+    await seedCanonicalDoc("textbooks/tb-district-bravo", {
+      ...baseSyncFields(),
+      userId: OTHER_UID,
+      ownerId: OTHER_UID,
+      title: "District Bravo Textbook",
+    });
+
+    await assertSucceeds(getDoc(doc(districtAdminDb, "users", OWNER_UID)));
+    await assertFails(getDoc(doc(districtAdminDb, "users", OTHER_UID)));
+
+    await assertSucceeds(getDoc(doc(districtAdminDb, "textbooks", "tb-district-alpha")));
+    await assertFails(getDoc(doc(districtAdminDb, "textbooks", "tb-district-bravo")));
+  });
+
+  it("blocks district admin cross-user writes while allowing super admin override", async () => {
+    const districtAdminDb = rulesEnv.authenticatedContext(DISTRICT_ADMIN_UID, {
+      admin: true,
+      districtId: DISTRICT_ALPHA,
+    }).firestore();
+    const superAdminDb = rulesEnv.authenticatedContext(SUPER_ADMIN_UID, { superAdmin: true }).firestore();
     const base = baseSyncFields();
 
-    await assertSucceeds(
-      setDoc(doc(adminDb, "users", OWNER_UID), {
+    await seedUserProfile(OWNER_UID, {
+      displayName: "Owner",
+      districtId: DISTRICT_ALPHA,
+      districtName: DISTRICT_ALPHA,
+      schoolId: "school-alpha",
+    });
+    await seedUserProfile(DISTRICT_ADMIN_UID, {
+      displayName: "District Admin",
+      districtId: DISTRICT_ALPHA,
+      districtName: DISTRICT_ALPHA,
+      schoolId: "school-alpha",
+    });
+    await seedUserProfile(SUPER_ADMIN_UID, {
+      displayName: "Super Admin",
+      districtId: DISTRICT_BRAVO,
+      districtName: DISTRICT_BRAVO,
+      schoolId: "school-bravo",
+    });
+
+    await assertFails(
+      setDoc(doc(districtAdminDb, "users", OWNER_UID), {
         uid: OWNER_UID,
-        displayName: "Owner via admin",
+        displayName: "Owner via district admin",
         email: "owner@example.com",
         isAdmin: false,
       })
     );
-    await assertSucceeds(getDoc(doc(adminDb, "users", OWNER_UID)));
+    await assertSucceeds(getDoc(doc(superAdminDb, "users", OWNER_UID)));
 
-    const adminCanonicalWrites = [
+    const canonicalWrites = [
       {
         path: "textbooks/tb-admin",
         payload: {
@@ -426,15 +538,45 @@ describe("Firestore rules: users + canonical hierarchy", () => {
       },
     ];
 
-    for (const canonicalDoc of adminCanonicalWrites) {
-      await assertSucceeds(setDoc(doc(adminDb, canonicalDoc.path), canonicalDoc.payload));
+    for (const canonicalDoc of canonicalWrites) {
+      await assertFails(setDoc(doc(districtAdminDb, canonicalDoc.path), canonicalDoc.payload));
+      await assertSucceeds(setDoc(doc(superAdminDb, canonicalDoc.path), canonicalDoc.payload));
     }
   });
 
-  it("blocks direct client writes to debug reports and scopes reads to owner/admin", async () => {
+  it("blocks direct client writes to debug reports and scopes reads by district/super-admin", async () => {
     const ownerDb = rulesEnv.authenticatedContext(OWNER_UID).firestore();
     const otherDb = rulesEnv.authenticatedContext(OTHER_UID).firestore();
-    const adminDb = rulesEnv.authenticatedContext("admin-user", { admin: true }).firestore();
+    const districtAdminDb = rulesEnv.authenticatedContext(DISTRICT_ADMIN_UID, {
+      admin: true,
+      districtId: DISTRICT_ALPHA,
+    }).firestore();
+    const superAdminDb = rulesEnv.authenticatedContext(SUPER_ADMIN_UID, { superAdmin: true }).firestore();
+
+    await seedUserProfile(OWNER_UID, {
+      displayName: "Owner",
+      districtId: DISTRICT_ALPHA,
+      districtName: DISTRICT_ALPHA,
+      schoolId: "school-alpha",
+    });
+    await seedUserProfile(OTHER_UID, {
+      displayName: "Other",
+      districtId: DISTRICT_BRAVO,
+      districtName: DISTRICT_BRAVO,
+      schoolId: "school-bravo",
+    });
+    await seedUserProfile(DISTRICT_ADMIN_UID, {
+      displayName: "District Admin",
+      districtId: DISTRICT_ALPHA,
+      districtName: DISTRICT_ALPHA,
+      schoolId: "school-alpha",
+    });
+    await seedUserProfile(SUPER_ADMIN_UID, {
+      displayName: "Super Admin",
+      districtId: DISTRICT_BRAVO,
+      districtName: DISTRICT_BRAVO,
+      schoolId: "school-bravo",
+    });
 
     const debugReportPath = `debugReports/${OWNER_UID}/reports/1710500000000`;
 
@@ -459,7 +601,8 @@ describe("Firestore rules: users + canonical hierarchy", () => {
 
     await assertSucceeds(getDoc(doc(ownerDb, debugReportPath)));
     await assertFails(getDoc(doc(otherDb, debugReportPath)));
-    await assertSucceeds(getDoc(doc(adminDb, debugReportPath)));
+    await assertSucceeds(getDoc(doc(districtAdminDb, debugReportPath)));
+    await assertSucceeds(getDoc(doc(superAdminDb, debugReportPath)));
   });
 
   it("blocks legacy nested vocab path under /users and allows canonical vocab path", async () => {
@@ -488,10 +631,39 @@ describe("Firestore rules: users + canonical hierarchy", () => {
     );
   });
 
-  it("enforces owner/non-owner/admin checks on canonical vocab path", async () => {
+  it("enforces owner/non-owner/district-admin/super-admin checks on canonical vocab path", async () => {
     const ownerDb = rulesEnv.authenticatedContext(OWNER_UID).firestore();
     const otherDb = rulesEnv.authenticatedContext(OTHER_UID).firestore();
-    const adminDb = rulesEnv.authenticatedContext("admin-vocab", { admin: true }).firestore();
+    const districtAdminDb = rulesEnv.authenticatedContext(DISTRICT_ADMIN_UID, {
+      admin: true,
+      districtId: DISTRICT_ALPHA,
+    }).firestore();
+    const superAdminDb = rulesEnv.authenticatedContext(SUPER_ADMIN_UID, { superAdmin: true }).firestore();
+
+    await seedUserProfile(OWNER_UID, {
+      displayName: "Owner",
+      districtId: DISTRICT_ALPHA,
+      districtName: DISTRICT_ALPHA,
+      schoolId: "school-alpha",
+    });
+    await seedUserProfile(OTHER_UID, {
+      displayName: "Other",
+      districtId: DISTRICT_BRAVO,
+      districtName: DISTRICT_BRAVO,
+      schoolId: "school-bravo",
+    });
+    await seedUserProfile(DISTRICT_ADMIN_UID, {
+      displayName: "District Admin",
+      districtId: DISTRICT_ALPHA,
+      districtName: DISTRICT_ALPHA,
+      schoolId: "school-alpha",
+    });
+    await seedUserProfile(SUPER_ADMIN_UID, {
+      displayName: "Super Admin",
+      districtId: DISTRICT_BRAVO,
+      districtName: DISTRICT_BRAVO,
+      schoolId: "school-bravo",
+    });
 
     const canonicalPath = "textbooks/tb-vocab-2/chapters/ch-vocab-2/sections/sec-vocab-2/vocab/v-2";
 
@@ -523,9 +695,9 @@ describe("Firestore rules: users + canonical hierarchy", () => {
 
     await assertFails(getDoc(doc(otherDb, canonicalPath)));
 
-    await assertSucceeds(
+    await assertFails(
       setDoc(
-        doc(adminDb, canonicalPath),
+        doc(districtAdminDb, canonicalPath),
         {
           ...baseSyncFields(),
           id: "v-2",
@@ -538,7 +710,51 @@ describe("Firestore rules: users + canonical hierarchy", () => {
       )
     );
 
-    await assertSucceeds(getDoc(doc(adminDb, canonicalPath)));
+    await assertSucceeds(getDoc(doc(districtAdminDb, canonicalPath)));
+    await assertSucceeds(
+      setDoc(
+        doc(superAdminDb, canonicalPath),
+        {
+          ...baseSyncFields(),
+          id: "v-2",
+          textbookId: "tb-vocab-2",
+          chapterId: "ch-vocab-2",
+          sectionId: "sec-vocab-2",
+          word: "super-admin-override",
+        },
+        { merge: true }
+      )
+    );
+  });
+
+  it("keeps district admins without districtId claim scoped to self-only access", async () => {
+    const districtAdminWithoutClaimDb = rulesEnv.authenticatedContext(DISTRICT_ADMIN_UID, {
+      admin: true,
+    }).firestore();
+
+    await seedUserProfile(OWNER_UID, {
+      displayName: "Owner",
+      districtId: DISTRICT_ALPHA,
+      districtName: DISTRICT_ALPHA,
+      schoolId: "school-alpha",
+    });
+    await seedUserProfile(DISTRICT_ADMIN_UID, {
+      displayName: "District Admin",
+      districtId: DISTRICT_ALPHA,
+      districtName: DISTRICT_ALPHA,
+      schoolId: "school-alpha",
+    });
+
+    await seedCanonicalDoc("textbooks/tb-no-claim", {
+      ...baseSyncFields(),
+      userId: OWNER_UID,
+      ownerId: OWNER_UID,
+      title: "No Claim Access Check",
+    });
+
+    await assertSucceeds(getDoc(doc(districtAdminWithoutClaimDb, "users", DISTRICT_ADMIN_UID)));
+    await assertFails(getDoc(doc(districtAdminWithoutClaimDb, "users", OWNER_UID)));
+    await assertFails(getDoc(doc(districtAdminWithoutClaimDb, "textbooks", "tb-no-claim")));
   });
 
   it("rejects canonical vocab creation when owner fields are tampered (false-positive mutation guard)", async () => {

@@ -57,6 +57,17 @@ For plugin-related work, at minimum record:
 - plugin API schema changes
 - marketplace metadata and command contract changes
 
+## Startup Change Check
+
+MemPalace startup now runs a repository change check before launching the MCP server.
+
+1. Task hook: `.vscode/tasks.json` `Start MemPalace MCP Server` runs `node scripts/mempalace-startup-check.mjs && mempalace mcp`.
+2. Boot artifact: `.mempalace/startup-change-check.json` stores the latest branch/head/fingerprint snapshot.
+3. Boot history: `.mempalace/startup-change-check.log.jsonl` appends one record per startup.
+4. The check compares current repo fingerprint (HEAD + dirty file set) against previous startup and prints whether changes were detected.
+
+This keeps MemPalace startup aware of repository drift without coupling app runtime startup to MemPalace availability.
+
 ## Auditability
 
 Every memory record must be deterministic and attributable to a specific change set. This ensures maintainers can reconstruct architecture evolution without relying on ephemeral chat context.

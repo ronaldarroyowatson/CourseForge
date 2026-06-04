@@ -8,6 +8,7 @@ interface CountdownBadgeProps {
   loading?: boolean;
   titleText?: string;
   labelText?: string;
+  size?: "default" | "compact";
 }
 
 const COUNTDOWN_PERIOD_SECONDS = 24 * 60 * 60;
@@ -18,19 +19,21 @@ export function CountdownBadge({
   loading = false,
   titleText = "Daily Firestore quota resets at midnight Pacific Time.",
   labelText = "Until daily reset (Pacific)",
+  size = "default",
 }: CountdownBadgeProps): React.JSX.Element {
   const safeSecondsLeft = Math.max(0, Math.min(secondsLeft, COUNTDOWN_PERIOD_SECONDS));
   const percentRemaining = (safeSecondsLeft / COUNTDOWN_PERIOD_SECONDS) * 100;
   const ringColor = getCountdownRingColor(percentRemaining);
-  const ringStrokeWidth = 10;
-  const ringSize = 126;
+  const isCompact = size === "compact";
+  const ringStrokeWidth = isCompact ? 8 : 10;
+  const ringSize = isCompact ? 102 : 126;
   const radius = (ringSize - ringStrokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference - (percentRemaining / 100) * circumference;
 
   return (
     <div
-      className="cf-countdown-ring"
+      className={`cf-countdown-ring${isCompact ? " cf-countdown-ring--compact" : ""}`}
       title={titleText}
     >
       {loading ? (

@@ -34,7 +34,8 @@ describe("MemPalace startup isolation", () => {
     expect(task).toBeDefined();
     const command = task?.command ?? "";
 
-    expect(command).toBe("mempalace mcp");
+    expect(command).toContain("mempalace mcp");
+    expect(command).toContain("mempalace-startup-check.mjs");
     expect(command.toLowerCase()).not.toContain("watchdog");
   });
 });

@@ -1464,4 +1464,25 @@ describe("auto textbook flow integration", () => {
     expect(screen.getAllByText(/pp\. 4-11/i).length).toBeGreaterThan(0);
   });
 
+  it("clears title OCR buffers when advancing into TOC capture step", async () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "title",
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          ownershipProofDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          ocrDraft: "Copyright title draft text that should stay partitioned to title step",
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+
+    expect(await screen.findByRole("button", { name: "Capture TOC Page" })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/OCR text/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Raw OCR Output/i)).not.toBeInTheDocument();
+  });
+
 });

@@ -25,3 +25,7 @@ tmp-smoke/debug/*.json
 
 # Release packaging transient artifacts
 release/.tmp-*
+
+# MemPalace startup check runtime artifacts
+.mempalace/startup-change-check.json
+.mempalace/startup-change-check.log.jsonl

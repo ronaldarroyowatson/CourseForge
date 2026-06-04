@@ -31,7 +31,18 @@ describe("Firestore rules static contract", () => {
     expect(rules).toMatch(/match \/concepts\/\{conceptId\}/);
     expect(rules).toMatch(/match \/keyIdeas\/\{keyIdeaId\}/);
     expect(rules).toMatch(/allow read:\s*if isOwnerRead\(\);/);
-    expect(rules).toMatch(/allow write:\s*if isOwner\(\) \|\| isAdmin\(\);/);
+    expect(rules).toMatch(/allow write:\s*if isOwner\(\) \|\| isSuperAdmin\(\);/);
+  });
+
+  it("keeps district/super-admin helper gates in place", () => {
+    const rules = readRulesText();
+
+    expect(rules).toMatch(/function isDistrictAdmin\(\)/);
+    expect(rules).toMatch(/function isSuperAdmin\(\)/);
+    expect(rules).toMatch(/function callerDistrictId\(\)/);
+    expect(rules).toMatch(/function districtIdForUser\(uid\)/);
+    expect(rules).toMatch(/function isSameDistrict\(targetUid\)/);
+    expect(rules).toMatch(/function districtAdminCanReadOwnerData\(data\)/);
   });
 
   it("retains catch-all deny as final fallback", () => {
@@ -48,5 +59,16 @@ describe("Firestore rules static contract", () => {
     expect(rules).toMatch(/match \/debugReports\/\{userId\}/);
     expect(rules).toMatch(/match \/reports\/\{reportId\}/);
     expect(rules).toMatch(/allow write:\s*if false;/);
+  });
+
+  it("keeps config and callable rate-limit rows server-only", () => {
+    const rules = readRulesText();
+
+    expect(rules).toMatch(/match \/config\/\{docId\}/);
+    expect(rules).toMatch(/match \/apiRateLimits\/\{docId\}/);
+    expect(rules).toMatch(/match \/config\/\{docId\}[\s\S]*allow read:\s*if false;/);
+    expect(rules).toMatch(/match \/config\/\{docId\}[\s\S]*allow write:\s*if false;/);
+    expect(rules).toMatch(/match \/apiRateLimits\/\{docId\}[\s\S]*allow read:\s*if false;/);
+    expect(rules).toMatch(/match \/apiRateLimits\/\{docId\}[\s\S]*allow write:\s*if false;/);
   });
 });

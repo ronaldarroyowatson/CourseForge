@@ -32,7 +32,7 @@ describe("Functions backend callable contract verification", () => {
     ];
 
     for (const callableExport of callableExports) {
-      expect(source).toContain(`export const ${callableExport} = onCall`);
+      expect(source).toContain(`export const ${callableExport} = guardedOnCall`);
     }
 
     expect(source).toContain("function success<T>(message: string, data: T): CallableResult<T>");
@@ -108,8 +108,8 @@ describe("Functions premium usage admin flow contracts", () => {
 
     expect(source).toContain("interface PremiumUsageState");
     expect(source).toContain("freezePremium: boolean;");
-    expect(source).toContain("export const getPremiumUsageReport = onCall");
-    expect(source).toContain("export const managePremiumUser = onCall");
+    expect(source).toContain("export const getPremiumUsageReport = guardedOnCall");
+    expect(source).toContain("export const managePremiumUser = guardedOnCall");
     expect(source).toContain("[\"freeze\", \"unfreeze\", \"resetDaily\", \"resetWeekly\", \"resetMonthly\"]");
   });
 
@@ -117,5 +117,31 @@ describe("Functions premium usage admin flow contracts", () => {
     const source = readFunctionsSource();
 
     expect(source).toContain("throw new HttpsError(\"invalid-argument\", \"Unsupported premium usage action.\")");
+  });
+});
+
+describe("Functions external API resilience contracts", () => {
+  it("includes resilient fetch with circuit-breaker and provider rate limiting", () => {
+    const source = readFunctionsSource();
+
+    expect(source).toContain("interface ResilientFetchOptions");
+    expect(source).toContain("async function resilientFetch(options: ResilientFetchOptions)");
+    expect(source).toContain("await assertDistributedCircuitClosed(options.providerKey)");
+    expect(source).toContain("assertExternalCircuitClosed(options.providerKey)");
+    expect(source).toContain("recordExternalCircuitFailure(options.providerKey");
+    expect(source).toContain("await enforceExternalProviderRateLimit(options.providerKey, {");
+    expect(source).toContain("maxRequests: providerPolicy.maxRequests");
+    expect(source).toContain("windowSeconds: providerPolicy.windowSeconds");
+  });
+
+  it("routes high-cost AI/API calls through resilient fetch", () => {
+    const source = readFunctionsSource();
+
+    expect(source).toContain("providerKey: runtime.id");
+    expect(source).toContain("providerKey: \"openai_image_metadata\"");
+    expect(source).toContain("providerKey: \"openai_document_content\"");
+    expect(source).toContain("providerKey: \"openai_tiered_variations\"");
+    expect(source).toContain("providerKey: \"openai_design_suggestions\"");
+    expect(source).toContain("providerKey: \"conversion_api\"");
   });
 });

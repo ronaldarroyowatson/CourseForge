@@ -1174,195 +1174,6 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
                 </span>
               </div>
 
-              <div className="cf-quota-item" style={{ gap: "0.6rem" }}>
-                <h4>GitHub Models Service</h4>
-                <CountdownBadge
-                  secondsLeft={pacificResetCountdown.secondsLeft}
-                  timeString={pacificResetCountdown.timeString}
-                  loading={!hasLoadedOnce}
-                  titleText="GitHub Models limits roll over at midnight Pacific Time."
-                  labelText="Until GitHub daily reset (Pacific)"
-                />
-                <div className="cf-quota-meta-row" style={{ marginTop: "0.15rem" }}>
-                  <span
-                    style={{
-                      background: githubDailyRequestPercent >= 90 ? "rgba(202, 64, 42, 0.16)" : githubDailyRequestPercent >= 75 ? "rgba(196, 134, 36, 0.16)" : "rgba(35, 122, 69, 0.14)",
-                      color: githubDailyRequestPercent >= 90 ? "#7f2617" : githubDailyRequestPercent >= 75 ? "#7a4d05" : "#215a37",
-                      border: "1px solid var(--border-default)",
-                      borderRadius: "999px",
-                      padding: "0.18rem 0.55rem",
-                    }}
-                  >
-                    Request load: <strong>{githubDailyRequestPercent.toFixed(1)}%</strong>
-                  </span>
-                  <span
-                    style={{
-                      background: githubDailyTokenPercent >= 90 ? "rgba(202, 64, 42, 0.16)" : githubDailyTokenPercent >= 75 ? "rgba(196, 134, 36, 0.16)" : "rgba(35, 122, 69, 0.14)",
-                      color: githubDailyTokenPercent >= 90 ? "#7f2617" : githubDailyTokenPercent >= 75 ? "#7a4d05" : "#215a37",
-                      border: "1px solid var(--border-default)",
-                      borderRadius: "999px",
-                      padding: "0.18rem 0.55rem",
-                    }}
-                  >
-                    Token load: <strong>{githubDailyTokenPercent.toFixed(1)}%</strong>
-                  </span>
-                  <span
-                    style={{
-                      background: githubRateLimitedToday > 0 ? "rgba(202, 64, 42, 0.16)" : "rgba(35, 122, 69, 0.14)",
-                      color: githubRateLimitedToday > 0 ? "#7f2617" : "#215a37",
-                      border: "1px solid var(--border-default)",
-                      borderRadius: "999px",
-                      padding: "0.18rem 0.55rem",
-                    }}
-                  >
-                    Rate-limit hits: <strong>{githubRateLimitedToday}</strong>
-                  </span>
-                </div>
-
-                {showGitHubRetryAfterCountdown ? (
-                  <CountdownBadge
-                    secondsLeft={githubRetryAfterRemainingSeconds}
-                    timeString={formatCountdown(githubRetryAfterRemainingSeconds)}
-                    loading={!hasLoadedOnce}
-                    titleText="GitHub provider returned a Retry-After window; this timer tracks when the next batch can be retried."
-                    labelText="GitHub Retry-After cooldown"
-                  />
-                ) : null}
-
-                <div className="cf-quota-rings-grid">
-                  <ProgressRing
-                    value={githubRequestsPerDayUsed}
-                    max={githubDailyRequestLimit}
-                    label="GitHub Requests / Day"
-                    loading={!hasLoadedOnce}
-                  />
-                  <ProgressRing
-                    value={githubTokensPerDayUsed}
-                    max={githubDailyTokenLimit}
-                    label="GitHub Tokens / Day"
-                    loading={!hasLoadedOnce}
-                  />
-                  <ProgressRing
-                    value={githubAverageTokensPerRequest}
-                    max={githubTokensPerRequestBudget}
-                    label="Avg Tokens / Request"
-                    loading={!hasLoadedOnce}
-                  />
-                  <ProgressRing
-                    value={githubRateLimitedToday}
-                    max={Math.max(1, githubDailyRequestLimit)}
-                    label="GitHub Rate-Limits / Day"
-                    loading={!hasLoadedOnce}
-                  />
-                </div>
-
-                <div className={`cf-quota-overrides${showGitHubServiceEditor ? "" : " cf-quota-overrides--collapsed"}`}>
-                  <div className="cf-quota-overrides__header">
-                    <p className="cf-quota-overrides__title">GitHub Models Limits</p>
-                    <button
-                      type="button"
-                      className="btn-secondary cf-quota-overrides__toggle"
-                      onClick={() => { setShowGitHubServiceEditor((current) => !current); }}
-                    >
-                      {showGitHubServiceEditor ? "Hide GitHub Limits" : "Show GitHub Limits"}
-                    </button>
-                  </div>
-                  {!showGitHubServiceEditor ? (
-                    <p className="cf-quota-overrides__collapsed-note">
-                      Hidden by default. Unhide to adjust GitHub Models limits and tier presets.
-                    </p>
-                  ) : (
-                    <div className="cf-quota-overrides__grid">
-                      <div className="cf-quota-overrides__field">
-                        <label htmlFor="cf-ai-policy-github-tier">GitHub Copilot tier preset</label>
-                        <select
-                          id="cf-ai-policy-github-tier"
-                          value={githubTierInput}
-                          disabled={isSaving}
-                          onChange={(event) => { applyGitHubTierPreset(event.target.value as GitHubCopilotTier); }}
-                        >
-                          <option value="free">Free</option>
-                          <option value="pro">Pro</option>
-                          <option value="business">Business</option>
-                          <option value="enterprise">Enterprise</option>
-                        </select>
-                      </div>
-                      <div className="cf-quota-overrides__field">
-                        <label htmlFor="cf-ai-policy-github-rpd">GitHub requests / day</label>
-                        <input
-                          id="cf-ai-policy-github-rpd"
-                          type="number"
-                          min={1}
-                          disabled={isSaving}
-                          value={githubDailyRequestLimitInput}
-                          onChange={(event) => setGitHubDailyRequestLimitInput(event.target.value)}
-                        />
-                      </div>
-                      <div className="cf-quota-overrides__field">
-                        <label htmlFor="cf-ai-policy-github-daily-tokens">GitHub tokens / day</label>
-                        <input
-                          id="cf-ai-policy-github-daily-tokens"
-                          type="number"
-                          min={1}
-                          disabled={isSaving}
-                          value={githubDailyTokenLimitInput}
-                          onChange={(event) => setGitHubDailyTokenLimitInput(event.target.value)}
-                        />
-                      </div>
-                      <div className="cf-quota-overrides__field">
-                        <label htmlFor="cf-ai-policy-github-rpm">GitHub requests / minute</label>
-                        <input
-                          id="cf-ai-policy-github-rpm"
-                          type="number"
-                          min={1}
-                          disabled={isSaving}
-                          value={githubRequestsPerMinuteLimitInput}
-                          onChange={(event) => setGitHubRequestsPerMinuteLimitInput(event.target.value)}
-                        />
-                      </div>
-                      <div className="cf-quota-overrides__field">
-                        <label htmlFor="cf-ai-policy-github-token-in">GitHub tokens/request (input)</label>
-                        <input
-                          id="cf-ai-policy-github-token-in"
-                          type="number"
-                          min={1}
-                          disabled={isSaving}
-                          value={githubTokensPerRequestInputLimitInput}
-                          onChange={(event) => setGitHubTokensPerRequestInputLimitInput(event.target.value)}
-                        />
-                      </div>
-                      <div className="cf-quota-overrides__field">
-                        <label htmlFor="cf-ai-policy-github-token-out">GitHub tokens/request (output)</label>
-                        <input
-                          id="cf-ai-policy-github-token-out"
-                          type="number"
-                          min={1}
-                          disabled={isSaving}
-                          value={githubTokensPerRequestOutputLimitInput}
-                          onChange={(event) => setGitHubTokensPerRequestOutputLimitInput(event.target.value)}
-                        />
-                      </div>
-                      <div className="cf-quota-overrides__field">
-                        <label htmlFor="cf-ai-policy-github-concurrency">GitHub concurrent requests</label>
-                        <input
-                          id="cf-ai-policy-github-concurrency"
-                          type="number"
-                          min={1}
-                          disabled={isSaving}
-                          value={githubConcurrentRequestsLimitInput}
-                          onChange={(event) => setGitHubConcurrentRequestsLimitInput(event.target.value)}
-                        />
-                      </div>
-                      <div className="cf-quota-overrides__actions">
-                        <button type="button" className="btn-secondary" onClick={() => { void handleSaveGlobalAiPolicy(); }} disabled={isSaving}>
-                          {isSaving ? "Saving..." : "Save GitHub Limits"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
               <div className={`cf-quota-overrides${showAiPolicyEditor ? "" : " cf-quota-overrides--collapsed"}`}>
                 <div className="cf-quota-overrides__header">
                   <p className="cf-quota-overrides__title">Global AI Safety Policy</p>
@@ -1564,6 +1375,203 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
             </div>
 
             <div className="cf-quota-right">
+              <div className="cf-quota-item cf-quota-item--github-service cf-quota-item--github-standalone" style={{ gap: "0.6rem" }}>
+                <h4>GitHub Models Service</h4>
+                <div className="cf-github-service-layout">
+                  <div className="cf-github-service-layout__timers">
+                    <CountdownBadge
+                      secondsLeft={pacificResetCountdown.secondsLeft}
+                      timeString={pacificResetCountdown.timeString}
+                      loading={!hasLoadedOnce}
+                      titleText="GitHub Models limits roll over at midnight Pacific Time."
+                      labelText="Until GitHub daily reset (Pacific)"
+                      size="compact"
+                    />
+                    {showGitHubRetryAfterCountdown ? (
+                      <CountdownBadge
+                        secondsLeft={githubRetryAfterRemainingSeconds}
+                        timeString={formatCountdown(githubRetryAfterRemainingSeconds)}
+                        loading={!hasLoadedOnce}
+                        titleText="GitHub provider returned a Retry-After window; this timer tracks when the next batch can be retried."
+                        labelText="GitHub Retry-After cooldown"
+                        size="compact"
+                      />
+                    ) : null}
+                  </div>
+
+                  <div className="cf-github-service-layout__metrics">
+                    <div className="cf-quota-meta-row cf-quota-meta-row--chips" style={{ marginTop: "0.15rem" }}>
+                      <span
+                        style={{
+                          background: githubDailyRequestPercent >= 90 ? "rgba(202, 64, 42, 0.16)" : githubDailyRequestPercent >= 75 ? "rgba(196, 134, 36, 0.16)" : "rgba(35, 122, 69, 0.14)",
+                          color: githubDailyRequestPercent >= 90 ? "#7f2617" : githubDailyRequestPercent >= 75 ? "#7a4d05" : "#215a37",
+                          border: "1px solid var(--border-default)",
+                          borderRadius: "999px",
+                          padding: "0.18rem 0.55rem",
+                        }}
+                      >
+                        Request load: <strong>{githubDailyRequestPercent.toFixed(1)}%</strong>
+                      </span>
+                      <span
+                        style={{
+                          background: githubDailyTokenPercent >= 90 ? "rgba(202, 64, 42, 0.16)" : githubDailyTokenPercent >= 75 ? "rgba(196, 134, 36, 0.16)" : "rgba(35, 122, 69, 0.14)",
+                          color: githubDailyTokenPercent >= 90 ? "#7f2617" : githubDailyTokenPercent >= 75 ? "#7a4d05" : "#215a37",
+                          border: "1px solid var(--border-default)",
+                          borderRadius: "999px",
+                          padding: "0.18rem 0.55rem",
+                        }}
+                      >
+                        Token load: <strong>{githubDailyTokenPercent.toFixed(1)}%</strong>
+                      </span>
+                      <span
+                        style={{
+                          background: githubRateLimitedToday > 0 ? "rgba(202, 64, 42, 0.16)" : "rgba(35, 122, 69, 0.14)",
+                          color: githubRateLimitedToday > 0 ? "#7f2617" : "#215a37",
+                          border: "1px solid var(--border-default)",
+                          borderRadius: "999px",
+                          padding: "0.18rem 0.55rem",
+                        }}
+                      >
+                        Rate-limit hits: <strong>{githubRateLimitedToday}</strong>
+                      </span>
+                    </div>
+
+                    <div className="cf-quota-rings-grid cf-quota-rings-grid--github">
+                      <ProgressRing
+                        value={githubRequestsPerDayUsed}
+                        max={githubDailyRequestLimit}
+                        label="GitHub Requests / Day"
+                        loading={!hasLoadedOnce}
+                      />
+                      <ProgressRing
+                        value={githubTokensPerDayUsed}
+                        max={githubDailyTokenLimit}
+                        label="GitHub Tokens / Day"
+                        loading={!hasLoadedOnce}
+                      />
+                      <ProgressRing
+                        value={githubAverageTokensPerRequest}
+                        max={githubTokensPerRequestBudget}
+                        label="Avg Tokens / Request"
+                        loading={!hasLoadedOnce}
+                      />
+                      <ProgressRing
+                        value={githubRateLimitedToday}
+                        max={Math.max(1, githubDailyRequestLimit)}
+                        label="GitHub Rate-Limits / Day"
+                        loading={!hasLoadedOnce}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className={`cf-quota-overrides${showGitHubServiceEditor ? "" : " cf-quota-overrides--collapsed"}`}>
+                  <div className="cf-quota-overrides__header">
+                    <p className="cf-quota-overrides__title">GitHub Models Limits</p>
+                    <button
+                      type="button"
+                      className="btn-secondary cf-quota-overrides__toggle"
+                      onClick={() => { setShowGitHubServiceEditor((current) => !current); }}
+                    >
+                      {showGitHubServiceEditor ? "Hide GitHub Limits" : "Show GitHub Limits"}
+                    </button>
+                  </div>
+                  {!showGitHubServiceEditor ? (
+                    <p className="cf-quota-overrides__collapsed-note">
+                      Hidden by default. Unhide to adjust GitHub Models limits and tier presets.
+                    </p>
+                  ) : (
+                    <div className="cf-quota-overrides__grid">
+                      <div className="cf-quota-overrides__field">
+                        <label htmlFor="cf-ai-policy-github-tier">GitHub Copilot tier preset</label>
+                        <select
+                          id="cf-ai-policy-github-tier"
+                          value={githubTierInput}
+                          disabled={isSaving}
+                          onChange={(event) => { applyGitHubTierPreset(event.target.value as GitHubCopilotTier); }}
+                        >
+                          <option value="free">Free</option>
+                          <option value="pro">Pro</option>
+                          <option value="business">Business</option>
+                          <option value="enterprise">Enterprise</option>
+                        </select>
+                      </div>
+                      <div className="cf-quota-overrides__field">
+                        <label htmlFor="cf-ai-policy-github-rpd">GitHub requests / day</label>
+                        <input
+                          id="cf-ai-policy-github-rpd"
+                          type="number"
+                          min={1}
+                          disabled={isSaving}
+                          value={githubDailyRequestLimitInput}
+                          onChange={(event) => setGitHubDailyRequestLimitInput(event.target.value)}
+                        />
+                      </div>
+                      <div className="cf-quota-overrides__field">
+                        <label htmlFor="cf-ai-policy-github-daily-tokens">GitHub tokens / day</label>
+                        <input
+                          id="cf-ai-policy-github-daily-tokens"
+                          type="number"
+                          min={1}
+                          disabled={isSaving}
+                          value={githubDailyTokenLimitInput}
+                          onChange={(event) => setGitHubDailyTokenLimitInput(event.target.value)}
+                        />
+                      </div>
+                      <div className="cf-quota-overrides__field">
+                        <label htmlFor="cf-ai-policy-github-rpm">GitHub requests / minute</label>
+                        <input
+                          id="cf-ai-policy-github-rpm"
+                          type="number"
+                          min={1}
+                          disabled={isSaving}
+                          value={githubRequestsPerMinuteLimitInput}
+                          onChange={(event) => setGitHubRequestsPerMinuteLimitInput(event.target.value)}
+                        />
+                      </div>
+                      <div className="cf-quota-overrides__field">
+                        <label htmlFor="cf-ai-policy-github-token-in">GitHub tokens/request (input)</label>
+                        <input
+                          id="cf-ai-policy-github-token-in"
+                          type="number"
+                          min={1}
+                          disabled={isSaving}
+                          value={githubTokensPerRequestInputLimitInput}
+                          onChange={(event) => setGitHubTokensPerRequestInputLimitInput(event.target.value)}
+                        />
+                      </div>
+                      <div className="cf-quota-overrides__field">
+                        <label htmlFor="cf-ai-policy-github-token-out">GitHub tokens/request (output)</label>
+                        <input
+                          id="cf-ai-policy-github-token-out"
+                          type="number"
+                          min={1}
+                          disabled={isSaving}
+                          value={githubTokensPerRequestOutputLimitInput}
+                          onChange={(event) => setGitHubTokensPerRequestOutputLimitInput(event.target.value)}
+                        />
+                      </div>
+                      <div className="cf-quota-overrides__field">
+                        <label htmlFor="cf-ai-policy-github-concurrency">GitHub concurrent requests</label>
+                        <input
+                          id="cf-ai-policy-github-concurrency"
+                          type="number"
+                          min={1}
+                          disabled={isSaving}
+                          value={githubConcurrentRequestsLimitInput}
+                          onChange={(event) => setGitHubConcurrentRequestsLimitInput(event.target.value)}
+                        />
+                      </div>
+                      <div className="cf-quota-overrides__actions">
+                        <button type="button" className="btn-secondary" onClick={() => { void handleSaveGlobalAiPolicy(); }} disabled={isSaving}>
+                          {isSaving ? "Saving..." : "Save GitHub Limits"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="cf-quota-rings-grid">
                 <ProgressRing
                   value={openAiRequestsPerDayUsed}

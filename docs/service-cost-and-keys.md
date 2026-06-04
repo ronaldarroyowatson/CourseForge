@@ -1,6 +1,6 @@
 # Service Cost and Keys
 
-Last updated: 2026-03-29
+Last updated: 2026-06-04
 
 ## Scope
 
@@ -34,10 +34,12 @@ This note documents where CourseForge uses cloud services for OCR/metadata extra
 ## Cost Controls Already in Code
 
 1. Multi-provider policy with local fallback to Tesseract
-2. Circuit-breaker style provider health and failover
+2. Distributed circuit-breaker state in `externalApiCircuitBreakers/{providerKey}` to suppress cross-instance retry storms
 3. Runtime status and trace visibility for debugging noisy retries
 4. Debug upload and payload-size limits via admin policy
 5. Metadata correction safeguards (daily caps/queue controls)
+6. Firestore-backed connectivity policy (`config/aiConnectivityPolicy`) for provider-specific request windows and breaker thresholds
+7. Super-admin-only policy mutators (`setAiConnectivityPolicy`, `setAiProviderPolicy`, `setGlobalAiSafetyPolicy`) to prevent tenant-level bypass of hard limits
 
 ## Operator Guidance
 

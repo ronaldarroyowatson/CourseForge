@@ -358,6 +358,45 @@ describe("Backend callable security contracts", () => {
     expect(ownerCheckIdx).toBeLessThan(claimsIdx);
   });
 
+  it("setAiProviderPolicy asserts super-admin before writing policy", () => {
+    const src = readFunctionsSource();
+
+    const fnStart = src.indexOf("export const setAiProviderPolicy");
+    const assertIdx = src.indexOf("assertSuperAdmin(request.auth)", fnStart);
+    const writeIdx = src.indexOf("AI_PROVIDER_POLICY_DOC_PATH", fnStart);
+
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(assertIdx).toBeGreaterThan(-1);
+    expect(writeIdx).toBeGreaterThan(-1);
+    expect(assertIdx).toBeLessThan(writeIdx);
+  });
+
+  it("setAiConnectivityPolicy asserts super-admin before writing connectivity policy", () => {
+    const src = readFunctionsSource();
+
+    const fnStart = src.indexOf("export const setAiConnectivityPolicy");
+    const assertIdx = src.indexOf("assertSuperAdmin(request.auth)", fnStart);
+    const writeIdx = src.indexOf("AI_CONNECTIVITY_POLICY_DOC_PATH", fnStart);
+
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(assertIdx).toBeGreaterThan(-1);
+    expect(writeIdx).toBeGreaterThan(-1);
+    expect(assertIdx).toBeLessThan(writeIdx);
+  });
+
+  it("managePremiumUser asserts super-admin before mutating premium usage", () => {
+    const src = readFunctionsSource();
+
+    const fnStart = src.indexOf("export const managePremiumUser");
+    const assertIdx = src.indexOf("assertSuperAdmin(request.auth)", fnStart);
+    const writeIdx = src.indexOf("await usageRef.set(next, { merge: true });", fnStart);
+
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(assertIdx).toBeGreaterThan(-1);
+    expect(writeIdx).toBeGreaterThan(-1);
+    expect(assertIdx).toBeLessThan(writeIdx);
+  });
+
   it("setUserSuperAdminStatus enforces owner self-targeting guardrails before claim writes", () => {
     const src = readFunctionsSource();
 

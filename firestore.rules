@@ -15,9 +15,10 @@ rules_version = '2';
 //   /users/{uid}
 //
 // Ownership is stored in the document's userId field, written by the sync
-// engine on every cloud write. Admins are identified via a custom JWT claim
-// (request.auth.token.admin == true), set exclusively by the setUserAdminStatus
-// Cloud Function.
+// engine on every cloud write. District admins are identified via custom JWT
+// claims (request.auth.token.admin == true or request.auth.token.districtAdmin
+// == true). District boundaries are enforced by request.auth.token.districtId.
+// Super admins are identified by request.auth.token.superAdmin.
 //
 // Section-scoped content entities use the same ownership model as vocab.
 
@@ -33,13 +34,70 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Returns true when the caller holds the custom admin JWT claim.
-    // This claim is set exclusively by the setUserAdminStatus Cloud Function
-    // and is never writable from the client.
-    function isAdmin() {
+    // Returns true when the caller holds super admin privileges.
+    function isSuperAdmin() {
       return request.auth != null
-        && 'admin' in request.auth.token
-        && request.auth.token.admin == true;
+        && 'superAdmin' in request.auth.token
+        && request.auth.token.superAdmin == true;
+    }
+
+    // Returns true when the caller holds district admin privileges.
+    // Backward compatibility: the legacy `admin` claim maps to district admin
+    // behavior for Firestore read scoping.
+    function isDistrictAdmin() {
+      return request.auth != null && (
+        ('districtAdmin' in request.auth.token && request.auth.token.districtAdmin == true) ||
+        ('admin' in request.auth.token && request.auth.token.admin == true)
+      );
+    }
+
+    // Returns caller districtId from token, or an empty string when missing.
+    function callerDistrictId() {
+      return isSignedIn()
+        && 'districtId' in request.auth.token
+        && request.auth.token.districtId is string
+        ? request.auth.token.districtId
+        : "";
+    }
+
+    // Returns districtId from /users/{uid}, or an empty string when missing.
+    function districtIdForUser(uid) {
+      return uid is string
+        && uid != ""
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && get(/databases/$(database)/documents/users/$(uid)).data.districtId is string
+        ? get(/databases/$(database)/documents/users/$(uid)).data.districtId
+        : "";
+    }
+
+    // Returns true when caller claim and target user resolve to the same
+    // non-empty district.
+    function isSameDistrict(targetUid) {
+      return targetUid is string
+        && targetUid != ""
+        && callerDistrictId() != ""
+        && callerDistrictId() == districtIdForUser(targetUid);
+    }
+
+    // Extracts the content owner uid from canonical owner fields.
+    function ownerUid(data) {
+      return (
+        ('ownerId' in data && data.ownerId is string && data.ownerId != "")
+          ? data.ownerId
+          : (
+            ('userId' in data && data.userId is string && data.userId != "")
+              ? data.userId
+              : ""
+          )
+      );
+    }
+
+    // District admins may read docs owned by users in their district.
+    function districtAdminCanReadOwnerData(data) {
+      return isDistrictAdmin()
+        && isSignedIn()
+        && ownerUid(data) != ""
+        && isSameDistrict(ownerUid(data));
     }
 
     // Returns true when the authenticated uid matches owner fields on data.
@@ -58,11 +116,75 @@ service cloud.firestore {
         : ownerMatches(resource.data);
     }
 
+    // Owners may update their own profile while privileged scope fields stay
+    // token-bound or immutable from the client.
+    function canOwnerWriteOwnProfile(uid) {
+      return isSignedIn()
+        && request.auth.uid == uid
+        && (
+          !('districtName' in request.resource.data)
+          || (resource != null && request.resource.data.districtName == resource.data.districtName)
+        )
+        && (
+          !('districtId' in request.resource.data)
+          || (
+            (
+              callerDistrictId() != ""
+              && request.resource.data.districtId == callerDistrictId()
+            )
+            || (
+              resource != null
+              && 'districtId' in resource.data
+              && request.resource.data.districtId == resource.data.districtId
+            )
+          )
+        )
+        && (
+          !('schoolName' in request.resource.data)
+          || (resource != null && request.resource.data.schoolName == resource.data.schoolName)
+        )
+        && (
+          !('isAdmin' in request.resource.data)
+          || request.resource.data.isAdmin == (
+            'admin' in request.auth.token && request.auth.token.admin == true
+          )
+        )
+        && (
+          !('isSchoolAdmin' in request.resource.data)
+          || request.resource.data.isSchoolAdmin == (
+            'schoolAdmin' in request.auth.token && request.auth.token.schoolAdmin == true
+          )
+        )
+        && (
+          !('isSuperAdmin' in request.resource.data)
+          || request.resource.data.isSuperAdmin == (
+            'superAdmin' in request.auth.token && request.auth.token.superAdmin == true
+          )
+        )
+        && (
+          !('schoolId' in request.resource.data)
+          || (
+            (
+              'schoolId' in request.auth.token
+              && request.auth.token.schoolId is string
+              && request.resource.data.schoolId == request.auth.token.schoolId
+            )
+            || (
+              resource != null
+              && 'schoolId' in resource.data
+              && request.resource.data.schoolId == resource.data.schoolId
+            )
+          )
+        );
+    }
+
     // Returns true when the caller may READ a content document.
-    // Restricts reads to the document owner or an admin.
-    // (FIX 2 — cross-tenant read exposure closed)
+    // Restricts reads to:
+    // - the document owner
+    // - district admins for in-district owners
+    // - super admins
     function isOwnerRead() {
-      return isAdmin() || ownerMatches(resource.data);
+      return isSuperAdmin() || ownerMatches(resource.data) || districtAdminCanReadOwnerData(resource.data);
     }
 
     // =========================================================================
@@ -76,19 +198,28 @@ service cloud.firestore {
     //         lastClaimsUpdatedAt
     //
     // - Owner can read and update their own profile.
-    // - Admins can read and write any profile (required for user management).
+    // - District admins can read users within their district.
+    // - Super admins can read and write any profile.
     // - All sub-collections under /users/{uid}/ are explicitly blocked to
     //   prevent accidental legacy writes (users/{uid}/sections, /chapters,
     //   /textbooks, /vocabTerms created by the old sync engine).
     // =========================================================================
     match /users/{uid} {
-      allow read:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
-      allow write: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
+      allow read:  if isSignedIn() && (
+        request.auth.uid == uid
+        || isSuperAdmin()
+        || (isDistrictAdmin() && isSameDistrict(uid))
+      );
+      allow write: if canOwnerWriteOwnProfile(uid) || isSuperAdmin();
 
       // Premium usage tracking: owners can read, only admins can mutate.
       match /premiumUsage/{docId} {
-        allow read:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
-        allow write: if isAdmin();
+        allow read:  if isSignedIn() && (
+          request.auth.uid == uid
+          || isSuperAdmin()
+          || (isDistrictAdmin() && isSameDistrict(uid))
+        );
+        allow write: if isSuperAdmin();
       }
 
       // Explicitly block legacy sub-collections written by the pre-v1.1 sync engine.
@@ -135,12 +266,13 @@ service cloud.firestore {
     //         lastModified, pendingSync, source, isFavorite, isArchived,
     //         status, isDeleted
     //
-    // Read policy  : document owner or admin (FIX 2 — was any signed-in user).
-    // Write policy : owner (userId matches) or admin.
+    // Read policy  : document owner, district admin for in-district owners,
+    //                or super admin.
+    // Write policy : owner (userId matches) or super admin.
     // =========================================================================
     match /textbooks/{textbookId} {
       allow read:   if isOwnerRead();
-      allow write:  if isOwner() || isAdmin();
+      allow write:  if isOwner() || isSuperAdmin();
 
       // -----------------------------------------------------------------------
       // /textbooks/{textbookId}/chapters/{chapterId}
@@ -150,7 +282,7 @@ service cloud.firestore {
       // -----------------------------------------------------------------------
       match /chapters/{chapterId} {
         allow read:   if isOwnerRead();
-        allow write:  if isOwner() || isAdmin();
+        allow write:  if isOwner() || isSuperAdmin();
 
         // ---------------------------------------------------------------------
         // /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}
@@ -160,7 +292,7 @@ service cloud.firestore {
         // ---------------------------------------------------------------------
         match /sections/{sectionId} {
           allow read:   if isOwnerRead();
-          allow write:  if isOwner() || isAdmin();
+          allow write:  if isOwner() || isSuperAdmin();
 
           // -------------------------------------------------------------------
           // /textbooks/{textbookId}/chapters/{chapterId}/sections/{sectionId}/vocab/{vocabId}
@@ -171,7 +303,7 @@ service cloud.firestore {
           // -------------------------------------------------------------------
           match /vocab/{vocabId} {
             allow read:   if isOwnerRead();
-            allow write:  if isOwner() || isAdmin();
+            allow write:  if isOwner() || isSuperAdmin();
           }
 
           // -------------------------------------------------------------------
@@ -179,7 +311,7 @@ service cloud.firestore {
           // -------------------------------------------------------------------
           match /equations/{equationId} {
             allow read:   if isOwnerRead();
-            allow write:  if isOwner() || isAdmin();
+            allow write:  if isOwner() || isSuperAdmin();
           }
 
           // -------------------------------------------------------------------
@@ -187,7 +319,7 @@ service cloud.firestore {
           // -------------------------------------------------------------------
           match /concepts/{conceptId} {
             allow read:   if isOwnerRead();
-            allow write:  if isOwner() || isAdmin();
+            allow write:  if isOwner() || isSuperAdmin();
           }
 
           // -------------------------------------------------------------------
@@ -195,7 +327,7 @@ service cloud.firestore {
           // -------------------------------------------------------------------
           match /keyIdeas/{keyIdeaId} {
             allow read:   if isOwnerRead();
-            allow write:  if isOwner() || isAdmin();
+            allow write:  if isOwner() || isSuperAdmin();
           }
 
           // -------------------------------------------------------------------
@@ -205,7 +337,7 @@ service cloud.firestore {
           // -------------------------------------------------------------------
           match /presentations/{presentationId} {
             allow read:   if isOwnerRead();
-            allow write:  if isOwner() || isAdmin();
+            allow write:  if isOwner() || isSuperAdmin();
           }
         }
       }
@@ -218,13 +350,42 @@ service cloud.firestore {
     // after server-side payload validation and size enforcement.
     // =========================================================================
     match /debugReports/{userId} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId
+        || isSuperAdmin()
+        || (isDistrictAdmin() && isSameDistrict(userId))
+      );
       allow write: if false;
 
       match /reports/{reportId} {
-        allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+        allow read: if isSignedIn() && (
+          request.auth.uid == userId
+          || isSuperAdmin()
+          || (isDistrictAdmin() && isSameDistrict(userId))
+        );
         allow write: if false;
       }
+    }
+
+    // =========================================================================
+    // /config/* and /apiRateLimits/*
+    //
+    // Security-critical policy and throttle state documents are server-owned.
+    // Clients must never read or write these rows directly.
+    // =========================================================================
+    match /config/{docId} {
+      allow read:  if false;
+      allow write: if false;
+
+      match /{rest=**} {
+        allow read:  if false;
+        allow write: if false;
+      }
+    }
+
+    match /apiRateLimits/{docId} {
+      allow read:  if false;
+      allow write: if false;
     }
 
     // =========================================================================

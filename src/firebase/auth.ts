@@ -957,13 +957,16 @@ export async function saveUserProfileToFirestore(user: User): Promise<void> {
   let isSchoolAdmin = false;
   let isSuperAdmin = false;
   let claimedSchoolId: string | null = null;
+  let claimedDistrictId: string | null = null;
   try {
     const tokenResult = await user.getIdTokenResult();
     isAdmin = tokenResult.claims["admin"] === true;
     isSchoolAdmin = tokenResult.claims["schoolAdmin"] === true;
     isSuperAdmin = tokenResult.claims["superAdmin"] === true;
     const schoolIdClaim = tokenResult.claims["schoolId"];
+    const districtIdClaim = tokenResult.claims["districtId"];
     claimedSchoolId = typeof schoolIdClaim === "string" && schoolIdClaim.trim() ? schoolIdClaim.trim() : null;
+    claimedDistrictId = typeof districtIdClaim === "string" && districtIdClaim.trim() ? districtIdClaim.trim() : null;
   } catch {
     // Non-critical — proceed without claim info.
   }
@@ -976,6 +979,7 @@ export async function saveUserProfileToFirestore(user: User): Promise<void> {
     isSchoolAdmin,
     isSuperAdmin,
     ...(claimedSchoolId ? { schoolId: claimedSchoolId } : {}),
+    ...(claimedDistrictId ? { districtId: claimedDistrictId } : {}),
     preferences: {
       language: detectBrowserLanguageTag(),
       accessibility: {

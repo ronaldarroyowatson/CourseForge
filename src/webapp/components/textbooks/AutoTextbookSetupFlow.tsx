@@ -5,7 +5,7 @@ import {
   type AutoConflictResolutionMode,
   buildAutoConflictResolutionPlan,
 } from "../../../core/services/autoTextbookConflictService";
-import { extractTextFromImageWithFallback } from "../../../core/services/autoOcrService";
+import { extractTextFromImageWithFallback, type AutoOcrProviderId } from "../../../core/services/autoOcrService";
 import { appendDebugLogEntry } from "../../../core/services";
 import { persistAutoTextbook } from "../../../core/services/autoTextbookPersistenceService";
 import { uploadTextbookCoverFromDataUrl, uploadTextbookOwnershipProofFromDataUrl } from "../../../core/services/coverImageService";
@@ -85,6 +85,8 @@ import { getCurrentUser } from "../../../firebase/auth";
 import { emitClientDebugTrace } from "../../../core/services/clientDebugTraceService";
 
 type AutoFlowStep = "cover" | "title" | "toc" | "toc-editor";
+type OcrBufferStep = "cover" | "title" | "toc";
+type OcrStepBuffers = Record<OcrBufferStep, { raw: string; draft: string }>;
 type AutoPrimaryHelperAction =
   | "capture-cover"
   | "upload-cover"
@@ -164,6 +166,88 @@ const METADATA_TILE_LABELS: Record<MetadataTileKey, string> = {
 const RELATED_ISBN_TYPES: RelatedIsbnType[] = ["student", "teacher", "digital", "workbook", "assessment", "other"];
 const IMMEDIATE_UPLOAD_SYNC_TIMEOUT_MS = 4500;
 const IMMEDIATE_UPLOAD_SYNC_RETRY_DELAY_MS = 5500;
+const TOC_RESCUE_PROVIDER_ORDER: AutoOcrProviderId[] = ["local_tesseract", "cloud_openai_vision", "cloud_github_models_vision"];
+
+function toOcrBufferStep(step: AutoFlowStep): OcrBufferStep {
+  return step === "toc-editor" ? "toc" : step;
+}
+
+function sanitizeTocDraftText(rawText: string): string {
+  const structuralPattern = /^(?:unit|module|chapter|ch\.?|lesson)\b|^[0-9]+(?:\.[0-9]+)+\s+|\.{2,}\s*\d+\s*$/i;
+  const headingWhitelist = /\b(?:science|forces|motion|newton|claim|evidence|reasoning|standards|measurement|module|unit|chapter|lesson|phenomenon|society|altitudes)\b/i;
+
+  return rawText
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((line) => {
+      const compact = line.replace(/\s+/g, "");
+      const letters = line.match(/[A-Za-z]/g)?.length ?? 0;
+      const symbols = line.match(/[^A-Za-z0-9\s.,:;()'\-–/&]/g)?.length ?? 0;
+      const noiseRatio = symbols / Math.max(1, compact.length);
+      const gibberishTokenCount = line
+        .split(/\s+/)
+        .filter((token) => /[A-Za-z]{4,}/.test(token))
+        .filter((token) => {
+          const vowels = token.match(/[aeiou]/gi)?.length ?? 0;
+          return vowels <= 1 && !headingWhitelist.test(token);
+        }).length;
+
+      if (structuralPattern.test(line)) {
+        return true;
+      }
+
+      if (letters < 3) {
+        return false;
+      }
+
+      if (noiseRatio >= 0.2) {
+        return false;
+      }
+
+      if (gibberishTokenCount >= 2) {
+        return false;
+      }
+
+      if (line.length < 6 && !/\d/.test(line)) {
+        return false;
+      }
+
+      return true;
+    })
+    .join("\n");
+}
+
+function scoreTocNoise(rawText: string): number {
+  const lines = rawText
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) {
+    return 1;
+  }
+
+  const tocSignalCount = lines.filter((line) => /^(?:unit|module|chapter|ch\.?|lesson)\b|^[0-9]+(?:\.[0-9]+)+\s+|\.{2,}\s*\d+\s*$/i.test(line)).length;
+  const suspiciousCount = lines.filter((line) => {
+    const symbols = line.match(/[^A-Za-z0-9\s.,:;()'\-–/&]/g)?.length ?? 0;
+    const compactLength = Math.max(1, line.replace(/\s+/g, "").length);
+    const symbolRatio = symbols / compactLength;
+    const noiseTokens = line
+      .split(/\s+/)
+      .filter((token) => /[A-Za-z]{4,}/.test(token))
+      .filter((token) => {
+        const vowels = token.match(/[aeiou]/gi)?.length ?? 0;
+        return vowels <= 1;
+      }).length;
+    return symbolRatio >= 0.2 || noiseTokens >= 2;
+  }).length;
+
+  const structuralPenalty = tocSignalCount > 0 ? 0 : 0.35;
+  return Math.min(1, (suspiciousCount / lines.length) + structuralPenalty);
+}
 
 interface AutoTextbookSetupFlowProps {
   runtime?: "webapp" | "extension";
@@ -1254,7 +1338,21 @@ export function AutoTextbookSetupFlow({
     cover: "",
     title: "",
   });
-  const lastTocCaptureOcrRef = useRef<string>(testingSeedState?.ocrDraft ?? "");
+  const lastTocCaptureOcrRef = useRef<string>(testingSeedState?.step === "toc" || testingSeedState?.step === "toc-editor" ? (testingSeedState.ocrDraft ?? "") : "");
+  const ocrBuffersByStepRef = useRef<OcrStepBuffers>({
+    cover: {
+      raw: testingSeedState?.step === "cover" ? (testingSeedState.ocrDraft ?? "") : "",
+      draft: testingSeedState?.step === "cover" ? (testingSeedState.ocrDraft ?? "") : "",
+    },
+    title: {
+      raw: testingSeedState?.step === "title" ? (testingSeedState.ocrDraft ?? "") : "",
+      draft: testingSeedState?.step === "title" ? (testingSeedState.ocrDraft ?? "") : "",
+    },
+    toc: {
+      raw: testingSeedState?.step === "toc" || testingSeedState?.step === "toc-editor" ? (testingSeedState.ocrDraft ?? "") : "",
+      draft: testingSeedState?.step === "toc" || testingSeedState?.step === "toc-editor" ? (testingSeedState.ocrDraft ?? "") : "",
+    },
+  });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingUploadLimitResultRef = useRef<ReturnType<typeof enforceAutoCaptureLimit> | null>(null);
   // Scroll target â€” metadata fields section revealed after successful OCR.
@@ -1277,6 +1375,28 @@ export function AutoTextbookSetupFlow({
   const currentSessionHasWork = Boolean(coverImageDataUrl || ownershipProofDataUrl || rawOcrText || metadataForm.title.trim());
   const isSessionCapacityReached = resumableDrafts.length >= MAX_AUTO_SESSION_DRAFTS && !currentSessionHasWork;
 
+  function updateStepOcrBuffers(targetStep: OcrBufferStep, rawText: string, draftText: string = rawText): void {
+    ocrBuffersByStepRef.current[targetStep] = {
+      raw: rawText,
+      draft: draftText,
+    };
+  }
+
+  function updateCurrentStepOcrDraft(nextDraft: string): void {
+    setOcrDraft(nextDraft);
+    const activeStep = toOcrBufferStep(step);
+    ocrBuffersByStepRef.current[activeStep] = {
+      ...ocrBuffersByStepRef.current[activeStep],
+      draft: nextDraft,
+    };
+  }
+
+  function syncDisplayedOcrFromStep(nextStep: AutoFlowStep): void {
+    const target = ocrBuffersByStepRef.current[toOcrBufferStep(nextStep)];
+    setRawOcrText(target.raw);
+    setOcrDraft(target.draft);
+  }
+
   useEffect(() => {
     emitAutoFlowDiagnostic("session_started", {
       traceId: flowSessionTraceIdRef.current,
@@ -1286,6 +1406,10 @@ export function AutoTextbookSetupFlow({
       },
     });
   }, [runtime, testingSeedState?.step]);
+
+  useEffect(() => {
+    syncDisplayedOcrFromStep(step);
+  }, [step]);
 
   useEffect(() => {
     let mounted = true;
@@ -2109,7 +2233,7 @@ export function AutoTextbookSetupFlow({
 
     upsertAutoMetadataConfidence(fieldConfidence);
     applyMetadataDraft(merged);
-    setOcrDraft(result.rawText);
+    updateCurrentStepOcrDraft(result.rawText);
     setLastExtractionFields(buildExtractionFieldList(metadataResultToAutoMetadata(result)));
     setErrorMessage(null);
     setInfoMessage("Metadata extracted. Review and correct the fields below before accepting.");
@@ -2791,8 +2915,11 @@ export function AutoTextbookSetupFlow({
     });
     lastCapturedOcrByStepRef.current[targetStep] = uploadPreview.ocrText;
     // Store the original raw OCR text separately from the editable draft.
-    setRawOcrText(uploadPreview.ocrText);
-    setOcrDraft(editableOcrText);
+    updateStepOcrBuffers(targetStep, uploadPreview.ocrText, editableOcrText);
+    if (toOcrBufferStep(step) === targetStep) {
+      setRawOcrText(uploadPreview.ocrText);
+      setOcrDraft(editableOcrText);
+    }
     setModerationAssessment(null);
     if (pipelineResult) {
       lastMetadataPipelineRef.current = pipelineResult;
@@ -2905,6 +3032,7 @@ export function AutoTextbookSetupFlow({
     setCoverImageDataUrl(captured.imageDataUrl);
     setLastMetadataImageDataUrl(captured.imageDataUrl);
     lastCapturedOcrByStepRef.current.cover = captured.ocrText;
+    updateStepOcrBuffers("cover", captured.ocrText, captured.ocrText);
     setRawOcrText(captured.ocrText);
     setOcrDraft(captured.ocrText);
     setModerationAssessment(null);
@@ -2944,6 +3072,7 @@ export function AutoTextbookSetupFlow({
     lastCapturedOcrByStepRef.current.title = mergedOcrText;
     setOwnershipProofDataUrl(captured.imageDataUrl);
     setLastMetadataImageDataUrl(captured.imageDataUrl);
+    updateStepOcrBuffers("title", mergedOcrText, mergedOcrText);
     setRawOcrText(mergedOcrText);
     setOcrDraft(mergedOcrText);
     setStep("title");
@@ -2983,14 +3112,16 @@ export function AutoTextbookSetupFlow({
       return;
     }
 
-    const baselineText = rawOcrText.trim().length > 0
-      ? rawOcrText
-      : ocrDraft;
+    const titleBaselineBuffer = ocrBuffersByStepRef.current.title;
+    const baselineText = titleBaselineBuffer.raw.trim().length > 0
+      ? titleBaselineBuffer.raw
+      : titleBaselineBuffer.draft;
     const mergedOcrText = mergeOcrTextWithOverlap(baselineText, captured.ocrText);
 
     lastCapturedOcrByStepRef.current.title = mergedOcrText;
     setOwnershipProofDataUrl((current) => current ?? captured.imageDataUrl);
     setLastMetadataImageDataUrl(captured.imageDataUrl);
+    updateStepOcrBuffers("title", mergedOcrText, mergedOcrText);
     setRawOcrText(mergedOcrText);
     setOcrDraft(mergedOcrText);
     setStep("title");
@@ -3025,21 +3156,52 @@ export function AutoTextbookSetupFlow({
       return;
     }
 
+    let selectedTocText = captured.ocrText;
+    const primaryNoiseScore = scoreTocNoise(selectedTocText);
+    if (primaryNoiseScore >= 0.55) {
+      try {
+        const rescue = await extractTextFromImageWithFallback(captured.imageDataUrl, {
+          providerOrder: TOC_RESCUE_PROVIDER_ORDER,
+        });
+        const rescueNoiseScore = scoreTocNoise(rescue.text);
+        if (rescueNoiseScore < primaryNoiseScore) {
+          selectedTocText = rescue.text;
+          appendDebugLogEntry({
+            eventType: "warning",
+            message: "TOC OCR rescue path selected cleaner text.",
+            autoModeStep: "toc",
+            context: {
+              originalProviderId: captured.ocrProviderId,
+              rescueProviderId: rescue.providerId,
+              primaryNoiseScore,
+              rescueNoiseScore,
+            },
+          });
+        }
+      } catch {
+        // Best effort rescue path.
+      }
+    }
+
+    const cleanedIncomingTocText = sanitizeTocDraftText(selectedTocText);
+    const existingTocDraft = ocrBuffersByStepRef.current.toc.draft;
     const baselineTocText = lastTocCaptureOcrRef.current.trim().length > 0
       ? lastTocCaptureOcrRef.current
-      : ocrDraft;
+      : existingTocDraft;
     const mergedTocText = baselineTocText.trim().length > 0
-      ? mergeOcrTextWithOverlap(baselineTocText, captured.ocrText)
-      : captured.ocrText;
+      ? mergeOcrTextWithOverlap(baselineTocText, cleanedIncomingTocText)
+      : cleanedIncomingTocText;
     const stitchedTocImage = tocCaptureImageDataUrl
       ? await stitchCueImagesWithOverlap(tocCaptureImageDataUrl, captured.imageDataUrl)
       : captured.imageDataUrl;
 
     const incomingParsed = parseTocFromOcrText(mergedTocText);
-    const previousParsed = parseTocFromOcrText(ocrDraft);
+    const previousParsed = parseTocFromOcrText(existingTocDraft);
     const novelEntries = countNovelTocEntries(previousParsed, incomingParsed);
 
-    lastTocCaptureOcrRef.current = captured.ocrText;
+    lastTocCaptureOcrRef.current = cleanedIncomingTocText;
+    updateStepOcrBuffers("toc", selectedTocText, mergedTocText);
+    setRawOcrText(selectedTocText);
     setOcrDraft(mergedTocText);
     setTocCaptureImageDataUrl(stitchedTocImage);
     setStep("toc");
@@ -3728,6 +3890,7 @@ export function AutoTextbookSetupFlow({
                           setCoverImageDataUrl(draft.coverImageDataUrl);
                           setOwnershipProofDataUrl(draft.ownershipProofDataUrl ?? null);
                           setLastMetadataImageDataUrl(draft.ownershipProofDataUrl ?? draft.coverImageDataUrl);
+                          updateStepOcrBuffers(toOcrBufferStep(draft.step), draft.rawOcrText, draft.rawOcrText);
                           setRawOcrText(draft.rawOcrText);
                           setOcrDraft(draft.rawOcrText);
                           const nextMetadataForm: MetadataFormState = draft.metadataFormSnapshot
@@ -4090,7 +4253,7 @@ export function AutoTextbookSetupFlow({
               rows={isOcrEditorExpanded ? 6 : 3}
               aria-label="OCR text"
               value={ocrDraft}
-              onChange={(event) => setOcrDraft(event.target.value)}
+              onChange={(event) => updateCurrentStepOcrDraft(event.target.value)}
               onClick={() => {
                 if (!isOcrEditorExpanded) {
                   setIsOcrEditorExpanded(true);

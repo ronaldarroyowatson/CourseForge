@@ -4,15 +4,16 @@ This plan defines how CourseForge remains usable when an AI service is degraded,
 
 ## Completion Status
 
-**Overall: 5/5 Phases Complete ✅**
+**Overall: 6/6 Phases Complete ✅**
 
 - Phase 1: Cloud OCR Callable ✅
 - Phase 2: Multi-Host Provider Expansion ✅
 - Phase 3: Health + Circuit Breaker ✅
 - Phase 4: Admin Controls + Fleet Visibility ✅
 - Phase 5: Auto Flow Observability ✅
+- Phase 6: Distributed Resilience + Policy-Driven Limits ✅
 
-Last updated: March 22, 2026
+Last updated: June 4, 2026
 
 ## Temporary Re-Prioritization (June 1, 2026)
 
@@ -120,6 +121,20 @@ Model host support:
   - flagged-for-review count
   - cloud OCR readiness summary
   - local learning and correction-sync status summaries
+
+## Phase 6: Distributed Resilience + Policy-Driven Limits (Implemented)
+
+- The provider circuit breaker now uses both local in-memory state and shared Firestore state (`externalApiCircuitBreakers/{providerKey}`) so one hot instance can protect the rest of the fleet from repeated upstream failures.
+- `resilientFetch` now enforces provider controls from a shared policy document (`config/aiConnectivityPolicy`) instead of static constants only.
+- Policy rows are normalized with hard minimums and include:
+  - `maxRequests`
+  - `windowSeconds`
+  - `circuitFailureThreshold`
+  - `circuitOpenSeconds`
+- Super-admin callables now provide guarded read/write access for this policy:
+  - `getAiConnectivityPolicy`
+  - `setAiConnectivityPolicy`
+- When a provider opens a local circuit due to 429s, upstream 5xx, timeout, or network failures, that open window is persisted to shared state to reduce retry storms and spend spikes.
 
 ## Metadata Guardrails
 

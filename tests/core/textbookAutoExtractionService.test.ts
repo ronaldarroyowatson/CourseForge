@@ -93,6 +93,183 @@ function writePngSliceToFile(
   writeFileSync(destinationPath, PNG.sync.write(slice));
 }
 
+function writePngCropToFile(
+  sourceImagePath: string,
+  destinationPath: string,
+  crop: { x: number; y: number; width: number; height: number }
+): void {
+  const source = PNG.sync.read(readFileSync(sourceImagePath));
+  const x = Math.max(0, Math.min(source.width - 1, Math.floor(crop.x)));
+  const y = Math.max(0, Math.min(source.height - 1, Math.floor(crop.y)));
+  const width = Math.max(1, Math.min(source.width - x, Math.floor(crop.width)));
+  const height = Math.max(1, Math.min(source.height - y, Math.floor(crop.height)));
+  const slice = new PNG({ width, height });
+  const sourceBytesPerRow = source.width * 4;
+  const targetBytesPerRow = slice.width * 4;
+
+  for (let row = 0; row < slice.height; row += 1) {
+    const sourceRowOffset = (y + row) * sourceBytesPerRow + x * 4;
+    const targetRowOffset = row * targetBytesPerRow;
+    source.data.copy(slice.data, targetRowOffset, sourceRowOffset, sourceRowOffset + targetBytesPerRow);
+  }
+
+  writeFileSync(destinationPath, PNG.sync.write(slice));
+}
+
+function writeBlackAndWhitePngToFile(sourceImagePath: string, destinationPath: string): void {
+  const source = PNG.sync.read(readFileSync(sourceImagePath));
+
+  for (let index = 0; index < source.data.length; index += 4) {
+    const red = source.data[index];
+    const green = source.data[index + 1];
+    const blue = source.data[index + 2];
+    const luminance = Math.round(0.299 * red + 0.587 * green + 0.114 * blue);
+    const binaryValue = luminance >= 170 ? 255 : 0;
+
+    source.data[index] = binaryValue;
+    source.data[index + 1] = binaryValue;
+    source.data[index + 2] = binaryValue;
+  }
+
+  writeFileSync(destinationPath, PNG.sync.write(source));
+}
+
+function buildCropExperimentRects(width: number, height: number): Array<{ label: string; crop: { x: number; y: number; width: number; height: number } }> {
+  const halfWidth = Math.max(1, Math.floor(width / 2));
+  const halfHeight = Math.max(1, Math.floor(height / 2));
+  const expandWidth = Math.max(1, Math.round(width * 0.1));
+  const expandHeight = Math.max(1, Math.round(height * 0.1));
+  const insetX = Math.max(0, Math.round(width * 0.04));
+  const insetY = Math.max(0, Math.round(height * 0.04));
+
+  return [
+    { label: "full", crop: { x: 0, y: 0, width, height } },
+    { label: "tight-full", crop: { x: insetX, y: insetY, width: Math.max(1, width - insetX * 2), height: Math.max(1, height - insetY * 2) } },
+    { label: "left-column", crop: { x: 0, y: 0, width: Math.max(1, halfWidth + expandWidth), height } },
+    { label: "right-column", crop: { x: Math.max(0, width - Math.max(1, halfWidth + expandWidth)), y: 0, width: Math.max(1, halfWidth + expandWidth), height } },
+    { label: "top-band", crop: { x: 0, y: 0, width, height: Math.max(1, halfHeight + expandHeight) } },
+    { label: "bottom-band", crop: { x: 0, y: Math.max(0, height - Math.max(1, halfHeight + expandHeight)), width, height: Math.max(1, halfHeight + expandHeight) } },
+    { label: "upper-left", crop: { x: insetX, y: insetY, width: Math.max(1, halfWidth + expandWidth), height: Math.max(1, halfHeight + expandHeight) } },
+    { label: "upper-right", crop: { x: Math.max(0, halfWidth - expandWidth), y: insetY, width: Math.max(1, halfWidth + expandWidth), height: Math.max(1, halfHeight + expandHeight) } },
+    { label: "lower-left", crop: { x: insetX, y: Math.max(0, halfHeight - expandHeight), width: Math.max(1, halfWidth + expandWidth), height: Math.max(1, halfHeight + expandHeight) } },
+    { label: "lower-right", crop: { x: Math.max(0, halfWidth - expandWidth), y: Math.max(0, halfHeight - expandHeight), width: Math.max(1, halfWidth + expandWidth), height: Math.max(1, halfHeight + expandHeight) } },
+  ];
+}
+
+function normalizeForCharacterError(value: string): string {
+  return value
+    .replace(/\r/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function calculateCharacterErrorPercent(expected: string, actual: string): number {
+  const normalizedExpected = normalizeForCharacterError(expected);
+  const normalizedActual = normalizeForCharacterError(actual);
+
+  if (!normalizedExpected.length) {
+    return 0;
+  }
+
+  const previousRow = Array.from({ length: normalizedActual.length + 1 }, (_, index) => index);
+  const currentRow = new Array<number>(normalizedActual.length + 1);
+
+  for (let expectedIndex = 1; expectedIndex <= normalizedExpected.length; expectedIndex += 1) {
+    currentRow[0] = expectedIndex;
+
+    for (let actualIndex = 1; actualIndex <= normalizedActual.length; actualIndex += 1) {
+      const substitutionCost = normalizedExpected[expectedIndex - 1] === normalizedActual[actualIndex - 1] ? 0 : 1;
+      currentRow[actualIndex] = Math.min(
+        previousRow[actualIndex] + 1,
+        currentRow[actualIndex - 1] + 1,
+        previousRow[actualIndex - 1] + substitutionCost
+      );
+    }
+
+    for (let actualIndex = 0; actualIndex <= normalizedActual.length; actualIndex += 1) {
+      previousRow[actualIndex] = currentRow[actualIndex];
+    }
+  }
+
+  return (previousRow[normalizedActual.length] / normalizedExpected.length) * 100;
+}
+
+async function readMergedOcrFromRects(
+  sourceImagePath: string,
+  rects: Array<{ label: string; crop: { x: number; y: number; width: number; height: number } }>
+): Promise<string> {
+  const tempDir = mkdtempSync(path.join(tmpdir(), "courseforge-toc-crop-"));
+
+  try {
+    const ocrTexts: string[] = [];
+
+    for (let index = 0; index < rects.length; index += 1) {
+      const rect = rects[index];
+      const cropPath = path.join(tempDir, `${String(index + 1).padStart(2, "0")}-${rect.label}.png`);
+      writePngCropToFile(sourceImagePath, cropPath, rect.crop);
+      const ocrText = await readRealTocOcrFromImagePath(cropPath);
+      ocrTexts.push(ocrText);
+    }
+
+    return ocrTexts.reduce((accumulator, current, index) => (index === 0 ? current : mergeOcrTextWithOverlap(accumulator, current)), "");
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function readOcrTextsFromRects(
+  sourceImagePath: string,
+  rects: Array<{ label: string; crop: { x: number; y: number; width: number; height: number } }>
+): Promise<Array<{ label: string; text: string }>> {
+  const tempDir = mkdtempSync(path.join(tmpdir(), "courseforge-toc-crop-"));
+
+  try {
+    const ocrTexts: Array<{ label: string; text: string }> = [];
+
+    for (let index = 0; index < rects.length; index += 1) {
+      const rect = rects[index];
+      const cropPath = path.join(tempDir, `${String(index + 1).padStart(2, "0")}-${rect.label}.png`);
+      writePngCropToFile(sourceImagePath, cropPath, rect.crop);
+      const ocrText = await readRealTocOcrFromImagePath(cropPath);
+      ocrTexts.push({ label: rect.label, text: ocrText });
+    }
+
+    return ocrTexts;
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function readRealTocOcrFromBinaryVariant(sourceImagePath: string): Promise<string> {
+  const tempDir = mkdtempSync(path.join(tmpdir(), "courseforge-toc-binary-"));
+
+  try {
+    const binaryPath = path.join(tempDir, "binary.png");
+    writeBlackAndWhitePngToFile(sourceImagePath, binaryPath);
+    return readRealTocOcrFromImagePath(binaryPath);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function readRealTocOcrFromBinaryCropVariant(
+  sourceImagePath: string,
+  crop: { x: number; y: number; width: number; height: number }
+): Promise<string> {
+  const tempDir = mkdtempSync(path.join(tmpdir(), "courseforge-toc-binary-crop-"));
+
+  try {
+    const binaryPath = path.join(tempDir, "binary.png");
+    const cropPath = path.join(tempDir, "binary-crop.png");
+    writeBlackAndWhitePngToFile(sourceImagePath, binaryPath);
+    writePngCropToFile(binaryPath, cropPath, crop);
+    return readRealTocOcrFromImagePath(cropPath);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
 function normalizeOcrLine(value: string): string {
   return value
     .toLowerCase()
@@ -216,6 +393,30 @@ const TOC_SOURCE_OF_TRUTH_FIXTURES = [
   "tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png",
   "tmp-smoke/samples/ocr__toc-spread-view__expect-parse-success.png",
 ];
+
+const TOC_GOLD_TRANSCRIPTS: Partial<Record<string, string>> = {
+  "tmp-smoke/samples/ocr__toc-spread-view__expect-parse-success.png": [
+    "INTRODUCTION TO PHYSICAL SCIENCE",
+    "MODULE 1: THE NATURE OF SCIENCE",
+    "CER Claim, Evidence, Reasoning 3",
+    "Lesson 1 The Methods of Science 4",
+    "Lesson 2 Standards of Measurement 12",
+    "Lesson 3 Communicating with Graphs 19",
+    "Lesson 4 Science and Technology 24",
+    "NATURE OF SCIENCE 31",
+    "Module Wrap-Up 33",
+    "MODULE 2: MOTION",
+    "CER Claim, Evidence, Reasoning 37",
+    "Lesson 1 Describing Motion 38",
+    "Lesson 2 Velocity and Momentum 45",
+    "Lesson 3 Acceleration 50",
+    "Module Wrap-Up 57",
+    "MODULE 3: FORCES AND NEWTON'S LAWS",
+    "CER Claim, Evidence, Reasoning 59",
+    "Lesson 1 Forces 60",
+    "Lesson 2 Newton's Laws of Motion 68",
+  ].join("\n"),
+};
 
 describe("textbookAutoExtractionService", () => {
   it("detects page boundaries inside a larger background", () => {
@@ -512,6 +713,50 @@ describe("textbookAutoExtractionService", () => {
     expect(recurringCount).toBe(3);
   });
 
+  it("keeps dense module TOC subsections intact for later chapters", () => {
+    const parsed = parseTocFromOcrText([
+      "MODULE 1: INTRODUCTION TO PHYSICAL SCIENCE 1",
+      "MODULE 2: MOTION 37",
+      "MODULE 3: FORCES AND NEWTON'S LAWS 59",
+      "CER Claim, Evidence, Reasoning 59",
+      "Lesson 1 Forces 60",
+      "Lesson 2 Newton's Laws of Motion 68",
+      "Lesson 3 Using Newton's Laws 74",
+      "Science & Society Extreme Altitudes 81",
+      "Module Wrap-Up 82",
+      "SEP Go Further Data Analysis Lab 83",
+      "STEM Unit 1 Project 83",
+    ].join("\n"));
+
+    const moduleThree = parsed.chapters.find((chapter) => chapter.chapterNumber === "3");
+    const sectionTitles = moduleThree?.sections.map((section) => section.title) ?? [];
+
+    expect(moduleThree?.title).toContain("FORCES AND NEWTON'S LAWS");
+    expect(sectionTitles).toEqual(expect.arrayContaining([
+      "CER Claim, Evidence, Reasoning",
+      "Forces",
+      "Newton's Laws of Motion",
+      "Using Newton's Laws",
+      "Extreme Altitudes",
+      "Module Wrap-Up",
+      "SEP Go Further Data Analysis Lab",
+      "STEM Unit 1 Project",
+    ]));
+  });
+
+  it("does not overstate confidence when a chapter heading appears without matching subsections", () => {
+    const parsed = parseTocFromOcrText([
+      "MODULE 1: THE NATURE OF SCIENCE 3",
+      "MODULE 2: MOTION 37",
+      "MODULE 3: FORCES AND NEWTON'S LAWS 59",
+      "Teacher Edition 100%",
+    ].join("\n"));
+
+    expect(parsed.chapters).toHaveLength(3);
+    expect(parsed.chapters[2]?.sections).toHaveLength(0);
+    expect(parsed.confidence).toBeLessThan(0.85);
+  });
+
   it("merges TOC captures from multiple pages", () => {
     const first = parseTocFromOcrText("Chapter 1 Integers 10\n1.1 Absolute Value 12");
     const second = parseTocFromOcrText("Chapter 1 Integers 10\n1.2 Number Lines 18");
@@ -715,6 +960,132 @@ describe("textbookAutoExtractionService", () => {
       // Ensure split-based stitched output stays close to the full baseline.
       expect(normalizedSplitStitched.length).toBeGreaterThanOrEqual(Math.floor(normalizedFullStitched.length * 0.65));
     }
+  }, 240000);
+
+  it("benchmarks a 10-sample crop ensemble against the source-of-truth TOC baseline", async () => {
+    const relativeImagePath = TOC_SOURCE_OF_TRUTH_FIXTURES[1];
+    const imagePath = path.resolve(process.cwd(), relativeImagePath);
+    const fullText = await readRealTocOcr(relativeImagePath);
+    const goldTranscript = TOC_GOLD_TRANSCRIPTS[relativeImagePath];
+    const source = PNG.sync.read(readFileSync(imagePath));
+    const cropRects = buildCropExperimentRects(source.width, source.height);
+    const fullParsed = parseTocFromOcrText(fullText);
+    const cropResults = await readOcrTextsFromRects(imagePath, cropRects);
+    const greedy10Text = cropResults.reduce((accumulator, current, index) => (
+      index === 0 ? current.text : mergeOcrTextWithOverlap(accumulator, current.text)
+    ), "");
+
+    const scoredCropResults = goldTranscript
+      ? cropResults
+          .map((result) => ({
+            ...result,
+            characterErrorPercent: calculateCharacterErrorPercent(goldTranscript, result.text),
+          }))
+          .sort((left, right) => left.characterErrorPercent - right.characterErrorPercent)
+      : cropResults.map((result) => ({ ...result, characterErrorPercent: null }));
+
+    const top5Text = scoredCropResults
+      .slice(0, 5)
+      .sort((left, right) => cropRects.findIndex((rect) => rect.label === left.label) - cropRects.findIndex((rect) => rect.label === right.label))
+      .reduce((accumulator, current, index) => (index === 0 ? current.text : mergeOcrTextWithOverlap(accumulator, current.text)), "");
+
+    const greedy10Parsed = parseTocFromOcrText(greedy10Text);
+    const top5Parsed = parseTocFromOcrText(top5Text);
+    const baselineCharacterErrorPercent = goldTranscript
+      ? calculateCharacterErrorPercent(goldTranscript, fullText)
+      : null;
+    const greedy10CharacterErrorPercent = goldTranscript
+      ? calculateCharacterErrorPercent(goldTranscript, greedy10Text)
+      : null;
+    const top5CharacterErrorPercent = goldTranscript
+      ? calculateCharacterErrorPercent(goldTranscript, top5Text)
+      : null;
+
+    expect(greedy10Parsed.chapters.length).toBeGreaterThanOrEqual(3);
+    expect(top5Parsed.chapters.length).toBeGreaterThanOrEqual(3);
+    expect(extractStableTocSignatures(greedy10Parsed).length).toBeGreaterThanOrEqual(
+      Math.floor(extractStableTocSignatures(fullParsed).length * 0.8)
+    );
+    expect(extractStableTocSignatures(top5Parsed).length).toBeGreaterThanOrEqual(
+      Math.floor(extractStableTocSignatures(fullParsed).length * 0.75)
+    );
+
+    // Useful when comparing the multi-sample crop path against the single-shot baseline.
+    // eslint-disable-next-line no-console
+    console.log(JSON.stringify({
+      fixture: relativeImagePath,
+      sampleCount: cropRects.length,
+      cropSampleErrors: scoredCropResults.map((result) => ({
+        label: result.label,
+        characterErrorPercent: result.characterErrorPercent,
+      })),
+      baselineCharacterErrorPercent,
+      greedy10CharacterErrorPercent,
+      top5CharacterErrorPercent,
+      greedy10ImprovementPercent: baselineCharacterErrorPercent !== null && greedy10CharacterErrorPercent !== null
+        ? baselineCharacterErrorPercent - greedy10CharacterErrorPercent
+        : null,
+      top5ImprovementPercent: baselineCharacterErrorPercent !== null && top5CharacterErrorPercent !== null
+        ? baselineCharacterErrorPercent - top5CharacterErrorPercent
+        : null,
+      fullConfidence: fullParsed.confidence,
+      greedy10Confidence: greedy10Parsed.confidence,
+      top5Confidence: top5Parsed.confidence,
+      fullSignatureCount: extractStableTocSignatures(fullParsed).length,
+      greedy10SignatureCount: extractStableTocSignatures(greedy10Parsed).length,
+      top5SignatureCount: extractStableTocSignatures(top5Parsed).length,
+    }, null, 2));
+  }, 240000);
+
+  it("compares binary preprocessing against the best single crop and the no-crop baseline", async () => {
+    const relativeImagePath = TOC_SOURCE_OF_TRUTH_FIXTURES[1];
+    const imagePath = path.resolve(process.cwd(), relativeImagePath);
+    const goldTranscript = TOC_GOLD_TRANSCRIPTS[relativeImagePath];
+    if (!goldTranscript) {
+      throw new Error(`Missing gold transcript for ${relativeImagePath}`);
+    }
+
+    const fullText = await readRealTocOcr(relativeImagePath);
+    const binaryFullText = await readRealTocOcrFromBinaryVariant(imagePath);
+    const source = PNG.sync.read(readFileSync(imagePath));
+    const cropRects = buildCropExperimentRects(source.width, source.height);
+    const cropResults = await readOcrTextsFromRects(imagePath, cropRects);
+    const bestCrop = goldTranscript
+      ? cropResults
+          .map((result) => ({
+            ...result,
+            characterErrorPercent: calculateCharacterErrorPercent(goldTranscript, result.text),
+          }))
+          .sort((left, right) => left.characterErrorPercent - right.characterErrorPercent)[0]
+      : cropResults[0];
+
+    if (!bestCrop) {
+      throw new Error("Expected at least one crop result");
+    }
+
+    const bestCropText = bestCrop.text;
+    const bestBinaryCropText = await readRealTocOcrFromBinaryCropVariant(imagePath, cropRects.find((rect) => rect.label === bestCrop.label)?.crop ?? cropRects[0].crop);
+
+    const baselineCharacterErrorPercent = calculateCharacterErrorPercent(goldTranscript, fullText);
+    const binaryFullCharacterErrorPercent = calculateCharacterErrorPercent(goldTranscript, binaryFullText);
+    const bestCropCharacterErrorPercent = calculateCharacterErrorPercent(goldTranscript, bestCropText);
+    const binaryCropCharacterErrorPercent = calculateCharacterErrorPercent(goldTranscript, bestBinaryCropText);
+
+    expect(bestCropCharacterErrorPercent).toBeLessThanOrEqual(baselineCharacterErrorPercent);
+
+    // Useful when comparing binary preprocessing against the current best single crop.
+    // eslint-disable-next-line no-console
+    console.log(JSON.stringify({
+      fixture: relativeImagePath,
+      baselineCharacterErrorPercent,
+      binaryFullCharacterErrorPercent,
+      bestCropLabel: bestCrop.label,
+      bestCropCharacterErrorPercent,
+      binaryCropCharacterErrorPercent,
+      bestCropImprovementPercent: baselineCharacterErrorPercent - bestCropCharacterErrorPercent,
+      binaryCropImprovementPercent: baselineCharacterErrorPercent - binaryCropCharacterErrorPercent,
+      binaryVsColorCropDelta: bestCropCharacterErrorPercent - binaryCropCharacterErrorPercent,
+    }, null, 2));
   }, 240000);
 
   it("scores metadata confidence and marks extracted fields as auto", () => {

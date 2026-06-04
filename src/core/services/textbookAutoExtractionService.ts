@@ -789,6 +789,12 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     return (englishLikeWordCount / words.length) - symbolPenalty;
   };
 
+  const normalizeSectionTitlePrefix = (value: string): string => {
+    const normalized = value.trim();
+    const stripped = normalized.replace(/^(?:science\s*&\s*society|science\s+and\s+society|nature\s+of\s+science|engineering\s*&\s*technology)\s+/i, "").trim();
+    return stripped || normalized;
+  };
+
   const extractPatternCandidateTitle = (line: string): string | null => {
     const moduleMatch = line.match(/^module\s*[0-9IVXivx]+\s*[:.\-]?\s*(.+?)(?:\s+[0-9OQDIli|!ZzSsB%]{1,5}(?:\s*[-–]\s*[0-9OQDIli|!ZzSsB%]{1,5})?)?$/i);
     if (moduleMatch) {
@@ -933,7 +939,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       const lessonNumber = normalizeSectionNumber(lessonMatch[1]);
       currentChapter.sections.push({
         sectionNumber: `${chapterNumber}.${lessonNumber}`,
-        title: canonicalizeRepeatedPatternTitle(lessonMatch[2].trim()),
+        title: normalizeSectionTitlePrefix(canonicalizeRepeatedPatternTitle(lessonMatch[2].trim())),
         pageStart: toPageNumber(lessonMatch[3]),
         pageEnd: toPageNumber(lessonMatch[4]),
       });
@@ -972,7 +978,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
 
       currentChapter.sections.push({
         sectionNumber: sectionMatch[1],
-        title: canonicalizeRepeatedPatternTitle(sectionMatch[2].trim()),
+        title: normalizeSectionTitlePrefix(canonicalizeRepeatedPatternTitle(sectionMatch[2].trim())),
         pageStart: toPageNumber(sectionMatch[3]),
         pageEnd: toPageNumber(sectionMatch[4]),
       });
@@ -984,7 +990,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     if (titledPageMatch && currentChapter && isLikelyTitledPageEntry(titledPageMatch[1])) {
       currentChapter.sections.push({
         sectionNumber: "",
-        title: canonicalizeRepeatedPatternTitle(titledPageMatch[1].trim()),
+        title: normalizeSectionTitlePrefix(canonicalizeRepeatedPatternTitle(titledPageMatch[1].trim())),
         pageStart: toPageNumber(titledPageMatch[2]),
         pageEnd: toPageNumber(titledPageMatch[3]),
       });
@@ -1027,6 +1033,8 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
   const chapterWithPageCount = chapters.filter((chapter) => typeof chapter.pageStart === "number").length;
 
   const structuralCoverage = lineHits / Math.max(1, candidateLineCount);
+  const expectedSectionSlots = Math.max(1, candidateLineCount - chapters.length);
+  const sectionDensitySignal = Math.min(1, sectionCount / expectedSectionSlots);
   const chapterSignal = Math.min(1, chapters.length / 3);
   const sectionSignal = Math.min(1, sectionCount / 6);
   const chapterPageSignal = chapters.length > 0 ? chapterWithPageCount / chapters.length : 0;
@@ -1037,7 +1045,8 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       0.16
       + (0.42 * clamp01(structuralCoverage))
       + (0.18 * chapterSignal)
-      + (0.16 * sectionSignal)
+      + (0.22 * sectionDensitySignal)
+      + (0.08 * sectionSignal)
       + (0.12 * chapterPageSignal)
       - (0.16 * noisePenalty)
     )

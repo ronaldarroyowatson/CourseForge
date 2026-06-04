@@ -166,6 +166,10 @@ const METADATA_TILE_LABELS: Record<MetadataTileKey, string> = {
 const RELATED_ISBN_TYPES: RelatedIsbnType[] = ["student", "teacher", "digital", "workbook", "assessment", "other"];
 const IMMEDIATE_UPLOAD_SYNC_TIMEOUT_MS = 4500;
 const IMMEDIATE_UPLOAD_SYNC_RETRY_DELAY_MS = 5500;
+const TOC_SAMPLE_TARGET_COUNT = 5;
+const TOC_SAMPLE_MAX_COUNT = 10;
+const TOC_SAMPLE_GAP_MS = 250;
+const TOC_SAMPLE_GOOD_CONFIDENCE = 0.94;
 const TOC_RESCUE_PROVIDER_ORDER: AutoOcrProviderId[] = ["local_tesseract", "cloud_openai_vision", "cloud_github_models_vision"];
 
 function toOcrBufferStep(step: AutoFlowStep): OcrBufferStep {
@@ -1116,6 +1120,161 @@ async function cropToSelectionAndAutoBoundary(
   );
 
   return secondPassCanvas.toDataURL("image/jpeg", 0.92);
+}
+
+async function cropDataUrlToRect(imageDataUrl: string, rect: SelectionRect): Promise<string> {
+  const image = await loadImage(imageDataUrl);
+  const safeRect: SelectionRect = {
+    x: Math.max(0, Math.min(image.naturalWidth - 1, Math.round(rect.x))),
+    y: Math.max(0, Math.min(image.naturalHeight - 1, Math.round(rect.y))),
+    width: Math.max(1, Math.min(image.naturalWidth, Math.round(rect.width))),
+    height: Math.max(1, Math.min(image.naturalHeight, Math.round(rect.height))),
+  };
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.min(image.naturalWidth - safeRect.x, safeRect.width));
+  canvas.height = Math.max(1, Math.min(image.naturalHeight - safeRect.y, safeRect.height));
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return imageDataUrl;
+  }
+
+  context.drawImage(
+    image,
+    safeRect.x,
+    safeRect.y,
+    canvas.width,
+    canvas.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
+
+async function toGrayscaleDataUrl(imageDataUrl: string): Promise<string> {
+  const image = await loadImage(imageDataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return imageDataUrl;
+  }
+
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+
+  for (let index = 0; index < imageData.data.length; index += 4) {
+    const red = imageData.data[index] ?? 0;
+    const green = imageData.data[index + 1] ?? 0;
+    const blue = imageData.data[index + 2] ?? 0;
+    const luminance = Math.round(0.299 * red + 0.587 * green + 0.114 * blue);
+    const binaryValue = luminance >= 170 ? 255 : 0;
+
+    imageData.data[index] = binaryValue;
+    imageData.data[index + 1] = binaryValue;
+    imageData.data[index + 2] = binaryValue;
+  }
+
+  context.putImageData(imageData, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
+
+function insetCropRect(rect: SelectionRect, insetRatio: number): SelectionRect {
+  const insetX = Math.round(rect.width * insetRatio);
+  const insetY = Math.round(rect.height * insetRatio);
+  const nextWidth = Math.max(1, rect.width - insetX * 2);
+  const nextHeight = Math.max(1, rect.height - insetY * 2);
+
+  return {
+    x: rect.x + insetX,
+    y: rect.y + insetY,
+    width: nextWidth,
+    height: nextHeight,
+  };
+}
+
+function splitCropRect(rect: SelectionRect, orientation: "left" | "right" | "top" | "bottom", overlapRatio = 0.12): SelectionRect {
+  const overlapX = Math.round(rect.width * overlapRatio);
+  const overlapY = Math.round(rect.height * overlapRatio);
+
+  if (orientation === "left") {
+    const width = Math.max(1, Math.floor(rect.width / 2) + overlapX);
+    return { x: rect.x, y: rect.y, width, height: rect.height };
+  }
+
+  if (orientation === "right") {
+    const width = Math.max(1, Math.floor(rect.width / 2) + overlapX);
+    return { x: rect.x + rect.width - width, y: rect.y, width, height: rect.height };
+  }
+
+  if (orientation === "top") {
+    const height = Math.max(1, Math.floor(rect.height / 2) + overlapY);
+    return { x: rect.x, y: rect.y, width: rect.width, height };
+  }
+
+  const height = Math.max(1, Math.floor(rect.height / 2) + overlapY);
+  return { x: rect.x, y: rect.y + rect.height - height, width: rect.width, height };
+}
+
+async function buildTocSamplingVariants(imageDataUrl: string): Promise<Array<{ label: string; imageDataUrl: string }>> {
+  const image = await loadImage(imageDataUrl);
+  const baseBoundary = {
+    x: 0,
+    y: 0,
+    width: image.naturalWidth,
+    height: image.naturalHeight,
+  };
+
+  try {
+    const probeCanvas = document.createElement("canvas");
+    probeCanvas.width = image.naturalWidth;
+    probeCanvas.height = image.naturalHeight;
+    const probeContext = probeCanvas.getContext("2d", { willReadFrequently: true });
+    if (probeContext) {
+      probeContext.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight);
+      const probeData = probeContext.getImageData(0, 0, image.naturalWidth, image.naturalHeight);
+      const detected = detectPageBoundaryFromRgba(probeData.data, image.naturalWidth, image.naturalHeight);
+      baseBoundary.x = detected.x;
+      baseBoundary.y = detected.y;
+      baseBoundary.width = detected.width;
+      baseBoundary.height = detected.height;
+    }
+  } catch {
+    // Best effort only.
+  }
+
+  const preferredCrop = insetCropRect(splitCropRect(splitCropRect(baseBoundary, "bottom"), "left", 0.18), 0.02);
+  const variants: Array<{ label: string; rect: SelectionRect }> = [
+    { label: "preferred color crop", rect: preferredCrop },
+  ];
+
+  const deduped: Array<{ label: string; imageDataUrl: string }> = [];
+  const seenRects = new Set<string>();
+  for (const variant of variants) {
+    const rectKey = [variant.rect.x, variant.rect.y, variant.rect.width, variant.rect.height].join("x");
+    if (seenRects.has(rectKey)) {
+      continue;
+    }
+
+    seenRects.add(rectKey);
+    deduped.push({
+      label: variant.label,
+      imageDataUrl: await cropDataUrlToRect(imageDataUrl, variant.rect),
+    });
+  }
+
+  deduped.push({
+    label: "preferred grayscale backup",
+    imageDataUrl: await toGrayscaleDataUrl(deduped[0]?.imageDataUrl ?? imageDataUrl),
+  });
+
+  return deduped;
 }
 
 async function loadImage(dataUrl: string): Promise<HTMLImageElement> {
@@ -3309,6 +3468,9 @@ export function AutoTextbookSetupFlow({
       sanitized: string;
       parsed: ParsedTocResult;
       noiseScore: number;
+      candidateLineCount: number;
+      sectionCount: number;
+      sparseSectionCoverage: boolean;
       missingChapterStarts: boolean;
       garbageDetected: boolean;
       entryCount: number;
@@ -3317,17 +3479,32 @@ export function AutoTextbookSetupFlow({
       const sanitized = sanitizeTocDraftText(candidateText);
       const parsed = parseTocFromOcrText(sanitized);
       const noiseScore = scoreTocNoise(candidateText);
+      const candidateLineCount = sanitized
+        .replace(/\r/g, "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .filter((line) => /^(unit|module|chapter|ch\.?|lesson)\b/i.test(line) || /^[0-9]+(?:\.[0-9]+)+\s+/.test(line) || /\s+\d+$/.test(line))
+        .length;
+      const sectionCount = parsed.chapters.reduce((sum, chapter) => sum + chapter.sections.length, 0);
+      const sparseSectionCoverage = parsed.chapters.length > 0
+        && candidateLineCount >= 5
+        && sectionCount <= Math.max(1, parsed.chapters.length);
       const missingChapterStarts = parsed.chapters.some((chapter) => typeof chapter.pageStart !== "number");
       const garbageDetected = hasImmediateTocGarbageSignals(candidateText);
       const entryCount = parsed.chapters.reduce((sum, chapter) => sum + 1 + chapter.sections.length, 0);
       const isGoodEnough = noiseScore < 0.25
         && !garbageDetected
         && parsed.confidence >= 0.9
-        && !missingChapterStarts;
+        && !missingChapterStarts
+        && !sparseSectionCoverage;
       return {
         sanitized,
         parsed,
         noiseScore,
+        candidateLineCount,
+        sectionCount,
+        sparseSectionCoverage,
         missingChapterStarts,
         garbageDetected,
         entryCount,
@@ -3340,7 +3517,8 @@ export function AutoTextbookSetupFlow({
     const shouldAttemptRescue = primary.noiseScore >= 0.45
       || primary.parsed.confidence < 0.9
       || primary.missingChapterStarts
-      || primary.garbageDetected;
+      || primary.garbageDetected
+      || primary.sparseSectionCoverage;
 
     if (shouldAttemptRescue) {
       try {
@@ -3419,15 +3597,64 @@ export function AutoTextbookSetupFlow({
       }
     }
 
-    const cleanedIncomingTocText = sanitizeTocDraftText(selectedTocText);
+    let bestText = selectedTocText;
+    let bestProviderId = selectedProviderId;
+    let bestQuality = evaluateCandidate(bestText);
+    let processedSamples = 1;
+
+    try {
+      const samplingVariants = await buildTocSamplingVariants(captured.imageDataUrl);
+      const preferredVariant = samplingVariants[0];
+      const grayscaleVariant = samplingVariants[1];
+
+      setIsRunningOcr(true);
+      if (preferredVariant) {
+        setOcrProgressMessage("TOC sampling 1/2: preferred color crop. Running best-crop pass...");
+
+        const preferredSample = await extractTextFromImageWithFallback(preferredVariant.imageDataUrl, {
+          providerOrder: TOC_RESCUE_PROVIDER_ORDER,
+        });
+        bestText = preferredSample.text;
+        bestProviderId = preferredSample.providerId;
+        bestQuality = evaluateCandidate(bestText);
+        processedSamples = 2;
+
+        if (grayscaleVariant) {
+          setOcrProgressMessage("TOC sampling 2/2: grayscale backup. Checking contrast fallback...");
+
+          const grayscaleSample = await extractTextFromImageWithFallback(grayscaleVariant.imageDataUrl, {
+            providerOrder: TOC_RESCUE_PROVIDER_ORDER,
+          });
+          const grayscaleQuality = evaluateCandidate(grayscaleSample.text);
+          const grayscaleLooksStronger = grayscaleQuality.parsed.confidence > bestQuality.parsed.confidence
+            || grayscaleQuality.entryCount > bestQuality.entryCount
+            || grayscaleQuality.sectionCount > bestQuality.sectionCount
+            || (bestQuality.sparseSectionCoverage && !grayscaleQuality.sparseSectionCoverage)
+            || (bestQuality.garbageDetected && !grayscaleQuality.garbageDetected)
+            || (!grayscaleQuality.garbageDetected && grayscaleQuality.isGoodEnough && !bestQuality.isGoodEnough);
+
+          if (grayscaleLooksStronger) {
+            bestText = grayscaleSample.text;
+            bestProviderId = grayscaleSample.providerId;
+            bestQuality = grayscaleQuality;
+          }
+        }
+      }
+    } catch {
+      // Best effort only. The baseline full shot still stands.
+    } finally {
+      setIsRunningOcr(false);
+    }
+
+    const sampledTocText = sanitizeTocDraftText(bestText);
     const existingTocDraft = ocrBuffersByStepRef.current.toc.draft;
     const safeExistingTocDraft = isLikelyTocText(existingTocDraft) ? existingTocDraft : "";
     const baselineTocText = lastTocCaptureOcrRef.current.trim().length > 0
       ? lastTocCaptureOcrRef.current
       : safeExistingTocDraft;
     const mergedTocText = baselineTocText.trim().length > 0
-      ? mergeOcrTextWithOverlap(baselineTocText, cleanedIncomingTocText)
-      : cleanedIncomingTocText;
+      ? mergeOcrTextWithOverlap(baselineTocText, sampledTocText)
+      : sampledTocText;
     const stitchedTocImage = tocCaptureImageDataUrl
       ? await stitchCueImagesWithOverlap(tocCaptureImageDataUrl, captured.imageDataUrl)
       : captured.imageDataUrl;
@@ -3436,23 +3663,21 @@ export function AutoTextbookSetupFlow({
     const previousParsed = parseTocFromOcrText(existingTocDraft);
     const novelEntries = countNovelTocEntries(previousParsed, incomingParsed);
 
-    lastTocCaptureOcrRef.current = cleanedIncomingTocText;
-    updateStepOcrBuffers("toc", selectedTocText, mergedTocText);
-    setRawOcrText(selectedTocText);
+    lastTocCaptureOcrRef.current = sampledTocText;
+    updateStepOcrBuffers("toc", sampledTocText, mergedTocText);
+    setRawOcrText(bestText);
     setOcrDraft(mergedTocText);
     setTocCaptureImageDataUrl(stitchedTocImage);
-    setOcrProviderStatus(rescueApplied
-      ? `OCR provider: ${selectedProviderId} (rescanned due to noisy text)`
-      : `OCR provider: ${selectedProviderId}`);
+    setOcrProviderStatus(`OCR provider: ${bestProviderId}${rescueApplied ? " (rescanned due to noisy text)" : ""}`);
     setStep("toc");
     applyTocFromText(mergedTocText);
 
     if (novelEntries > 0) {
-      setInfoMessage(`TOC capture added and overlap-stitched. ${novelEntries} new TOC entries were detected. (OCR: ${selectedProviderId}${rescueApplied ? ", auto-rescanned" : ""})`);
+      setInfoMessage(`TOC capture added and overlap-stitched. ${novelEntries} new TOC entries were detected after ${processedSamples} sample(s). (OCR: ${bestProviderId}${rescueApplied ? ", auto-rescanned" : ""})`);
       return;
     }
 
-    setInfoMessage(`TOC capture overlap-stitched, but no new TOC entries were detected. Try moving further before the next capture. (OCR: ${selectedProviderId}${rescueApplied ? ", auto-rescanned" : ""})`);
+    setInfoMessage(`TOC capture overlap-stitched, but no new TOC entries were detected after ${processedSamples} sample(s). Try moving further before the next capture. (OCR: ${bestProviderId}${rescueApplied ? ", auto-rescanned" : ""})`);
   }
 
   function countNovelTocEntries(base: ParsedTocResult, incoming: ParsedTocResult): number {

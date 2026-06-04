@@ -5357,6 +5357,19 @@ button:not(:disabled):active {
   gap: 0.65rem;
 }
 
+.cf-provider-limits-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .cf-provider-limits-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ----- Quota Dashboard two-column layout ----- */
 .cf-quota-dashboard {
   display: grid;
@@ -5594,8 +5607,9 @@ button:not(:disabled):active {
   gap: 0.55rem;
 }
 
-.cf-quota-item--github-standalone {
-  padding: 0.75rem;
+.cf-github-provider-card {
+  display: grid;
+  gap: 0.75rem;
 }
 
 .cf-github-service-layout {

@@ -179,6 +179,7 @@ function toOcrBufferStep(step: AutoFlowStep): OcrBufferStep {
 function sanitizeTocDraftText(rawText: string): string {
   const structuralPattern = /^(?:unit|module|chapter|ch\.?|lesson)\b|^[0-9]+(?:\.[0-9]+)+\s+|\.{2,}\s*\d+\s*$/i;
   const headingWhitelist = /\b(?:science|forces|motion|newton|claim|evidence|reasoning|standards|measurement|module|unit|chapter|lesson|phenomenon|society|altitudes)\b/i;
+  const chromeNoisePattern = /\b(?:teacher\s+edition|return\s+to\s+double[-\s]?page\s+view|double[-\s]?page\s+view|stop\s+sharing|sharing\b|zoom\b|\d{1,3}%|localhost:\d+|m\.mheducation\.com|edge\b|favorites\b|profiles\b|tab\b|window\b)\b/i;
 
   return rawText
     .replace(/\r/g, "")
@@ -186,6 +187,10 @@ function sanitizeTocDraftText(rawText: string): string {
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean)
     .filter((line) => {
+      if (chromeNoisePattern.test(line)) {
+        return false;
+      }
+
       const compact = line.replace(/\s+/g, "");
       const letters = line.match(/[A-Za-z]/g)?.length ?? 0;
       const symbols = line.match(/[^A-Za-z0-9\s.,:;()'\-–/&]/g)?.length ?? 0;
@@ -207,6 +212,10 @@ function sanitizeTocDraftText(rawText: string): string {
       }
 
       if (noiseRatio >= 0.2) {
+        return false;
+      }
+
+      if (/\b(?:x|xx|x\?)\s*$/i.test(line) && !/\b(?:module|chapter|lesson)\b/i.test(line)) {
         return false;
       }
 
@@ -266,10 +275,20 @@ function hasImmediateTocGarbageSignals(rawText: string): boolean {
 
   const structuralPattern = /^(?:unit|module|chapter|ch\.?|lesson)\b|^[0-9]+(?:\.[0-9]+)+\s+|\.{2,}\s*\d+\s*$/i;
   const headingWhitelist = /\b(?:science|forces|motion|newton|claim|evidence|reasoning|standards|measurement|module|unit|chapter|lesson|phenomenon|society|altitudes|analysis|wrap|project)\b/i;
+  const chromeNoisePattern = /\b(?:teacher\s+edition|return\s+to\s+double[-\s]?page\s+view|double[-\s]?page\s+view|stop\s+sharing|sharing\b|zoom\b|\d{1,3}%|localhost:\d+|m\.mheducation\.com|edge\b|favorites\b|profiles\b|tab\b|window\b)\b/i;
+  const hudNoisePattern = /\b(?:encounter\s+the\s+phenomenon|unit\s+\d+\s*project|engineering\s*&\s*technology|resources|edit\b|regenerate\s+from\s+image)\b/i;
 
   return lines.some((line) => {
     if (structuralPattern.test(line)) {
       return false;
+    }
+
+    if (chromeNoisePattern.test(line)) {
+      return true;
+    }
+
+    if (hudNoisePattern.test(line) && !/\.\.+\s*\d+\s*$/i.test(line)) {
+      return true;
     }
 
     if (/[#@%$^*_=+~`]{3,}/.test(line)) {
@@ -294,8 +313,93 @@ function hasImmediateTocGarbageSignals(rawText: string): boolean {
         return vowels <= 1;
       }).length;
 
+    if (/\b(?:x|xx|x\?)\s*$/i.test(line) && !/\b(?:lesson|module|chapter)\b/i.test(line)) {
+      return true;
+    }
+
     return gibberishWords >= 2;
   });
+}
+
+function parseRomanNumeral(value: string): number | null {
+  const roman = value.trim().toUpperCase();
+  if (!/^[IVXLCDM]+$/.test(roman)) {
+    return null;
+  }
+
+  const romanMap: Record<string, number> = {
+    I: 1,
+    V: 5,
+    X: 10,
+    L: 50,
+    C: 100,
+    D: 500,
+    M: 1000,
+  };
+
+  let total = 0;
+  let previous = 0;
+  for (let index = roman.length - 1; index >= 0; index -= 1) {
+    const current = romanMap[roman[index]];
+    if (!current) {
+      return null;
+    }
+
+    if (current < previous) {
+      total -= current;
+    } else {
+      total += current;
+      previous = current;
+    }
+  }
+
+  return total > 0 ? total : null;
+}
+
+function parseChapterOrdinalToken(token: string): number | null {
+  const normalized = token
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .replace(/[OQ]/g, "0")
+    .replace(/[IL|!]/g, "1")
+    .replace(/[S]/g, "5")
+    .replace(/[B]/g, "8");
+
+  if (!normalized) {
+    return null;
+  }
+
+  const digitMatch = normalized.match(/[0-9]+/);
+  if (digitMatch) {
+    const parsed = Number.parseInt(digitMatch[0], 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  return parseRomanNumeral(normalized);
+}
+
+function extractChapterHeadingOrdinals(rawText: string): number[] {
+  const lines = rawText
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const headingOrdinals = new Set<number>();
+  for (const line of lines) {
+    const match = line.match(/^(?:module|chapter|unit)\s+([A-Za-z0-9]+)/i);
+    if (!match) {
+      continue;
+    }
+
+    const parsed = parseChapterOrdinalToken(match[1]);
+    if (typeof parsed === "number") {
+      headingOrdinals.add(parsed);
+    }
+  }
+
+  return Array.from(headingOrdinals).sort((left, right) => left - right);
 }
 
 function scoreTocLineQuality(line: string): number {
@@ -3472,6 +3576,8 @@ export function AutoTextbookSetupFlow({
       sectionCount: number;
       sparseSectionCoverage: boolean;
       missingChapterStarts: boolean;
+      missingHeadingSignals: boolean;
+      missingHeadingCount: number;
       garbageDetected: boolean;
       entryCount: number;
       isGoodEnough: boolean;
@@ -3491,12 +3597,21 @@ export function AutoTextbookSetupFlow({
         && candidateLineCount >= 5
         && sectionCount <= Math.max(1, parsed.chapters.length);
       const missingChapterStarts = parsed.chapters.some((chapter) => typeof chapter.pageStart !== "number");
+      const headingSignals = extractChapterHeadingOrdinals(candidateText);
+      const parsedHeadings = new Set(
+        parsed.chapters
+          .map((chapter) => parseChapterOrdinalToken(String(chapter.chapterNumber ?? "")))
+          .filter((value): value is number => typeof value === "number")
+      );
+      const missingHeadingCount = headingSignals.filter((heading) => !parsedHeadings.has(heading)).length;
+      const missingHeadingSignals = missingHeadingCount > 0;
       const garbageDetected = hasImmediateTocGarbageSignals(candidateText);
       const entryCount = parsed.chapters.reduce((sum, chapter) => sum + 1 + chapter.sections.length, 0);
       const isGoodEnough = noiseScore < 0.25
         && !garbageDetected
         && parsed.confidence >= 0.9
         && !missingChapterStarts
+        && !missingHeadingSignals
         && !sparseSectionCoverage;
       return {
         sanitized,
@@ -3506,6 +3621,8 @@ export function AutoTextbookSetupFlow({
         sectionCount,
         sparseSectionCoverage,
         missingChapterStarts,
+        missingHeadingSignals,
+        missingHeadingCount,
         garbageDetected,
         entryCount,
         isGoodEnough,
@@ -3517,6 +3634,7 @@ export function AutoTextbookSetupFlow({
     const shouldAttemptRescue = primary.noiseScore >= 0.45
       || primary.parsed.confidence < 0.9
       || primary.missingChapterStarts
+      || primary.missingHeadingSignals
       || primary.garbageDetected
       || primary.sparseSectionCoverage;
 
@@ -3541,12 +3659,16 @@ export function AutoTextbookSetupFlow({
             || rescueQuality.parsed.confidence > bestQuality.parsed.confidence
             || rescueQuality.entryCount > bestQuality.entryCount
             || (bestQuality.missingChapterStarts && !rescueQuality.missingChapterStarts)
+            || (bestQuality.missingHeadingSignals && !rescueQuality.missingHeadingSignals)
+            || rescueQuality.missingHeadingCount < bestQuality.missingHeadingCount
             || (bestQuality.garbageDetected && !rescueQuality.garbageDetected);
 
           const mergedLooksStronger = mergedQuality.noiseScore < bestQuality.noiseScore
             || mergedQuality.parsed.confidence > bestQuality.parsed.confidence
             || mergedQuality.entryCount > bestQuality.entryCount
             || (bestQuality.missingChapterStarts && !mergedQuality.missingChapterStarts)
+            || (bestQuality.missingHeadingSignals && !mergedQuality.missingHeadingSignals)
+            || mergedQuality.missingHeadingCount < bestQuality.missingHeadingCount
             || (bestQuality.garbageDetected && !mergedQuality.garbageDetected);
 
           if (rescueLooksStronger || mergedLooksStronger) {
@@ -3630,6 +3752,8 @@ export function AutoTextbookSetupFlow({
             || grayscaleQuality.entryCount > bestQuality.entryCount
             || grayscaleQuality.sectionCount > bestQuality.sectionCount
             || (bestQuality.sparseSectionCoverage && !grayscaleQuality.sparseSectionCoverage)
+            || (bestQuality.missingHeadingSignals && !grayscaleQuality.missingHeadingSignals)
+            || grayscaleQuality.missingHeadingCount < bestQuality.missingHeadingCount
             || (bestQuality.garbageDetected && !grayscaleQuality.garbageDetected)
             || (!grayscaleQuality.garbageDetected && grayscaleQuality.isGoodEnough && !bestQuality.isGoodEnough);
 
@@ -3637,6 +3761,38 @@ export function AutoTextbookSetupFlow({
             bestText = grayscaleSample.text;
             bestProviderId = grayscaleSample.providerId;
             bestQuality = grayscaleQuality;
+          }
+        }
+
+        if (bestQuality.missingHeadingSignals) {
+          setOcrProgressMessage("TOC recovery: chapter heading(s) were detected in OCR but missing from parse. Running recovery pass...");
+          const recoverySample = await extractTextFromImageWithFallback(captured.imageDataUrl, {
+            providerOrder: TOC_RESCUE_PROVIDER_ORDER,
+          });
+          const recoveryQuality = evaluateCandidate(recoverySample.text);
+          const mergedRecoveryText = mergeTocTextByLineQuality(bestText, recoverySample.text);
+          const mergedRecoveryQuality = evaluateCandidate(mergedRecoveryText);
+
+          const recoveryLooksStronger = recoveryQuality.parsed.confidence > bestQuality.parsed.confidence
+            || recoveryQuality.entryCount > bestQuality.entryCount
+            || (bestQuality.missingHeadingSignals && !recoveryQuality.missingHeadingSignals)
+            || recoveryQuality.missingHeadingCount < bestQuality.missingHeadingCount;
+
+          const mergedRecoveryLooksStronger = mergedRecoveryQuality.parsed.confidence > bestQuality.parsed.confidence
+            || mergedRecoveryQuality.entryCount > bestQuality.entryCount
+            || (bestQuality.missingHeadingSignals && !mergedRecoveryQuality.missingHeadingSignals)
+            || mergedRecoveryQuality.missingHeadingCount < bestQuality.missingHeadingCount;
+
+          if (mergedRecoveryLooksStronger || recoveryLooksStronger) {
+            if (mergedRecoveryLooksStronger && (!recoveryLooksStronger || mergedRecoveryQuality.parsed.confidence >= recoveryQuality.parsed.confidence)) {
+              bestText = mergedRecoveryText;
+              bestProviderId = recoverySample.providerId;
+              bestQuality = mergedRecoveryQuality;
+            } else {
+              bestText = recoverySample.text;
+              bestProviderId = recoverySample.providerId;
+              bestQuality = recoveryQuality;
+            }
           }
         }
       }

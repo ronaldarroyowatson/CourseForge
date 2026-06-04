@@ -429,6 +429,25 @@ describe("textbookAutoExtractionService", () => {
     expect(parsed.confidence).toBeGreaterThan(0.5);
   });
 
+  it("recovers page numbers from OCR-confusable tokens and skips obvious garbage titled rows", () => {
+    const parsed = parseTocFromOcrText([
+      "Module 4 Work and Energy 8O",
+      "Lesson 1 Work and Machines 8S",
+      "Lesson 2 Describing Energy 95",
+      "sen UNIT 1PROJECT 35 if",
+      "Teacher Edition 100%",
+      "Module Wrap-Up 1O5",
+    ].join("\n"));
+
+    expect(parsed.chapters).toHaveLength(1);
+    expect(parsed.chapters[0].pageStart).toBe(80);
+    expect(parsed.chapters[0].sections.some((section) => section.title === "Work and Machines" && section.pageStart === 85)).toBe(true);
+    expect(parsed.chapters[0].sections.some((section) => section.title === "Describing Energy" && section.pageStart === 95)).toBe(true);
+    expect(parsed.chapters[0].sections.some((section) => section.title === "Module Wrap-Up" && section.pageStart === 105)).toBe(true);
+    expect(parsed.chapters[0].sections.some((section) => /sen UNIT 1PROJECT/i.test(section.title))).toBe(false);
+    expect(parsed.chapters[0].sections.some((section) => /Teacher Edition/i.test(section.title))).toBe(false);
+  });
+
   it("merges TOC captures from multiple pages", () => {
     const first = parseTocFromOcrText("Chapter 1 Integers 10\n1.1 Absolute Value 12");
     const second = parseTocFromOcrText("Chapter 1 Integers 10\n1.2 Number Lines 18");

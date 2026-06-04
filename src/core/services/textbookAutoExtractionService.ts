@@ -562,6 +562,95 @@ export function mergeAutoMetadata(
 export function parseTocFromOcrText(rawText: string): ParsedTocResult {
   const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 
+  const OCR_PAGE_DIGIT_MAP: Record<string, string> = {
+    O: "0",
+    o: "0",
+    Q: "0",
+    D: "0",
+    I: "1",
+    l: "1",
+    i: "1",
+    "|": "1",
+    "!": "1",
+    Z: "2",
+    z: "2",
+    S: "5",
+    s: "5",
+    B: "8",
+    "%": "8",
+  };
+
+  const normalizePageToken = (value: string): string => {
+    const compact = value.replace(/[^0-9A-Za-z%|!]/g, "");
+    if (!compact) {
+      return "";
+    }
+
+    return compact
+      .split("")
+      .map((char) => (OCR_PAGE_DIGIT_MAP[char] ?? char))
+      .join("")
+      .replace(/[^0-9]/g, "");
+  };
+
+  const toPageNumber = (value: string | undefined): number | undefined => {
+    if (!value) {
+      return undefined;
+    }
+    const normalized = normalizePageToken(value);
+    if (!normalized) {
+      return undefined;
+    }
+    const pageNumber = Number(normalized);
+    if (!Number.isFinite(pageNumber)) {
+      return undefined;
+    }
+    if (pageNumber < 1 || pageNumber > 5000) {
+      return undefined;
+    }
+    return pageNumber;
+  };
+
+  const isLikelyTitledPageEntry = (title: string): boolean => {
+    const compact = title.replace(/\s+/g, " ").trim();
+    if (!compact) {
+      return false;
+    }
+
+    if (/^(teacher edition|table of contents|toc)$/i.test(compact)) {
+      return false;
+    }
+
+    if (/\b(?:https?:\/\/|www\.)/i.test(compact)) {
+      return false;
+    }
+
+    const words = compact.split(/\s+/);
+    const alphaWordCount = words.filter((word) => /[A-Za-z]{2,}/.test(word)).length;
+    if (alphaWordCount === 0) {
+      return false;
+    }
+
+    const gibberishWordCount = words
+      .filter((word) => /[A-Za-z]{4,}/.test(word))
+      .filter((word) => {
+        const vowels = word.match(/[aeiou]/gi)?.length ?? 0;
+        return vowels <= 1;
+      }).length;
+
+    if (gibberishWordCount >= 2) {
+      return false;
+    }
+
+    const symbolCount = compact.match(/[^A-Za-z0-9\s.,:;()'\-–/&]/g)?.length ?? 0;
+    const symbolRatio = symbolCount / Math.max(1, compact.replace(/\s+/g, "").length);
+    if (symbolRatio >= 0.2) {
+      return false;
+    }
+
+    return true;
+  };
+
   const normalizeTocLineOcrArtifacts = (line: string): string => {
     let normalized = line;
 
@@ -601,14 +690,14 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       continue;
     }
 
-    const moduleMatch = line.match(/^module\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/i);
+    const moduleMatch = line.match(/^module\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+([0-9OQDIli|!ZzSsB%]{1,5})(?:\s*[-–]\s*([0-9OQDIli|!ZzSsB%]{1,5}))?)?$/i);
     if (moduleMatch) {
       currentChapter = {
         chapterNumber: moduleMatch[1],
         title: moduleMatch[2].trim(),
         chapterLabel: "Module",
-        pageStart: moduleMatch[3] ? Number(moduleMatch[3]) : undefined,
-        pageEnd: moduleMatch[4] ? Number(moduleMatch[4]) : undefined,
+        pageStart: toPageNumber(moduleMatch[3]),
+        pageEnd: toPageNumber(moduleMatch[4]),
         unitName: activeUnitName,
         sections: [],
       };
@@ -617,14 +706,14 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       continue;
     }
 
-    const chapterMatch = line.match(/^(?:chapter|ch\.?)\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/i);
+    const chapterMatch = line.match(/^(?:chapter|ch\.?)\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+([0-9OQDIli|!ZzSsB%]{1,5})(?:\s*[-–]\s*([0-9OQDIli|!ZzSsB%]{1,5}))?)?$/i);
     if (chapterMatch) {
       currentChapter = {
         chapterNumber: chapterMatch[1],
         title: chapterMatch[2].trim(),
         chapterLabel: "Chapter",
-        pageStart: chapterMatch[3] ? Number(chapterMatch[3]) : undefined,
-        pageEnd: chapterMatch[4] ? Number(chapterMatch[4]) : undefined,
+        pageStart: toPageNumber(chapterMatch[3]),
+        pageEnd: toPageNumber(chapterMatch[4]),
         unitName: activeUnitName,
         sections: [],
       };
@@ -633,7 +722,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       continue;
     }
 
-    const lessonMatch = line.match(/^lesson\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/i);
+    const lessonMatch = line.match(/^lesson\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+([0-9OQDIli|!ZzSsB%]{1,5})(?:\s*[-–]\s*([0-9OQDIli|!ZzSsB%]{1,5}))?)?$/i);
     if (lessonMatch) {
       if (!currentChapter) {
         currentChapter = {
@@ -651,21 +740,21 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       currentChapter.sections.push({
         sectionNumber: `${chapterNumber}.${lessonNumber}`,
         title: lessonMatch[2].trim(),
-        pageStart: lessonMatch[3] ? Number(lessonMatch[3]) : undefined,
-        pageEnd: lessonMatch[4] ? Number(lessonMatch[4]) : undefined,
+        pageStart: toPageNumber(lessonMatch[3]),
+        pageEnd: toPageNumber(lessonMatch[4]),
       });
       lineHits += 1;
       continue;
     }
 
-    const numericChapterMatch = line.match(/^([0-9]{1,2})\s+(.+?)\s+(\d+)(?:\s*[-–]\s*(\d+))?$/);
+    const numericChapterMatch = line.match(/^([0-9]{1,2})\s+(.+?)\s+([0-9OQDIli|!ZzSsB%]{1,5})(?:\s*[-–]\s*([0-9OQDIli|!ZzSsB%]{1,5}))?$/);
     if (numericChapterMatch && !/^\d+\.\d+/.test(line)) {
       currentChapter = {
         chapterNumber: numericChapterMatch[1],
         title: numericChapterMatch[2].trim(),
         chapterLabel: "Chapter",
-        pageStart: Number(numericChapterMatch[3]),
-        pageEnd: numericChapterMatch[4] ? Number(numericChapterMatch[4]) : undefined,
+        pageStart: toPageNumber(numericChapterMatch[3]),
+        pageEnd: toPageNumber(numericChapterMatch[4]),
         unitName: activeUnitName,
         sections: [],
       };
@@ -674,7 +763,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       continue;
     }
 
-    const sectionMatch = line.match(/^([0-9]+(?:\.[0-9]+)+)\s+(.+?)(?:\s+(\d+)(?:\s*[-–]\s*(\d+))?)?$/);
+    const sectionMatch = line.match(/^([0-9]+(?:\.[0-9]+)+)\s+(.+?)(?:\s+([0-9OQDIli|!ZzSsB%]{1,5})(?:\s*[-–]\s*([0-9OQDIli|!ZzSsB%]{1,5}))?)?$/);
     if (sectionMatch) {
       if (!currentChapter) {
         currentChapter = {
@@ -690,20 +779,20 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       currentChapter.sections.push({
         sectionNumber: sectionMatch[1],
         title: sectionMatch[2].trim(),
-        pageStart: sectionMatch[3] ? Number(sectionMatch[3]) : undefined,
-        pageEnd: sectionMatch[4] ? Number(sectionMatch[4]) : undefined,
+        pageStart: toPageNumber(sectionMatch[3]),
+        pageEnd: toPageNumber(sectionMatch[4]),
       });
       lineHits += 1;
       continue;
     }
 
-    const titledPageMatch = line.match(/^([A-Za-z][A-Za-z0-9'&/,().\- ]+?)\s+(\d+)(?:\s*[-–]\s*(\d+))?$/);
-    if (titledPageMatch && currentChapter) {
+    const titledPageMatch = line.match(/^([A-Za-z][A-Za-z0-9'&/,().\- ]+?)\s+([0-9OQDIli|!ZzSsB%]{1,5})(?:\s*[-–]\s*([0-9OQDIli|!ZzSsB%]{1,5}))?$/);
+    if (titledPageMatch && currentChapter && isLikelyTitledPageEntry(titledPageMatch[1])) {
       currentChapter.sections.push({
         sectionNumber: "",
         title: titledPageMatch[1].trim(),
-        pageStart: Number(titledPageMatch[2]),
-        pageEnd: titledPageMatch[3] ? Number(titledPageMatch[3]) : undefined,
+        pageStart: toPageNumber(titledPageMatch[2]),
+        pageEnd: toPageNumber(titledPageMatch[3]),
       });
       lineHits += 1;
     }

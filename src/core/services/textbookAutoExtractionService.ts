@@ -675,6 +675,13 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       normalized = recovered;
     }
 
+    normalized = normalized
+      .replace(/\bc[l1i]a[l1i]m\b/gi, "Claim")
+      .replace(/\bev[l1i]dence\b/gi, "Evidence")
+      .replace(/\breas[o0]n[i1l]ng\b/gi, "Reasoning")
+      .replace(/\bg[0o]\s+further\b/gi, "Go Further")
+      .replace(/\bana[l1i]ysis\b/gi, "Analysis");
+
     if (/\bclaim\s*,\s*evidence\s*,\s*reasoning\b/i.test(normalized)) {
       normalized = normalized.replace(/\bC[1I][T7][1I]\b/gi, "CER");
       normalized = normalized.replace(/^\s*(?:[A-Z0-9]{1,3}\s+)?(Claim\s*,\s*Evidence\s*,\s*Reasoning\b)/i, "CER $1");
@@ -701,6 +708,169 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean);
 
+  const TOC_PATTERN_WORD_HINTS = new Set([
+    "module",
+    "chapter",
+    "lesson",
+    "unit",
+    "claim",
+    "evidence",
+    "reasoning",
+    "go",
+    "further",
+    "data",
+    "analysis",
+    "wrap",
+    "science",
+    "motion",
+    "forces",
+    "newton",
+    "methods",
+    "measurement",
+    "describing",
+    "acceleration",
+    "autonomous",
+    "vehicles",
+    "subterranean",
+    "project",
+    "society",
+  ]);
+
+  const normalizeTitleForPatternKey = (value: string): string => {
+    const normalized = value
+      .toLowerCase()
+      .replace(/[0]/g, "o")
+      .replace(/[1|!]/g, "l")
+      .replace(/[5]/g, "s")
+      .replace(/[8]/g, "b")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!normalized) {
+      return "";
+    }
+
+    const keyWords = normalized
+      .split(" ")
+      .filter((word) => word.length >= 3)
+      .slice(0, 6);
+
+    return keyWords.join(" ");
+  };
+
+  const scoreTitleLanguageQuality = (value: string): number => {
+    const words = value
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(" ")
+      .filter(Boolean);
+
+    if (!words.length) {
+      return 0;
+    }
+
+    const englishLikeWordCount = words.filter((word) => {
+      if (TOC_PATTERN_WORD_HINTS.has(word)) {
+        return true;
+      }
+      if (word.length <= 2) {
+        return true;
+      }
+      const vowelCount = word.match(/[aeiou]/g)?.length ?? 0;
+      return vowelCount >= 1;
+    }).length;
+
+    const symbolCount = value.match(/[^A-Za-z0-9\s.,:;()'\-–/&]/g)?.length ?? 0;
+    const symbolPenalty = symbolCount / Math.max(1, value.replace(/\s+/g, "").length);
+
+    return (englishLikeWordCount / words.length) - symbolPenalty;
+  };
+
+  const extractPatternCandidateTitle = (line: string): string | null => {
+    const moduleMatch = line.match(/^module\s*[0-9IVXivx]+\s*[:.\-]?\s*(.+?)(?:\s+[0-9OQDIli|!ZzSsB%]{1,5}(?:\s*[-–]\s*[0-9OQDIli|!ZzSsB%]{1,5})?)?$/i);
+    if (moduleMatch) {
+      return moduleMatch[1].trim();
+    }
+
+    const chapterMatch = line.match(/^(?:chapter|ch\.?)\s*[0-9IVXivx]+\s*[:.\-]?\s*(.+?)(?:\s+[0-9OQDIli|!ZzSsB%]{1,5}(?:\s*[-–]\s*[0-9OQDIli|!ZzSsB%]{1,5})?)?$/i);
+    if (chapterMatch) {
+      return chapterMatch[1].trim();
+    }
+
+    const lessonMatch = line.match(/^lesson\s*[0-9IVXivx]+\s*[:.\-]?\s*(.+?)(?:\s+[0-9OQDIli|!ZzSsB%]{1,5}(?:\s*[-–]\s*[0-9OQDIli|!ZzSsB%]{1,5})?)?$/i);
+    if (lessonMatch) {
+      return lessonMatch[1].trim();
+    }
+
+    const sectionMatch = line.match(/^[0-9]+(?:\.[0-9]+)+\s+(.+?)(?:\s+[0-9OQDIli|!ZzSsB%]{1,5}(?:\s*[-–]\s*[0-9OQDIli|!ZzSsB%]{1,5})?)?$/);
+    if (sectionMatch) {
+      return sectionMatch[1].trim();
+    }
+
+    const titledPageMatch = line.match(/^([A-Za-z][A-Za-z0-9'&/,().\- ]+?)\s+[0-9OQDIli|!ZzSsB%]{1,5}(?:\s*[-–]\s*[0-9OQDIli|!ZzSsB%]{1,5})?$/);
+    if (titledPageMatch) {
+      return titledPageMatch[1].trim();
+    }
+
+    return null;
+  };
+
+  const repeatedPatternCandidates = new Map<string, { count: number; canonicalTitle: string; canonicalScore: number }>();
+  for (const line of lines) {
+    const candidateTitle = extractPatternCandidateTitle(line);
+    if (!candidateTitle) {
+      continue;
+    }
+
+    const patternKey = normalizeTitleForPatternKey(candidateTitle);
+    if (!patternKey || patternKey.split(" ").length < 2) {
+      continue;
+    }
+
+    const qualityScore = scoreTitleLanguageQuality(candidateTitle);
+    const existing = repeatedPatternCandidates.get(patternKey);
+    if (!existing) {
+      repeatedPatternCandidates.set(patternKey, {
+        count: 1,
+        canonicalTitle: candidateTitle,
+        canonicalScore: qualityScore,
+      });
+      continue;
+    }
+
+    const nextCount = existing.count + 1;
+    if (qualityScore > existing.canonicalScore) {
+      repeatedPatternCandidates.set(patternKey, {
+        count: nextCount,
+        canonicalTitle: candidateTitle,
+        canonicalScore: qualityScore,
+      });
+      continue;
+    }
+
+    repeatedPatternCandidates.set(patternKey, {
+      ...existing,
+      count: nextCount,
+    });
+  }
+
+  const canonicalizeRepeatedPatternTitle = (title: string): string => {
+    const patternKey = normalizeTitleForPatternKey(title);
+    if (!patternKey) {
+      return title;
+    }
+
+    const candidate = repeatedPatternCandidates.get(patternKey);
+    if (!candidate || candidate.count < 3) {
+      return title;
+    }
+
+    return candidate.canonicalTitle;
+  };
+
   const chapters: TocChapter[] = [];
   let currentChapter: TocChapter | null = null;
   let activeUnitName: string | undefined;
@@ -718,7 +888,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     if (moduleMatch) {
       currentChapter = {
         chapterNumber: moduleMatch[1],
-        title: moduleMatch[2].trim(),
+        title: canonicalizeRepeatedPatternTitle(moduleMatch[2].trim()),
         chapterLabel: "Module",
         pageStart: toPageNumber(moduleMatch[3]),
         pageEnd: toPageNumber(moduleMatch[4]),
@@ -734,7 +904,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     if (chapterMatch) {
       currentChapter = {
         chapterNumber: chapterMatch[1],
-        title: chapterMatch[2].trim(),
+        title: canonicalizeRepeatedPatternTitle(chapterMatch[2].trim()),
         chapterLabel: "Chapter",
         pageStart: toPageNumber(chapterMatch[3]),
         pageEnd: toPageNumber(chapterMatch[4]),
@@ -763,7 +933,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       const lessonNumber = normalizeSectionNumber(lessonMatch[1]);
       currentChapter.sections.push({
         sectionNumber: `${chapterNumber}.${lessonNumber}`,
-        title: lessonMatch[2].trim(),
+        title: canonicalizeRepeatedPatternTitle(lessonMatch[2].trim()),
         pageStart: toPageNumber(lessonMatch[3]),
         pageEnd: toPageNumber(lessonMatch[4]),
       });
@@ -775,7 +945,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     if (numericChapterMatch && !/^\d+\.\d+/.test(line)) {
       currentChapter = {
         chapterNumber: numericChapterMatch[1],
-        title: numericChapterMatch[2].trim(),
+        title: canonicalizeRepeatedPatternTitle(numericChapterMatch[2].trim()),
         chapterLabel: "Chapter",
         pageStart: toPageNumber(numericChapterMatch[3]),
         pageEnd: toPageNumber(numericChapterMatch[4]),
@@ -802,7 +972,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
 
       currentChapter.sections.push({
         sectionNumber: sectionMatch[1],
-        title: sectionMatch[2].trim(),
+        title: canonicalizeRepeatedPatternTitle(sectionMatch[2].trim()),
         pageStart: toPageNumber(sectionMatch[3]),
         pageEnd: toPageNumber(sectionMatch[4]),
       });
@@ -814,7 +984,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     if (titledPageMatch && currentChapter && isLikelyTitledPageEntry(titledPageMatch[1])) {
       currentChapter.sections.push({
         sectionNumber: "",
-        title: titledPageMatch[1].trim(),
+        title: canonicalizeRepeatedPatternTitle(titledPageMatch[1].trim()),
         pageStart: toPageNumber(titledPageMatch[2]),
         pageEnd: toPageNumber(titledPageMatch[3]),
       });

@@ -478,6 +478,40 @@ describe("textbookAutoExtractionService", () => {
     expect(parsed.chapters[0]?.sections.some((section) => /Methods of Science/i.test(section.title))).toBe(true);
   });
 
+  it("canonicalizes recurring ancillary OCR patterns that appear three times", () => {
+    const parsed = parseTocFromOcrText([
+      "MODULE 1: THE NATURE OF SCIENCE 3",
+      "CER Cla1m, Evidence, Reasoning 3",
+      "MODULE 2: MOTION 37",
+      "CER Claim, Evidence, Reasoning 37",
+      "MODULE 3: FORCES AND NEWTON'S LAWS 59",
+      "CER Clalm, Evidence, Reasoning 59",
+    ].join("\n"));
+
+    const allSectionTitles = parsed.chapters.flatMap((chapter) => chapter.sections.map((section) => section.title));
+    const canonicalCount = allSectionTitles.filter((title) => title === "CER Claim, Evidence, Reasoning").length;
+
+    expect(parsed.chapters).toHaveLength(3);
+    expect(canonicalCount).toBe(3);
+  });
+
+  it("preserves recurring GO FURTHER pattern coverage when one occurrence is noisy", () => {
+    const parsed = parseTocFromOcrText([
+      "MODULE 1: THE NATURE OF SCIENCE 3",
+      "SEP Go Further Data Analysis 33",
+      "MODULE 2: MOTION 37",
+      "SEP G0 Further Data Analysis 57",
+      "MODULE 3: FORCES AND NEWTON'S LAWS 59",
+      "SEP Go Further Data Analysis 79",
+    ].join("\n"));
+
+    const allSectionTitles = parsed.chapters.flatMap((chapter) => chapter.sections.map((section) => section.title));
+    const recurringCount = allSectionTitles.filter((title) => title === "SEP Go Further Data Analysis").length;
+
+    expect(parsed.chapters).toHaveLength(3);
+    expect(recurringCount).toBe(3);
+  });
+
   it("merges TOC captures from multiple pages", () => {
     const first = parseTocFromOcrText("Chapter 1 Integers 10\n1.1 Absolute Value 12");
     const second = parseTocFromOcrText("Chapter 1 Integers 10\n1.2 Number Lines 18");

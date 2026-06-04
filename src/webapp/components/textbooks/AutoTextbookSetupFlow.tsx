@@ -249,6 +249,105 @@ function scoreTocNoise(rawText: string): number {
   return Math.min(1, (suspiciousCount / lines.length) + structuralPenalty);
 }
 
+function hasImmediateTocGarbageSignals(rawText: string): boolean {
+  const lines = rawText
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) {
+    return true;
+  }
+
+  const structuralPattern = /^(?:unit|module|chapter|ch\.?|lesson)\b|^[0-9]+(?:\.[0-9]+)+\s+|\.{2,}\s*\d+\s*$/i;
+  const headingWhitelist = /\b(?:science|forces|motion|newton|claim|evidence|reasoning|standards|measurement|module|unit|chapter|lesson|phenomenon|society|altitudes|analysis|wrap|project)\b/i;
+
+  return lines.some((line) => {
+    if (structuralPattern.test(line)) {
+      return false;
+    }
+
+    if (/[#@%$^*_=+~`]{3,}/.test(line)) {
+      return true;
+    }
+
+    const compact = line.replace(/\s+/g, "");
+    const symbols = line.match(/[^A-Za-z0-9\s.,:;()'\-–/&]/g)?.length ?? 0;
+    const symbolRatio = symbols / Math.max(1, compact.length);
+    if (symbolRatio >= 0.16) {
+      return true;
+    }
+
+    const gibberishWords = line
+      .split(/\s+/)
+      .filter((token) => /[A-Za-z]{4,}/.test(token))
+      .filter((token) => {
+        if (headingWhitelist.test(token)) {
+          return false;
+        }
+        const vowels = token.match(/[aeiou]/gi)?.length ?? 0;
+        return vowels <= 1;
+      }).length;
+
+    return gibberishWords >= 2;
+  });
+}
+
+function scoreTocLineQuality(line: string): number {
+  const trimmed = line.replace(/\s+/g, " ").trim();
+  if (!trimmed) {
+    return -1;
+  }
+
+  const structuralSignal = /^(?:unit|module|chapter|ch\.?|lesson)\b|^[0-9]+(?:\.[0-9]+)+\s+|\.{2,}\s*\d+\s*$/i.test(trimmed) ? 0.5 : 0;
+  const symbolCount = trimmed.match(/[^A-Za-z0-9\s.,:;()'\-–/&]/g)?.length ?? 0;
+  const symbolRatio = symbolCount / Math.max(1, trimmed.replace(/\s+/g, "").length);
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  const englishLikeWordCount = words
+    .filter((word) => /[A-Za-z]{3,}/.test(word))
+    .filter((word) => {
+      const vowels = word.match(/[aeiou]/gi)?.length ?? 0;
+      return vowels >= 1;
+    }).length;
+
+  const englishSignal = words.length > 0 ? englishLikeWordCount / words.length : 0;
+  return structuralSignal + englishSignal - symbolRatio;
+}
+
+function mergeTocTextByLineQuality(baseText: string, candidateText: string): string {
+  const baseLines = baseText.replace(/\r/g, "").split("\n");
+  const candidateLines = candidateText.replace(/\r/g, "").split("\n");
+  const mergedLines: string[] = [];
+  const maxLength = Math.max(baseLines.length, candidateLines.length);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const baseLine = (baseLines[index] ?? "").trim();
+    const candidateLine = (candidateLines[index] ?? "").trim();
+
+    if (!baseLine && !candidateLine) {
+      continue;
+    }
+
+    if (!baseLine) {
+      mergedLines.push(candidateLine);
+      continue;
+    }
+
+    if (!candidateLine) {
+      mergedLines.push(baseLine);
+      continue;
+    }
+
+    const baseScore = scoreTocLineQuality(baseLine);
+    const candidateScore = scoreTocLineQuality(candidateLine);
+    mergedLines.push(candidateScore > baseScore + 0.2 ? candidateLine : baseLine);
+  }
+
+  return mergedLines.join("\n");
+}
+
 interface AutoTextbookSetupFlowProps {
   runtime?: "webapp" | "extension";
   onSaved: () => void;
@@ -1398,6 +1497,35 @@ export function AutoTextbookSetupFlow({
     setOcrDraft(target.draft);
   }
 
+  function resetAllOcrRuntimeCaches(): void {
+    lastCapturedOcrByStepRef.current = {
+      cover: "",
+      title: "",
+    };
+    lastTocCaptureOcrRef.current = "";
+    ocrBuffersByStepRef.current = {
+      cover: { raw: "", draft: "" },
+      title: { raw: "", draft: "" },
+      toc: { raw: "", draft: "" },
+    };
+    setRawOcrText("");
+    setOcrDraft("");
+    setOcrProviderStatus("");
+    setOcrProgressMessage("");
+    setIsRawOcrExpanded(false);
+    setIsOcrEditorExpanded(false);
+  }
+
+  function resetTitleOcrScratchpad(): void {
+    updateStepOcrBuffers("title", "", "");
+    if (step === "title") {
+      setRawOcrText("");
+      setOcrDraft("");
+    }
+    setOcrProviderStatus("");
+    setOcrProgressMessage("");
+  }
+
   useEffect(() => {
     emitAutoFlowDiagnostic("session_started", {
       traceId: flowSessionTraceIdRef.current,
@@ -2320,11 +2448,24 @@ export function AutoTextbookSetupFlow({
 
   function handleAcceptCoverStep(): void {
     queueCorrectionLearningSample("accept_cover");
+    // Always enter copyright capture with an empty OCR scratchpad.
+    resetTitleOcrScratchpad();
     setStep("title");
+  }
+
+  function resetTocOcrScratchpad(): void {
+    lastTocCaptureOcrRef.current = "";
+    updateStepOcrBuffers("toc", "", "");
+    setRawOcrText("");
+    setOcrDraft("");
+    setOcrProviderStatus("");
+    setOcrProgressMessage("");
   }
 
   function handleAcceptTitleStep(): void {
     queueCorrectionLearningSample("accept_title");
+    // Starting TOC capture should always begin with a clean OCR scratchpad.
+    resetTocOcrScratchpad();
     setStep("toc");
   }
 
@@ -3163,48 +3304,111 @@ export function AutoTextbookSetupFlow({
     let selectedTocText = captured.ocrText;
     let selectedProviderId = captured.ocrProviderId;
     let rescueApplied = false;
-    const primaryNoiseScore = scoreTocNoise(selectedTocText);
-    const primarySanitized = sanitizeTocDraftText(selectedTocText);
-    const primaryParsed = parseTocFromOcrText(primarySanitized);
-    const primaryMissingChapterStarts = primaryParsed.chapters.some((chapter) => typeof chapter.pageStart !== "number");
-    const countTocEntries = (result: ParsedTocResult): number => result.chapters.reduce((sum, chapter) => sum + 1 + chapter.sections.length, 0);
-    const shouldAttemptRescue = primaryNoiseScore >= 0.45
-      || primaryParsed.confidence < 0.9
-      || primaryMissingChapterStarts;
+
+    const evaluateCandidate = (candidateText: string): {
+      sanitized: string;
+      parsed: ParsedTocResult;
+      noiseScore: number;
+      missingChapterStarts: boolean;
+      garbageDetected: boolean;
+      entryCount: number;
+      isGoodEnough: boolean;
+    } => {
+      const sanitized = sanitizeTocDraftText(candidateText);
+      const parsed = parseTocFromOcrText(sanitized);
+      const noiseScore = scoreTocNoise(candidateText);
+      const missingChapterStarts = parsed.chapters.some((chapter) => typeof chapter.pageStart !== "number");
+      const garbageDetected = hasImmediateTocGarbageSignals(candidateText);
+      const entryCount = parsed.chapters.reduce((sum, chapter) => sum + 1 + chapter.sections.length, 0);
+      const isGoodEnough = noiseScore < 0.25
+        && !garbageDetected
+        && parsed.confidence >= 0.9
+        && !missingChapterStarts;
+      return {
+        sanitized,
+        parsed,
+        noiseScore,
+        missingChapterStarts,
+        garbageDetected,
+        entryCount,
+        isGoodEnough,
+      };
+    };
+
+    const primary = evaluateCandidate(selectedTocText);
+
+    const shouldAttemptRescue = primary.noiseScore >= 0.45
+      || primary.parsed.confidence < 0.9
+      || primary.missingChapterStarts
+      || primary.garbageDetected;
 
     if (shouldAttemptRescue) {
       try {
-        setOcrProgressMessage("Analyzing image - noisy TOC text detected, rescanning for cleaner text...");
+        setOcrProgressMessage("Analyzing image - garbage/noise detected in TOC text, rescanning immediately...");
         setIsRunningOcr(true);
-        const rescue = await extractTextFromImageWithFallback(captured.imageDataUrl, {
-          providerOrder: TOC_RESCUE_PROVIDER_ORDER,
-        });
-        const rescueNoiseScore = scoreTocNoise(rescue.text);
-        const rescueSanitized = sanitizeTocDraftText(rescue.text);
-        const rescueParsed = parseTocFromOcrText(rescueSanitized);
-        const rescueMissingChapterStarts = rescueParsed.chapters.some((chapter) => typeof chapter.pageStart !== "number");
-        const rescueLooksStronger = rescueNoiseScore < primaryNoiseScore
-          || rescueParsed.confidence > primaryParsed.confidence
-          || countTocEntries(rescueParsed) > countTocEntries(primaryParsed)
-          || (primaryMissingChapterStarts && !rescueMissingChapterStarts);
+        const maxRescuePasses = primary.garbageDetected ? 3 : 2;
+        let bestText = selectedTocText;
+        let bestProviderId = selectedProviderId;
+        let bestQuality = primary;
 
-        if (rescueLooksStronger) {
-          selectedTocText = rescue.text;
-          selectedProviderId = rescue.providerId;
-          rescueApplied = true;
+        for (let rescuePass = 1; rescuePass <= maxRescuePasses; rescuePass += 1) {
+          const rescue = await extractTextFromImageWithFallback(captured.imageDataUrl, {
+            providerOrder: TOC_RESCUE_PROVIDER_ORDER,
+          });
+          const mergedCandidate = mergeTocTextByLineQuality(bestText, rescue.text);
+          const rescueQuality = evaluateCandidate(rescue.text);
+          const mergedQuality = evaluateCandidate(mergedCandidate);
+
+          const rescueLooksStronger = rescueQuality.noiseScore < bestQuality.noiseScore
+            || rescueQuality.parsed.confidence > bestQuality.parsed.confidence
+            || rescueQuality.entryCount > bestQuality.entryCount
+            || (bestQuality.missingChapterStarts && !rescueQuality.missingChapterStarts)
+            || (bestQuality.garbageDetected && !rescueQuality.garbageDetected);
+
+          const mergedLooksStronger = mergedQuality.noiseScore < bestQuality.noiseScore
+            || mergedQuality.parsed.confidence > bestQuality.parsed.confidence
+            || mergedQuality.entryCount > bestQuality.entryCount
+            || (bestQuality.missingChapterStarts && !mergedQuality.missingChapterStarts)
+            || (bestQuality.garbageDetected && !mergedQuality.garbageDetected);
+
+          if (rescueLooksStronger || mergedLooksStronger) {
+            rescueApplied = true;
+
+            if (mergedLooksStronger && (!rescueLooksStronger || mergedQuality.parsed.confidence >= rescueQuality.parsed.confidence)) {
+              bestText = mergedCandidate;
+              bestProviderId = rescue.providerId;
+              bestQuality = mergedQuality;
+            } else {
+              bestText = rescue.text;
+              bestProviderId = rescue.providerId;
+              bestQuality = rescueQuality;
+            }
+          }
+
+          if (bestQuality.isGoodEnough) {
+            break;
+          }
+        }
+
+        if (rescueApplied) {
+          selectedTocText = bestText;
+          selectedProviderId = bestProviderId;
+
           appendDebugLogEntry({
             eventType: "warning",
             message: "TOC OCR rescue path selected cleaner text.",
             autoModeStep: "toc",
             context: {
               originalProviderId: captured.ocrProviderId,
-              rescueProviderId: rescue.providerId,
-              primaryNoiseScore,
-              rescueNoiseScore,
-              primaryConfidence: primaryParsed.confidence,
-              rescueConfidence: rescueParsed.confidence,
-              primaryMissingChapterStarts,
-              rescueMissingChapterStarts,
+              rescueProviderId: bestProviderId,
+              primaryNoiseScore: primary.noiseScore,
+              rescueNoiseScore: bestQuality.noiseScore,
+              primaryConfidence: primary.parsed.confidence,
+              rescueConfidence: bestQuality.parsed.confidence,
+              primaryMissingChapterStarts: primary.missingChapterStarts,
+              rescueMissingChapterStarts: bestQuality.missingChapterStarts,
+              primaryGarbageDetected: primary.garbageDetected,
+              rescueGarbageDetected: bestQuality.garbageDetected,
             },
           });
         }
@@ -3217,9 +3421,10 @@ export function AutoTextbookSetupFlow({
 
     const cleanedIncomingTocText = sanitizeTocDraftText(selectedTocText);
     const existingTocDraft = ocrBuffersByStepRef.current.toc.draft;
+    const safeExistingTocDraft = isLikelyTocText(existingTocDraft) ? existingTocDraft : "";
     const baselineTocText = lastTocCaptureOcrRef.current.trim().length > 0
       ? lastTocCaptureOcrRef.current
-      : existingTocDraft;
+      : safeExistingTocDraft;
     const mergedTocText = baselineTocText.trim().length > 0
       ? mergeOcrTextWithOverlap(baselineTocText, cleanedIncomingTocText)
       : cleanedIncomingTocText;
@@ -3921,13 +4126,15 @@ export function AutoTextbookSetupFlow({
                         type="button"
                         disabled={isBusy}
                         onClick={() => {
+                          // Start resumed sessions from clean in-memory OCR state.
+                          resetAllOcrRuntimeCaches();
                           activeSessionDraftIdRef.current = draft.id;
                           setCoverImageDataUrl(draft.coverImageDataUrl);
                           setOwnershipProofDataUrl(draft.ownershipProofDataUrl ?? null);
                           setLastMetadataImageDataUrl(draft.ownershipProofDataUrl ?? draft.coverImageDataUrl);
-                          updateStepOcrBuffers(toOcrBufferStep(draft.step), draft.rawOcrText, draft.rawOcrText);
-                          setRawOcrText(draft.rawOcrText);
-                          setOcrDraft(draft.rawOcrText);
+                          updateStepOcrBuffers(toOcrBufferStep(draft.step), "", "");
+                          setRawOcrText("");
+                          setOcrDraft("");
                           const nextMetadataForm: MetadataFormState = draft.metadataFormSnapshot
                             ? { ...draft.metadataFormSnapshot }
                             : {
@@ -3986,6 +4193,7 @@ export function AutoTextbookSetupFlow({
                   clearAutoExtractionCheckpoints();
                   clearAllAutoSessionDrafts();
                   setResumableDrafts([]);
+                  resetAllOcrRuntimeCaches();
                 }}
               >
                 Delete All Drafts

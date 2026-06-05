@@ -267,6 +267,13 @@
 			"command": "npm run bugfix:release -- -Description \"TOC OCR: prefer best color crop with grayscale fallback and docs\" -SkipTests -AllowUnsignedMacOS",
 			"isBackground": false,
 			"group": "test"
+		},
+		{
+			"label": "ocr: ci loop (gh + local live install)",
+			"type": "shell",
+			"command": "npm run ocr:ci:loop -- --description \"TOC OCR live iteration\" --ref main",
+			"isBackground": false,
+			"group": "test"
 		}
 	],
 	"inputs": [

@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-  "version": "1.7.98",
+  "version": "1.7.99",
   "private": true,
   "type": "module",
   "engines": {
@@ -48,6 +48,9 @@
     "token:ocr:set:openai": "bash scripts/secure-cloud-ocr-token.sh set openai",
     "token:ocr:set:github": "bash scripts/secure-cloud-ocr-token.sh set github",
     "test:smoke:ocr:cloud:secure": "bash scripts/secure-cloud-ocr-token.sh run",
+    "ocr:ci:loop": "node scripts/ocr-live-ci-loop.mjs",
+    "ocr:ci:loop:fast": "node scripts/ocr-live-ci-loop.mjs --skip-cloud-smoke --skip-remote --reuse-mac-artifact",
+    "debug:ocr:live": "tsx scripts/ocr-live-debug.ts",
     "test:e2e:packaged": "npm run test:e2e:autoupdate && npm run test:installer && npm run check:installer",
     "test:real-sync": "tsx tests/realSyncTest.ts",
     "test:installer:guardrails": "vitest run tests/integration/windows.installer.template.integration.test.ts",

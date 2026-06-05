@@ -1354,7 +1354,24 @@ async function buildTocSamplingVariants(imageDataUrl: string): Promise<Array<{ l
   }
 
   const preferredCrop = insetCropRect(splitCropRect(splitCropRect(baseBoundary, "bottom"), "left", 0.18), 0.02);
+  const wideBottomCrop = insetCropRect(splitCropRect(baseBoundary, "bottom", 0.14), 0.015);
+  const centerBottomCrop = insetCropRect(
+    splitCropRect(
+      {
+        x: baseBoundary.x + Math.round(baseBoundary.width * 0.08),
+        y: baseBoundary.y,
+        width: Math.max(1, Math.round(baseBoundary.width * 0.84)),
+        height: baseBoundary.height,
+      },
+      "bottom",
+      0.1,
+    ),
+    0.01,
+  );
   const variants: Array<{ label: string; rect: SelectionRect }> = [
+    { label: "full page boundary", rect: baseBoundary },
+    { label: "wide bottom crop", rect: wideBottomCrop },
+    { label: "center bottom crop", rect: centerBottomCrop },
     { label: "preferred color crop", rect: preferredCrop },
   ];
 
@@ -1375,7 +1392,7 @@ async function buildTocSamplingVariants(imageDataUrl: string): Promise<Array<{ l
 
   deduped.push({
     label: "preferred grayscale backup",
-    imageDataUrl: await toGrayscaleDataUrl(deduped[0]?.imageDataUrl ?? imageDataUrl),
+    imageDataUrl: await toGrayscaleDataUrl(deduped.find((variant) => variant.label === "preferred color crop")?.imageDataUrl ?? deduped[0]?.imageDataUrl ?? imageDataUrl),
   });
 
   return deduped;
@@ -3724,44 +3741,74 @@ export function AutoTextbookSetupFlow({
     let bestQuality = evaluateCandidate(bestText);
     let processedSamples = 1;
 
+    const selectStrongerTocCandidate = (
+      currentBest: {
+        text: string;
+        providerId: string;
+        quality: ReturnType<typeof evaluateCandidate>;
+      },
+      nextCandidate: {
+        text: string;
+        providerId: string;
+        quality: ReturnType<typeof evaluateCandidate>;
+      }
+    ) => {
+      const next = nextCandidate.quality;
+      const best = currentBest.quality;
+
+      const nextIsStronger = next.isGoodEnough && !best.isGoodEnough
+        || next.parsed.confidence > best.parsed.confidence
+        || next.entryCount > best.entryCount
+        || next.sectionCount > best.sectionCount
+        || (best.sparseSectionCoverage && !next.sparseSectionCoverage)
+        || (best.missingChapterStarts && !next.missingChapterStarts)
+        || (best.missingHeadingSignals && !next.missingHeadingSignals)
+        || next.missingHeadingCount < best.missingHeadingCount
+        || (best.garbageDetected && !next.garbageDetected)
+        || next.noiseScore < best.noiseScore;
+
+      if (!nextIsStronger) {
+        return currentBest;
+      }
+
+      return {
+        text: nextCandidate.text,
+        providerId: nextCandidate.providerId,
+        quality: nextCandidate.quality,
+      };
+    };
+
     try {
       const samplingVariants = await buildTocSamplingVariants(captured.imageDataUrl);
-      const preferredVariant = samplingVariants[0];
-      const grayscaleVariant = samplingVariants[1];
 
       setIsRunningOcr(true);
-      if (preferredVariant) {
-        setOcrProgressMessage("TOC sampling 1/2: preferred color crop. Running best-crop pass...");
+      if (samplingVariants.length > 0) {
+        for (let index = 0; index < samplingVariants.length; index += 1) {
+          const variant = samplingVariants[index];
+          setOcrProgressMessage(`TOC sampling ${index + 1}/${samplingVariants.length}: ${variant.label}.`);
 
-        const preferredSample = await extractTextFromImageWithFallback(preferredVariant.imageDataUrl, {
-          providerOrder: TOC_RESCUE_PROVIDER_ORDER,
-        });
-        bestText = preferredSample.text;
-        bestProviderId = preferredSample.providerId;
-        bestQuality = evaluateCandidate(bestText);
-        processedSamples = 2;
-
-        if (grayscaleVariant) {
-          setOcrProgressMessage("TOC sampling 2/2: grayscale backup. Checking contrast fallback...");
-
-          const grayscaleSample = await extractTextFromImageWithFallback(grayscaleVariant.imageDataUrl, {
+          const sample = await extractTextFromImageWithFallback(variant.imageDataUrl, {
             providerOrder: TOC_RESCUE_PROVIDER_ORDER,
           });
-          const grayscaleQuality = evaluateCandidate(grayscaleSample.text);
-          const grayscaleLooksStronger = grayscaleQuality.parsed.confidence > bestQuality.parsed.confidence
-            || grayscaleQuality.entryCount > bestQuality.entryCount
-            || grayscaleQuality.sectionCount > bestQuality.sectionCount
-            || (bestQuality.sparseSectionCoverage && !grayscaleQuality.sparseSectionCoverage)
-            || (bestQuality.missingHeadingSignals && !grayscaleQuality.missingHeadingSignals)
-            || grayscaleQuality.missingHeadingCount < bestQuality.missingHeadingCount
-            || (bestQuality.garbageDetected && !grayscaleQuality.garbageDetected)
-            || (!grayscaleQuality.garbageDetected && grayscaleQuality.isGoodEnough && !bestQuality.isGoodEnough);
+          const sampleQuality = evaluateCandidate(sample.text);
 
-          if (grayscaleLooksStronger) {
-            bestText = grayscaleSample.text;
-            bestProviderId = grayscaleSample.providerId;
-            bestQuality = grayscaleQuality;
-          }
+          const stronger = selectStrongerTocCandidate(
+            {
+              text: bestText,
+              providerId: bestProviderId,
+              quality: bestQuality,
+            },
+            {
+              text: sample.text,
+              providerId: sample.providerId,
+              quality: sampleQuality,
+            },
+          );
+
+          bestText = stronger.text;
+          bestProviderId = stronger.providerId;
+          bestQuality = stronger.quality;
+          processedSamples += 1;
         }
 
         if (bestQuality.missingHeadingSignals) {

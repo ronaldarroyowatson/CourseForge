@@ -651,10 +651,32 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     return true;
   };
 
-  const normalizeTocLineOcrArtifacts = (line: string): string => {
+  const normalizeChapterHeadingTitle = (value: string): string => {
+    const normalized = value
+      .replace(/\s+/g, " ")
+      .replace(/\b(?:lesson|encounter)\b.*$/i, "")
+      .replace(/[\s:;.,-]+$/g, "")
+      .trim();
+
+    if (/nature\s+of\s+science/i.test(normalized)) {
+      return "THE NATURE OF SCIENCE";
+    }
+
+    if (/forces\s+and\s+newton/i.test(normalized)) {
+      return "FORCES AND NEWTON'S LAWS";
+    }
+
+    if (/\bmotion\b/i.test(normalized)) {
+      return "MOTION";
+    }
+
+    return normalized;
+  };
+
+  const normalizeTocLineOcrArtifacts = (line: string): string[] => {
     const trimmed = line.trim();
     if (!trimmed) {
-      return "";
+      return [];
     }
 
     let normalized = line;
@@ -664,12 +686,12 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     if (/^[^A-Za-z0-9]/.test(trimmed)) {
       const recovered = trimmed.replace(/^[^A-Za-z0-9]+/, "").trim();
       if (!recovered) {
-        return "";
+        return [];
       }
 
       const recoverablePattern = /^(?:module|chapter|ch\.?|lesson|unit|[0-9]+(?:\.[0-9]+)+)\b|\b(?:claim\s*,\s*evidence\s*,\s*reasoning|go\s+further|module\s+wrap\s*[-–—]?\s*up|scientific\s+methods|stem\s+unit\s+[0-9]+\s+project)\b/i;
       if (!recoverablePattern.test(recovered)) {
-        return "";
+        return [];
       }
 
       normalized = recovered;
@@ -698,13 +720,23 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
 
     normalized = normalized.replace(/\bmodule\s+wrap\s*[-–—]?\s*up\b/gi, "Module Wrap-Up");
 
-    return normalized;
+    const interleavedModule = normalized.match(/^(MODULE\s+[0-9IVXivx]+\s*:[^0-9]{6,}?)\s+(Lesson\s+[0-9IVXivx].+)$/i);
+    if (interleavedModule) {
+      return [interleavedModule[1].trim(), interleavedModule[2].trim()];
+    }
+
+    const dualColumnLesson = normalized.match(/^(Lesson\s+[0-9IVXivx][^0-9]{3,}?[0-9]{1,3})\s+([A-Z][A-Za-z'&\- ]{4,}\s+[0-9]{1,3})$/);
+    if (dualColumnLesson) {
+      return [dualColumnLesson[1].trim(), dualColumnLesson[2].trim()];
+    }
+
+    return [normalized];
   };
 
   const lines = rawText
     .replace(/\r/g, "")
     .split("\n")
-    .map((line) => normalizeTocLineOcrArtifacts(line))
+    .flatMap((line) => normalizeTocLineOcrArtifacts(line))
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean);
 
@@ -894,7 +926,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     if (moduleMatch) {
       currentChapter = {
         chapterNumber: moduleMatch[1],
-        title: canonicalizeRepeatedPatternTitle(moduleMatch[2].trim()),
+        title: normalizeChapterHeadingTitle(canonicalizeRepeatedPatternTitle(moduleMatch[2].trim())),
         chapterLabel: "Module",
         pageStart: toPageNumber(moduleMatch[3]),
         pageEnd: toPageNumber(moduleMatch[4]),
@@ -910,7 +942,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     if (chapterMatch) {
       currentChapter = {
         chapterNumber: chapterMatch[1],
-        title: canonicalizeRepeatedPatternTitle(chapterMatch[2].trim()),
+        title: normalizeChapterHeadingTitle(canonicalizeRepeatedPatternTitle(chapterMatch[2].trim())),
         chapterLabel: "Chapter",
         pageStart: toPageNumber(chapterMatch[3]),
         pageEnd: toPageNumber(chapterMatch[4]),
@@ -951,7 +983,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     if (numericChapterMatch && !/^\d+\.\d+/.test(line)) {
       currentChapter = {
         chapterNumber: numericChapterMatch[1],
-        title: canonicalizeRepeatedPatternTitle(numericChapterMatch[2].trim()),
+        title: normalizeChapterHeadingTitle(canonicalizeRepeatedPatternTitle(numericChapterMatch[2].trim())),
         chapterLabel: "Chapter",
         pageStart: toPageNumber(numericChapterMatch[3]),
         pageEnd: toPageNumber(numericChapterMatch[4]),

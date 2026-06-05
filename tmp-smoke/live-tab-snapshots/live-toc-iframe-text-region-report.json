@@ -1,0 +1,140 @@
+{
+  "generatedAt": "2026-06-05T00:56:33.850Z",
+  "imageFile": "/Users/dev-macbook/Documents/GitHub/CourseForge/tmp-smoke/live-tab-snapshots/live-toc-iframe-text-region.png",
+  "providerId": "local_tesseract",
+  "attempts": [
+    {
+      "providerId": "local_tesseract",
+      "success": true
+    }
+  ],
+  "rawText": "2 a\nINTRODUCTION TO PHYSICAL SCIENCE MODULE 3: FORCES AND NEWTON'S LAWS\nThis module introduces the nature of science, what physical science ENCOUNTER THE PHENOMENON\nis, and provides tools for the study of science. (ED Claim, Evidence, Reasoning 59\nLesson 1 Forces 60\nMODULE 1: THE NATURE OF SCIENCE Lesson 2 Newton's Laws of Motion 68\nENCOUNTER THE PHENOMENON Lesson 3 Using Newton's Laws 74\n(GE Claim, Evidence, Reasoning 3 SeENCE& SOCIETY\nLesson 1 The Methods of Science 4 Extreme Altitudes 81\nLesson 2 Standards of Measurement 2 Module Wrap-Up 83\nLesson 3 Communicating with Graphs 19 ED Go FURTHER Data Analysis Lab 83\nLesson 4 Science and Technology. 24 @ STEM UNIT 1 PROJECT 83\nNATURE OF SCIENCE\nScientific Methods. 31\n® Module Wrap-Up. 33\nE30 GO FURTHER Data Analysis Lab 33\nMODULE 2: MOTION\nENCOUNTER THE PHENOMENON\n(ED Claim, Evidence, Reasoning 37\nLesson 1 Describing Motion 38\nLesson 2 Velocity and Momentum a5\nLesson 3 Acceleration 50\nENGINEERING & TECHNOLOGY\nAutonomous Vehicles Go Subterranean 55\nBB AAA Arm | Ten er",
+  "parsedToc": {
+    "chapters": [
+      {
+        "chapterNumber": "1",
+        "chapterLabel": "Chapter",
+        "title": "Chapter 1",
+        "sections": [
+          {
+            "sectionNumber": "1.1",
+            "title": "Forces",
+            "pageStart": 60
+          }
+        ],
+        "pageStart": 60
+      },
+      {
+        "chapterNumber": "1",
+        "title": "THE NATURE OF SCIENCE",
+        "chapterLabel": "Module",
+        "pageStart": 68,
+        "sections": [
+          {
+            "sectionNumber": "1.2",
+            "title": "Newton's Laws of Motion",
+            "pageStart": 68
+          },
+          {
+            "sectionNumber": "",
+            "title": "ENCOUNTER THE PHENOMENON Lesson 3 Using Newton's Laws",
+            "pageStart": 74
+          },
+          {
+            "sectionNumber": "1.1",
+            "title": "The Methods of Science",
+            "pageStart": 4
+          },
+          {
+            "sectionNumber": "",
+            "title": "Extreme Altitudes",
+            "pageStart": 81
+          },
+          {
+            "sectionNumber": "1.2",
+            "title": "Standards of Measurement",
+            "pageStart": 2
+          },
+          {
+            "sectionNumber": "",
+            "title": "Module Wrap-Up",
+            "pageStart": 83
+          },
+          {
+            "sectionNumber": "1.3",
+            "title": "Communicating with Graphs",
+            "pageStart": 19
+          },
+          {
+            "sectionNumber": "",
+            "title": "ED Go Further Data Analysis Lab",
+            "pageStart": 83
+          },
+          {
+            "sectionNumber": "1.4",
+            "title": "Science and Technology. 24 @ STEM UNIT 1 PROJECT",
+            "pageStart": 83
+          },
+          {
+            "sectionNumber": "",
+            "title": "Scientific Methods.",
+            "pageStart": 31
+          },
+          {
+            "sectionNumber": "",
+            "title": "Module Wrap-Up.",
+            "pageStart": 33
+          },
+          {
+            "sectionNumber": "",
+            "title": "SEP Go Further Data Analysis Lab",
+            "pageStart": 33
+          }
+        ]
+      },
+      {
+        "chapterNumber": "2",
+        "title": "MOTION",
+        "chapterLabel": "Module",
+        "pageStart": 37,
+        "sections": [
+          {
+            "sectionNumber": "",
+            "title": "CER Claim, Evidence, Reasoning",
+            "pageStart": 37
+          },
+          {
+            "sectionNumber": "2.1",
+            "title": "Describing Motion",
+            "pageStart": 38
+          },
+          {
+            "sectionNumber": "2.2",
+            "title": "Velocity and Momentum a5"
+          },
+          {
+            "sectionNumber": "2.3",
+            "title": "Acceleration",
+            "pageStart": 50
+          },
+          {
+            "sectionNumber": "",
+            "title": "Autonomous Vehicles Go Subterranean",
+            "pageStart": 55
+          }
+        ]
+      }
+    ],
+    "confidence": 1
+  },
+  "cer": 45.11545293072824,
+  "cerRaw": 114.92007104795736,
+  "cerStructured": 45.11545293072824,
+  "cerMode": "structured",
+  "cerThreshold": 0.1,
+  "cerThresholdPassed": false,
+  "goldTranscriptFile": "/tmp/courseforge-page1-gold.txt",
+  "outputFile": "/Users/dev-macbook/Documents/GitHub/CourseForge/tmp-smoke/live-tab-snapshots/live-toc-iframe-text-region-report.json",
+  "selectedVariant": "original",
+  "goldTranscriptLength": 563
+}

@@ -269,8 +269,10 @@ async function preprocessImageForOcr(imageDataUrl: string): Promise<string> {
 
   try {
     const image = await loadImageFromDataUrl(imageDataUrl);
-    const maxDimension = 2200;
-    const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+    const longestSide = Math.max(image.naturalWidth, image.naturalHeight);
+    const upscaleFactor = longestSide < 1400 ? 1.6 : longestSide < 1900 ? 1.25 : 1;
+    const maxDimension = 2600;
+    const scale = Math.min(maxDimension / longestSide, upscaleFactor);
     const width = Math.max(1, Math.round(image.naturalWidth * scale));
     const height = Math.max(1, Math.round(image.naturalHeight * scale));
 
@@ -286,14 +288,37 @@ async function preprocessImageForOcr(imageDataUrl: string): Promise<string> {
     const imageData = context.getImageData(0, 0, width, height);
     const pixels = imageData.data;
 
+    // Build luminance stats first so thresholding adapts to bright reader UIs.
+    let luminanceSum = 0;
+    let luminanceSquaredSum = 0;
+    let pixelCount = 0;
     for (let index = 0; index < pixels.length; index += 4) {
-      const red = pixels[index];
-      const green = pixels[index + 1];
-      const blue = pixels[index + 2];
+      const red = pixels[index] ?? 0;
+      const green = pixels[index + 1] ?? 0;
+      const blue = pixels[index + 2] ?? 0;
+      const gray = (red * 0.299) + (green * 0.587) + (blue * 0.114);
+      luminanceSum += gray;
+      luminanceSquaredSum += gray * gray;
+      pixelCount += 1;
+    }
 
-      const gray = Math.round((red * 0.299) + (green * 0.587) + (blue * 0.114));
-      const boosted = Math.max(0, Math.min(255, (gray - 128) * 1.45 + 128));
-      const binary = boosted > 168 ? 255 : Math.round(boosted * 0.65);
+    const meanLuminance = pixelCount > 0 ? (luminanceSum / pixelCount) : 170;
+    const variance = Math.max(0, (luminanceSquaredSum / Math.max(1, pixelCount)) - (meanLuminance * meanLuminance));
+    const deviation = Math.sqrt(variance);
+    const threshold = Math.max(118, Math.min(192, meanLuminance - (deviation * 0.15)));
+
+    for (let index = 0; index < pixels.length; index += 4) {
+      const red = pixels[index] ?? 0;
+      const green = pixels[index + 1] ?? 0;
+      const blue = pixels[index + 2] ?? 0;
+
+      const gray = (red * 0.299) + (green * 0.587) + (blue * 0.114);
+      const contrasted = Math.max(0, Math.min(255, ((gray - meanLuminance) * 1.95) + 128));
+      const binary = contrasted >= threshold
+        ? 255
+        : contrasted <= (threshold - 16)
+          ? 0
+          : Math.round(((contrasted - (threshold - 16)) / 16) * 255);
 
       pixels[index] = binary;
       pixels[index + 1] = binary;

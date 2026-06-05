@@ -525,6 +525,7 @@ function showHelp() {
   console.log("  program debug auth-trace [--event redirect-resolve-error] [--provider microsoft] [--message text] [--severity info|warn|error]");
   console.log("  program debug dsc <enable|disable|report|clear> [--page settings] [--card \"Debug Log\"] [--report path]");
   console.log("  program debug dump-log [--sourceType automatic|manual] [--output path] [--sync-cloud] [--approve-delete]");
+  console.log("  program debug ocr-live --image-file path [--gold-transcript-file path] [--output path]");
   console.log("  program debug clear-log");
   console.log("  program debug enable");
   console.log("  program debug disable");
@@ -743,6 +744,17 @@ if (subcommand === "dump-log") {
 if (subcommand === "dsc") {
   handleDsc();
   process.exit(0);
+}
+
+if (subcommand === "ocr-live") {
+  const { spawnSync } = await import("node:child_process");
+  const child = spawnSync(
+    "npx",
+    ["tsx", "scripts/ocr-live-debug.ts", ...args.slice(2)],
+    { stdio: "inherit" }
+  );
+
+  process.exit(child.status ?? 1);
 }
 
 if (subcommand === "clear-log") {

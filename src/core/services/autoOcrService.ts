@@ -1168,7 +1168,26 @@ export async function extractTextFromImageWithFallback(
       const providerImage = providerId === "local_tesseract"
         ? await getLocalPreparedImage()
         : imageDataUrl;
-      const text = await provider.extractText(providerImage);
+      let text = await provider.extractText(providerImage);
+
+      // Local OCR can occasionally lose text after aggressive preprocessing.
+      // Retry once on the original frame before marking local OCR unusable.
+      if (
+        providerId === "local_tesseract"
+        && isLikelyUnusableOcrText(text)
+      ) {
+        void emitOcrDiagnostic("local_extract_retry_original_frame", {
+          level: "warning",
+          traceId: extractionTraceId,
+          context: {
+            providerId,
+            preprocessedBytes: providerImage.length,
+            originalBytes: imageDataUrl.length,
+          },
+        });
+        text = await provider.extractText(imageDataUrl);
+      }
+
       if (isLikelyUnusableOcrText(text)) {
         attempts.push({ providerId, success: false, errorMessage: "OCR returned unusable text." });
         recordProviderFailure(providerId, "OCR returned unusable text.");

@@ -3116,6 +3116,38 @@ export function AutoTextbookSetupFlow({
       };
     } catch (error) {
       setIsRunningOcr(false);
+      const rawMessage = error instanceof Error ? error.message : String(error);
+
+      if (/All OCR providers failed/i.test(rawMessage)) {
+        const summaryMatch = rawMessage.match(/\]\.?\s*(.*)$/);
+        const providerSummary = summaryMatch?.[1]?.trim() ?? "OCR providers returned unusable text.";
+        const userFacingOcrMessage = "Screen capture succeeded, but OCR could not extract usable text. Try zooming in on the textbook page, selecting the exact tab/window, or using Upload Image.";
+
+        emitAutoFlowDiagnostic("ocr_pipeline_failed_after_capture", {
+          level: "error",
+          traceId,
+          context: {
+            targetStep,
+            message: rawMessage,
+            providerSummary,
+          },
+        });
+
+        setErrorMessage(userFacingOcrMessage);
+        setOcrProviderStatus(`OCR fallback summary: ${providerSummary}`);
+        setOcrCooldownExpiryMs(getAutoOcrCooldownExpiryMs());
+        appendDebugLogEntry({
+          eventType: "error",
+          message: "OCR pipeline failed after capture.",
+          autoModeStep: targetStep,
+          context: {
+            detail: rawMessage,
+            providerSummary,
+          },
+        });
+        return null;
+      }
+
       const normalized = normalizeDisplayCaptureError(error);
       const message = normalized.message;
       const userFacingMessage = normalized.code === "permission_denied"

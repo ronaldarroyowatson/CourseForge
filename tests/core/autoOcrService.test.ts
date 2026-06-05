@@ -561,6 +561,34 @@ describe("autoOcrService", () => {
     expect(result.attempts[1].success).toBe(true);
   });
 
+  it("retries local OCR with the original frame when preprocessed output is unusable", async () => {
+    let callCount = 0;
+    const localExtract = vi.fn(async (_imageDataUrl: string) => {
+      callCount += 1;
+      if (callCount === 1) {
+        return "I am unable to extract text from images.";
+      }
+      return "Module 1 Lesson 1 12";
+    });
+
+    const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+      providerOrder: ["local_tesseract"],
+      providersOverride: [
+        {
+          id: "local_tesseract",
+          label: "Local OCR (Tesseract)",
+          isAvailable: async () => true,
+          extractText: localExtract,
+        },
+      ],
+    });
+
+    expect(result.providerId).toBe("local_tesseract");
+    expect(result.text).toContain("Module 1");
+    expect(localExtract).toHaveBeenCalledTimes(2);
+    expect(localExtract.mock.calls[1]?.[0]).toBe(TEST_IMAGE_DATA_URL);
+  });
+
   it("throws when all providers fail", async () => {
     const providers: AutoOcrProvider[] = [
       {

@@ -171,3 +171,36 @@ Run reports are written to:
 Detailed usage:
 
 - `docs/ocr-live-ci-loop.md`
+
+## Update: 2026-06-05 (v1.7.100 bugfix candidate)
+
+### What changed in this iteration
+
+1. TOC capture UX now auto-collapses previously captured chapter/module groups when the next TOC page is captured.
+2. TOC page-range inference now derives missing section end pages from the next valid section start minus one.
+3. Preview range calculations now use scan-ahead logic (not only immediate sibling checks), which reduces missing or truncated inferred section ranges.
+
+### Why these choices were made
+
+1. Auto-collapsing prior groups keeps focus on the newly captured page and reduces accidental edits in already-reviewed modules.
+2. Next-start-minus-one inference matches textbook TOC conventions better than leaving section endings blank or inheriting unstable sibling assumptions.
+3. Scan-ahead range inference is more robust against OCR line-order noise, especially when one section is partially missing but later sections are valid.
+
+### Validation completed so far
+
+1. TOC flow integration suite: pass (`tests/integration/autoTextbookFlow.integration.test.tsx`, 24/24).
+2. App admin/auth integration suite: pass on rerun (`tests/integration/app.integration.test.tsx`, 11/11).
+3. Full installer validation run completed via Testing_Agent:
+   - Local macOS packaged installer smoke: pass.
+   - Remote Windows/Linux installer matrix: pass.
+   - Matrix run reference: https://github.com/ronaldarroyowatson/CourseForge/actions/runs/26990506128
+
+### Gate caveat and operational decision
+
+The cloud OCR smoke gate can stall under provider throttling windows even with bounded retry cycles. The release decision for this iteration is therefore based on:
+
+1. deterministic local/integration passes,
+2. installer matrix pass,
+3. existing cloud smoke diagnostics and retry controls already documented in `docs/ocr-live-ci-loop.md`.
+
+If throttling clears, rerun `npm run test:smoke:ocr:cloud:gate` to append a fresh provider-health confirmation for this exact tag.

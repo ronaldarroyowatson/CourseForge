@@ -10,12 +10,21 @@ export interface TocHierarchyState {
 
 interface TocPreviewTreeProps {
   toc: TocHierarchyState;
+  expansionMode?: "default" | "collapse-all" | "expand-latest";
+  expansionCycle?: number;
   isBusy?: boolean;
   onUpdateNode: (node: TocPreviewNodeModel, update: { numberValue: string; title: string; pageStart?: number }) => void;
   onRegenerateNode: (node: TocPreviewNodeModel) => void;
 }
 
-export function TocPreviewTree({ toc, isBusy = false, onUpdateNode, onRegenerateNode }: TocPreviewTreeProps): React.JSX.Element {
+export function TocPreviewTree({
+  toc,
+  expansionMode = "default",
+  expansionCycle = 0,
+  isBusy = false,
+  onUpdateNode,
+  onRegenerateNode,
+}: TocPreviewTreeProps): React.JSX.Element {
   const summary = useMemo(() => buildTocPreviewTree(toc.chapters, toc.confidence), [toc.chapters, toc.confidence]);
 
   return (
@@ -35,10 +44,11 @@ export function TocPreviewTree({ toc, isBusy = false, onUpdateNode, onRegenerate
         </div>
       ) : (
         <div className="toc-preview-tree__body space-y-2">
-          {summary.nodes.map((node) => (
+          {summary.nodes.map((node, index) => (
             <TocPreviewNode
-              key={node.id}
+              key={expansionMode === "default" ? node.id : `${node.id}-${expansionMode}-${expansionCycle}`}
               node={node}
+              initiallyExpanded={expansionMode === "collapse-all" ? false : expansionMode === "expand-latest" ? index === summary.nodes.length - 1 : true}
               onUpdateNode={onUpdateNode}
               onRegenerateNode={onRegenerateNode}
               isBusy={isBusy}

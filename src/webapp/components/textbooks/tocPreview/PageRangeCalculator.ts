@@ -32,6 +32,33 @@ function normalizePageStart(pageStart: number | undefined): number | undefined {
     : undefined;
 }
 
+function findNextLargerStart(
+  starts: Array<number | undefined>,
+  fromIndex: number,
+  currentStart: number | undefined
+): number | undefined {
+  if (typeof currentStart !== "number" || !Number.isFinite(currentStart)) {
+    return undefined;
+  }
+
+  for (let index = fromIndex + 1; index < starts.length; index += 1) {
+    const candidate = starts[index];
+    if (typeof candidate !== "number" || !Number.isFinite(candidate)) {
+      continue;
+    }
+
+    if (candidate > currentStart) {
+      return candidate;
+    }
+
+    if (candidate === currentStart) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
 function inferSiblingEnd(
   currentStart: number | undefined,
   nextStart: number | undefined,
@@ -142,12 +169,13 @@ function buildSectionNodes(chapterIndex: number, sections: TocSection[], baseCon
   const topLevelSections: TocPreviewNodeModel[] = [];
   const sectionIdByPrefix = new Map<string, string>();
   const sectionById = new Map<string, TocPreviewNodeModel>();
+  const sectionStarts = sections.map((section) => normalizePageStart(section.pageStart));
 
   sections.forEach((section, sectionIndex) => {
     const numberValue = section.sectionNumber ?? "";
     const title = section.title ?? "";
     const pageStart = normalizePageStart(section.pageStart);
-    const nextStart = normalizePageStart(sections[sectionIndex + 1]?.pageStart);
+    const nextStart = findNextLargerStart(sectionStarts, sectionIndex, pageStart);
     const pageEnd = inferSiblingEnd(pageStart, nextStart, section.pageEnd);
     const hasExplicitNumber = Boolean(numberValue.trim());
     const missingFields = collectMissingFields(numberValue, title, pageStart, hasExplicitNumber);
@@ -217,11 +245,12 @@ function buildSectionNodes(chapterIndex: number, sections: TocSection[], baseCon
 }
 
 export function buildTocPreviewTree(chapters: TocChapter[], globalConfidence: number): TocPreviewBuildResult {
+  const chapterStarts = chapters.map((chapter) => normalizePageStart(chapter.pageStart));
   const nodes: TocPreviewNodeModel[] = chapters.map((chapter, chapterIndex) => {
     const numberValue = chapter.chapterNumber ?? "";
     const title = chapter.title ?? "";
     const pageStart = normalizePageStart(chapter.pageStart);
-    const nextStart = normalizePageStart(chapters[chapterIndex + 1]?.pageStart);
+    const nextStart = findNextLargerStart(chapterStarts, chapterIndex, pageStart);
     const pageEnd = inferSiblingEnd(pageStart, nextStart, chapter.pageEnd);
     const missingFields = collectMissingFields(numberValue, title, pageStart);
     const confidence = scoreNodeConfidence(globalConfidence, Boolean(numberValue.trim()), Boolean(title.trim()), typeof pageStart === "number");

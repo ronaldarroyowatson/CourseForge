@@ -87,6 +87,7 @@ import { emitClientDebugTrace } from "../../../core/services/clientDebugTraceSer
 type AutoFlowStep = "cover" | "title" | "toc" | "toc-editor";
 type OcrBufferStep = "cover" | "title" | "toc";
 type OcrStepBuffers = Record<OcrBufferStep, { raw: string; draft: string }>;
+type TocPreviewExpansionMode = "default" | "collapse-all" | "expand-latest";
 type AutoPrimaryHelperAction =
   | "capture-cover"
   | "upload-cover"
@@ -1098,6 +1099,38 @@ function getChapterDerivedPageEnd(chapters: TocChapter[], chapterIndex: number):
   return undefined;
 }
 
+function getSectionDerivedPageEnd(chapter: TocChapter, sectionIndex: number): number | undefined {
+  const section = chapter.sections[sectionIndex];
+  if (!section) {
+    return undefined;
+  }
+
+  if (typeof section.pageEnd === "number" && Number.isFinite(section.pageEnd)) {
+    return section.pageEnd;
+  }
+
+  if (typeof section.pageStart !== "number" || !Number.isFinite(section.pageStart)) {
+    return undefined;
+  }
+
+  for (let index = sectionIndex + 1; index < chapter.sections.length; index += 1) {
+    const nextStart = chapter.sections[index]?.pageStart;
+    if (typeof nextStart !== "number" || !Number.isFinite(nextStart)) {
+      continue;
+    }
+
+    if (nextStart > section.pageStart) {
+      return nextStart - 1;
+    }
+
+    if (nextStart === section.pageStart) {
+      return section.pageStart;
+    }
+  }
+
+  return undefined;
+}
+
 function buildChapterDescription(unitName: string | undefined, pageStart: number | undefined, pageEnd: number | undefined): string | undefined {
   const parts: string[] = [];
   if (unitName && unitName.trim()) {
@@ -1671,6 +1704,8 @@ export function AutoTextbookSetupFlow({
   const [tocCaptureImageDataUrl, setTocCaptureImageDataUrl] = useState<string | null>(testingSeedState?.tocCaptureImageDataUrl ?? null);
   const [guidedCuePlan, setGuidedCuePlan] = useState<GuidedCaptureCuePlan>(initialGuidedCuePlan);
   const [isBusy, setIsBusy] = useState(false);
+  const [tocPreviewExpansionMode, setTocPreviewExpansionMode] = useState<TocPreviewExpansionMode>("default");
+  const [tocPreviewExpansionCycle, setTocPreviewExpansionCycle] = useState(0);
   const [activePrimaryHelper, setActivePrimaryHelper] = useState<AutoPrimaryHelperAction | null>(null);
   const [primaryHelperAnchor, setPrimaryHelperAnchor] = useState<{ x: number; y: number } | null>(null);
   const helperDelayTimerRef = useRef<number | null>(null);
@@ -1769,6 +1804,11 @@ export function AutoTextbookSetupFlow({
       ...ocrBuffersByStepRef.current[activeStep],
       draft: nextDraft,
     };
+  }
+
+  function bumpTocPreviewExpansion(mode: TocPreviewExpansionMode): void {
+    setTocPreviewExpansionMode(mode);
+    setTocPreviewExpansionCycle((current) => current + 1);
   }
 
   function syncDisplayedOcrFromStep(nextStep: AutoFlowStep): void {
@@ -3568,6 +3608,7 @@ export function AutoTextbookSetupFlow({
   }
 
   async function handleCaptureToc(): Promise<void> {
+    bumpTocPreviewExpansion("collapse-all");
     emitAutoFlowDiagnostic("ui_capture_toc_clicked", {
       traceId: createAutoFlowTraceId("auto-flow-ui-toc"),
       context: { step },
@@ -3874,6 +3915,7 @@ export function AutoTextbookSetupFlow({
     setOcrProviderStatus(`OCR provider: ${bestProviderId}${rescueApplied ? " (rescanned due to noisy text)" : ""}`);
     setStep("toc");
     applyTocFromText(mergedTocText);
+    bumpTocPreviewExpansion("expand-latest");
 
     if (novelEntries > 0) {
       setInfoMessage(`TOC capture added and overlap-stitched. ${novelEntries} new TOC entries were detected after ${processedSamples} sample(s). (OCR: ${bestProviderId}${rescueApplied ? ", auto-rescanned" : ""})`);
@@ -4320,7 +4362,10 @@ export function AutoTextbookSetupFlow({
             title: sectionInstruction.sectionTitle,
             notes: buildSectionNotes(
               sourceSection?.pageStart,
-              sourceSection?.pageEnd
+              sourceSection?.pageEnd ?? getSectionDerivedPageEnd(
+                tocResult.chapters[sectionInstruction.chapterRef.chapterIndex],
+                sectionInstruction.sectionIndex,
+              )
             ),
           };
 
@@ -5010,6 +5055,8 @@ export function AutoTextbookSetupFlow({
             chapters: tocResult.chapters,
             confidence: tocResult.confidence,
           }}
+          expansionMode={tocPreviewExpansionMode}
+          expansionCycle={tocPreviewExpansionCycle}
           isBusy={isBusy}
           onUpdateNode={handlePreviewNodeUpdate}
           onRegenerateNode={handleRegenerateNodeFromImage}
@@ -5190,7 +5237,7 @@ export function AutoTextbookSetupFlow({
                     min={1}
                     value={toPageInputValue(section.pageEnd)}
                     onChange={(event) => updateSection(chapterIndex, sectionIndex, { pageEnd: parsePageInputValue(event.target.value) })}
-                    placeholder="End page"
+                    placeholder={toPageInputValue(getSectionDerivedPageEnd(chapter, sectionIndex)) || "End page"}
                   />
                 </div>
               ))}

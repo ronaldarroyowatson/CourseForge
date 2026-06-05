@@ -56,6 +56,12 @@ The live OCR debug runner also supports:
 - `--cer-threshold 0.1` to record the target threshold in the JSON output.
 - `--fail-on-cer-threshold` to make the debug runner exit nonzero when CER exceeds the threshold.
 
+Cloud smoke gate retry behavior can be bounded with:
+
+- `COURSEFORGE_GITHUB_SMOKE_RETRY_CYCLES=0 npm run test:smoke:ocr:cloud:gate`
+
+Use this when provider throttle windows are long and you need a fast fail/signal instead of extended waiting.
+
 ## Output and evidence
 
 Every run writes a report:

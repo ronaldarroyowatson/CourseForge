@@ -448,11 +448,20 @@ function saveCircuitState(state: CircuitState): void {
 }
 
 function isCircuitOpen(providerId: AutoOcrProviderId): boolean {
+  // local_tesseract is a local provider with no rate limits — never circuit-break it.
+  // The circuit breaker is only meant to protect external cloud APIs from being hammered.
+  if (providerId === "local_tesseract") {
+    return false;
+  }
   const state = getCircuitState()[providerId];
   return state.openUntil > Date.now();
 }
 
 function recordProviderSuccess(providerId: AutoOcrProviderId): void {
+  // local_tesseract is never circuit-broken, so nothing to reset.
+  if (providerId === "local_tesseract") {
+    return;
+  }
   const state = getCircuitState();
   state[providerId] = {
     consecutiveFailures: 0,
@@ -462,6 +471,10 @@ function recordProviderSuccess(providerId: AutoOcrProviderId): void {
 }
 
 function recordProviderFailure(providerId: AutoOcrProviderId, errorMessage: string): void {
+  // local_tesseract is a local provider — never circuit-break it regardless of failure count.
+  if (providerId === "local_tesseract") {
+    return;
+  }
   const state = getCircuitState();
   const previous = state[providerId];
   const nextFailures = previous.consecutiveFailures + 1;
@@ -474,6 +487,46 @@ function recordProviderFailure(providerId: AutoOcrProviderId, errorMessage: stri
   };
   saveCircuitState(state);
 }
+
+/**
+ * Self-heal: if an older release stored a circuit-open state for local_tesseract in
+ * localStorage, clear it so captures aren't permanently blocked after upgrading.
+ */
+function clearStaleLocalTesseractCircuitState(): void {
+  const storage = getStorage();
+  if (!storage) {
+    return;
+  }
+  const raw = storage.getItem(AUTO_OCR_CIRCUIT_STATE_KEY);
+  if (!raw) {
+    return;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<CircuitState>;
+    const entry = parsed.local_tesseract;
+    if (entry && (Number(entry.openUntil) > 0 || Number(entry.consecutiveFailures) > 0)) {
+      const cleaned: CircuitState = {
+        local_tesseract: { consecutiveFailures: 0, openUntil: 0 },
+        cloud_openai_vision: {
+          consecutiveFailures: Number(parsed.cloud_openai_vision?.consecutiveFailures ?? 0),
+          openUntil: Number(parsed.cloud_openai_vision?.openUntil ?? 0),
+          lastError: parsed.cloud_openai_vision?.lastError,
+        },
+        cloud_github_models_vision: {
+          consecutiveFailures: Number(parsed.cloud_github_models_vision?.consecutiveFailures ?? 0),
+          openUntil: Number(parsed.cloud_github_models_vision?.openUntil ?? 0),
+          lastError: parsed.cloud_github_models_vision?.lastError,
+        },
+      };
+      saveCircuitState(cleaned);
+    }
+  } catch {
+    // Ignore malformed state — normal read path will recover.
+  }
+}
+
+// Self-heal stale local_tesseract circuit state left by pre-1.7.101 releases.
+clearStaleLocalTesseractCircuitState();
 
 export function getAutoOcrProviderOrder(): AutoOcrProviderId[] {
   const storage = getStorage();

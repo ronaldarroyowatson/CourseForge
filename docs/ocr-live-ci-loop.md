@@ -94,6 +94,19 @@ For direct OCR inspection without the full loop, run:
 npm run debug:ocr:live -- --image-file <snapshot.png> --gold-transcript-file <gold.txt> --provider-order local_tesseract
 ```
 
+For an automated cloud/local alternation loop with cooldown-aware cloud pauses and a persistent markdown history log, run:
+
+```bash
+npm run debug:ocr:iterate -- --image-file <snapshot.png> --gold-transcript-file <gold.txt> --iterations 10 --cloud-provider cloud_openai_vision --cloud-cooldown-seconds 180 --between-runs-seconds 8 --log-file docs/ocr-live-iteration-log.md
+```
+
+This loop:
+
+- alternates preferred provider mode (`cloud` then `local`)
+- automatically switches to local OCR when cloud cooldown is active
+- appends each run to `docs/ocr-live-iteration-log.md`
+- stores per-run JSON in `tmp-smoke/live-iteration/`
+
 For forced cloud OCR in CLI context, run:
 
 ```bash

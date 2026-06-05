@@ -20,6 +20,7 @@ interface RateLimitCooldownBadgeProps {
  */
 export function RateLimitCooldownBadge({ expiryMs, label }: RateLimitCooldownBadgeProps): React.JSX.Element | null {
   const totalRef = useRef<number>(0);
+  const lastExpiryRef = useRef<number>(0);
   const [remainingMs, setRemainingMs] = useState<number>(0);
   const [visible, setVisible] = useState(false);
 
@@ -31,9 +32,10 @@ export function RateLimitCooldownBadge({ expiryMs, label }: RateLimitCooldownBad
       return;
     }
 
-    // Capture total duration on first mount (or when expiry changes).
-    if (totalRef.current === 0 || expiryMs !== expiryMs) {
+    // Capture total duration on first mount and whenever expiry changes.
+    if (totalRef.current === 0 || lastExpiryRef.current !== expiryMs) {
       totalRef.current = remaining;
+      lastExpiryRef.current = expiryMs;
     }
     setRemainingMs(remaining);
     setVisible(true);

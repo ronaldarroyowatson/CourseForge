@@ -15,6 +15,7 @@ import {
   createInitialAutoCaptureUsage,
   DEFAULT_AUTO_CAPTURE_LIMITS,
   detectPageBoundaryFromRgba,
+  detectTwoColumnTocRegionFromRgba,
   enforceAutoCaptureLimit,
   assessImageModerationSignal,
   evaluateAutoCaptureSafety,
@@ -178,6 +179,20 @@ function toOcrBufferStep(step: AutoFlowStep): OcrBufferStep {
   return step === "toc-editor" ? "toc" : step;
 }
 
+function isLikelyStretchGarbageToken(token: string): boolean {
+  const cleaned = token.replace(/[^A-Za-z]/g, "");
+  if (cleaned.length < 6) {
+    return false;
+  }
+
+  if (/(.)\1{4,}/i.test(cleaned)) {
+    return true;
+  }
+
+  const vowels = cleaned.match(/[aeiou]/gi)?.length ?? 0;
+  return vowels <= 1;
+}
+
 function sanitizeTocDraftText(rawText: string): string {
   const structuralPattern = /^(?:unit|module|chapter|ch\.?|lesson)\b|^[0-9]+(?:\.[0-9]+)+\s+|\.{2,}\s*\d+\s*$/i;
   const headingWhitelist = /\b(?:science|forces|motion|newton|claim|evidence|reasoning|standards|measurement|module|unit|chapter|lesson|phenomenon|society|altitudes)\b/i;
@@ -201,6 +216,9 @@ function sanitizeTocDraftText(rawText: string): string {
         .split(/\s+/)
         .filter((token) => /[A-Za-z]{4,}/.test(token))
         .filter((token) => {
+          if (isLikelyStretchGarbageToken(token)) {
+            return true;
+          }
           const vowels = token.match(/[aeiou]/gi)?.length ?? 0;
           return vowels <= 1 && !headingWhitelist.test(token);
         }).length;
@@ -264,6 +282,33 @@ function scoreTocNoise(rawText: string): number {
   return Math.min(1, (suspiciousCount / lines.length) + structuralPenalty);
 }
 
+function scoreTocAnchorSignals(rawText: string): number {
+  const normalized = rawText.replace(/\r/g, "\n").toLowerCase();
+  let score = 0;
+
+  if (/\bunit\s+[0-9ivx]+\b/.test(normalized)) {
+    score += 1;
+  }
+
+  if (/\bmodule\s+1\b/.test(normalized)) {
+    score += 1;
+  }
+
+  if (/\bmodule\s+2\b/.test(normalized)) {
+    score += 1;
+  }
+
+  if (/\bmodule\s+3\b/.test(normalized)) {
+    score += 1;
+  }
+
+  if (/\b(?:sep\s+go\s+further|stem\s+unit\s+[0-9]+\s+project|module\s+wrap\s*[-–—]?\s*up)\b/.test(normalized)) {
+    score += 1;
+  }
+
+  return score;
+}
+
 function hasImmediateTocGarbageSignals(rawText: string): boolean {
   const lines = rawText
     .replace(/\r/g, "")
@@ -308,6 +353,9 @@ function hasImmediateTocGarbageSignals(rawText: string): boolean {
       .split(/\s+/)
       .filter((token) => /[A-Za-z]{4,}/.test(token))
       .filter((token) => {
+        if (isLikelyStretchGarbageToken(token)) {
+          return true;
+        }
         if (headingWhitelist.test(token)) {
           return false;
         }
@@ -316,6 +364,10 @@ function hasImmediateTocGarbageSignals(rawText: string): boolean {
       }).length;
 
     if (/\b(?:x|xx|x\?)\s*$/i.test(line) && !/\b(?:lesson|module|chapter)\b/i.test(line)) {
+      return true;
+    }
+
+    if (line.split(/\s+/).some((token) => isLikelyStretchGarbageToken(token))) {
       return true;
     }
 
@@ -390,14 +442,12 @@ function extractChapterHeadingOrdinals(rawText: string): number[] {
 
   const headingOrdinals = new Set<number>();
   for (const line of lines) {
-    const match = line.match(/^(?:module|chapter|unit)\s+([A-Za-z0-9]+)/i);
-    if (!match) {
-      continue;
-    }
-
-    const parsed = parseChapterOrdinalToken(match[1]);
-    if (typeof parsed === "number") {
-      headingOrdinals.add(parsed);
+    const matches = line.matchAll(/(?:^|\s)(?:module|chapter|unit)\s+([A-Za-z0-9+|!]+)/gi);
+    for (const match of matches) {
+      const parsed = parseChapterOrdinalToken(match[1]);
+      if (typeof parsed === "number") {
+        headingOrdinals.add(parsed);
+      }
     }
   }
 
@@ -1368,6 +1418,9 @@ async function buildTocSamplingVariants(imageDataUrl: string): Promise<Array<{ l
     width: image.naturalWidth,
     height: image.naturalHeight,
   };
+  let twoColumnBoundary = {
+    ...baseBoundary,
+  };
 
   try {
     const probeCanvas = document.createElement("canvas");
@@ -1382,6 +1435,19 @@ async function buildTocSamplingVariants(imageDataUrl: string): Promise<Array<{ l
       baseBoundary.y = detected.y;
       baseBoundary.width = detected.width;
       baseBoundary.height = detected.height;
+
+      const detectedTwoColumn = detectTwoColumnTocRegionFromRgba(
+        probeData.data,
+        image.naturalWidth,
+        image.naturalHeight,
+        detected,
+      );
+      twoColumnBoundary = {
+        x: detectedTwoColumn.x,
+        y: detectedTwoColumn.y,
+        width: detectedTwoColumn.width,
+        height: detectedTwoColumn.height,
+      };
     }
   } catch {
     // Best effort only.
@@ -1402,8 +1468,39 @@ async function buildTocSamplingVariants(imageDataUrl: string): Promise<Array<{ l
     ),
     0.01,
   );
+  const guidedTwoColumnCrop = insetCropRect(twoColumnBoundary, 0.008);
+  const expandedX = Math.max(
+    baseBoundary.x,
+    guidedTwoColumnCrop.x - Math.round(baseBoundary.width * 0.012),
+  );
+  const expandedY = Math.max(
+    baseBoundary.y,
+    guidedTwoColumnCrop.y - Math.round(baseBoundary.height * 0.02),
+  );
+  const baseRight = baseBoundary.x + baseBoundary.width;
+  const baseBottom = baseBoundary.y + baseBoundary.height;
+  const guidedTwoColumnExpanded: SelectionRect = {
+    x: expandedX,
+    y: expandedY,
+    width: Math.max(
+      1,
+      Math.min(
+        baseRight - expandedX,
+        guidedTwoColumnCrop.width + Math.round(baseBoundary.width * 0.024),
+      ),
+    ),
+    height: Math.max(
+      1,
+      Math.min(
+        baseBottom - expandedY,
+        guidedTwoColumnCrop.height + Math.round(baseBoundary.height * 0.05),
+      ),
+    ),
+  };
   const variants: Array<{ label: string; rect: SelectionRect }> = [
     { label: "full page boundary", rect: baseBoundary },
+    { label: "two-column guided crop", rect: guidedTwoColumnCrop },
+    { label: "two-column guided expanded", rect: guidedTwoColumnExpanded },
     { label: "wide bottom crop", rect: wideBottomCrop },
     { label: "center bottom crop", rect: centerBottomCrop },
     { label: "preferred color crop", rect: preferredCrop },
@@ -3675,6 +3772,8 @@ export function AutoTextbookSetupFlow({
       missingHeadingCount: number;
       garbageDetected: boolean;
       entryCount: number;
+      anchorSignalScore: number;
+      densePenalty: number;
       isGoodEnough: boolean;
     } => {
       const sanitized = sanitizeTocDraftText(candidateText);
@@ -3702,12 +3801,16 @@ export function AutoTextbookSetupFlow({
       const missingHeadingSignals = missingHeadingCount > 0;
       const garbageDetected = hasImmediateTocGarbageSignals(candidateText);
       const entryCount = parsed.chapters.reduce((sum, chapter) => sum + 1 + chapter.sections.length, 0);
+      const anchorSignalScore = scoreTocAnchorSignals(candidateText);
+      const densePenalty = entryCount >= 24 ? 1 : 0;
       const isGoodEnough = noiseScore < 0.25
         && !garbageDetected
         && parsed.confidence >= 0.9
         && !missingChapterStarts
         && !missingHeadingSignals
-        && !sparseSectionCoverage;
+        && !sparseSectionCoverage
+        && anchorSignalScore >= 3
+        && densePenalty === 0;
       return {
         sanitized,
         parsed,
@@ -3720,6 +3823,8 @@ export function AutoTextbookSetupFlow({
         missingHeadingCount,
         garbageDetected,
         entryCount,
+        anchorSignalScore,
+        densePenalty,
         isGoodEnough,
       };
     };
@@ -3835,6 +3940,8 @@ export function AutoTextbookSetupFlow({
       const best = currentBest.quality;
 
       const nextIsStronger = next.isGoodEnough && !best.isGoodEnough
+        || next.anchorSignalScore > best.anchorSignalScore
+        || next.densePenalty < best.densePenalty
         || next.parsed.confidence > best.parsed.confidence
         || next.entryCount > best.entryCount
         || next.sectionCount > best.sectionCount

@@ -23,6 +23,7 @@ type OcrLiveReport = {
   goldTranscriptFile?: string;
   outputFile?: string;
   selectedVariant?: string;
+  runLabel?: string;
 };
 
 type ExtractionAttempt = { providerId: string; success: boolean; errorMessage?: string };
@@ -356,11 +357,32 @@ function buildPngTocVariants(imagePath: string): Array<{ label: string; dataUrl:
     width: Math.round(image.width * 0.56),
     height: Math.round(image.height * 0.64),
   };
+  const rightMain = {
+    x: Math.round(image.width * 0.34),
+    y: Math.round(image.height * 0.08),
+    width: Math.round(image.width * 0.64),
+    height: Math.round(image.height * 0.88),
+  };
+  const rightMainInset = {
+    x: Math.round(image.width * 0.38),
+    y: Math.round(image.height * 0.12),
+    width: Math.round(image.width * 0.56),
+    height: Math.round(image.height * 0.8),
+  };
+  const centerPage = {
+    x: Math.round(image.width * 0.24),
+    y: Math.round(image.height * 0.08),
+    width: Math.round(image.width * 0.62),
+    height: Math.round(image.height * 0.86),
+  };
 
   const cropSpecs: Array<{ label: string; rect: { x: number; y: number; width: number; height: number } }> = [
     { label: "full", rect: full },
     { label: "lower-band", rect: lowerBand },
     { label: "center-lower-band", rect: centerLowerBand },
+    { label: "center-page", rect: centerPage },
+    { label: "right-main", rect: rightMain },
+    { label: "right-main-inset", rect: rightMainInset },
     { label: "left-lower", rect: leftLower },
     { label: "right-lower", rect: rightLower },
   ];
@@ -382,16 +404,53 @@ function scoreTocCandidate(rawText: string): number {
   const structureLines = lines.filter((line) => /^(?:module|chapter|lesson|unit)\b|^[0-9]+(?:\.[0-9]+)+\s+|\s+[0-9]{1,4}\s*$/i.test(line)).length;
   const sectionCount = parsed.chapters.reduce((sum, chapter) => sum + chapter.sections.length, 0);
   const chromeHits = lines.filter((line) => /teacher\s+edition|stop\s+sharing|resources|favorites|profiles|window|tab|zoom|edge/i.test(line)).length;
+  const moduleMentions = lines.filter((line) => /^module\s+[0-9IVX]/i.test(line)).length;
+  const lessonMentions = lines.filter((line) => /^lesson\s+[0-9IVX]|^[0-9]+\.[0-9]+\s+/i.test(line)).length;
   const missingPageStarts = parsed.chapters.filter((chapter) => typeof chapter.pageStart !== "number").length;
 
   return (
     parsed.confidence * 100
     + parsed.chapters.length * 12
-    + sectionCount * 2
+    + sectionCount * 2.5
+    + moduleMentions * 5
+    + lessonMentions * 2
     + structureLines
-    - chromeHits * 10
+    - chromeHits * 20
     - missingPageStarts * 8
   );
+}
+
+function appendMarkdownRunLog(logFile: string, report: OcrLiveReport, elapsedMs: number): void {
+  const resolved = path.resolve(logFile);
+  const directory = path.dirname(resolved);
+  fs.mkdirSync(directory, { recursive: true });
+
+  if (!fs.existsSync(resolved)) {
+    const header = [
+      "# OCR Live Iteration Log",
+      "",
+      "| Timestamp | Label | Provider | Variant | CER (structured) | CER (raw) | Confidence | Chapters | Sections | Notes |",
+      "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+      "",
+    ].join("\n");
+    fs.writeFileSync(resolved, header, "utf8");
+  }
+
+  const sectionCount = report.parsedToc.chapters.reduce((sum, chapter) => sum + chapter.sections.length, 0);
+  const row = [
+    report.generatedAt,
+    report.runLabel ?? "manual",
+    report.providerId,
+    report.selectedVariant ?? "original",
+    typeof report.cerStructured === "number" ? report.cerStructured.toFixed(4) : "n/a",
+    typeof report.cerRaw === "number" ? report.cerRaw.toFixed(4) : "n/a",
+    report.parsedToc.confidence.toFixed(3),
+    String(report.parsedToc.chapters.length),
+    String(sectionCount),
+    `duration=${(elapsedMs / 1000).toFixed(1)}s`,
+  ].map((value) => value.replace(/\|/g, "\\|")).join(" | ");
+
+  fs.appendFileSync(resolved, `| ${row} |\n`, "utf8");
 }
 
 function normalizeTocTitle(value: string): string {
@@ -573,8 +632,12 @@ async function main(): Promise<void> {
   const providerOrder = typeof args["provider-order"] === "string"
     ? args["provider-order"].split(",").map((value) => value.trim()).filter(Boolean)
     : undefined;
+  const appendMarkdownLogFile = typeof args["append-markdown-log"] === "string" ? args["append-markdown-log"] : "";
+  const runLabel = typeof args["run-label"] === "string" ? args["run-label"].trim() : "";
 
   const useDirectCloud = directCloudProvider === "cloud_github_models_vision" || directCloudProvider === "cloud_openai_vision";
+
+  const startedAtMs = Date.now();
 
   if (!imageFile) {
     console.error("Missing required flag: --image-file");
@@ -642,6 +705,7 @@ async function main(): Promise<void> {
     goldTranscriptFile: goldTranscriptFile ? path.resolve(goldTranscriptFile) : undefined,
     outputFile: outputFile ? path.resolve(outputFile) : undefined,
     selectedVariant: bestVariant,
+    runLabel: runLabel || undefined,
   };
 
   const reportJson = JSON.stringify({
@@ -653,6 +717,10 @@ async function main(): Promise<void> {
     const resolvedOutput = path.resolve(outputFile);
     fs.mkdirSync(path.dirname(resolvedOutput), { recursive: true });
     fs.writeFileSync(resolvedOutput, `${reportJson}\n`, "utf8");
+  }
+
+  if (appendMarkdownLogFile) {
+    appendMarkdownRunLog(appendMarkdownLogFile, report, Date.now() - startedAtMs);
   }
 
   process.stdout.write(`${reportJson}\n`);

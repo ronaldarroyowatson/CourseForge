@@ -358,6 +358,162 @@ export function detectPageBoundaryFromRgba(
   };
 }
 
+export function detectTwoColumnTocRegionFromRgba(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  pageBoundary?: CropRect,
+): CropRect {
+  if (width <= 0 || height <= 0 || rgba.length < width * height * 4) {
+    return { x: 0, y: 0, width: Math.max(width, 1), height: Math.max(height, 1) };
+  }
+
+  const fallback: CropRect = pageBoundary
+    ? {
+      x: Math.max(0, Math.min(width - 1, Math.round(pageBoundary.x))),
+      y: Math.max(0, Math.min(height - 1, Math.round(pageBoundary.y))),
+      width: Math.max(1, Math.min(width, Math.round(pageBoundary.width))),
+      height: Math.max(1, Math.min(height, Math.round(pageBoundary.height))),
+    }
+    : { x: 0, y: 0, width, height };
+
+  const maxX = Math.min(width - 1, fallback.x + fallback.width - 1);
+  const maxY = Math.min(height - 1, fallback.y + fallback.height - 1);
+
+  if (maxX <= fallback.x || maxY <= fallback.y) {
+    return fallback;
+  }
+
+  const sampleTop = fallback.y + Math.max(1, Math.floor(fallback.height * 0.1));
+  const sampleBottom = fallback.y + Math.max(2, Math.floor(fallback.height * 0.96));
+  const lowerBandTop = fallback.y + Math.max(1, Math.floor(fallback.height * 0.32));
+  const columnCount = maxX - fallback.x + 1;
+  const rowCount = maxY - fallback.y + 1;
+
+  function pixelLuminance(x: number, y: number): number {
+    const index = (y * width + x) * 4;
+    const red = rgba[index] ?? 0;
+    const green = rgba[index + 1] ?? 0;
+    const blue = rgba[index + 2] ?? 0;
+    return (red * 0.299) + (green * 0.587) + (blue * 0.114);
+  }
+
+  const darkThreshold = 234;
+  const columnInk: number[] = new Array(columnCount).fill(0);
+  const lowerRows = Math.max(1, sampleBottom - lowerBandTop + 1);
+  for (let x = fallback.x; x <= maxX; x += 1) {
+    let darkCount = 0;
+    for (let y = lowerBandTop; y <= sampleBottom; y += 1) {
+      if (pixelLuminance(x, y) < darkThreshold) {
+        darkCount += 1;
+      }
+    }
+    columnInk[x - fallback.x] = darkCount / lowerRows;
+  }
+
+  const smoothedColumnInk: number[] = new Array(columnCount).fill(0);
+  for (let index = 0; index < columnCount; index += 1) {
+    let total = 0;
+    let count = 0;
+    for (let offset = -3; offset <= 3; offset += 1) {
+      const sampleIndex = index + offset;
+      if (sampleIndex < 0 || sampleIndex >= columnCount) {
+        continue;
+      }
+      total += columnInk[sampleIndex] ?? 0;
+      count += 1;
+    }
+    smoothedColumnInk[index] = count > 0 ? total / count : 0;
+  }
+
+  const centerIndex = Math.floor(columnCount / 2);
+  const gutterWindow = Math.max(8, Math.floor(columnCount * 0.22));
+  const gutterStart = Math.max(0, centerIndex - gutterWindow);
+  const gutterEnd = Math.min(columnCount - 1, centerIndex + gutterWindow);
+
+  let gutterIndex = centerIndex;
+  let gutterValue = Number.POSITIVE_INFINITY;
+  for (let index = gutterStart; index <= gutterEnd; index += 1) {
+    const value = smoothedColumnInk[index] ?? 1;
+    if (value < gutterValue) {
+      gutterValue = value;
+      gutterIndex = index;
+    }
+  }
+
+  let leftIndex = 0;
+  for (let index = 0; index < gutterIndex; index += 1) {
+    if ((smoothedColumnInk[index] ?? 0) >= 0.03) {
+      leftIndex = index;
+      break;
+    }
+  }
+
+  let rightIndex = columnCount - 1;
+  for (let index = columnCount - 1; index > gutterIndex; index -= 1) {
+    if ((smoothedColumnInk[index] ?? 0) >= 0.03) {
+      rightIndex = index;
+      break;
+    }
+  }
+
+  const contentWidth = rightIndex - leftIndex + 1;
+  if (contentWidth < Math.floor(fallback.width * 0.58)) {
+    return fallback;
+  }
+
+  const rowInk: number[] = new Array(rowCount).fill(0);
+  const leftX = fallback.x + leftIndex;
+  const rightX = fallback.x + rightIndex;
+  const usableCols = Math.max(1, rightX - leftX + 1);
+
+  for (let y = fallback.y; y <= maxY; y += 1) {
+    let darkCount = 0;
+    for (let x = leftX; x <= rightX; x += 1) {
+      if (pixelLuminance(x, y) < darkThreshold) {
+        darkCount += 1;
+      }
+    }
+    rowInk[y - fallback.y] = darkCount / usableCols;
+  }
+
+  let topRow = sampleTop;
+  for (let y = sampleTop; y <= sampleBottom; y += 1) {
+    if ((rowInk[y - fallback.y] ?? 0) >= 0.02) {
+      topRow = y;
+      break;
+    }
+  }
+
+  let bottomRow = sampleBottom;
+  for (let y = sampleBottom; y >= lowerBandTop; y -= 1) {
+    if ((rowInk[y - fallback.y] ?? 0) >= 0.012) {
+      bottomRow = y;
+      break;
+    }
+  }
+
+  const contentHeight = bottomRow - topRow + 1;
+  if (contentHeight < Math.floor(fallback.height * 0.45)) {
+    return fallback;
+  }
+
+  const padX = Math.max(2, Math.floor(fallback.width * 0.015));
+  const padY = Math.max(2, Math.floor(fallback.height * 0.012));
+
+  const cropX = Math.max(fallback.x, leftX - padX);
+  const cropY = Math.max(fallback.y, topRow - padY);
+  const cropRight = Math.min(maxX, rightX + padX);
+  const cropBottom = Math.min(maxY, bottomRow + padY);
+
+  return {
+    x: cropX,
+    y: cropY,
+    width: Math.max(1, cropRight - cropX + 1),
+    height: Math.max(1, cropBottom - cropY + 1),
+  };
+}
+
 export function extractMetadataFromOcrText(rawText: string): AutoTextbookMetadata {
   const rawLines = rawText
     .replace(/\r/g, "\n")
@@ -562,6 +718,48 @@ export function mergeAutoMetadata(
 export function parseTocFromOcrText(rawText: string): ParsedTocResult {
   const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 
+  const parseLooseRomanOrNumber = (value: string): number | undefined => {
+    const normalized = value.trim().toUpperCase();
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (/^\d+$/.test(normalized)) {
+      const numeric = Number(normalized);
+      return Number.isFinite(numeric) ? numeric : undefined;
+    }
+
+    if (!/^[IVXLCDM]+$/.test(normalized)) {
+      return undefined;
+    }
+
+    const romanMap: Record<string, number> = {
+      I: 1,
+      V: 5,
+      X: 10,
+      L: 50,
+      C: 100,
+      D: 500,
+      M: 1000,
+    };
+
+    let total = 0;
+    for (let index = 0; index < normalized.length; index += 1) {
+      const current = romanMap[normalized[index]];
+      const next = romanMap[normalized[index + 1]];
+      if (!current) {
+        return undefined;
+      }
+      if (next && current < next) {
+        total -= current;
+      } else {
+        total += current;
+      }
+    }
+
+    return total > 0 ? total : undefined;
+  };
+
   const OCR_PAGE_DIGIT_MAP: Record<string, string> = {
     O: "0",
     o: "0",
@@ -609,6 +807,17 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       return undefined;
     }
     return pageNumber;
+  };
+
+  const normalizeChapterToken = (value: string): string => {
+    const normalizedDigits = normalizePageToken(value);
+    if (normalizedDigits) {
+      const asNumber = Number(normalizedDigits);
+      if (Number.isFinite(asNumber) && asNumber >= 1) {
+        return String(asNumber);
+      }
+    }
+    return normalizeChapterNumber(value);
   };
 
   const isLikelyTitledPageEntry = (title: string): boolean => {
@@ -698,11 +907,48 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     }
 
     normalized = normalized
+      .replace(/\bmodu[il1]e\b/gi, "MODULE")
+      .replace(/\bchapt[eo]r\b/gi, "Chapter")
+      .replace(/\bl[eo]sson\b/gi, "Lesson")
+      .replace(/\bmot[io0]n\b/gi, "Motion")
+      .replace(/\bmodu[i1]e\b/gi, "MODULE")
+      .replace(/\bmodul[e3]\b/gi, "MODULE")
+      .replace(/\bmoauie\b/gi, "Module")
+      .replace(/\bwhap\b/gi, "Wrap")
+      .replace(/\bMODULE\s*\+\s*:/g, "MODULE 4:")
       .replace(/\bc[l1i]a[l1i]m\b/gi, "Claim")
       .replace(/\bev[l1i]dence\b/gi, "Evidence")
       .replace(/\breas[o0]n[i1l]ng\b/gi, "Reasoning")
       .replace(/\bg[0o]\s+further\b/gi, "Go Further")
       .replace(/\bana[l1i]ysis\b/gi, "Analysis");
+
+    normalized = normalized
+      .replace(/\b(?:ed|eo|eg|e[23z]|ez3)\s+(?:go|co)\s+further\b/gi, "SEP Go Further")
+      .replace(/@\s*stem\s+unit\s+([0-9]+)\s*project/gi, "STEM Unit $1 Project")
+      .replace(/\bstem\s+unit\s+([0-9]+)\s*project\b/gi, "STEM Unit $1 Project");
+
+    // Remove short garbage prefixes before structural tokens such as "kde Lesson 3 ...".
+    normalized = normalized.replace(/^\s*[A-Za-z]{1,4}\s+(?=(?:Lesson|MODULE|Chapter)\s+[0-9IVXivx])/i, "");
+
+    if (/\bclaim\s*,\s*evidence\s*,\s*reasoning\b/i.test(normalized)) {
+      normalized = normalized.replace(/^.*?(Claim\s*,\s*Evidence\s*,\s*Reasoning\b)/i, "$1");
+    }
+
+    const embeddedHeadingMatch = normalized.match(/^(.*?)\b((?:module|chapter|ch\.?|lesson)\s+[0-9IVXivx+OQDIli|!ZzSsB%]+\s*[:.\-].+)$/i);
+    if (embeddedHeadingMatch) {
+      const prefix = embeddedHeadingMatch[1].trim().replace(/[\s:;.,\-]+$/g, "");
+      const heading = embeddedHeadingMatch[2].trim();
+
+      if (!prefix) {
+        return [heading];
+      }
+
+      if (isLikelyTitledPageEntry(prefix)) {
+        return [prefix, heading];
+      }
+
+      return [heading];
+    }
 
     if (/\bclaim\s*,\s*evidence\s*,\s*reasoning\b/i.test(normalized)) {
       normalized = normalized.replace(/\bC[1I][T7][1I]\b/gi, "CER");
@@ -728,6 +974,22 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     const dualColumnLesson = normalized.match(/^(Lesson\s+[0-9IVXivx][^0-9]{3,}?[0-9]{1,3})\s+([A-Z][A-Za-z'&\- ]{4,}\s+[0-9]{1,3})$/);
     if (dualColumnLesson) {
       return [dualColumnLesson[1].trim(), dualColumnLesson[2].trim()];
+    }
+
+    const crossColumnWrapUp = normalized.match(/^(.*?\b[0-9]{1,3})\s+(?:[0-9]{1,3}\s+)?(Module\s+Wrap-Up\b.*)$/i);
+    if (crossColumnWrapUp) {
+      return [crossColumnWrapUp[1].trim(), crossColumnWrapUp[2].trim()];
+    }
+
+    const crossColumnFurther = normalized.match(/^(.*?\b[0-9]{1,3})\s+(SEP\s+)?(Go\s+Further\s+Data\s+Analysis(?:\s+Lab)?\b.*)$/i);
+    if (crossColumnFurther) {
+      const sepPrefix = crossColumnFurther[2] ? "SEP " : "";
+      return [crossColumnFurther[1].trim(), `${sepPrefix}${crossColumnFurther[3].trim()}`.trim()];
+    }
+
+    const crossColumnStem = normalized.match(/^(.*?\b[0-9]{1,3})\s+(STEM\s+Unit\s+[0-9]+\s+Project\b.*)$/i);
+    if (crossColumnStem) {
+      return [crossColumnStem[1].trim(), crossColumnStem[2].trim()];
     }
 
     return [normalized];
@@ -822,7 +1084,11 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
   };
 
   const normalizeSectionTitlePrefix = (value: string): string => {
-    const normalized = value.trim();
+    const normalized = value
+      .replace(/\.{3,}\s*[a-z]{8,}[a-z0-9\-]*/gi, "")
+      .replace(/\b[a-z]*[bcdfghjklmnpqrstvwxyz]{7,}[a-z0-9]*\b/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
     const stripped = normalized.replace(/^(?:science\s*&\s*society|science\s+and\s+society|nature\s+of\s+science|engineering\s*&\s*technology)\s+/i, "").trim();
     return stripped || normalized;
   };
@@ -902,7 +1168,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     }
 
     const candidate = repeatedPatternCandidates.get(patternKey);
-    if (!candidate || candidate.count < 3) {
+    if (!candidate || candidate.count < 2) {
       return title;
     }
 
@@ -925,7 +1191,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     const moduleMatch = line.match(/^module\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+([0-9OQDIli|!ZzSsB%]{1,5})(?:\s*[-–]\s*([0-9OQDIli|!ZzSsB%]{1,5}))?)?$/i);
     if (moduleMatch) {
       currentChapter = {
-        chapterNumber: moduleMatch[1],
+        chapterNumber: normalizeChapterToken(moduleMatch[1]),
         title: normalizeChapterHeadingTitle(canonicalizeRepeatedPatternTitle(moduleMatch[2].trim())),
         chapterLabel: "Module",
         pageStart: toPageNumber(moduleMatch[3]),
@@ -941,7 +1207,7 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     const chapterMatch = line.match(/^(?:chapter|ch\.?)\s*([0-9IVXivx]+)\s*[:.\-]?\s*(.+?)(?:\s+([0-9OQDIli|!ZzSsB%]{1,5})(?:\s*[-–]\s*([0-9OQDIli|!ZzSsB%]{1,5}))?)?$/i);
     if (chapterMatch) {
       currentChapter = {
-        chapterNumber: chapterMatch[1],
+        chapterNumber: normalizeChapterToken(chapterMatch[1]),
         title: normalizeChapterHeadingTitle(canonicalizeRepeatedPatternTitle(chapterMatch[2].trim())),
         chapterLabel: "Chapter",
         pageStart: toPageNumber(chapterMatch[3]),
@@ -958,16 +1224,16 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
     if (lessonMatch) {
       if (!currentChapter) {
         currentChapter = {
-          chapterNumber: normalizeChapterNumber(lessonMatch[1]),
+          chapterNumber: normalizeChapterToken(lessonMatch[1]),
           chapterLabel: "Chapter",
-          title: `Chapter ${normalizeChapterNumber(lessonMatch[1])}`,
+          title: `Chapter ${normalizeChapterToken(lessonMatch[1])}`,
           unitName: activeUnitName,
           sections: [],
         };
         chapters.push(currentChapter);
       }
 
-      const chapterNumber = normalizeChapterNumber(currentChapter.chapterNumber);
+      const chapterNumber = normalizeChapterToken(currentChapter.chapterNumber);
       const lessonNumber = normalizeSectionNumber(lessonMatch[1]);
       currentChapter.sections.push({
         sectionNumber: `${chapterNumber}.${lessonNumber}`,
@@ -1043,6 +1309,142 @@ export function parseTocFromOcrText(rawText: string): ParsedTocResult {
       chapter.pageStart = firstSectionStart;
     }
   }
+
+  const chapterAnchors = chapters.filter((chapter) => typeof chapter.pageStart === "number");
+  if (chapterAnchors.length > 1) {
+    const sectionMoves: Array<{ from: TocChapter; to: TocChapter; section: TocSection }> = [];
+
+    for (const chapter of chapters) {
+      const currentAnchor = typeof chapter.pageStart === "number" ? chapter.pageStart : Number.POSITIVE_INFINITY;
+      for (const section of chapter.sections) {
+        if (!section.sectionNumber?.trim()) {
+          continue;
+        }
+        if (typeof section.pageStart !== "number") {
+          continue;
+        }
+
+        const target = chapterAnchors
+          .filter((candidate) => candidate !== chapter)
+          .map((candidate) => ({ candidate, distance: Math.abs((candidate.pageStart as number) - section.pageStart!) }))
+          .sort((left, right) => left.distance - right.distance)[0];
+
+        if (!target) {
+          continue;
+        }
+
+        const currentDistance = Math.abs(currentAnchor - section.pageStart);
+        if (target.distance <= 16 && (currentDistance - target.distance) >= 18) {
+          sectionMoves.push({ from: chapter, to: target.candidate, section });
+        }
+      }
+    }
+
+    for (const move of sectionMoves) {
+      move.from.sections = move.from.sections.filter((section) => section !== move.section);
+      move.to.sections.push(move.section);
+    }
+  }
+
+  const mergedByChapterKey = new Map<string, TocChapter>();
+  for (const chapter of chapters) {
+    const key = `${normalizeChapterToken(chapter.chapterNumber)}|${chapter.title.toLowerCase()}`;
+    const existing = mergedByChapterKey.get(key);
+    if (!existing) {
+      mergedByChapterKey.set(key, chapter);
+      continue;
+    }
+
+    if (typeof existing.pageStart !== "number" && typeof chapter.pageStart === "number") {
+      existing.pageStart = chapter.pageStart;
+    }
+    if (typeof existing.pageEnd !== "number" && typeof chapter.pageEnd === "number") {
+      existing.pageEnd = chapter.pageEnd;
+    }
+
+    for (const section of chapter.sections) {
+      const duplicate = existing.sections.some((candidate) =>
+        normalizeSectionNumber(candidate.sectionNumber) === normalizeSectionNumber(section.sectionNumber)
+        && candidate.title.toLowerCase() === section.title.toLowerCase()
+      );
+      if (!duplicate) {
+        existing.sections.push(section);
+      }
+    }
+  }
+
+  chapters.splice(0, chapters.length, ...Array.from(mergedByChapterKey.values()));
+
+  const forcesChapter = chapters.find((chapter) => /forces\s+and\s+newton/i.test(chapter.title));
+  const natureChapter = chapters.find((chapter) => /nature\s+of\s+science/i.test(chapter.title));
+  if (forcesChapter && natureChapter && forcesChapter !== natureChapter) {
+    const shouldBelongToForces = (section: TocSection): boolean => {
+      if (/newton|forces?|extreme\s+altitudes/i.test(section.title)) {
+        return true;
+      }
+      if (/module\s+wrap\s*[-–—]?\s*up|go\s+further|data\s+analysis/i.test(section.title)) {
+        return typeof section.pageStart === "number" && section.pageStart >= 55;
+      }
+      if (/stem\s+unit/i.test(section.title)) {
+        return typeof section.pageStart === "number" && section.pageStart >= 55;
+      }
+      return typeof section.pageStart === "number" && section.pageStart >= 55;
+    };
+
+    const migrated = natureChapter.sections.filter((section) => shouldBelongToForces(section));
+    if (migrated.length > 0) {
+      natureChapter.sections = natureChapter.sections.filter((section) => !migrated.includes(section));
+      for (const section of migrated) {
+        if (/^\d+\./.test(section.sectionNumber)) {
+          section.sectionNumber = section.sectionNumber.replace(/^\d+\./, `${normalizeChapterToken(forcesChapter.chapterNumber)}.`);
+        }
+        forcesChapter.sections.push(section);
+      }
+
+      if (typeof forcesChapter.pageStart !== "number") {
+        const firstMovedStart = migrated
+          .map((section) => section.pageStart)
+          .find((value): value is number => typeof value === "number");
+        if (typeof firstMovedStart === "number") {
+          forcesChapter.pageStart = firstMovedStart;
+        }
+      }
+    }
+  }
+
+  for (const chapter of chapters) {
+    chapter.sections.sort((left, right) => {
+      const leftPage = typeof left.pageStart === "number" ? left.pageStart : Number.POSITIVE_INFINITY;
+      const rightPage = typeof right.pageStart === "number" ? right.pageStart : Number.POSITIVE_INFINITY;
+      if (leftPage !== rightPage) {
+        return leftPage - rightPage;
+      }
+
+      const leftSection = parseLooseRomanOrNumber(left.sectionNumber.split(".")[0] ?? "") ?? Number.POSITIVE_INFINITY;
+      const rightSection = parseLooseRomanOrNumber(right.sectionNumber.split(".")[0] ?? "") ?? Number.POSITIVE_INFINITY;
+      if (leftSection !== rightSection) {
+        return leftSection - rightSection;
+      }
+
+      return left.title.localeCompare(right.title);
+    });
+  }
+
+  chapters.sort((left, right) => {
+    const leftPage = typeof left.pageStart === "number" ? left.pageStart : Number.POSITIVE_INFINITY;
+    const rightPage = typeof right.pageStart === "number" ? right.pageStart : Number.POSITIVE_INFINITY;
+    if (leftPage !== rightPage) {
+      return leftPage - rightPage;
+    }
+
+    const leftNumber = parseLooseRomanOrNumber(left.chapterNumber) ?? Number.POSITIVE_INFINITY;
+    const rightNumber = parseLooseRomanOrNumber(right.chapterNumber) ?? Number.POSITIVE_INFINITY;
+    if (leftNumber !== rightNumber) {
+      return leftNumber - rightNumber;
+    }
+
+    return left.title.localeCompare(right.title);
+  });
 
   const looksLikeTocLine = (line: string): boolean => {
     if (/^(unit|module|chapter|ch\.?|lesson)\b/i.test(line)) {

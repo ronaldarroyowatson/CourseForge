@@ -134,6 +134,7 @@ const ocrMocks = vi.hoisted(() => ({
     { id: "cloud_openai_vision", label: "Cloud OCR (OpenAI Vision)", available: true },
     { id: "local_tesseract", label: "Local OCR (Tesseract)", available: true },
   ]),
+  getAutoOcrCooldownExpiryMs: vi.fn(() => null),
   getCloudAutoOcrProviderPolicy: vi.fn(async () => null),
   getEffectiveAutoOcrProviderOrder: vi.fn(async () => ["cloud_openai_vision", "local_tesseract"]),
   setCloudAutoOcrProviderPolicy: vi.fn(async (providerOrder: ["cloud_openai_vision" | "local_tesseract", "cloud_openai_vision" | "local_tesseract"]) => ({
@@ -175,6 +176,7 @@ vi.mock("../../src/core/services", () => ({
 
 vi.mock("../../src/core/services/autoOcrService", () => ({
   getAutoOcrProviderHealth: ocrMocks.getAutoOcrProviderHealth,
+  getAutoOcrCooldownExpiryMs: ocrMocks.getAutoOcrCooldownExpiryMs,
   getCloudAutoOcrProviderPolicy: ocrMocks.getCloudAutoOcrProviderPolicy,
   getEffectiveAutoOcrProviderOrder: ocrMocks.getEffectiveAutoOcrProviderOrder,
   setCloudAutoOcrProviderPolicy: ocrMocks.setCloudAutoOcrProviderPolicy,

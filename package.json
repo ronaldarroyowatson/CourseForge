@@ -51,6 +51,7 @@
     "ocr:ci:loop": "node scripts/ocr-live-ci-loop.mjs",
     "ocr:ci:loop:fast": "node scripts/ocr-live-ci-loop.mjs --skip-cloud-smoke --skip-remote --reuse-mac-artifact",
     "debug:ocr:live": "tsx scripts/ocr-live-debug.ts",
+    "debug:ocr:iterate": "tsx scripts/ocr-live-iterate.ts",
     "test:e2e:packaged": "npm run test:e2e:autoupdate && npm run test:installer && npm run check:installer",
     "test:real-sync": "tsx tests/realSyncTest.ts",
     "test:installer:guardrails": "vitest run tests/integration/windows.installer.template.integration.test.ts",

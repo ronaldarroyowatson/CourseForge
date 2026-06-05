@@ -46,6 +46,7 @@ Each setup script does the following in order:
   - npm run typecheck:all
   - npm run test:index
   - npm run test:samples:validate
+  - npm run test:security:cli
   - npm run bugfix:test
   - If cloud OCR providers are rate-limited or unavailable, setup retries and falls back to local quality gates so environment provisioning can complete.
 

@@ -83,6 +83,7 @@ import { stitchCueImagesWithOverlap } from "../../utils/cueImageStitch";
 import { isLikelyCourseForgeSelfCapture } from "../../utils/liveCueCapture";
 import { mergeOcrTextWithOverlap } from "../../utils/ocrTextMerge";
 import { isChromeOSRuntime, isSmallChromebookViewport } from "../../utils/platform";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 import { getCurrentUser } from "../../../firebase/auth";
 import { emitClientDebugTrace } from "../../../core/services/clientDebugTraceService";
 
@@ -173,7 +174,7 @@ const TOC_SAMPLE_TARGET_COUNT = 5;
 const TOC_SAMPLE_MAX_COUNT = 10;
 const TOC_SAMPLE_GAP_MS = 250;
 const TOC_SAMPLE_GOOD_CONFIDENCE = 0.94;
-const TOC_RESCUE_PROVIDER_ORDER: AutoOcrProviderId[] = ["local_tesseract", "cloud_openai_vision", "cloud_github_models_vision"];
+const TOC_RESCUE_PROVIDER_ORDER: AutoOcrProviderId[] = ["cloud_openai_vision", "cloud_github_models_vision", "local_tesseract"];
 
 function toOcrBufferStep(step: AutoFlowStep): OcrBufferStep {
   return step === "toc-editor" ? "toc" : step;
@@ -3611,137 +3612,150 @@ export function AutoTextbookSetupFlow({
   }
 
   async function handleCaptureCover(): Promise<void> {
-    if (isSessionCapacityReached) {
-      setErrorMessage("You already have 3 unfinished Auto captures. Delete one draft or finish one before starting another.");
-      return;
-    }
-    emitAutoFlowDiagnostic("ui_capture_cover_clicked", {
-      traceId: createAutoFlowTraceId("auto-flow-ui-cover"),
-      context: { step },
-    });
-    const captured = await captureForStep("cover");
-    if (!captured) {
-      emitAutoFlowDiagnostic("ui_capture_cover_no_result", {
-        level: "warning",
+    await executeGuiCliBoundCommand("courseforge textbooks auto capture cover", async () => {
+      if (isSessionCapacityReached) {
+        setErrorMessage("You already have 3 unfinished Auto captures. Delete one draft or finish one before starting another.");
+        return;
+      }
+      emitAutoFlowDiagnostic("ui_capture_cover_clicked", {
         traceId: createAutoFlowTraceId("auto-flow-ui-cover"),
+        context: { step },
       });
-      return;
-    }
+      const captured = await captureForStep("cover");
+      if (!captured) {
+        emitAutoFlowDiagnostic("ui_capture_cover_no_result", {
+          level: "warning",
+          traceId: createAutoFlowTraceId("auto-flow-ui-cover"),
+        });
+        return;
+      }
 
-    setCoverImageDataUrl(captured.imageDataUrl);
-    setLastMetadataImageDataUrl(captured.imageDataUrl);
-    lastCapturedOcrByStepRef.current.cover = captured.ocrText;
-    updateStepOcrBuffers("cover", captured.ocrText, captured.ocrText);
-    setRawOcrText(captured.ocrText);
-    setOcrDraft(captured.ocrText);
-    setModerationAssessment(null);
-    setStep("cover");
-    if (captured.pipelineResult) {
-      lastMetadataPipelineRef.current = captured.pipelineResult;
-    }
-    lastMetadataCaptureStepRef.current = "cover";
-    if (captured.metadataResult) {
-      applyMetadataFromPipelineResult(captured.metadataResult, "cover");
-    } else {
-      applyMetadataFromText(captured.ocrText, "cover");
-    }
-    setInfoMessage(`Cover captured and parsed. Review the metadata fields before accepting. (Source: ${captured.metadataResult?.source ?? `OCR: ${captured.ocrProviderId}`})`);
-    scrollToMetadata();
+      setCoverImageDataUrl(captured.imageDataUrl);
+      setLastMetadataImageDataUrl(captured.imageDataUrl);
+      lastCapturedOcrByStepRef.current.cover = captured.ocrText;
+      updateStepOcrBuffers("cover", captured.ocrText, captured.ocrText);
+      setRawOcrText(captured.ocrText);
+      setOcrDraft(captured.ocrText);
+      setModerationAssessment(null);
+      setStep("cover");
+      if (captured.pipelineResult) {
+        lastMetadataPipelineRef.current = captured.pipelineResult;
+      }
+      lastMetadataCaptureStepRef.current = "cover";
+      if (captured.metadataResult) {
+        applyMetadataFromPipelineResult(captured.metadataResult, "cover");
+      } else {
+        applyMetadataFromText(captured.ocrText, "cover");
+      }
+      setInfoMessage(`Cover captured and parsed. Review the metadata fields before accepting. (Source: ${captured.metadataResult?.source ?? `OCR: ${captured.ocrProviderId}`})`);
+      scrollToMetadata();
+    }, {
+      step,
+    });
   }
 
   async function handleCaptureTitle(): Promise<void> {
-    if (isSessionCapacityReached) {
-      setErrorMessage("You already have 3 unfinished Auto captures. Delete one draft or finish one before starting another.");
-      return;
-    }
-    emitAutoFlowDiagnostic("ui_capture_title_clicked", {
-      traceId: createAutoFlowTraceId("auto-flow-ui-title"),
-      context: { step },
-    });
-    const captured = await captureForStep("title");
-    if (!captured) {
-      emitAutoFlowDiagnostic("ui_capture_title_no_result", {
-        level: "warning",
+    await executeGuiCliBoundCommand("courseforge textbooks auto capture title", async () => {
+      if (isSessionCapacityReached) {
+        setErrorMessage("You already have 3 unfinished Auto captures. Delete one draft or finish one before starting another.");
+        return;
+      }
+      emitAutoFlowDiagnostic("ui_capture_title_clicked", {
         traceId: createAutoFlowTraceId("auto-flow-ui-title"),
+        context: { step },
       });
-      return;
-    }
+      const captured = await captureForStep("title");
+      if (!captured) {
+        emitAutoFlowDiagnostic("ui_capture_title_no_result", {
+          level: "warning",
+          traceId: createAutoFlowTraceId("auto-flow-ui-title"),
+        });
+        return;
+      }
 
-    const mergedOcrText = captured.ocrText;
-    lastCapturedOcrByStepRef.current.title = mergedOcrText;
-    setOwnershipProofDataUrl(captured.imageDataUrl);
-    setLastMetadataImageDataUrl(captured.imageDataUrl);
-    updateStepOcrBuffers("title", mergedOcrText, mergedOcrText);
-    setRawOcrText(mergedOcrText);
-    setOcrDraft(mergedOcrText);
-    setStep("title");
-    if (captured.pipelineResult) {
-      lastMetadataPipelineRef.current = captured.pipelineResult;
-    }
-    lastMetadataCaptureStepRef.current = "title";
-    if (captured.metadataResult) {
-      applyMetadataFromPipelineResult({
-        ...captured.metadataResult,
-        rawText: mergedOcrText,
-      }, "title");
-    } else {
-      applyMetadataFromText(mergedOcrText, "title");
-    }
-    setInfoMessage(`Copyright page captured and parsed. Review merged metadata. (Source: ${captured.metadataResult?.source ?? `OCR: ${captured.ocrProviderId}`})`);
-    scrollToMetadata();
+      const mergedOcrText = captured.ocrText;
+      lastCapturedOcrByStepRef.current.title = mergedOcrText;
+      setOwnershipProofDataUrl(captured.imageDataUrl);
+      setLastMetadataImageDataUrl(captured.imageDataUrl);
+      updateStepOcrBuffers("title", mergedOcrText, mergedOcrText);
+      setRawOcrText(mergedOcrText);
+      setOcrDraft(mergedOcrText);
+      setStep("title");
+      if (captured.pipelineResult) {
+        lastMetadataPipelineRef.current = captured.pipelineResult;
+      }
+      lastMetadataCaptureStepRef.current = "title";
+      if (captured.metadataResult) {
+        applyMetadataFromPipelineResult({
+          ...captured.metadataResult,
+          rawText: mergedOcrText,
+        }, "title");
+      } else {
+        applyMetadataFromText(mergedOcrText, "title");
+      }
+      setInfoMessage(`Copyright page captured and parsed. Review merged metadata. (Source: ${captured.metadataResult?.source ?? `OCR: ${captured.ocrProviderId}`})`);
+      scrollToMetadata();
+    }, {
+      step,
+    });
   }
 
   async function handleCaptureTitleAddShot(): Promise<void> {
-    if (isSessionCapacityReached) {
-      setErrorMessage("You already have 3 unfinished Auto captures. Delete one draft or finish one before starting another.");
-      return;
-    }
+    await executeGuiCliBoundCommand("courseforge textbooks auto capture title add-shot", async () => {
+      if (isSessionCapacityReached) {
+        setErrorMessage("You already have 3 unfinished Auto captures. Delete one draft or finish one before starting another.");
+        return;
+      }
 
-    emitAutoFlowDiagnostic("ui_capture_title_multishot_clicked", {
-      traceId: createAutoFlowTraceId("auto-flow-ui-title-multishot"),
-      context: { step },
-    });
-
-    const captured = await captureForStep("title");
-    if (!captured) {
-      emitAutoFlowDiagnostic("ui_capture_title_multishot_no_result", {
-        level: "warning",
+      emitAutoFlowDiagnostic("ui_capture_title_multishot_clicked", {
         traceId: createAutoFlowTraceId("auto-flow-ui-title-multishot"),
+        context: { step },
       });
-      return;
-    }
 
-    const titleBaselineBuffer = ocrBuffersByStepRef.current.title;
-    const baselineText = titleBaselineBuffer.raw.trim().length > 0
-      ? titleBaselineBuffer.raw
-      : titleBaselineBuffer.draft;
-    const mergedOcrText = mergeOcrTextWithOverlap(baselineText, captured.ocrText);
+      const captured = await captureForStep("title");
+      if (!captured) {
+        emitAutoFlowDiagnostic("ui_capture_title_multishot_no_result", {
+          level: "warning",
+          traceId: createAutoFlowTraceId("auto-flow-ui-title-multishot"),
+        });
+        return;
+      }
 
-    lastCapturedOcrByStepRef.current.title = mergedOcrText;
-    setOwnershipProofDataUrl((current) => current ?? captured.imageDataUrl);
-    setLastMetadataImageDataUrl(captured.imageDataUrl);
-    updateStepOcrBuffers("title", mergedOcrText, mergedOcrText);
-    setRawOcrText(mergedOcrText);
-    setOcrDraft(mergedOcrText);
-    setStep("title");
-    if (captured.pipelineResult) {
-      lastMetadataPipelineRef.current = captured.pipelineResult;
-    }
-    lastMetadataCaptureStepRef.current = "title";
-    if (captured.metadataResult) {
-      applyMetadataFromPipelineResult({
-        ...captured.metadataResult,
-        rawText: mergedOcrText,
-      }, "title");
-    } else {
-      applyMetadataFromText(mergedOcrText, "title");
-    }
+      const titleBaselineBuffer = ocrBuffersByStepRef.current.title;
+      const baselineText = titleBaselineBuffer.raw.trim().length > 0
+        ? titleBaselineBuffer.raw
+        : titleBaselineBuffer.draft;
+      const mergedOcrText = mergeOcrTextWithOverlap(baselineText, captured.ocrText);
 
-    setInfoMessage(`Copyright page shot added. OCR was overlap-merged into one draft. (OCR: ${captured.ocrProviderId})`);
-    scrollToMetadata();
+      lastCapturedOcrByStepRef.current.title = mergedOcrText;
+      setOwnershipProofDataUrl((current) => current ?? captured.imageDataUrl);
+      setLastMetadataImageDataUrl(captured.imageDataUrl);
+      updateStepOcrBuffers("title", mergedOcrText, mergedOcrText);
+      setRawOcrText(mergedOcrText);
+      setOcrDraft(mergedOcrText);
+      setStep("title");
+      if (captured.pipelineResult) {
+        lastMetadataPipelineRef.current = captured.pipelineResult;
+      }
+      lastMetadataCaptureStepRef.current = "title";
+      if (captured.metadataResult) {
+        applyMetadataFromPipelineResult({
+          ...captured.metadataResult,
+          rawText: mergedOcrText,
+        }, "title");
+      } else {
+        applyMetadataFromText(mergedOcrText, "title");
+      }
+
+      setInfoMessage(`Copyright page shot added. OCR was overlap-merged into one draft. (OCR: ${captured.ocrProviderId})`);
+      scrollToMetadata();
+    }, {
+      step,
+    });
   }
 
   async function handleCaptureToc(): Promise<void> {
+    await executeGuiCliBoundCommand("courseforge textbooks auto capture toc", async () => {
     bumpTocPreviewExpansion("collapse-all");
     emitAutoFlowDiagnostic("ui_capture_toc_clicked", {
       traceId: createAutoFlowTraceId("auto-flow-ui-toc"),
@@ -4067,6 +4081,10 @@ export function AutoTextbookSetupFlow({
     }
 
     setInfoMessage(`TOC capture overlap-stitched, but no new TOC entries were detected after ${processedSamples} sample(s). Try moving further before the next capture. (OCR: ${bestProviderId}${rescueApplied ? ", auto-rescanned" : ""})`);
+    }, {
+      step,
+      chapterCount: tocResult.chapters.length,
+    });
   }
 
   function countNovelTocEntries(base: ParsedTocResult, incoming: ParsedTocResult): number {
@@ -4143,47 +4161,55 @@ export function AutoTextbookSetupFlow({
   }
 
   function mergeWithPreviousChapter(chapterIndex: number): void {
-    setTocResult((current) => {
-      if (chapterIndex <= 0 || chapterIndex >= current.chapters.length) {
-        return current;
-      }
+    void executeGuiCliBoundCommand("courseforge textbooks auto toc merge chapter", () => {
+      setTocResult((current) => {
+        if (chapterIndex <= 0 || chapterIndex >= current.chapters.length) {
+          return current;
+        }
 
-      const previous = current.chapters[chapterIndex - 1];
-      const target = current.chapters[chapterIndex];
-      const merged: TocChapter = {
-        ...previous,
-        title: `${previous.title} / ${target.title}`,
-        sections: [...previous.sections, ...target.sections],
-      };
+        const previous = current.chapters[chapterIndex - 1];
+        const target = current.chapters[chapterIndex];
+        const merged: TocChapter = {
+          ...previous,
+          title: `${previous.title} / ${target.title}`,
+          sections: [...previous.sections, ...target.sections],
+        };
 
-      const next = [...current.chapters];
-      next.splice(chapterIndex - 1, 2, merged);
-      return { ...current, chapters: next };
+        const next = [...current.chapters];
+        next.splice(chapterIndex - 1, 2, merged);
+        return { ...current, chapters: next };
+      });
+    }, {
+      chapterIndex,
     });
   }
 
   function splitChapter(chapterIndex: number): void {
-    setTocResult((current) => {
-      const chapter = current.chapters[chapterIndex];
-      if (!chapter || chapter.sections.length < 2) {
-        return current;
-      }
+    void executeGuiCliBoundCommand("courseforge textbooks auto toc split chapter", () => {
+      setTocResult((current) => {
+        const chapter = current.chapters[chapterIndex];
+        if (!chapter || chapter.sections.length < 2) {
+          return current;
+        }
 
-      const splitIndex = Math.floor(chapter.sections.length / 2);
-      const left: TocChapter = {
-        ...chapter,
-        title: `${chapter.title} (Part 1)`,
-        sections: chapter.sections.slice(0, splitIndex),
-      };
-      const right: TocChapter = {
-        ...chapter,
-        title: `${chapter.title} (Part 2)`,
-        sections: chapter.sections.slice(splitIndex),
-      };
+        const splitIndex = Math.floor(chapter.sections.length / 2);
+        const left: TocChapter = {
+          ...chapter,
+          title: `${chapter.title} (Part 1)`,
+          sections: chapter.sections.slice(0, splitIndex),
+        };
+        const right: TocChapter = {
+          ...chapter,
+          title: `${chapter.title} (Part 2)`,
+          sections: chapter.sections.slice(splitIndex),
+        };
 
-      const next = [...current.chapters];
-      next.splice(chapterIndex, 1, left, right);
-      return { ...current, chapters: next };
+        const next = [...current.chapters];
+        next.splice(chapterIndex, 1, left, right);
+        return { ...current, chapters: next };
+      });
+    }, {
+      chapterIndex,
     });
   }
 
@@ -4226,6 +4252,7 @@ export function AutoTextbookSetupFlow({
   }
 
   async function handleSaveAutoSetup(): Promise<void> {
+    await executeGuiCliBoundCommand("courseforge textbooks auto save setup", async () => {
     const traceId = createAutoFlowTraceId("auto-flow-save");
     emitAutoFlowDiagnostic("save_started", {
       traceId,
@@ -4692,6 +4719,11 @@ export function AutoTextbookSetupFlow({
     } finally {
       setIsBusy(false);
     }
+    }, {
+      chapterCount: tocResult.chapters.length,
+      hasCover: Boolean(coverImageDataUrl),
+      title: metadataForm.title,
+    });
   }
 
   return (

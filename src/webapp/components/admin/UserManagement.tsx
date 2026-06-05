@@ -9,6 +9,7 @@ import React, { useCallback, useEffect, useState } from "react";
 
 import type { AdminUserRecord } from "../../../core/services";
 import { getAllUsers, setUserAdminStatus, setUserContentBlockStatus } from "../../../core/services";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 import { refreshCurrentUserClaims } from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
 
@@ -21,71 +22,83 @@ export function UserManagement(): React.JSX.Element {
   const [pendingUids, setPendingUids] = useState<Set<string>>(new Set());
 
   const loadUsers = useCallback(async (): Promise<void> => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const result = await getAllUsers();
-      setUsers(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load users.");
-    } finally {
-      setIsLoading(false);
-    }
+    await executeGuiCliBoundCommand("courseforge admin users refresh", async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const result = await getAllUsers();
+        setUsers(result);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load users.");
+      } finally {
+        setIsLoading(false);
+      }
+    });
   }, []);
 
   useEffect(() => { void loadUsers(); }, [loadUsers]);
 
   async function handleSetAdminStatus(uid: string, isAdmin: boolean): Promise<void> {
-    setPendingUids((prev) => new Set(prev).add(uid));
-    try {
-      await setUserAdminStatus(uid, isAdmin);
-      setUsers((prev) =>
-        prev.map((u) => (u.uid === uid ? { ...u, isAdmin } : u))
-      );
+    await executeGuiCliBoundCommand("courseforge admin users admin toggle", async () => {
+      setPendingUids((prev) => new Set(prev).add(uid));
+      try {
+        await setUserAdminStatus(uid, isAdmin);
+        setUsers((prev) =>
+          prev.map((u) => (u.uid === uid ? { ...u, isAdmin } : u))
+        );
 
-      if (currentUserId === uid) {
-        const refreshedAdminClaim = await refreshCurrentUserClaims();
-        setAdminFlag(refreshedAdminClaim);
+        if (currentUserId === uid) {
+          const refreshedAdminClaim = await refreshCurrentUserClaims();
+          setAdminFlag(refreshedAdminClaim);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to update admin status.");
+      } finally {
+        setPendingUids((prev) => {
+          const next = new Set(prev);
+          next.delete(uid);
+          return next;
+        });
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update admin status.");
-    } finally {
-      setPendingUids((prev) => {
-        const next = new Set(prev);
-        next.delete(uid);
-        return next;
-      });
-    }
+    }, {
+      uid,
+      isAdmin,
+    });
   }
 
   async function handleSetContentBlockStatus(uid: string, isContentBlocked: boolean): Promise<void> {
-    setPendingUids((prev) => new Set(prev).add(uid));
-    try {
-      await setUserContentBlockStatus(
-        uid,
-        isContentBlocked,
-        isContentBlocked ? "Blocked after textbook image moderation review." : undefined
-      );
-      setUsers((prev) => prev.map((u) => {
-        if (u.uid !== uid) {
-          return u;
-        }
-
-        return {
-          ...u,
+    await executeGuiCliBoundCommand("courseforge admin users content block toggle", async () => {
+      setPendingUids((prev) => new Set(prev).add(uid));
+      try {
+        await setUserContentBlockStatus(
+          uid,
           isContentBlocked,
-          contentBlockReason: isContentBlocked ? "Blocked after textbook image moderation review." : null,
-        };
-      }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update content block status.");
-    } finally {
-      setPendingUids((prev) => {
-        const next = new Set(prev);
-        next.delete(uid);
-        return next;
-      });
-    }
+          isContentBlocked ? "Blocked after textbook image moderation review." : undefined
+        );
+        setUsers((prev) => prev.map((u) => {
+          if (u.uid !== uid) {
+            return u;
+          }
+
+          return {
+            ...u,
+            isContentBlocked,
+            contentBlockReason: isContentBlocked ? "Blocked after textbook image moderation review." : null,
+          };
+        }));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to update content block status.");
+      } finally {
+        setPendingUids((prev) => {
+          const next = new Set(prev);
+          next.delete(uid);
+          return next;
+        });
+      }
+    }, {
+      uid,
+      isContentBlocked,
+    });
   }
 
   return (

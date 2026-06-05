@@ -8,6 +8,22 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 
+async function loginAsTeacher(env: NodeJS.ProcessEnv) {
+  await execFileAsync(process.execPath, [
+    "scripts/program-cli.mjs",
+    "login",
+    "--role",
+    "teacher",
+    "--uid",
+    "plugin-teacher-uid",
+    "--email",
+    "teacher@courseforge.test",
+  ], {
+    cwd: process.cwd(),
+    env,
+  });
+}
+
 describe("program CLI plugin workflow", () => {
   let tempLocalAppData = "";
 
@@ -26,6 +42,8 @@ describe("program CLI plugin workflow", () => {
       ...process.env,
       LOCALAPPDATA: tempLocalAppData,
     };
+
+    await loginAsTeacher(env);
 
     const initialStatus = await execFileAsync(process.execPath, ["scripts/program-cli.mjs", "plugins", "status"], {
       cwd: process.cwd(),
@@ -81,6 +99,8 @@ describe("program CLI plugin workflow", () => {
       ...process.env,
       LOCALAPPDATA: tempLocalAppData,
     };
+
+    await loginAsTeacher(env);
 
     const result = await execFileAsync(process.execPath, ["scripts/program-cli.mjs", "plugins", "install", "missing-plugin"], {
       cwd: process.cwd(),

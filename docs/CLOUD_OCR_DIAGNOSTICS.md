@@ -72,6 +72,19 @@ What it does:
 - validates expected metadata extraction fields (ISBN, publisher location, copyright year, publisher URL, grade band from field or URL, MHID)
 - writes a machine-readable JSON report to `tmp-smoke/`
 
+Generate a consolidated debug artifact after running tests and smoke checks:
+
+```bash
+npm run report:test-debug:unified
+```
+
+This command writes:
+
+- `tmp-smoke/reports/unified-test-debug-report.md` (human-readable summary)
+- `tmp-smoke/reports/unified-test-debug-report.json` (machine-readable aggregate)
+
+The report includes latest known gate/test logs plus the most recent `ocr-smoke-report-*.json` payload.
+
 ## Required Credentials
 
 - OpenAI: `OPENAI_API_KEY`

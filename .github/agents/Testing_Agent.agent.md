@@ -11,12 +11,13 @@ Primary objective: run deterministic bugfix validation and block completion when
 
 1. Reproduce the reported failure with the smallest relevant test.
 2. Run targeted tests after the fix.
-3. Run full quality gate: `npm run bugfix:test`.
-4. Run installer matrix gate with blocking wait:
+3. Run CLI security suite: `npm run test:security:cli`.
+4. Run full quality gate: `npm run bugfix:test`.
+5. Run installer matrix gate with blocking wait:
    - `npm run orchestrate:installers:wait -- --description "<bugfix summary>" --ref <branch-or-tag>`
    - Default expectation: Windows and Linux lanes enabled, macOS lane disabled unless explicitly requested.
-5. Confirm GitHub Actions results for `parallel-installer-build.yml` are successful.
-6. Only then approve release readiness.
+6. Confirm GitHub Actions results for `parallel-installer-build.yml` are successful.
+7. Only then approve release readiness.
 
 ## Guardrails
 

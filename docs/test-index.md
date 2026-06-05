@@ -1,12 +1,12 @@
 # Test Index
 
-Generated: 2026-06-05T14:48:44.669Z
+Generated: 2026-06-05T19:29:02.613Z
 
 ## Summary
 
-- Total test files: 86
-- Unit test files: 57
-- Integration test files: 27
+- Total test files: 94
+- Unit test files: 63
+- Integration test files: 28
 - Rules test files: 2
 - Canonical sample files: 5
 
@@ -20,6 +20,7 @@ Generated: 2026-06-05T14:48:44.669Z
 - tests/core/autoOcrService.test.ts
 - tests/core/autoTextbookConflictService.test.ts
 - tests/core/autoTextbookPersistence.localization.test.ts
+- tests/core/cliThrottleOutput.test.ts
 - tests/core/copilot.auditLogger.test.ts
 - tests/core/copilot.premiumUsageTracker.test.ts
 - tests/core/cueImageStitch.test.ts
@@ -34,6 +35,7 @@ Generated: 2026-06-05T14:48:44.669Z
 - tests/core/gameTextService.test.ts
 - tests/core/glossaryLoopExecutor.test.ts
 - tests/core/glossaryService.test.ts
+- tests/core/guiCliParityService.test.ts
 - tests/core/guidedCaptureCueService.test.ts
 - tests/core/i18nService.test.ts
 - tests/core/installerLifecycle.macos.matrix.test.ts
@@ -45,12 +47,16 @@ Generated: 2026-06-05T14:48:44.669Z
 - tests/core/metadataCorrectionLearningService.test.ts
 - tests/core/metadataCorrectionSafeguards.test.ts
 - tests/core/metadataExtractionPipelineService.test.ts
+- tests/core/ocrDebugCommandService.test.ts
 - tests/core/ocrTextMerge.test.ts
 - tests/core/pluginService.test.ts
 - tests/core/premiumUsage.limits.test.ts
 - tests/core/presentationService.conversion.test.ts
 - tests/core/programCli.dsc.test.ts
+- tests/core/programCli.helpPermissions.test.ts
+- tests/core/programCli.ocrDebug.test.ts
 - tests/core/programCli.plugins.test.ts
+- tests/core/programCli.workflowParity.test.ts
 - tests/core/semanticTokens.test.ts
 - tests/core/syncBatchUpload.test.ts
 - tests/core/syncNow.safety.test.ts
@@ -99,6 +105,7 @@ Generated: 2026-06-05T14:48:44.669Z
 - tests/integration/textbookSyncRetry.integration.test.tsx
 - tests/integration/update-status-server.integration.test.ts
 - tests/integration/windows.installer.template.integration.test.ts
+- tests/integration/security/cli.workflow.security.integration.test.ts
 
 ## Rules Tests
 

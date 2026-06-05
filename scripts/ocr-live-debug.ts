@@ -5,6 +5,7 @@ import { execFileSync, execSync } from "node:child_process";
 import { PNG } from "pngjs";
 
 import { parseTocFromOcrText } from "../src/core/services/textbookAutoExtractionService";
+import { runInlineCountdown } from "./lib/cliThrottleOutput";
 
 type OcrLiveReport = {
   generatedAt: string;
@@ -35,6 +36,19 @@ type ExtractionLike = {
 };
 
 type DirectCloudProvider = "cloud_github_models_vision" | "cloud_openai_vision";
+
+type DirectCloudThrottleConfig = {
+  enabled: boolean;
+  batchSize: number;
+  batchCooldownSeconds: number;
+  maxCooldownSeconds: number;
+  interRequestDelayMs: number;
+  rateLimitRetryCycles: number;
+};
+
+type DirectCloudThrottleState = {
+  requestCount: number;
+};
 
 async function extractTextFromAppService(
   imageDataUrl: string,
@@ -131,6 +145,100 @@ function getDirectCloudRuntime(providerId: DirectCloudProvider): {
   };
 }
 
+function parsePositiveInt(value: string | undefined, fallbackValue: number): number {
+  if (!value) {
+    return fallbackValue;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallbackValue;
+  }
+  return Math.floor(parsed);
+}
+
+function parseNonNegativeInt(value: string | undefined, fallbackValue: number): number {
+  if (!value) {
+    return fallbackValue;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallbackValue;
+  }
+  return Math.floor(parsed);
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitWithTextCountdown(seconds: number, label: string): Promise<void> {
+  await runInlineCountdown({
+    seconds,
+    label,
+    channel: "cli-throttle",
+    sleepMs,
+  });
+}
+
+async function applyPreRequestThrottle(
+  throttleConfig: DirectCloudThrottleConfig,
+  throttleState: DirectCloudThrottleState
+): Promise<void> {
+  if (!throttleConfig.enabled || throttleState.requestCount <= 0) {
+    return;
+  }
+
+  if (throttleState.requestCount % Math.max(1, throttleConfig.batchSize) === 0) {
+    process.stdout.write(
+      `[cli-throttle] Completed batch of ${throttleConfig.batchSize} request(s); cooling down for ${throttleConfig.batchCooldownSeconds}s.\n`
+    );
+    await waitWithTextCountdown(throttleConfig.batchCooldownSeconds, "Batch cooldown");
+    return;
+  }
+
+  if (throttleConfig.interRequestDelayMs <= 0) {
+    return;
+  }
+
+  if (throttleConfig.interRequestDelayMs >= 1000) {
+    await waitWithTextCountdown(
+      Math.ceil(throttleConfig.interRequestDelayMs / 1000),
+      "Inter-request delay"
+    );
+  } else {
+    await sleepMs(throttleConfig.interRequestDelayMs);
+  }
+}
+
+function parseRetryAfterSeconds(headers: Headers, bodyText: string): number | null {
+  const retryAfter = headers.get("retry-after")?.trim() ?? "";
+  if (retryAfter) {
+    const asSeconds = Number(retryAfter);
+    if (Number.isFinite(asSeconds) && asSeconds > 0) {
+      return Math.max(1, Math.floor(asSeconds));
+    }
+
+    const asDate = Date.parse(retryAfter);
+    if (Number.isFinite(asDate)) {
+      const deltaSeconds = Math.ceil((asDate - Date.now()) / 1000);
+      if (deltaSeconds > 0) {
+        return deltaSeconds;
+      }
+    }
+  }
+
+  const body = bodyText.toLowerCase();
+  const bodyMatch = body.match(/retry[_\s-]?after[^0-9]*(\d{1,6})/i);
+  if (bodyMatch) {
+    const parsed = Number(bodyMatch[1]);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+  }
+
+  return null;
+}
+
 function extractCloudContent(json: unknown): string {
   if (!json || typeof json !== "object") {
     return "";
@@ -168,7 +276,9 @@ function extractCloudContent(json: unknown): string {
 
 async function extractTextFromDirectCloud(
   imageDataUrl: string,
-  providerId: DirectCloudProvider
+  providerId: DirectCloudProvider,
+  throttleConfig: DirectCloudThrottleConfig,
+  throttleState: DirectCloudThrottleState
 ): Promise<ExtractionLike> {
   const token = resolveProviderToken(providerId);
   if (!token) {
@@ -205,8 +315,10 @@ async function extractTextFromDirectCloud(
   let responseStatus = 0;
   let responseText = "";
   let fetchError: Error | null = null;
+  const maxAttempts = 1 + Math.max(0, throttleConfig.rateLimitRetryCycles);
 
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    await applyPreRequestThrottle(throttleConfig, throttleState);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 45000);
     try {
@@ -220,14 +332,36 @@ async function extractTextFromDirectCloud(
         },
         body: requestBody,
       });
+      throttleState.requestCount += 1;
       responseStatus = response.status;
       responseText = await response.text();
       fetchError = null;
+
+      if (responseStatus === 429 && attempt < maxAttempts) {
+        const suggestedRetrySeconds = parseRetryAfterSeconds(response.headers, responseText)
+          ?? throttleConfig.batchCooldownSeconds;
+        const retrySeconds = Math.max(
+          1,
+          Math.min(throttleConfig.maxCooldownSeconds, suggestedRetrySeconds)
+        );
+
+        process.stdout.write(
+          `[cli-throttle] ${providerId} rate-limited (attempt ${attempt}/${maxAttempts}). Retrying in ${retrySeconds}s.\n`
+        );
+        await waitWithTextCountdown(retrySeconds, "Rate-limit cooldown");
+        continue;
+      }
+
       break;
     } catch (error) {
+      throttleState.requestCount += 1;
       fetchError = error instanceof Error ? error : new Error(String(error));
-      if (attempt < 3) {
-        await new Promise((resolve) => setTimeout(resolve, attempt * 600));
+      if (attempt < maxAttempts) {
+        const retrySeconds = Math.min(5, Math.max(1, attempt));
+        process.stdout.write(
+          `[cli-throttle] ${providerId} request failed (attempt ${attempt}/${maxAttempts}): ${fetchError.message}. Retrying in ${retrySeconds}s.\n`
+        );
+        await waitWithTextCountdown(retrySeconds, "Retry backoff");
       }
     } finally {
       clearTimeout(timeout);
@@ -634,8 +768,39 @@ async function main(): Promise<void> {
     : undefined;
   const appendMarkdownLogFile = typeof args["append-markdown-log"] === "string" ? args["append-markdown-log"] : "";
   const runLabel = typeof args["run-label"] === "string" ? args["run-label"].trim() : "";
+  const githubBatchSize = parsePositiveInt(
+    typeof args["github-batch-size"] === "string" ? args["github-batch-size"] : process.env.COURSEFORGE_GITHUB_SMOKE_BATCH_SIZE,
+    2
+  );
+  const githubBatchCooldownSeconds = parsePositiveInt(
+    typeof args["github-batch-cooldown-seconds"] === "string" ? args["github-batch-cooldown-seconds"] : process.env.COURSEFORGE_GITHUB_SMOKE_BATCH_COOLDOWN_SECONDS,
+    75
+  );
+  const githubMaxCooldownSeconds = parsePositiveInt(
+    typeof args["github-max-cooldown-seconds"] === "string" ? args["github-max-cooldown-seconds"] : process.env.COURSEFORGE_GITHUB_SMOKE_MAX_COOLDOWN_SECONDS,
+    300
+  );
+  const githubInterRequestDelayMs = parseNonNegativeInt(
+    typeof args["github-inter-request-delay-ms"] === "string" ? args["github-inter-request-delay-ms"] : process.env.COURSEFORGE_GITHUB_SMOKE_INTER_REQUEST_DELAY_MS,
+    650
+  );
+  const githubRateLimitRetryCycles = parseNonNegativeInt(
+    typeof args["github-rate-limit-retry-cycles"] === "string" ? args["github-rate-limit-retry-cycles"] : process.env.COURSEFORGE_GITHUB_SMOKE_RETRY_CYCLES,
+    1
+  );
 
   const useDirectCloud = directCloudProvider === "cloud_github_models_vision" || directCloudProvider === "cloud_openai_vision";
+  const directCloudThrottleConfig: DirectCloudThrottleConfig = {
+    enabled: directCloudProvider === "cloud_github_models_vision",
+    batchSize: githubBatchSize,
+    batchCooldownSeconds: githubBatchCooldownSeconds,
+    maxCooldownSeconds: githubMaxCooldownSeconds,
+    interRequestDelayMs: githubInterRequestDelayMs,
+    rateLimitRetryCycles: githubRateLimitRetryCycles,
+  };
+  const directCloudThrottleState: DirectCloudThrottleState = {
+    requestCount: 0,
+  };
 
   const startedAtMs = Date.now();
 
@@ -651,7 +816,12 @@ async function main(): Promise<void> {
 
   for (const variant of variants) {
     const extraction = useDirectCloud
-      ? await extractTextFromDirectCloud(variant.dataUrl, directCloudProvider as DirectCloudProvider)
+      ? await extractTextFromDirectCloud(
+        variant.dataUrl,
+        directCloudProvider as DirectCloudProvider,
+        directCloudThrottleConfig,
+        directCloudThrottleState
+      )
       : await extractTextFromAppService(variant.dataUrl, providerOrder as string[] | undefined);
     const score = scoreTocCandidate(extraction.text);
     if (!bestExtraction || score > bestScore) {

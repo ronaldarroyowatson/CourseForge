@@ -12,6 +12,7 @@ import {
   getSubmittedContent,
   updateContentStatus,
 } from "../../../core/services";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 
 export function ModerationQueue(): React.JSX.Element {
   const [items, setItems] = useState<ModerationItem[]>([]);
@@ -20,16 +21,18 @@ export function ModerationQueue(): React.JSX.Element {
   const [pendingPaths, setPendingPaths] = useState<Set<string>>(new Set());
 
   const loadQueue = useCallback(async (): Promise<void> => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const result = await getSubmittedContent();
-      setItems(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load moderation queue.");
-    } finally {
-      setIsLoading(false);
-    }
+    await executeGuiCliBoundCommand("courseforge admin moderation refresh", async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const result = await getSubmittedContent();
+        setItems(result);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load moderation queue.");
+      } finally {
+        setIsLoading(false);
+      }
+    });
   }, []);
 
   useEffect(() => { void loadQueue(); }, [loadQueue]);
@@ -42,39 +45,51 @@ export function ModerationQueue(): React.JSX.Element {
   }
 
   async function handleApprove(item: ModerationItem): Promise<void> {
-    addPending(item.docPath);
-    try {
-      await updateContentStatus(item.docPath, "approved");
-      setItems((prev) => prev.filter((i) => i.docPath !== item.docPath));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to approve content.");
-    } finally {
-      removePending(item.docPath);
-    }
+    await executeGuiCliBoundCommand("courseforge admin moderation approve", async () => {
+      addPending(item.docPath);
+      try {
+        await updateContentStatus(item.docPath, "approved");
+        setItems((prev) => prev.filter((i) => i.docPath !== item.docPath));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to approve content.");
+      } finally {
+        removePending(item.docPath);
+      }
+    }, {
+      docPath: item.docPath,
+    });
   }
 
   async function handleReject(item: ModerationItem): Promise<void> {
-    addPending(item.docPath);
-    try {
-      await updateContentStatus(item.docPath, "rejected");
-      setItems((prev) => prev.filter((i) => i.docPath !== item.docPath));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to reject content.");
-    } finally {
-      removePending(item.docPath);
-    }
+    await executeGuiCliBoundCommand("courseforge admin moderation reject", async () => {
+      addPending(item.docPath);
+      try {
+        await updateContentStatus(item.docPath, "rejected");
+        setItems((prev) => prev.filter((i) => i.docPath !== item.docPath));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to reject content.");
+      } finally {
+        removePending(item.docPath);
+      }
+    }, {
+      docPath: item.docPath,
+    });
   }
 
   async function handleArchive(item: ModerationItem): Promise<void> {
-    addPending(item.docPath);
-    try {
-      await adminArchiveContent(item.docPath);
-      setItems((prev) => prev.filter((i) => i.docPath !== item.docPath));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to archive content.");
-    } finally {
-      removePending(item.docPath);
-    }
+    await executeGuiCliBoundCommand("courseforge admin moderation archive", async () => {
+      addPending(item.docPath);
+      try {
+        await adminArchiveContent(item.docPath);
+        setItems((prev) => prev.filter((i) => i.docPath !== item.docPath));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to archive content.");
+      } finally {
+        removePending(item.docPath);
+      }
+    }, {
+      docPath: item.docPath,
+    });
   }
 
   return (

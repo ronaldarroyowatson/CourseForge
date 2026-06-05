@@ -7,6 +7,7 @@ import {
   adminUpdateContent,
   getAllTextbooksAdmin,
 } from "../../../core/services";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 
 type CollectionFilter = "all" | "textbooks" | "chapters" | "sections" | "vocab";
 
@@ -46,21 +47,28 @@ export function ContentBrowser(): React.JSX.Element {
   const [collectionName, setCollectionName] = React.useState<CollectionFilter>("all");
 
   async function handleSearch(): Promise<void> {
-    setError(null);
-    setIsLoading(true);
-    try {
-      const results = await getAllTextbooksAdmin({
-        isbn: filterIsbn.trim() || undefined,
-        titleContains: filterTitle.trim() || undefined,
-        ownerEmail: filterOwnerEmail.trim() || undefined,
-        collectionName,
-      });
-      setRecords(results);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Search failed.");
-    } finally {
-      setIsLoading(false);
-    }
+    await executeGuiCliBoundCommand("courseforge admin content search", async () => {
+      setError(null);
+      setIsLoading(true);
+      try {
+        const results = await getAllTextbooksAdmin({
+          isbn: filterIsbn.trim() || undefined,
+          titleContains: filterTitle.trim() || undefined,
+          ownerEmail: filterOwnerEmail.trim() || undefined,
+          collectionName,
+        });
+        setRecords(results);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Search failed.");
+      } finally {
+        setIsLoading(false);
+      }
+    }, {
+      collectionName,
+      filterIsbn,
+      filterTitle,
+      filterOwnerEmail,
+    });
   }
 
   function addPending(path: string): void {
@@ -112,40 +120,50 @@ export function ContentBrowser(): React.JSX.Element {
       return;
     }
 
-    addPending(record.docPath);
-    try {
-      const payload = buildUpdatePayload(record, editState);
-      await adminUpdateContent(record.docPath, payload);
-      setRecords((prev) => prev.map((item) => item.docPath === record.docPath ? {
-        ...item,
-        title: editState.title,
-        summary: editState.summary,
-        grade: editState.grade || undefined,
-        subject: editState.subject || undefined,
-        edition: editState.edition || undefined,
-        publicationYear: editState.publicationYear ? Number(editState.publicationYear) : undefined,
-        status: editState.status,
-      } : item));
-      stopEditing();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Update failed.");
-    } finally {
-      removePending(record.docPath);
-    }
+    await executeGuiCliBoundCommand("courseforge admin content update", async () => {
+      addPending(record.docPath);
+      try {
+        const payload = buildUpdatePayload(record, editState);
+        await adminUpdateContent(record.docPath, payload);
+        setRecords((prev) => prev.map((item) => item.docPath === record.docPath ? {
+          ...item,
+          title: editState.title,
+          summary: editState.summary,
+          grade: editState.grade || undefined,
+          subject: editState.subject || undefined,
+          edition: editState.edition || undefined,
+          publicationYear: editState.publicationYear ? Number(editState.publicationYear) : undefined,
+          status: editState.status,
+        } : item));
+        stopEditing();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Update failed.");
+      } finally {
+        removePending(record.docPath);
+      }
+    }, {
+      docPath: record.docPath,
+      collectionName: record.collectionName,
+    });
   }
 
   async function handleArchive(record: AdminContentRecord): Promise<void> {
-    addPending(record.docPath);
-    try {
-      await adminArchiveContent(record.docPath, !record.isArchived);
-      setRecords((prev) =>
-        prev.map((item) => item.docPath === record.docPath ? { ...item, isArchived: !record.isArchived } : item)
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Archive failed.");
-    } finally {
-      removePending(record.docPath);
-    }
+    await executeGuiCliBoundCommand("courseforge admin content archive", async () => {
+      addPending(record.docPath);
+      try {
+        await adminArchiveContent(record.docPath, !record.isArchived);
+        setRecords((prev) =>
+          prev.map((item) => item.docPath === record.docPath ? { ...item, isArchived: !record.isArchived } : item)
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Archive failed.");
+      } finally {
+        removePending(record.docPath);
+      }
+    }, {
+      docPath: record.docPath,
+      nextArchived: !record.isArchived,
+    });
   }
 
   async function handleSoftDelete(record: AdminContentRecord): Promise<void> {
@@ -153,17 +171,21 @@ export function ContentBrowser(): React.JSX.Element {
       return;
     }
 
-    addPending(record.docPath);
-    try {
-      await adminSoftDeleteContent(record.docPath, true);
-      setRecords((prev) =>
-        prev.map((item) => item.docPath === record.docPath ? { ...item, isDeleted: true } : item)
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Delete failed.");
-    } finally {
-      removePending(record.docPath);
-    }
+    await executeGuiCliBoundCommand("courseforge admin content delete", async () => {
+      addPending(record.docPath);
+      try {
+        await adminSoftDeleteContent(record.docPath, true);
+        setRecords((prev) =>
+          prev.map((item) => item.docPath === record.docPath ? { ...item, isDeleted: true } : item)
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Delete failed.");
+      } finally {
+        removePending(record.docPath);
+      }
+    }, {
+      docPath: record.docPath,
+    });
   }
 
   return (

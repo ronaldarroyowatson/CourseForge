@@ -146,6 +146,11 @@ if (cooldownRaw && /^\d+$/.test(cooldownRaw.trim())) {
   args.push("-GitHubBatchCooldownSeconds", cooldownRaw.trim());
 }
 
+const maxCooldownRaw = process.env.COURSEFORGE_GITHUB_SMOKE_MAX_COOLDOWN_SECONDS;
+if (maxCooldownRaw && /^\d+$/.test(maxCooldownRaw.trim())) {
+  args.push("-GitHubMaxCooldownSeconds", maxCooldownRaw.trim());
+}
+
 const delayRaw = process.env.COURSEFORGE_GITHUB_SMOKE_INTER_REQUEST_DELAY_MS;
 if (delayRaw && /^\d+$/.test(delayRaw.trim())) {
   args.push("-GitHubInterRequestDelayMs", delayRaw.trim());

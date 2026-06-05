@@ -10,6 +10,7 @@ CourseForge test categories are:
 
 - `tests/core` for unit and service-level behavior
 - `tests/integration` for cross-surface or end-to-end application flows
+- `tests/security` for auth, RBAC, abuse-prevention, and privilege-bound CLI/API contracts
 - `tests/rules` for Firestore rules and static contract checks
 - `tmp-smoke/samples` for canonical smoke-test fixtures only
 
@@ -22,6 +23,7 @@ When changing tests, fixtures, OCR validation, or debug tooling, run:
 - `npm run typecheck:all`
 - `npm run test:index`
 - `npm run test:samples:validate`
+- `npm run test:security:cli`
 - `npm run bugfix:test`
 
 `npm run bugfix:test` is the release-quality gate and now includes:
@@ -31,6 +33,7 @@ When changing tests, fixtures, OCR validation, or debug tooling, run:
 - canonical sample validation
 - build
 - comprehensive test battery
+- dedicated CLI auth/RBAC security suites (`npm run test:security:cli`)
 - gated live cloud OCR smoke test
 
 ## 3. Canonical Sample File Naming
@@ -144,6 +147,33 @@ DSC token debugging must remain available from the same entry point via:
 `debug dsc report` should emit the authoritative semantic palette resolution, page/card/component introspection, mismatch detection, and cascading-failure risk status.
 
 When extending debug functionality in the live app, add or update a CLI-equivalent command path.
+
+## 8.1 GUI/CLI Parity Gate
+
+Any new GUI capability must have an equivalent CLI command path in `scripts/program-cli.mjs` or a documented `npm run` command that reaches the same service path.
+
+Minimum parity requirements for new GUI features:
+
+- command or subcommand added to CLI
+- help entry added under `courseforge help` (purpose, usage, flags, examples, limitations, required permissions, outputs, error codes)
+- tests added for CLI path and existing GUI behavior
+- docs updated with GUI to CLI mapping
+
+PRs that add GUI-only behavior without a CLI path are treated as incomplete.
+
+## 8.2 OCR Permission Commands
+
+The CLI must expose permission diagnostics and recovery paths:
+
+- `npm run program -- permissions audit`
+- `npm run program -- permissions repair`
+- `npm run program -- permissions reset`
+
+Notes:
+
+- `repair` and `reset` default to dry-run mode and require `--apply` to execute changes.
+- `audit` should be run with `--json` in automation contexts.
+- Permission grant confirmation remains a manual OS-level check on macOS System Settings.
 
 ## 9. Source Type Standard
 

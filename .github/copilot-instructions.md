@@ -72,6 +72,7 @@ Completion gate:
 | `npm run typecheck:all` | Clears VS Code Problems pane TypeScript errors across app and scripts |
 | `npm run test:index` | Regenerates the checked-in test index |
 | `npm run test:samples:validate` | Verifies canonical sample naming and usage |
+| `npm run test:security:cli` | Runs CLI auth/RBAC and workflow security suites |
 | `npm run bugfix:test` | Full quality gate: typecheck + build + all tests |
 | `npm run test:e2e:comprehensive` | Complete end-to-end + unit + integration battery |
 | `npm run test:rules` | Firestore rules tests (Java or static fallback) |
@@ -87,6 +88,7 @@ Before marking any bug fix complete, confirm:
 - [ ] `npm run typecheck:all` passes (zero errors)
 - [ ] `npm run test:index` was run after test-suite changes
 - [ ] `npm run test:samples:validate` passes after fixture changes
+- [ ] `npm run test:security:cli` passes
 - [ ] `npm run test:e2e:comprehensive` passes
 - [ ] VS Code Problems pane shows no new errors
 - [ ] Relevant docs updated (if behavior changed)
@@ -111,6 +113,24 @@ Before marking any bug fix complete, confirm:
 - Any new debug behavior in the app should keep a CLI-equivalent path via `npm run program -- debug ...`.
 - Debug metadata should include timestamp, subsystem, severity, source type, and error context whenever available.
 - Use normalized source type vocabulary (`automatic`, `manual`) for new debug and CLI flows; preserve compatibility with older app entity values only where needed.
+
+### GUI/CLI Parity Standards (MANDATORY)
+
+- Every new GUI feature must include a CLI-equivalent command path in `scripts/program-cli.mjs` or a documented `npm run` command that calls the same underlying service.
+- GUI actions (buttons, toggles, menu items, wizard actions) must execute through shared command IDs that mirror CLI command intent, so GUI and CLI stay on the same behavior path.
+- Every new CLI path must include a `courseforge help` entry with: purpose, usage, flags, examples, limitations, required permissions, expected outputs, and error codes.
+- Every GUI feature PR must include parity tests covering both GUI behavior and CLI execution path.
+- Every GUI feature PR must update parity documentation in `docs/gui-cli-parity-matrix.md`.
+- Agent enforcement rule: if a PR introduces GUI behavior without CLI parity + tests + docs, treat the PR as blocked until parity is added.
+
+### OCR Permission Stability Standards
+
+- OCR permission diagnostics and remediation must remain available through:
+   - `npm run program -- permissions audit`
+   - `npm run program -- permissions repair`
+   - `npm run program -- permissions reset`
+- Permission-changing commands must default to dry-run and require explicit `--apply`.
+- macOS permission repair/reset work should preserve reinstall flow and explicit user prompt guidance for Screen Capture and Accessibility grants.
 
 ### Design System Controls (DSC) and Color Harmony Standards
 

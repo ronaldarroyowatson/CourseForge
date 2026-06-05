@@ -8,6 +8,7 @@ import {
   getPremiumUsageReport,
   managePremiumUser,
 } from "../../../core/services";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 import { useUIStore } from "../../store/uiStore";
 
 const AUTO_REFRESH_MS = 15000;
@@ -42,17 +43,19 @@ export function PremiumUsagePanel(): React.JSX.Element {
   }, [rows]);
 
   const loadReport = useCallback(async (): Promise<void> => {
-    try {
-      setLoading(true);
-      setError(null);
-      const next = await getPremiumUsageReport();
-      setRows(next);
-      setLastUpdated(new Date().toISOString());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load premium usage report.");
-    } finally {
-      setLoading(false);
-    }
+    await executeGuiCliBoundCommand("courseforge admin premium refresh", async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const next = await getPremiumUsageReport();
+        setRows(next);
+        setLastUpdated(new Date().toISOString());
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load premium usage report.");
+      } finally {
+        setLoading(false);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -78,20 +81,26 @@ export function PremiumUsagePanel(): React.JSX.Element {
     action: "freeze" | "unfreeze" | "resetDaily" | "resetWeekly" | "resetMonthly",
     freezePremium?: boolean
   ): Promise<void> {
-    setPendingUids((prev) => new Set(prev).add(uid));
-    try {
-      const updated = await managePremiumUser(uid, action, freezePremium);
-      setRows((prev) => prev.map((row) => (row.uid === uid ? updated : row)));
-      setLastUpdated(new Date().toISOString());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update premium usage.");
-    } finally {
-      setPendingUids((prev) => {
-        const next = new Set(prev);
-        next.delete(uid);
-        return next;
-      });
-    }
+    await executeGuiCliBoundCommand("courseforge admin premium action", async () => {
+      setPendingUids((prev) => new Set(prev).add(uid));
+      try {
+        const updated = await managePremiumUser(uid, action, freezePremium);
+        setRows((prev) => prev.map((row) => (row.uid === uid ? updated : row)));
+        setLastUpdated(new Date().toISOString());
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to update premium usage.");
+      } finally {
+        setPendingUids((prev) => {
+          const next = new Set(prev);
+          next.delete(uid);
+          return next;
+        });
+      }
+    }, {
+      uid,
+      action,
+      freezePremium: Boolean(freezePremium),
+    });
   }
 
   return (

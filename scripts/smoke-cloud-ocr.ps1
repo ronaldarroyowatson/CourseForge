@@ -7,6 +7,7 @@
   [switch]$GitHubOnly,
   [int]$GitHubBatchSize = 2,
   [int]$GitHubBatchCooldownSeconds = 75,
+  [int]$GitHubMaxCooldownSeconds = 300,
   [int]$GitHubInterRequestDelayMs = 650,
   [int]$GitHubRateLimitRetryCycles = 1
 )
@@ -138,11 +139,48 @@ function Wait-ForGitHubBatchWindow {
   }
 
   if ($ThrottleState.RequestCount -gt 0 -and ($ThrottleState.RequestCount % [Math]::Max(1, $ThrottleState.BatchSize)) -eq 0) {
-    Write-Host ("[github-throttle] Completed batch of {0} request(s); cooling down for {1}s..." -f $ThrottleState.BatchSize, $ThrottleState.BatchCooldownSeconds)
-    Start-Sleep -Seconds ([Math]::Max(1, $ThrottleState.BatchCooldownSeconds))
+    $cooldownSeconds = [Math]::Max(1, $ThrottleState.BatchCooldownSeconds)
+    Write-Host ("[github-throttle] Completed batch of {0} request(s); cooling down for {1}s..." -f $ThrottleState.BatchSize, $cooldownSeconds)
+    Show-TextCountdown -Seconds $cooldownSeconds -Prefix "Batch cooldown"
   } elseif ($ThrottleState.RequestCount -gt 0 -and $ThrottleState.InterRequestDelayMs -gt 0) {
-    Start-Sleep -Milliseconds $ThrottleState.InterRequestDelayMs
+    $interRequestMs = [Math]::Max(0, [int]$ThrottleState.InterRequestDelayMs)
+    if ($interRequestMs -ge 1000) {
+      $interRequestSeconds = [Math]::Ceiling($interRequestMs / 1000)
+      Show-TextCountdown -Seconds $interRequestSeconds -Prefix "Inter-request delay"
+    } else {
+      Start-Sleep -Milliseconds $interRequestMs
+    }
   }
+}
+
+function Show-TextCountdown {
+  param(
+    [int]$Seconds,
+    [string]$Prefix
+  )
+
+  $remaining = [Math]::Max(0, $Seconds)
+  if ($remaining -le 0) {
+    return
+  }
+
+  $prefixText = "[github-throttle] $Prefix"
+
+  while ($remaining -gt 0) {
+    Write-Host ("`r{0}: {1}s remaining...   " -f $prefixText, $remaining) -NoNewline
+    $tick = if ($remaining -gt 60) {
+      15
+    } elseif ($remaining -gt 15) {
+      5
+    } else {
+      1
+    }
+    $sleepFor = [Math]::Min($tick, $remaining)
+    Start-Sleep -Seconds $sleepFor
+    $remaining -= $sleepFor
+  }
+
+  Write-Host ("`r{0}: 0s remaining.           " -f $prefixText)
 }
 
 function Wait-ForGitHubRateLimitWindow {
@@ -164,8 +202,19 @@ function Wait-ForGitHubRateLimitWindow {
     $fallbackSeconds
   }
 
+  $maxCooldownSeconds = if ($null -ne $ThrottleState -and $ThrottleState.MaxCooldownSeconds -is [int] -and $ThrottleState.MaxCooldownSeconds -gt 0) {
+    [int]$ThrottleState.MaxCooldownSeconds
+  } else {
+    300
+  }
+
+  if ($waitSeconds -gt $maxCooldownSeconds) {
+    Write-Host ("[github-throttle] Requested cooldown {0}s exceeds cap {1}s; capping wait window." -f $waitSeconds, $maxCooldownSeconds)
+    $waitSeconds = $maxCooldownSeconds
+  }
+
   Write-Host ("[github-throttle] {0}; waiting {1}s before retrying..." -f $ReasonLabel, $waitSeconds)
-  Start-Sleep -Seconds $waitSeconds
+  Show-TextCountdown -Seconds $waitSeconds -Prefix "Retry cooldown"
 }
 
 function Update-GitHubThrottleFromResult {
@@ -759,6 +808,7 @@ foreach ($provider in $providers) {
     Enabled = $isGitHubProvider
     BatchSize = [Math]::Max(1, $GitHubBatchSize)
     BatchCooldownSeconds = [Math]::Max(1, $GitHubBatchCooldownSeconds)
+    MaxCooldownSeconds = [Math]::Max(1, $GitHubMaxCooldownSeconds)
     InterRequestDelayMs = [Math]::Max(0, $GitHubInterRequestDelayMs)
     RequestCount = 0
   }

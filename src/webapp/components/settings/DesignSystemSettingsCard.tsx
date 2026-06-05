@@ -20,6 +20,7 @@ import {
   logDscMasonryLayoutDecision,
   selectDscMasonryLayout,
 } from "../../../core/services/masonryLayoutService";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 import { useUIStore } from "../../store/uiStore";
 
 interface DesignSystemSettingsCardProps {
@@ -391,136 +392,154 @@ export function DesignSystemSettingsCard({ userId }: DesignSystemSettingsCardPro
   }, [secondsLeft, setPrefs, showKeepDialog]);
 
   async function handleSave(): Promise<void> {
-    setShowKeepDialog(true);
-    setSecondsLeft(12);
+    await executeGuiCliBoundCommand("courseforge settings design save", async () => {
+      setShowKeepDialog(true);
+      setSecondsLeft(12);
 
-    if (!userId || persistenceMode === "local") {
-      setStatus("Design settings saved locally.");
-      void logDesignSystemDebugEvent("Design tokens saved locally.");
-      return;
-    }
-
-    try {
-      if (persistenceMode === "cloud") {
-        await saveDesignTokenPreferencesToCloud(userId, prefs);
-        setStatus("Design settings saved to cloud.");
-      } else {
-        const cloud = await loadDesignTokenPreferencesFromCloud(userId);
-        const merged = sanitizeDesignTokenPreferences({
-          ...(cloud ?? {}),
-          ...prefs,
-        });
-        setPrefs(merged);
-        await saveDesignTokenPreferencesToCloud(userId, merged);
-        setStatus("Design settings merged and synced to cloud.");
-      }
-
-      void logDesignSystemDebugEvent("Design token persistence completed.", {
-        mode: persistenceMode,
-        userId,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown cloud sync error.";
-      setStatus(`Unable to sync design settings: ${message}`);
-      void logDesignSystemDebugEvent("Design token persistence failed.", { mode: persistenceMode, message });
-    }
-  }
-
-  async function handleLoadCloudSettings(): Promise<void> {
-    if (!userId) {
-      setStatus("Sign in to load cloud settings.");
-      return;
-    }
-
-    try {
-      const cloud = await loadDesignTokenPreferencesFromCloud(userId);
-      if (!cloud) {
-        setStatus("No cloud design settings were found for this account.");
+      if (!userId || persistenceMode === "local") {
+        setStatus("Design settings saved locally.");
+        void logDesignSystemDebugEvent("Design tokens saved locally.");
         return;
       }
 
-      setPrefs(cloud);
-      setStatus("Loaded cloud design settings.");
-      void logDesignSystemDebugEvent("Design token cloud settings loaded.", { userId });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown cloud load error.";
-      setStatus(`Unable to load cloud settings: ${message}`);
-      void logDesignSystemDebugEvent("Design token cloud load failed.", { message, userId });
-    }
+      try {
+        if (persistenceMode === "cloud") {
+          await saveDesignTokenPreferencesToCloud(userId, prefs);
+          setStatus("Design settings saved to cloud.");
+        } else {
+          const cloud = await loadDesignTokenPreferencesFromCloud(userId);
+          const merged = sanitizeDesignTokenPreferences({
+            ...(cloud ?? {}),
+            ...prefs,
+          });
+          setPrefs(merged);
+          await saveDesignTokenPreferencesToCloud(userId, merged);
+          setStatus("Design settings merged and synced to cloud.");
+        }
+
+        void logDesignSystemDebugEvent("Design token persistence completed.", {
+          mode: persistenceMode,
+          userId,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown cloud sync error.";
+        setStatus(`Unable to sync design settings: ${message}`);
+        void logDesignSystemDebugEvent("Design token persistence failed.", { mode: persistenceMode, message });
+      }
+    }, {
+      mode: persistenceMode,
+      hasUserId: Boolean(userId),
+    });
+  }
+
+  async function handleLoadCloudSettings(): Promise<void> {
+    await executeGuiCliBoundCommand("courseforge settings design cloud load", async () => {
+      if (!userId) {
+        setStatus("Sign in to load cloud settings.");
+        return;
+      }
+
+      try {
+        const cloud = await loadDesignTokenPreferencesFromCloud(userId);
+        if (!cloud) {
+          setStatus("No cloud design settings were found for this account.");
+          return;
+        }
+
+        setPrefs(cloud);
+        setStatus("Loaded cloud design settings.");
+        void logDesignSystemDebugEvent("Design token cloud settings loaded.", { userId });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown cloud load error.";
+        setStatus(`Unable to load cloud settings: ${message}`);
+        void logDesignSystemDebugEvent("Design token cloud load failed.", { message, userId });
+      }
+    }, {
+      hasUserId: Boolean(userId),
+    });
   }
 
   async function handleCloudDecision(decision: CloudSettingsDecision): Promise<void> {
-    if (!userId) {
-      setCloudPromptStatus("Sign in is required for cloud settings decisions.");
-      return;
-    }
-
-    setCloudDecisionBusy(true);
-    try {
-      const cloud = await loadDesignTokenPreferencesFromCloud(userId);
-      const outcome = resolveCloudSettingsDecision({
-        local: prefs,
-        cloud,
-        decision,
-      });
-
-      if (decision === "delete-cloud-use-local-defaults") {
-        await deleteCloudDesignTokenPreferences(userId);
-      } else if (outcome.cloudTarget) {
-        await saveDesignTokenPreferencesToCloud(userId, outcome.cloudTarget);
+    await executeGuiCliBoundCommand(`courseforge settings design cloud decision ${decision}`, async () => {
+      if (!userId) {
+        setCloudPromptStatus("Sign in is required for cloud settings decisions.");
+        return;
       }
 
-      setPrefs(outcome.nextLocal);
-      setCloudPromptStatus(outcome.trace);
-      setCloudPromptVisible(false);
+      setCloudDecisionBusy(true);
+      try {
+        const cloud = await loadDesignTokenPreferencesFromCloud(userId);
+        const outcome = resolveCloudSettingsDecision({
+          local: prefs,
+          cloud,
+          decision,
+        });
 
-      void logDesignSystemDebugEvent("Cloud settings decision applied.", {
-        userId,
-        decision,
-        trace: outcome.trace,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "unknown_cloud_decision_error";
-      setCloudPromptStatus(`Cloud settings action failed: ${message}`);
-      void logDesignSystemDebugEvent("Cloud settings decision failed.", {
-        userId,
-        decision,
-        message,
-      });
-    } finally {
-      setCloudDecisionBusy(false);
-    }
+        if (decision === "delete-cloud-use-local-defaults") {
+          await deleteCloudDesignTokenPreferences(userId);
+        } else if (outcome.cloudTarget) {
+          await saveDesignTokenPreferencesToCloud(userId, outcome.cloudTarget);
+        }
+
+        setPrefs(outcome.nextLocal);
+        setCloudPromptStatus(outcome.trace);
+        setCloudPromptVisible(false);
+
+        void logDesignSystemDebugEvent("Cloud settings decision applied.", {
+          userId,
+          decision,
+          trace: outcome.trace,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown_cloud_decision_error";
+        setCloudPromptStatus(`Cloud settings action failed: ${message}`);
+        void logDesignSystemDebugEvent("Cloud settings decision failed.", {
+          userId,
+          decision,
+          message,
+        });
+      } finally {
+        setCloudDecisionBusy(false);
+      }
+    }, {
+      decision,
+      hasUserId: Boolean(userId),
+    });
   }
 
   async function handleDeleteOldSettings(): Promise<void> {
-    try {
-      resetPrefs();
-      setCorruptionStatus("Deleted old settings and reset to defaults.");
-      void logDesignSystemDebugEvent("Corrupted settings deleted and defaults restored.", {
-        invalidFields: localDiagnostics.invalidFields,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "unknown_delete_settings_error";
-      setCorruptionStatus(`Unable to delete old settings: ${message}`);
-      void logDesignSystemDebugEvent("Failed to delete corrupted settings.", { message });
-    }
+    await executeGuiCliBoundCommand("courseforge settings design local delete-corrupted", async () => {
+      try {
+        resetPrefs();
+        setCorruptionStatus("Deleted old settings and reset to defaults.");
+        void logDesignSystemDebugEvent("Corrupted settings deleted and defaults restored.", {
+          invalidFields: localDiagnostics.invalidFields,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown_delete_settings_error";
+        setCorruptionStatus(`Unable to delete old settings: ${message}`);
+        void logDesignSystemDebugEvent("Failed to delete corrupted settings.", { message });
+      }
+    });
   }
 
   async function handleRepairSettings(): Promise<void> {
-    const repair = tryRepairCorruptedLocalDesignSettings();
-    if (!repair.success) {
-      resetPrefs();
-      setCorruptionStatus("Repair failed. Defaults restored.");
-      void logDesignSystemDebugEvent("Corrupted settings repair failed. Defaults restored.", {
+    await executeGuiCliBoundCommand("courseforge settings design local repair", async () => {
+      const repair = tryRepairCorruptedLocalDesignSettings();
+      if (!repair.success) {
+        resetPrefs();
+        setCorruptionStatus("Repair failed. Defaults restored.");
+        void logDesignSystemDebugEvent("Corrupted settings repair failed. Defaults restored.", {
+          invalidFields: repair.invalidFields,
+        });
+        return;
+      }
+
+      setPrefs(repair.repaired);
+      setCorruptionStatus(`Repaired settings with fallback values (${repair.invalidFields.length} corrected fields).`);
+      void logDesignSystemDebugEvent("Corrupted settings repaired.", {
         invalidFields: repair.invalidFields,
       });
-      return;
-    }
-
-    setPrefs(repair.repaired);
-    setCorruptionStatus(`Repaired settings with fallback values (${repair.invalidFields.length} corrected fields).`);
-    void logDesignSystemDebugEvent("Corrupted settings repaired.", {
-      invalidFields: repair.invalidFields,
     });
   }
 

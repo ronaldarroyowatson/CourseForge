@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { doc, setDoc } from "firebase/firestore";
 import { clearReadBudgetForManualRetry, clearWriteBudgetForManualRetry, syncNow } from "../../../core/services/syncService";
 import { setUserSuperAdminStatus } from "../../../core/services/schoolAdminService";
+import { GUI_OCR_DEBUG_COMMANDS, runOcrDebugCommand, type OcrDebugCommandId } from "../../../core/services/ocrDebugCommandService";
 import { firestoreDb } from "../../../firebase/firestore";
 import { getCurrentUser, getRoleClaims } from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
@@ -49,6 +50,17 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
 
   const [showDebugPanel, setShowDebugPanel] = React.useState(false);
   const [isHeaderExpanded, setIsHeaderExpanded] = React.useState(false);
+  const [ocrDebugOutput, setOcrDebugOutput] = React.useState<string>("");
+
+  function handleRunOcrDebugCommand(commandId: OcrDebugCommandId): void {
+    const result = runOcrDebugCommand(commandId);
+    if (typeof result === "string") {
+      setOcrDebugOutput(result.slice(0, 8_000));
+      return;
+    }
+
+    setOcrDebugOutput(JSON.stringify(result, null, 2).slice(0, 8_000));
+  }
 
   async function handleSyncNow(): Promise<void> {
     if (authMode !== "cloud") {
@@ -384,6 +396,28 @@ export function Header({ isSettingsView = false }: { isSettingsView?: boolean })
                     <li key={event}>{event}</li>
                   ))}
                 </ul>
+              </div>
+
+              <div>
+                <strong>OCR Debug Commands (GUI to CLI mirror)</strong>
+                <p>These actions execute command IDs mapped to `courseforge ocr debug ...`.</p>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  {GUI_OCR_DEBUG_COMMANDS.map((command) => (
+                    <button
+                      key={command.id}
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => handleRunOcrDebugCommand(command.id)}
+                    >
+                      {command.label}
+                    </button>
+                  ))}
+                </div>
+                {ocrDebugOutput ? (
+                  <pre style={{ maxHeight: "16rem", overflow: "auto", marginTop: "0.75rem" }}>
+                    {ocrDebugOutput}
+                  </pre>
+                ) : null}
               </div>
             </div>
           ) : null}

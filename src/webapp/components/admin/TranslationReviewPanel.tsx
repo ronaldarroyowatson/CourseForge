@@ -10,6 +10,7 @@ import {
   editTranslationForReview,
   upsertTranslationMemoryCloudEntry,
 } from "../../../core/services";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 
 function formatTimestamp(timestamp: number): string {
   try {
@@ -31,24 +32,30 @@ export function TranslationReviewPanel(): React.JSX.Element {
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
   const refreshQueue = React.useCallback(async (): Promise<void> => {
-    setIsLoading(true);
-    setErrorMessage(null);
+    await executeGuiCliBoundCommand("courseforge admin translations review refresh", async () => {
+      setIsLoading(true);
+      setErrorMessage(null);
 
-    try {
-      const queue = await listTranslationReviewQueue({
-        language: language === "all" ? undefined : language,
-        subject: subject || undefined,
-        highlightZomi,
-      });
+      try {
+        const queue = await listTranslationReviewQueue({
+          language: language === "all" ? undefined : language,
+          subject: subject || undefined,
+          highlightZomi,
+        });
 
-      setRows(queue);
-      setDraftById(Object.fromEntries(queue.map((entry) => [entry.id, entry.translatedText])));
-      setStatusMessage(`Loaded ${queue.length} item${queue.length === 1 ? "" : "s"} for review.`);
-    } catch {
-      setErrorMessage("Unable to load translation review queue.");
-    } finally {
-      setIsLoading(false);
-    }
+        setRows(queue);
+        setDraftById(Object.fromEntries(queue.map((entry) => [entry.id, entry.translatedText])));
+        setStatusMessage(`Loaded ${queue.length} item${queue.length === 1 ? "" : "s"} for review.`);
+      } catch {
+        setErrorMessage("Unable to load translation review queue.");
+      } finally {
+        setIsLoading(false);
+      }
+    }, {
+      language,
+      subject,
+      highlightZomi,
+    });
   }, [highlightZomi, language, subject]);
 
   React.useEffect(() => {
@@ -56,112 +63,142 @@ export function TranslationReviewPanel(): React.JSX.Element {
   }, [refreshQueue]);
 
   async function handleApprove(item: TranslationReviewItem): Promise<void> {
-    setErrorMessage(null);
-    try {
-      const updated = await approveTranslationForReview({
-        language: item.language,
-        termId: item.termId,
-        actor: "admin",
-      });
+    await executeGuiCliBoundCommand("courseforge admin translations approve", async () => {
+      setErrorMessage(null);
+      try {
+        const updated = await approveTranslationForReview({
+          language: item.language,
+          termId: item.termId,
+          actor: "admin",
+        });
 
-      if (!updated) {
-        setErrorMessage("Translation not found.");
-        return;
+        if (!updated) {
+          setErrorMessage("Translation not found.");
+          return;
+        }
+
+        await upsertTranslationMemoryCloudEntry(updated, "shared");
+        await refreshQueue();
+        setStatusMessage("Translation approved and locked.");
+      } catch {
+        setErrorMessage("Unable to approve translation right now.");
       }
-
-      await upsertTranslationMemoryCloudEntry(updated, "shared");
-      await refreshQueue();
-      setStatusMessage("Translation approved and locked.");
-    } catch {
-      setErrorMessage("Unable to approve translation right now.");
-    }
+    }, {
+      id: item.id,
+      language: item.language,
+      termId: item.termId,
+    });
   }
 
   async function handleEdit(item: TranslationReviewItem): Promise<void> {
-    setErrorMessage(null);
-    const nextValue = draftById[item.id] ?? item.translatedText;
+    await executeGuiCliBoundCommand("courseforge admin translations edit", async () => {
+      setErrorMessage(null);
+      const nextValue = draftById[item.id] ?? item.translatedText;
 
-    try {
-      const updated = await editTranslationForReview({
-        language: item.language,
-        termId: item.termId,
-        sourceText: item.sourceText,
-        translatedText: nextValue,
-        actor: "admin",
-      });
+      try {
+        const updated = await editTranslationForReview({
+          language: item.language,
+          termId: item.termId,
+          sourceText: item.sourceText,
+          translatedText: nextValue,
+          actor: "admin",
+        });
 
-      await upsertTranslationMemoryCloudEntry(updated, "shared");
-      await refreshQueue();
-      setStatusMessage("Translation edited and synced to translation memory.");
-    } catch {
-      setErrorMessage("Unable to save edit right now.");
-    }
+        await upsertTranslationMemoryCloudEntry(updated, "shared");
+        await refreshQueue();
+        setStatusMessage("Translation edited and synced to translation memory.");
+      } catch {
+        setErrorMessage("Unable to save edit right now.");
+      }
+    }, {
+      id: item.id,
+      language: item.language,
+      termId: item.termId,
+    });
   }
 
   async function handleRegenerate(item: TranslationReviewItem): Promise<void> {
-    setErrorMessage(null);
+    await executeGuiCliBoundCommand("courseforge admin translations regenerate", async () => {
+      setErrorMessage(null);
 
-    try {
-      const regenerated = await rejectAndRegenerateTranslation({
-        language: item.language,
-        termId: item.termId,
-        sourceText: item.sourceText,
-        contextTags: item.contextTags,
-      });
+      try {
+        const regenerated = await rejectAndRegenerateTranslation({
+          language: item.language,
+          termId: item.termId,
+          sourceText: item.sourceText,
+          contextTags: item.contextTags,
+        });
 
-      await upsertTranslationMemoryCloudEntry(regenerated, "shared");
-      await refreshQueue();
-      setStatusMessage("Translation regenerated by AI and added back to queue.");
-    } catch {
-      setErrorMessage("Unable to regenerate translation right now.");
-    }
+        await upsertTranslationMemoryCloudEntry(regenerated, "shared");
+        await refreshQueue();
+        setStatusMessage("Translation regenerated by AI and added back to queue.");
+      } catch {
+        setErrorMessage("Unable to regenerate translation right now.");
+      }
+    }, {
+      id: item.id,
+      language: item.language,
+      termId: item.termId,
+    });
   }
 
   async function handleViewHistory(item: TranslationReviewItem): Promise<void> {
-    setErrorMessage(null);
+    await executeGuiCliBoundCommand("courseforge admin translations history view", async () => {
+      setErrorMessage(null);
 
-    try {
-      const history = await getTranslationHistory(item.language, item.termId);
-      if (!history.length) {
+      try {
+        const history = await getTranslationHistory(item.language, item.termId);
+        if (!history.length) {
+          setHistoryById((previous) => ({
+            ...previous,
+            [item.id]: "No history recorded yet.",
+          }));
+          return;
+        }
+
+        const summary = history
+          .slice(-5)
+          .reverse()
+          .map((entry) => `${formatTimestamp(entry.timestamp)} • ${entry.updatedBy}: \"${entry.oldValue}\" -> \"${entry.newValue}\"`)
+          .join("\n");
+
         setHistoryById((previous) => ({
           ...previous,
-          [item.id]: "No history recorded yet.",
+          [item.id]: summary,
         }));
-        return;
+      } catch {
+        setErrorMessage("Unable to load translation history.");
       }
-
-      const summary = history
-        .slice(-5)
-        .reverse()
-        .map((entry) => `${formatTimestamp(entry.timestamp)} • ${entry.updatedBy}: \"${entry.oldValue}\" -> \"${entry.newValue}\"`)
-        .join("\n");
-
-      setHistoryById((previous) => ({
-        ...previous,
-        [item.id]: summary,
-      }));
-    } catch {
-      setErrorMessage("Unable to load translation history.");
-    }
+    }, {
+      id: item.id,
+      language: item.language,
+      termId: item.termId,
+    });
   }
 
   async function handleAddToGlossary(item: TranslationReviewItem): Promise<void> {
-    const subjectTag = item.contextTags[0] ?? "general";
-    try {
-      await addGlossaryFromOverride({
-        subject: subjectTag,
-        sourceLanguage: "en",
-        targetLanguage: item.language,
-        sourceTerm: item.sourceText,
-        preferredTranslation: draftById[item.id] ?? item.translatedText,
-        notes: `Added from translation review for ${item.termId}.`,
-        usageRef: `translationMemory:${item.termId}`,
-        actor: "admin",
-      });
-      setStatusMessage("Saved glossary term from translation override.");
-    } catch {
-      setErrorMessage("Unable to add glossary entry from this override.");
-    }
+    await executeGuiCliBoundCommand("courseforge admin translations glossary add", async () => {
+      const subjectTag = item.contextTags[0] ?? "general";
+      try {
+        await addGlossaryFromOverride({
+          subject: subjectTag,
+          sourceLanguage: "en",
+          targetLanguage: item.language,
+          sourceTerm: item.sourceText,
+          preferredTranslation: draftById[item.id] ?? item.translatedText,
+          notes: `Added from translation review for ${item.termId}.`,
+          usageRef: `translationMemory:${item.termId}`,
+          actor: "admin",
+        });
+        setStatusMessage("Saved glossary term from translation override.");
+      } catch {
+        setErrorMessage("Unable to add glossary entry from this override.");
+      }
+    }, {
+      id: item.id,
+      language: item.language,
+      termId: item.termId,
+    });
   }
 
   return (

@@ -6,6 +6,7 @@ import {
   listGlossaryEntries,
   saveGlossaryEntry,
 } from "../../../core/services";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 
 export function GlossaryManagementPanel(): React.JSX.Element {
   const [subject, setSubject] = React.useState("biology");
@@ -20,18 +21,24 @@ export function GlossaryManagementPanel(): React.JSX.Element {
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
   async function refreshRows(): Promise<void> {
-    setErrorMessage(null);
-    try {
-      const items = await listGlossaryEntries({
-        subject,
-        sourceLanguage,
-        targetLanguage,
-      });
-      setRows(items.sort((left, right) => right.updatedAt - left.updatedAt));
-      setStatusMessage(`Loaded ${items.length} glossary entries.`);
-    } catch {
-      setErrorMessage("Unable to load glossary entries.");
-    }
+    await executeGuiCliBoundCommand("courseforge admin glossary refresh", async () => {
+      setErrorMessage(null);
+      try {
+        const items = await listGlossaryEntries({
+          subject,
+          sourceLanguage,
+          targetLanguage,
+        });
+        setRows(items.sort((left, right) => right.updatedAt - left.updatedAt));
+        setStatusMessage(`Loaded ${items.length} glossary entries.`);
+      } catch {
+        setErrorMessage("Unable to load glossary entries.");
+      }
+    }, {
+      subject,
+      sourceLanguage,
+      targetLanguage,
+    });
   }
 
   React.useEffect(() => {
@@ -39,49 +46,59 @@ export function GlossaryManagementPanel(): React.JSX.Element {
   }, []);
 
   async function handleSave(): Promise<void> {
-    setErrorMessage(null);
+    await executeGuiCliBoundCommand("courseforge admin glossary save", async () => {
+      setErrorMessage(null);
 
-    if (!sourceTerm.trim() || !preferredTranslation.trim()) {
-      setErrorMessage("Source term and preferred translation are required.");
-      return;
-    }
+      if (!sourceTerm.trim() || !preferredTranslation.trim()) {
+        setErrorMessage("Source term and preferred translation are required.");
+        return;
+      }
 
-    try {
-      await saveGlossaryEntry({
-        id: "",
-        subject,
-        sourceLanguage,
-        targetLanguage,
-        sourceTerm,
-        preferredTranslation,
-        notes: notes || undefined,
-        usageRefs: usageRef ? [usageRef] : [],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        updatedBy: "admin",
-      });
+      try {
+        await saveGlossaryEntry({
+          id: "",
+          subject,
+          sourceLanguage,
+          targetLanguage,
+          sourceTerm,
+          preferredTranslation,
+          notes: notes || undefined,
+          usageRefs: usageRef ? [usageRef] : [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: "admin",
+        });
 
-      setSourceTerm("");
-      setPreferredTranslation("");
-      setNotes("");
-      setUsageRef("");
-      await refreshRows();
-      setStatusMessage("Glossary entry saved.");
-    } catch {
-      setErrorMessage("Unable to save glossary entry.");
-    }
+        setSourceTerm("");
+        setPreferredTranslation("");
+        setNotes("");
+        setUsageRef("");
+        await refreshRows();
+        setStatusMessage("Glossary entry saved.");
+      } catch {
+        setErrorMessage("Unable to save glossary entry.");
+      }
+    }, {
+      subject,
+      sourceLanguage,
+      targetLanguage,
+    });
   }
 
   async function handleDelete(id: string): Promise<void> {
-    setErrorMessage(null);
+    await executeGuiCliBoundCommand("courseforge admin glossary delete", async () => {
+      setErrorMessage(null);
 
-    try {
-      await deleteGlossaryEntry(id);
-      await refreshRows();
-      setStatusMessage("Glossary entry removed.");
-    } catch {
-      setErrorMessage("Unable to delete glossary entry.");
-    }
+      try {
+        await deleteGlossaryEntry(id);
+        await refreshRows();
+        setStatusMessage("Glossary entry removed.");
+      } catch {
+        setErrorMessage("Unable to delete glossary entry.");
+      }
+    }, {
+      id,
+    });
   }
 
   return (

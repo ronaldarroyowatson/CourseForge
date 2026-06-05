@@ -39,6 +39,7 @@ import {
 } from "../../../core/services";
 import { readMetadataPipelineRuntimeStatus, type MetadataPipelineRuntimeStatus } from "../../../core/services/metadataExtractionPipelineService";
 import { readMetadataCorrectionSyncRuntimeState, type MetadataCorrectionSyncRuntimeState } from "../../../core/services/metadataCorrectionSyncService";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 import { getSupportedLanguages, t as translate } from "../../../core/services/i18nService";
 import { firestoreDb } from "../../../firebase/firestore";
 import {
@@ -520,28 +521,32 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   }, [refreshDscPluginStatus]);
 
   async function handleInstallDscPlugin(): Promise<void> {
-    const status = await installPlugin("dsc");
-    if (status.error) {
-      setDscPluginStatus(`Install failed: ${status.error}`);
-      return;
-    }
+    await executeGuiCliBoundCommand("courseforge settings plugin dsc install", async () => {
+      const status = await installPlugin("dsc");
+      if (status.error) {
+        setDscPluginStatus(`Install failed: ${status.error}`);
+        return;
+      }
 
-    setDscPluginInstalled(true);
-    setDscPluginStatus("Installed");
-    await refreshDscPluginStatus();
+      setDscPluginInstalled(true);
+      setDscPluginStatus("Installed");
+      await refreshDscPluginStatus();
+    });
   }
 
   async function handleUninstallDscPlugin(): Promise<void> {
-    const status = await uninstallPlugin("dsc");
-    if (status.error) {
-      setDscPluginStatus(`Uninstall failed: ${status.error}`);
-      return;
-    }
+    await executeGuiCliBoundCommand("courseforge settings plugin dsc uninstall", async () => {
+      const status = await uninstallPlugin("dsc");
+      if (status.error) {
+        setDscPluginStatus(`Uninstall failed: ${status.error}`);
+        return;
+      }
 
-    setShowFloatingDesignSystemCard(false);
-    setDscPluginInstalled(false);
-    setDscPluginStatus("Not Installed");
-    await refreshDscPluginStatus();
+      setShowFloatingDesignSystemCard(false);
+      setDscPluginInstalled(false);
+      setDscPluginStatus("Not Installed");
+      await refreshDscPluginStatus();
+    });
   }
 
   function refreshMetadataTrainingStats(): void {
@@ -654,25 +659,30 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
       return;
     }
 
-    setIsSavingSchool(true);
-    try {
-      const result = await setUserSchoolAffiliation({
-        schoolName: nextSchoolName,
-        districtName: districtInput.trim() || undefined,
-        schoolId: preferred?.schoolId,
-      });
+    await executeGuiCliBoundCommand("courseforge settings school affiliation save", async () => {
+      setIsSavingSchool(true);
+      try {
+        const result = await setUserSchoolAffiliation({
+          schoolName: nextSchoolName,
+          districtName: districtInput.trim() || undefined,
+          schoolId: preferred?.schoolId,
+        });
 
-      setSchoolSearch(result.schoolName);
-      setDistrictInput(result.districtName ?? districtInput);
-      setSchoolDirectoryStatus(result.assignedSchoolAdmin
-        ? "School saved. You are now the first school admin for this school."
-        : "School saved. Your account is now linked to this school/district.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      setSchoolDirectoryStatus(`Unable to save school affiliation right now. (${message})`);
-    } finally {
-      setIsSavingSchool(false);
-    }
+        setSchoolSearch(result.schoolName);
+        setDistrictInput(result.districtName ?? districtInput);
+        setSchoolDirectoryStatus(result.assignedSchoolAdmin
+          ? "School saved. You are now the first school admin for this school."
+          : "School saved. Your account is now linked to this school/district.");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        setSchoolDirectoryStatus(`Unable to save school affiliation right now. (${message})`);
+      } finally {
+        setIsSavingSchool(false);
+      }
+    }, {
+      schoolName: nextSchoolName,
+      schoolId: preferred?.schoolId,
+    });
   }
 
   function handleAddCloudService(): void {
@@ -686,39 +696,49 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   }
 
   async function handleSignOut(): Promise<void> {
-    setAccountStatus(null);
-    try {
-      await signOutCurrentUser();
-      window.location.assign("/login");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to sign out right now.";
-      setAccountStatus(message);
-    }
+    await executeGuiCliBoundCommand("courseforge settings auth signout", async () => {
+      setAccountStatus(null);
+      try {
+        await signOutCurrentUser();
+        window.location.assign("/login");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to sign out right now.";
+        setAccountStatus(message);
+      }
+    });
   }
 
   async function handleLanguageChange(nextLanguage: string): Promise<void> {
-    setLanguage(nextLanguage as "en" | "es" | "pt" | "zm" | "fr" | "de");
-    try {
-      await persistPreferences(nextLanguage);
-      setPreferenceStatus(translate(nextLanguage as "en" | "es" | "pt" | "zm" | "fr" | "de", "settings", "saved"));
-    } catch {
-      setPreferenceStatus("Unable to save language preference right now.");
-    }
+    await executeGuiCliBoundCommand("courseforge settings language set", async () => {
+      setLanguage(nextLanguage as "en" | "es" | "pt" | "zm" | "fr" | "de");
+      try {
+        await persistPreferences(nextLanguage);
+        setPreferenceStatus(translate(nextLanguage as "en" | "es" | "pt" | "zm" | "fr" | "de", "settings", "saved"));
+      } catch {
+        setPreferenceStatus("Unable to save language preference right now.");
+      }
+    }, {
+      language: nextLanguage,
+    });
   }
 
   async function handleAccessibilityPatch(partial: Parameters<typeof patchAccessibility>[0]): Promise<void> {
-    const nextAccessibility = {
-      ...accessibility,
-      ...partial,
-    };
-    patchAccessibility(partial);
+    await executeGuiCliBoundCommand("courseforge settings accessibility patch", async () => {
+      const nextAccessibility = {
+        ...accessibility,
+        ...partial,
+      };
+      patchAccessibility(partial);
 
-    try {
-      await persistPreferences(language, nextAccessibility);
-      setPreferenceStatus(translate(language, "settings", "saved"));
-    } catch {
-      setPreferenceStatus("Unable to save accessibility preferences right now.");
-    }
+      try {
+        await persistPreferences(language, nextAccessibility);
+        setPreferenceStatus(translate(language, "settings", "saved"));
+      } catch {
+        setPreferenceStatus("Unable to save accessibility preferences right now.");
+      }
+    }, {
+      partial,
+    });
   }
 
   async function refreshDebugStats(): Promise<void> {
@@ -726,18 +746,22 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   }
 
   function handleDebugToggle(enabled: boolean): void {
-    setDebugLoggingEnabled(enabled);
-    setDebugEnabled(enabled);
-    void refreshDebugStats();
-    setDebugStatus(enabled ? "Debug logging enabled." : "Debug logging disabled.");
+    void executeGuiCliBoundCommand("courseforge settings debug toggle", async () => {
+      setDebugLoggingEnabled(enabled);
+      setDebugEnabled(enabled);
+      await refreshDebugStats();
+      setDebugStatus(enabled ? "Debug logging enabled." : "Debug logging disabled.");
+    }, {
+      enabled,
+    });
   }
 
   function handleClearDebugLog(): void {
-    void (async () => {
+    void executeGuiCliBoundCommand("courseforge settings debug clear", async () => {
       await clearDebugLogEntries();
       await refreshDebugStats();
       setDebugStatus("Local debug log cleared.");
-    })();
+    });
   }
 
   function handleGenerateFullDebugReport(): void {
@@ -788,17 +812,25 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   }
 
   function updatePrimaryOcrProvider(providerId: AutoOcrProviderId): void {
-    const secondary = ocrProviderOrder.find((entry) => entry !== providerId && entry !== "local_tesseract") ?? "cloud_github_models_vision";
-    const next = setAutoOcrProviderOrder([providerId, secondary]);
-    setOcrProviderOrderState(next);
-    setOcrProviderStatus("Primary cloud OCR provider updated. Local OCR remains the final fallback.");
+    void executeGuiCliBoundCommand("courseforge settings ocr primary set", async () => {
+      const secondary = ocrProviderOrder.find((entry) => entry !== providerId && entry !== "local_tesseract") ?? "cloud_github_models_vision";
+      const next = setAutoOcrProviderOrder([providerId, secondary]);
+      setOcrProviderOrderState(next);
+      setOcrProviderStatus("Primary cloud OCR provider updated. Local OCR remains the final fallback.");
+    }, {
+      providerId,
+    });
   }
 
   function updateFallbackOcrProvider(providerId: AutoOcrProviderId): void {
-    const primary = ocrProviderOrder[0] ?? "cloud_openai_vision";
-    const next = setAutoOcrProviderOrder([primary, providerId]);
-    setOcrProviderOrderState(next);
-    setOcrProviderStatus("Secondary cloud OCR provider updated. Local OCR remains the final fallback.");
+    void executeGuiCliBoundCommand("courseforge settings ocr secondary set", async () => {
+      const primary = ocrProviderOrder[0] ?? "cloud_openai_vision";
+      const next = setAutoOcrProviderOrder([primary, providerId]);
+      setOcrProviderOrderState(next);
+      setOcrProviderStatus("Secondary cloud OCR provider updated. Local OCR remains the final fallback.");
+    }, {
+      providerId,
+    });
   }
 
   React.useEffect(() => {
@@ -946,74 +978,86 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   }, []);
 
   async function handleReloadCloudPolicy(): Promise<void> {
-    setIsUpdatingOcrPolicy(true);
-    try {
-      const cloudPolicy = await getCloudAutoOcrProviderPolicy();
-      if (!cloudPolicy?.providerOrder?.length) {
-        setOcrProviderStatus("No shared AI provider policy is currently set.");
-        return;
-      }
+    await executeGuiCliBoundCommand("courseforge settings ocr policy load", async () => {
+      setIsUpdatingOcrPolicy(true);
+      try {
+        const cloudPolicy = await getCloudAutoOcrProviderPolicy();
+        if (!cloudPolicy?.providerOrder?.length) {
+          setOcrProviderStatus("No shared AI provider policy is currently set.");
+          return;
+        }
 
-      setOcrProviderOrderState(cloudPolicy.providerOrder);
-      setOcrProviderStatus("Loaded shared AI provider policy from cloud.");
-    } catch {
-      setOcrProviderStatus("Unable to load shared AI provider policy right now.");
-    } finally {
-      setIsUpdatingOcrPolicy(false);
-    }
+        setOcrProviderOrderState(cloudPolicy.providerOrder);
+        setOcrProviderStatus("Loaded shared AI provider policy from cloud.");
+      } catch {
+        setOcrProviderStatus("Unable to load shared AI provider policy right now.");
+      } finally {
+        setIsUpdatingOcrPolicy(false);
+      }
+    });
   }
 
   async function handleApplyCloudPolicy(): Promise<void> {
-    setIsUpdatingOcrPolicy(true);
-    try {
-      const result = await setCloudAutoOcrProviderPolicy(ocrProviderOrder);
-      if (!result) {
-        setOcrProviderStatus("Unable to save shared AI provider policy.");
-        return;
-      }
+    await executeGuiCliBoundCommand("courseforge settings ocr policy save", async () => {
+      setIsUpdatingOcrPolicy(true);
+      try {
+        const result = await setCloudAutoOcrProviderPolicy(ocrProviderOrder);
+        if (!result) {
+          setOcrProviderStatus("Unable to save shared AI provider policy.");
+          return;
+        }
 
-      setOcrProviderOrderState(result.providerOrder);
-      setOcrProviderStatus("Saved shared AI provider policy.");
-    } catch {
-      setOcrProviderStatus("Unable to save shared AI provider policy. Admin access may be required.");
-    } finally {
-      setIsUpdatingOcrPolicy(false);
-    }
+        setOcrProviderOrderState(result.providerOrder);
+        setOcrProviderStatus("Saved shared AI provider policy.");
+      } catch {
+        setOcrProviderStatus("Unable to save shared AI provider policy. Admin access may be required.");
+      } finally {
+        setIsUpdatingOcrPolicy(false);
+      }
+    }, {
+      providerOrder: ocrProviderOrder,
+    });
   }
 
   async function handleSendDebugLogToCloud(): Promise<void> {
-    try {
-      setIsUploadingDebugLog(true);
-      setDebugStatus(null);
+    await executeGuiCliBoundCommand("courseforge settings debug upload", async () => {
+      try {
+        setIsUploadingDebugLog(true);
+        setDebugStatus(null);
 
-      const result = await uploadAndClearDebugLogs({
-        userId,
-      });
+        const result = await uploadAndClearDebugLogs({
+          userId,
+        });
 
-      await refreshDebugStats();
-      setDebugStatus(result.uploadedCount > 0
-        ? `Uploaded ${result.uploadedCount} debug log entr${result.uploadedCount === 1 ? "y" : "ies"} to cloud and cleared local logs.`
-        : "No local debug logs to upload.");
-    } catch {
-      setDebugStatus("Unable to upload debug logs right now. Please try again.");
-    } finally {
-      setIsUploadingDebugLog(false);
-    }
+        await refreshDebugStats();
+        setDebugStatus(result.uploadedCount > 0
+          ? `Uploaded ${result.uploadedCount} debug log entr${result.uploadedCount === 1 ? "y" : "ies"} to cloud and cleared local logs.`
+          : "No local debug logs to upload.");
+      } catch {
+        setDebugStatus("Unable to upload debug logs right now. Please try again.");
+      } finally {
+        setIsUploadingDebugLog(false);
+      }
+    }, {
+      hasUserId: Boolean(userId),
+    });
   }
 
   async function handleCheckLanguageUpdates(): Promise<void> {
-    try {
-      const registry = await fetchLanguageRegistryFromUrl();
-      const newSupported = registry.supported.filter((item) => !languageOptions.includes(item as typeof languageOptions[number]));
-      setLanguageRoadmapPreview(registry.roadmap.slice(0, 8));
-      setLanguageRegistryStatus(
-        newSupported.length > 0
-          ? `Detected ${newSupported.length} new language pack candidate(s): ${newSupported.join(", ")}.`
-          : `Language packs are up to date. Roadmap candidates: ${registry.roadmap.length}.`
-      );
-    } catch {
-      setLanguageRegistryStatus("Unable to check for language updates right now.");
-    }
+    await executeGuiCliBoundCommand("courseforge settings language registry check", async () => {
+      try {
+        const registry = await fetchLanguageRegistryFromUrl();
+        const newSupported = registry.supported.filter((item) => !languageOptions.includes(item as typeof languageOptions[number]));
+        setLanguageRoadmapPreview(registry.roadmap.slice(0, 8));
+        setLanguageRegistryStatus(
+          newSupported.length > 0
+            ? `Detected ${newSupported.length} new language pack candidate(s): ${newSupported.join(", ")}.`
+            : `Language packs are up to date. Roadmap candidates: ${registry.roadmap.length}.`
+        );
+      } catch {
+        setLanguageRegistryStatus("Unable to check for language updates right now.");
+      }
+    });
   }
 
   async function resolveKnownUpdateVersions(
@@ -1111,10 +1155,11 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   }
 
   async function handleCheckForUpdates(): Promise<void> {
-    setIsCheckingUpdate(true);
-    setUpdateCheckStatus(null);
-    setLatestReleaseUrl(null);
-    try {
+    await executeGuiCliBoundCommand("courseforge settings updater check", async () => {
+      setIsCheckingUpdate(true);
+      setUpdateCheckStatus(null);
+      setLatestReleaseUrl(null);
+      try {
       const response = await fetch(toNoStoreApiUrl("/api/check-for-updates"), { cache: "no-store" });
       const contentType = response.headers.get("content-type") || "";
       let data: {
@@ -1247,7 +1292,7 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
       } else {
         setUpdateCheckStatus(`Already up to date. You're running ${formatVersionLabel(resolvedCurrentVersion)}.`);
       }
-    } catch (error) {
+      } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown request failure";
 
       const knownVersions = await resolveKnownUpdateVersions(currentAppVersion, latestAvailableVersion);
@@ -1262,9 +1307,10 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
 
       setUpdateCheckStatus(`Unable to check for updates right now (${errorMessage}).`);
       void refreshUpdaterDiagnostics();
-    } finally {
-      setIsCheckingUpdate(false);
-    }
+      } finally {
+        setIsCheckingUpdate(false);
+      }
+    });
   }
 
   const bestLatestVersion = (() => {
@@ -1718,8 +1764,12 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
                   checked={metadataSharingEnabled}
                   onChange={(event) => {
                     const enabled = event.target.checked;
-                    setMetadataCorrectionSharingEnabled(enabled);
-                    setMetadataSharingEnabled(enabled);
+                    void executeGuiCliBoundCommand("courseforge settings metadata sharing toggle", () => {
+                      setMetadataCorrectionSharingEnabled(enabled);
+                      setMetadataSharingEnabled(enabled);
+                    }, {
+                      enabled,
+                    });
                   }}
                 />
                 Share corrections to improve accuracy for everyone.

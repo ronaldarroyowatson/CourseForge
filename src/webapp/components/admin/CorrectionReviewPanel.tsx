@@ -5,6 +5,7 @@ import {
   listCorrectionsAdmin,
   reviewCorrectionsAdmin,
 } from "../../../core/services/adminFirestoreService";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 
 interface FiltersState {
   publisher: string;
@@ -69,37 +70,44 @@ export function CorrectionReviewPanel(): React.JSX.Element {
   );
 
   const loadRecords = useCallback(async (): Promise<void> => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await listCorrectionsAdmin({
-        page,
-        pageSize,
-        sortBy,
-        sortDirection,
-        filters: {
-          publisher: filters.publisher.trim() || undefined,
-          pageType: filters.pageType,
-          source: filters.source,
-          reviewStatus: filters.reviewStatus,
-          flaggedOnly: filters.flaggedOnly,
-          confidenceMin: toNumber(filters.confidenceMin),
-          confidenceMax: toNumber(filters.confidenceMax),
-          dateFrom: filters.dateFrom || undefined,
-          dateTo: filters.dateTo || undefined,
-        },
-      });
+    await executeGuiCliBoundCommand("courseforge admin corrections review refresh", async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await listCorrectionsAdmin({
+          page,
+          pageSize,
+          sortBy,
+          sortDirection,
+          filters: {
+            publisher: filters.publisher.trim() || undefined,
+            pageType: filters.pageType,
+            source: filters.source,
+            reviewStatus: filters.reviewStatus,
+            flaggedOnly: filters.flaggedOnly,
+            confidenceMin: toNumber(filters.confidenceMin),
+            confidenceMax: toNumber(filters.confidenceMax),
+            dateFrom: filters.dateFrom || undefined,
+            dateTo: filters.dateTo || undefined,
+          },
+        });
 
-      setRecords(response.items);
-      setTotal(response.total);
-      if (response.items.length > 0 && !selectedRecordId) {
-        setSelectedRecordId(response.items[0].id);
+        setRecords(response.items);
+        setTotal(response.total);
+        if (response.items.length > 0 && !selectedRecordId) {
+          setSelectedRecordId(response.items[0].id);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to load correction records.");
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load correction records.");
-    } finally {
-      setLoading(false);
-    }
+    }, {
+      page,
+      sortBy,
+      sortDirection,
+      reviewStatus: filters.reviewStatus,
+    });
   }, [filters, page, pageSize, selectedRecordId, sortBy, sortDirection]);
 
   useEffect(() => {
@@ -173,15 +181,19 @@ export function CorrectionReviewPanel(): React.JSX.Element {
       return;
     }
 
-    try {
-      setError(null);
-      const result = await reviewCorrectionsAdmin({ action, recordIds: ids });
-      setStatus(`${result.updated} record(s) updated.`);
-      setSelectedIds(new Set());
-      await loadRecords();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Bulk action failed.");
-    }
+    await executeGuiCliBoundCommand(`courseforge admin corrections review bulk ${action}`, async () => {
+      try {
+        setError(null);
+        const result = await reviewCorrectionsAdmin({ action, recordIds: ids });
+        setStatus(`${result.updated} record(s) updated.`);
+        setSelectedIds(new Set());
+        await loadRecords();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Bulk action failed.");
+      }
+    }, {
+      count: ids.length,
+    });
   }
 
   async function runSingleAction(action: "accept" | "reject" | "modify"): Promise<void> {
@@ -189,38 +201,42 @@ export function CorrectionReviewPanel(): React.JSX.Element {
       return;
     }
 
-    try {
-      setError(null);
-      const payload = action === "modify"
-        ? {
-            action,
-            recordIds: [selectedRecord.id],
-            modifiedMetadata: {
-              title: modifyMetadata.title || null,
-              subtitle: modifyMetadata.subtitle || null,
-              edition: modifyMetadata.edition || null,
-              publisher: modifyMetadata.publisher || null,
-              series: modifyMetadata.series || null,
-              gradeLevel: modifyMetadata.gradeLevel || null,
-              subject: modifyMetadata.subject || null,
-              confidence: Math.max(0, Math.min(1, Number(modifyMetadata.confidence) || selectedRecord.finalConfidence)),
-            },
-          }
-        : {
-            action,
-            recordIds: [selectedRecord.id],
-          };
+    await executeGuiCliBoundCommand(`courseforge admin corrections review single ${action}`, async () => {
+      try {
+        setError(null);
+        const payload = action === "modify"
+          ? {
+              action,
+              recordIds: [selectedRecord.id],
+              modifiedMetadata: {
+                title: modifyMetadata.title || null,
+                subtitle: modifyMetadata.subtitle || null,
+                edition: modifyMetadata.edition || null,
+                publisher: modifyMetadata.publisher || null,
+                series: modifyMetadata.series || null,
+                gradeLevel: modifyMetadata.gradeLevel || null,
+                subject: modifyMetadata.subject || null,
+                confidence: Math.max(0, Math.min(1, Number(modifyMetadata.confidence) || selectedRecord.finalConfidence)),
+              },
+            }
+          : {
+              action,
+              recordIds: [selectedRecord.id],
+            };
 
-      const result = await reviewCorrectionsAdmin(payload as {
-        action: "accept" | "reject" | "modify";
-        recordIds: string[];
-        modifiedMetadata?: Partial<CorrectionRecord["finalMetadata"]>;
-      });
-      setStatus(`${result.updated} record(s) updated.`);
-      await loadRecords();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Review action failed.");
-    }
+        const result = await reviewCorrectionsAdmin(payload as {
+          action: "accept" | "reject" | "modify";
+          recordIds: string[];
+          modifiedMetadata?: Partial<CorrectionRecord["finalMetadata"]>;
+        });
+        setStatus(`${result.updated} record(s) updated.`);
+        await loadRecords();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Review action failed.");
+      }
+    }, {
+      recordId: selectedRecord.id,
+    });
   }
 
   function exportSelected(): void {

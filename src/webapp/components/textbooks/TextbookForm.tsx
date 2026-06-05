@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import type { RelatedIsbn, RelatedIsbnType } from "../../../core/models";
 import { uploadTextbookCoverFromDataUrl, uploadTextbookCoverImage } from "../../../core/services/coverImageService";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 import { fetchMetadataByISBN, normalizeISBN } from "../../../core/services/isbnService";
 import { findCloudTextbookByISBN } from "../../../core/services/syncService";
 import { getCurrentUser } from "../../../firebase/auth";
@@ -236,10 +237,14 @@ export function TextbookForm({
   }
 
   function handleCancelEdit(): void {
-    setSelectedTextbook(null);
-    setErrorMessage(null);
-    setSuccessMessage(null);
-    stopStream();
+    void executeGuiCliBoundCommand("courseforge textbooks edit cancel", () => {
+      setSelectedTextbook(null);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+      stopStream();
+    }, {
+      isEditMode,
+    });
   }
 
   async function fileToDataUrl(file: File): Promise<string> {
@@ -319,165 +324,177 @@ export function TextbookForm({
   // ── ISBN Lookup ──────────────────────────────────────────────────────────
 
   async function handleISBNLookup(): Promise<void> {
-    setErrorMessage(null);
-    setSuccessMessage(null);
+    await executeGuiCliBoundCommand("courseforge textbooks isbn lookup", async () => {
+      setErrorMessage(null);
+      setSuccessMessage(null);
 
-    if (!form.isbn.trim()) {
-      setErrorMessage("Please enter an ISBN before looking up.");
-      return;
-    }
-
-    try {
-      setIsLookingUpISBN(true);
-      const metadata = await fetchMetadataByISBN(form.isbn);
-
-      if (!metadata) {
-        setIsManualEntryMode(true);
-        setForm((current) => ({
-          ...INITIAL_FORM_STATE,
-          isbn: current.isbn,
-        }));
-        setErrorMessage("This ISBN is not available in public databases. Please enter the textbook details manually.");
+      if (!form.isbn.trim()) {
+        setErrorMessage("Please enter an ISBN before looking up.");
         return;
       }
 
-      setIsManualEntryMode(false);
+      try {
+        setIsLookingUpISBN(true);
+        const metadata = await fetchMetadataByISBN(form.isbn);
 
-      const parsedYear = metadata.publicationDate ? Number.parseInt(metadata.publicationDate.slice(0, 4), 10) : null;
+        if (!metadata) {
+          setIsManualEntryMode(true);
+          setForm((current) => ({
+            ...INITIAL_FORM_STATE,
+            isbn: current.isbn,
+          }));
+          setErrorMessage("This ISBN is not available in public databases. Please enter the textbook details manually.");
+          return;
+        }
 
-      setForm((current) => ({
-        ...current,
-        title: metadata.title ?? current.title,
-        edition: current.edition,
-        publicationYear: parsedYear && Number.isFinite(parsedYear)
-          ? parsedYear.toString()
-          : current.publicationYear,
-      }));
+        setIsManualEntryMode(false);
 
-      const authorList = metadata.authors?.join(", ") || "Unknown";
-      setSuccessMessage(`ISBN found! Author(s): ${authorList}. Form fields prefilled.`);
-    } catch (error) {
-      if (error instanceof Error) {
-        setErrorMessage(error.message || "Unable to look up ISBN. Please try again.");
-      } else {
-        setErrorMessage("Unable to look up ISBN. Please try again.");
+        const parsedYear = metadata.publicationDate ? Number.parseInt(metadata.publicationDate.slice(0, 4), 10) : null;
+
+        setForm((current) => ({
+          ...current,
+          title: metadata.title ?? current.title,
+          edition: current.edition,
+          publicationYear: parsedYear && Number.isFinite(parsedYear)
+            ? parsedYear.toString()
+            : current.publicationYear,
+        }));
+
+        const authorList = metadata.authors?.join(", ") || "Unknown";
+        setSuccessMessage(`ISBN found! Author(s): ${authorList}. Form fields prefilled.`);
+      } catch (error) {
+        if (error instanceof Error) {
+          setErrorMessage(error.message || "Unable to look up ISBN. Please try again.");
+        } else {
+          setErrorMessage("Unable to look up ISBN. Please try again.");
+        }
+      } finally {
+        setIsLookingUpISBN(false);
       }
-    } finally {
-      setIsLookingUpISBN(false);
-    }
+    }, {
+      isbn: form.isbn,
+      mode: entryMode,
+    });
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    setErrorMessage(null);
-    setSuccessMessage(null);
+    await executeGuiCliBoundCommand("courseforge textbooks save", async () => {
+      setErrorMessage(null);
+      setSuccessMessage(null);
 
-    const parsedYear = Number(form.publicationYear);
-    if (!Number.isInteger(parsedYear) || parsedYear <= 0) {
-      setErrorMessage("Publication year must be a valid whole number.");
-      return;
-    }
-
-    const isbnRaw = form.isbn.trim();
-    const isbnNormalized = normalizeISBN(isbnRaw);
-    const validRelatedIsbns = relatedIsbns.filter((r) => r.isbn.trim().length > 0);
-
-    try {
-      setIsSaving(true);
-
-      if (isEditMode && selectedTextbook) {
-        let coverImageUrl = selectedTextbook.coverImageUrl ?? null;
-        if (authMode === "local") {
-          if (coverDataUrl) {
-            coverImageUrl = coverDataUrl;
-          } else if (coverFile) {
-            coverImageUrl = await fileToDataUrl(coverFile);
-          }
-        } else if (coverFile) {
-          coverImageUrl = await uploadTextbookCoverImage(selectedTextbook.id, coverFile);
-        } else if (coverDataUrl) {
-          coverImageUrl = await uploadTextbookCoverFromDataUrl(selectedTextbook.id, coverDataUrl);
-        }
-
-        await editTextbook(selectedTextbook.id, {
-          title: form.title.trim(),
-          grade: form.grade.trim(),
-          subject: form.subject.trim(),
-          edition: form.edition.trim(),
-          publicationYear: parsedYear,
-          isbnRaw,
-          isbnNormalized,
-          relatedIsbns: validRelatedIsbns,
-          platformUrl: form.platformUrl.trim() || undefined,
-          coverImageUrl,
-        });
-        setSelectedTextbook(null);
-      } else {
-        const existingLocal = await findDuplicateTextbook({
-          isbnRaw,
-          title: form.title.trim(),
-          grade: form.grade.trim(),
-          publisher: "",
-          seriesName: "",
-          publicationYear: parsedYear,
-        });
-
-        if (existingLocal) {
-          const shouldContinue = window.confirm("A textbook with this ISBN already exists. Upload anyway?");
-          if (!shouldContinue) {
-            setErrorMessage("Upload canceled to avoid creating a duplicate textbook.");
-            return;
-          }
-        }
-
-        if (isbnRaw) {
-          const currentUser = getCurrentUser();
-          if (currentUser?.uid) {
-            try {
-              const existingCloud = await findCloudTextbookByISBN(currentUser.uid, isbnRaw);
-              if (existingCloud) {
-                setErrorMessage("A textbook with this ISBN already exists in your cloud library.");
-                return;
-              }
-            } catch {
-              // Cloud duplicate checks are best-effort and should not block local-first saves.
-            }
-          }
-        }
-
-        await createTextbook({
-          sourceType: "manual",
-          originalLanguage: language,
-          title: form.title.trim(),
-          grade: form.grade.trim(),
-          subject: form.subject.trim(),
-          edition: form.edition.trim(),
-          publicationYear: parsedYear,
-          isbnRaw,
-          isbnNormalized,
-          relatedIsbns: validRelatedIsbns,
-          platformUrl: form.platformUrl.trim() || undefined,
-          coverImageUrl: null,
-          coverFile: coverFile ?? undefined,
-          coverDataUrl: coverDataUrl ?? undefined,
-        });
-
-        setForm(INITIAL_FORM_STATE);
-        setRelatedIsbns([]);
-        setCoverPreviewUrl(null);
-        setCoverFile(null);
-        setCoverDataUrl(null);
-        setIsManualEntryMode(false);
-        setEntryMode("choose");
-        onSetupModeChange?.("choose");
+      const parsedYear = Number(form.publicationYear);
+      if (!Number.isInteger(parsedYear) || parsedYear <= 0) {
+        setErrorMessage("Publication year must be a valid whole number.");
+        return;
       }
 
-      onSaved();
-    } catch {
-      setErrorMessage("Unable to save textbook. Please try again.");
-    } finally {
-      setIsSaving(false);
-    }
+      const isbnRaw = form.isbn.trim();
+      const isbnNormalized = normalizeISBN(isbnRaw);
+      const validRelatedIsbns = relatedIsbns.filter((r) => r.isbn.trim().length > 0);
+
+      try {
+        setIsSaving(true);
+
+        if (isEditMode && selectedTextbook) {
+          let coverImageUrl = selectedTextbook.coverImageUrl ?? null;
+          if (authMode === "local") {
+            if (coverDataUrl) {
+              coverImageUrl = coverDataUrl;
+            } else if (coverFile) {
+              coverImageUrl = await fileToDataUrl(coverFile);
+            }
+          } else if (coverFile) {
+            coverImageUrl = await uploadTextbookCoverImage(selectedTextbook.id, coverFile);
+          } else if (coverDataUrl) {
+            coverImageUrl = await uploadTextbookCoverFromDataUrl(selectedTextbook.id, coverDataUrl);
+          }
+
+          await editTextbook(selectedTextbook.id, {
+            title: form.title.trim(),
+            grade: form.grade.trim(),
+            subject: form.subject.trim(),
+            edition: form.edition.trim(),
+            publicationYear: parsedYear,
+            isbnRaw,
+            isbnNormalized,
+            relatedIsbns: validRelatedIsbns,
+            platformUrl: form.platformUrl.trim() || undefined,
+            coverImageUrl,
+          });
+          setSelectedTextbook(null);
+        } else {
+          const existingLocal = await findDuplicateTextbook({
+            isbnRaw,
+            title: form.title.trim(),
+            grade: form.grade.trim(),
+            publisher: "",
+            seriesName: "",
+            publicationYear: parsedYear,
+          });
+
+          if (existingLocal) {
+            const shouldContinue = window.confirm("A textbook with this ISBN already exists. Upload anyway?");
+            if (!shouldContinue) {
+              setErrorMessage("Upload canceled to avoid creating a duplicate textbook.");
+              return;
+            }
+          }
+
+          if (isbnRaw) {
+            const currentUser = getCurrentUser();
+            if (currentUser?.uid) {
+              try {
+                const existingCloud = await findCloudTextbookByISBN(currentUser.uid, isbnRaw);
+                if (existingCloud) {
+                  setErrorMessage("A textbook with this ISBN already exists in your cloud library.");
+                  return;
+                }
+              } catch {
+                // Cloud duplicate checks are best-effort and should not block local-first saves.
+              }
+            }
+          }
+
+          await createTextbook({
+            sourceType: "manual",
+            originalLanguage: language,
+            title: form.title.trim(),
+            grade: form.grade.trim(),
+            subject: form.subject.trim(),
+            edition: form.edition.trim(),
+            publicationYear: parsedYear,
+            isbnRaw,
+            isbnNormalized,
+            relatedIsbns: validRelatedIsbns,
+            platformUrl: form.platformUrl.trim() || undefined,
+            coverImageUrl: null,
+            coverFile: coverFile ?? undefined,
+            coverDataUrl: coverDataUrl ?? undefined,
+          });
+
+          setForm(INITIAL_FORM_STATE);
+          setRelatedIsbns([]);
+          setCoverPreviewUrl(null);
+          setCoverFile(null);
+          setCoverDataUrl(null);
+          setIsManualEntryMode(false);
+          setEntryMode("choose");
+          onSetupModeChange?.("choose");
+        }
+
+        onSaved();
+      } catch {
+        setErrorMessage("Unable to save textbook. Please try again.");
+      } finally {
+        setIsSaving(false);
+      }
+    }, {
+      isEditMode,
+      mode: entryMode,
+      isbn: form.isbn,
+      title: form.title,
+    });
   }
 
   return (
@@ -490,6 +507,7 @@ export function TextbookForm({
             type="button"
             className={`textbook-entry-mode-card ${isLocalOnlySession ? "textbook-entry-mode-card--locked" : ""}`}
             onClick={() => {
+              void executeGuiCliBoundCommand("courseforge textbooks mode auto", () => {
               if (isLocalOnlySession) {
                 setErrorMessage("Auto mode is unavailable in local-only accounts.");
                 return;
@@ -498,6 +516,7 @@ export function TextbookForm({
               onSetupModeChange?.("auto");
               setErrorMessage(null);
               setSuccessMessage(null);
+              }, { isLocalOnlySession });
             }}
             aria-disabled={isLocalOnlySession}
             disabled={isLocalOnlySession}
@@ -510,10 +529,12 @@ export function TextbookForm({
             type="button"
             className="textbook-entry-mode-card"
             onClick={() => {
-              setEntryMode("manual");
-              onSetupModeChange?.("manual");
-              setErrorMessage(null);
-              setSuccessMessage(null);
+              void executeGuiCliBoundCommand("courseforge textbooks mode manual", () => {
+                setEntryMode("manual");
+                onSetupModeChange?.("manual");
+                setErrorMessage(null);
+                setSuccessMessage(null);
+              });
             }}
           >
             <strong>Manual</strong>
@@ -529,10 +550,12 @@ export function TextbookForm({
               runtime={runtime}
               onSaved={onSaved}
               onSwitchToManual={() => {
-                setEntryMode("manual");
-                onSetupModeChange?.("manual");
-                setErrorMessage(null);
-                setSuccessMessage(null);
+                void executeGuiCliBoundCommand("courseforge textbooks mode manual", () => {
+                  setEntryMode("manual");
+                  onSetupModeChange?.("manual");
+                  setErrorMessage(null);
+                  setSuccessMessage(null);
+                });
               }}
               externalNavigationRequest={autoFlowNavigationRequest}
               onProgressChange={onAutoProgressChange}
@@ -755,10 +778,12 @@ export function TextbookForm({
               type="button"
               className="btn-secondary"
               onClick={() => {
-                setEntryMode("choose");
-                onSetupModeChange?.("choose");
-                setErrorMessage(null);
-                setSuccessMessage(null);
+                void executeGuiCliBoundCommand("courseforge textbooks mode choose", () => {
+                  setEntryMode("choose");
+                  onSetupModeChange?.("choose");
+                  setErrorMessage(null);
+                  setSuccessMessage(null);
+                });
               }}
               disabled={isSaving}
             >

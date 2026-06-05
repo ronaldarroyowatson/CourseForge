@@ -8,6 +8,22 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 
+async function loginAsTeacher(env: NodeJS.ProcessEnv) {
+  await execFileAsync(process.execPath, [
+    "scripts/program-cli.mjs",
+    "login",
+    "--role",
+    "teacher",
+    "--uid",
+    "dsc-teacher-uid",
+    "--email",
+    "teacher@courseforge.test",
+  ], {
+    cwd: process.cwd(),
+    env,
+  });
+}
+
 describe("program CLI DSC workflow", () => {
   let tempLocalAppData = "";
 
@@ -24,6 +40,8 @@ describe("program CLI DSC workflow", () => {
       ...process.env,
       LOCALAPPDATA: tempLocalAppData,
     };
+
+    await loginAsTeacher(env);
 
     await execFileAsync(process.execPath, ["scripts/program-cli.mjs", "debug", "dsc", "enable"], {
       cwd: process.cwd(),

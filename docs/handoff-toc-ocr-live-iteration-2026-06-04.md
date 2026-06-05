@@ -204,3 +204,109 @@ The cloud OCR smoke gate can stall under provider throttling windows even with b
 3. existing cloud smoke diagnostics and retry controls already documented in `docs/ocr-live-ci-loop.md`.
 
 If throttling clears, rerun `npm run test:smoke:ocr:cloud:gate` to append a fresh provider-health confirmation for this exact tag.
+
+## Update: 2026-06-05 (Synced Main For Next Session)
+
+### Current synced state
+
+1. Branch and remote are synced on `main`.
+2. Latest handoff commit for this cycle:
+   - `b01f6b1` (Improve TOC OCR crop guidance and stabilize test gates).
+3. Workspace version at validation time: `1.7.103`.
+4. Working tree was clean at handoff.
+
+### What was finalized in this cycle
+
+1. Product-side dynamic crop guidance expanded in auto TOC flow:
+   - two-column region guidance,
+   - guided-expanded crop bounds safety,
+   - stronger candidate ranking signals.
+2. Core TOC parsing/crop reliability updates:
+   - two-column TOC region detector,
+   - ancillary section migration safeguards to preserve module-local structure,
+   - OCR artifact normalization updates for drifted ancillary labels.
+3. Test stabilization and coverage updates:
+   - new two-column detector test,
+   - TOC preview pipeline regressions fixed,
+   - settings updater integration mock updated for OCR cooldown getter.
+4. Live-iteration tooling/docs kept in repo:
+   - `scripts/ocr-live-iterate.ts`,
+   - `scripts/ocr-live-debug.ts` enhancements,
+   - `docs/ocr-live-iteration-log.md`,
+   - `docs/ocr-live-ci-loop.md`,
+   - `docs/ocr-gold/toc-page1-gold.txt`.
+
+### Validation status at handoff
+
+Passed:
+
+1. `npm run typecheck:all`
+2. `npm run test:index`
+3. `npm run test:samples:validate`
+4. `npm run build`
+5. `npm run test:e2e:comprehensive` (EXIT 0)
+
+Operational caveat:
+
+1. `npm run test:smoke:ocr:cloud:gate` may be blocked by external GitHub model throttling windows (long wait intervals). This is not currently a parser/crop correctness blocker.
+
+## Next Session Start Here
+
+### A. Sync + sanity boot (first 5 minutes)
+
+1. Pull latest:
+   - `git checkout main && git pull --ff-only`
+2. Confirm clean state:
+   - `git status --short`
+3. Quick confidence checks:
+   - `npm run typecheck:all`
+   - `npx vitest run tests/core/tocPreviewPipeline.test.ts`
+   - `npx vitest run tests/core/textbookAutoExtractionService.test.ts`
+
+### B. Live testing on the actual installed CourseForge (local machine)
+
+Goal: validate TOC extraction behavior end-to-end in the installed app, not only dev/integration harness.
+
+1. Launch the installed CourseForge app (not dev web server) on macOS.
+2. Navigate to Textbooks auto setup in the installed app.
+3. Use the real live McGraw tab/page as capture source.
+4. Run at least 3 back-to-back TOC captures using the same framing strategy.
+5. For each run, record:
+   - module count and ordering,
+   - whether Module 3 is present and correctly grouped,
+   - ancillary presence consistency (CER + SEP/Go Further per module),
+   - obvious cross-module contamination,
+   - whether fallback/cooldown behavior is visible.
+6. Save/append run notes into:
+   - `docs/ocr-live-iteration-log.md`
+
+### C. Iteration workflow for live OCR tuning
+
+Use this loop each cycle:
+
+1. Reproduce from installed app live capture and document observed failure shape.
+2. Reproduce in harness using nearest fixture and update/add focused tests first.
+3. Apply minimal parser/crop fix.
+4. Run focused gates:
+   - `npx vitest run tests/core/tocPreviewPipeline.test.ts`
+   - `npx vitest run tests/core/textbookAutoExtractionService.test.ts`
+   - `npx vitest run tests/integration/autoTextbookFlow.integration.test.tsx`
+5. Re-test on installed app with same live page framing.
+6. Append run result and deltas to `docs/ocr-live-iteration-log.md`.
+7. When stable, run full gate:
+   - `npm run bugfix:test`
+
+### D. Recommended run matrix per session
+
+1. Fast local parser/crop checks:
+   - `npm run ocr:ci:loop:fast`
+2. Full CI-assisted loop when preparing release confidence:
+   - `npm run ocr:ci:loop -- --description "TOC OCR live iteration" --ref <branch-or-tag>`
+
+### E. Acceptance criteria for continuing/releasing
+
+1. Installed-app live run keeps module structure intact (no chapter/module duplication or cross-module contamination).
+2. Module 3 is present and correctly grouped.
+3. Ancillary consistency is acceptable across modules (no major asymmetric CER/SEP omissions).
+4. Core/integration OCR tests pass locally.
+5. Full bugfix gate passes, except external throttle-only cloud gate delays (must be documented in the run log if deferred).

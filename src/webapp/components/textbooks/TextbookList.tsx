@@ -16,6 +16,7 @@ import {
   getTextbookContentStatsMap,
   type TextbookContentStats,
 } from "../../../core/services/repositories/textbookRepository";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 import { useRepositories } from "../../hooks/useRepositories";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
@@ -210,191 +211,218 @@ export function TextbookList({
       return;
     }
 
-    onDeleted(id);
+    await executeGuiCliBoundCommand("courseforge textbooks delete", async () => {
+      onDeleted(id);
 
-    try {
-      await scheduleTextbookDelete(id, deleteRetentionMs);
-    } catch {
-      setErrorMessage("Unable to schedule textbook deletion.");
-      onRefresh();
-    }
+      try {
+        await scheduleTextbookDelete(id, deleteRetentionMs);
+      } catch {
+        setErrorMessage("Unable to schedule textbook deletion.");
+        onRefresh();
+      }
+    }, {
+      textbookId: id,
+      retentionMs: deleteRetentionMs,
+    });
   }
 
   async function handleRetrySync(textbookId: string): Promise<void> {
-    setErrorMessage(null);
-    // Clear any stale write-budget-exceeded flag so the retry can proceed.
-    // The accumulated write count is preserved; only the blocked gate is lifted.
-    clearWriteBudgetForManualRetry();
-    updateRetrySyncProgress(textbookId, 8, "Preparing retry...", "info");
-    setRetrySyncInProgress((prev) => new Set(prev).add(textbookId));
+    await executeGuiCliBoundCommand("courseforge textbooks sync retry", async () => {
+      setErrorMessage(null);
+      // Clear any stale write-budget-exceeded flag so the retry can proceed.
+      // The accumulated write count is preserved; only the blocked gate is lifted.
+      clearWriteBudgetForManualRetry();
+      updateRetrySyncProgress(textbookId, 8, "Preparing retry...", "info");
+      setRetrySyncInProgress((prev) => new Set(prev).add(textbookId));
 
-    try {
-      const diagnostics = await getPendingSyncDiagnostics();
-      const batchLimit = Math.max(1, getSyncWriteBatchLimit());
-      const throttleDelayMs = Math.max(RETRY_SYNC_WINDOW_DELAY_MS, getSyncThrottleWindowMs() + 500);
-      const initialPending = Math.max(0, diagnostics.pendingCount);
-      const estimatedBatchTotal = Math.max(1, Math.ceil(Math.max(initialPending, 1) / batchLimit));
-      const maxAttempts = Math.max(estimatedBatchTotal * 3, 6);
+      try {
+        const diagnostics = await getPendingSyncDiagnostics();
+        const batchLimit = Math.max(1, getSyncWriteBatchLimit());
+        const throttleDelayMs = Math.max(RETRY_SYNC_WINDOW_DELAY_MS, getSyncThrottleWindowMs() + 500);
+        const initialPending = Math.max(0, diagnostics.pendingCount);
+        const estimatedBatchTotal = Math.max(1, Math.ceil(Math.max(initialPending, 1) / batchLimit));
+        const maxAttempts = Math.max(estimatedBatchTotal * 3, 6);
 
-      let previousPending = initialPending;
-      let stalledAttempts = 0;
+        let previousPending = initialPending;
+        let stalledAttempts = 0;
 
-      const waitForNextWindow = async (basePercent: number, reason: string): Promise<void> => {
-        const totalTicks = Math.max(1, Math.ceil(throttleDelayMs / RETRY_SYNC_TICK_MS));
+        const waitForNextWindow = async (basePercent: number, reason: string): Promise<void> => {
+          const totalTicks = Math.max(1, Math.ceil(throttleDelayMs / RETRY_SYNC_TICK_MS));
 
-        for (let tick = totalTicks; tick >= 1; tick -= 1) {
+          for (let tick = totalTicks; tick >= 1; tick -= 1) {
+            updateRetrySyncProgress(
+              textbookId,
+              Math.min(98, basePercent),
+              `${reason} Next batch window in ${tick}s.`,
+              "warning"
+            );
+
+            await new Promise<void>((resolve) => {
+              setTimeout(() => resolve(), RETRY_SYNC_TICK_MS);
+            });
+          }
+        };
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          const currentBatch = Math.min(estimatedBatchTotal, Math.max(1, Math.ceil((attempt + 1) / 2)));
           updateRetrySyncProgress(
             textbookId,
-            Math.min(98, basePercent),
-            `${reason} Next batch window in ${tick}s.`,
-            "warning"
+            Math.min(85, 10 + attempt * 6),
+            `Preparing batch ${currentBatch} of ${estimatedBatchTotal}...`,
+            "info"
           );
 
-          await new Promise<void>((resolve) => {
-            setTimeout(() => resolve(), RETRY_SYNC_TICK_MS);
-          });
-        }
-      };
+          const startedAt = Date.now();
+          const syncResult = await syncNow({ superAdminSyncBypass: isSuperAdmin });
+          const elapsedSeconds = Math.max((Date.now() - startedAt) / 1000, 0.001);
 
-      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        const currentBatch = Math.min(estimatedBatchTotal, Math.max(1, Math.ceil((attempt + 1) / 2)));
-        updateRetrySyncProgress(
-          textbookId,
-          Math.min(85, 10 + attempt * 6),
-          `Preparing batch ${currentBatch} of ${estimatedBatchTotal}...`,
-          "info"
-        );
-
-        const startedAt = Date.now();
-        const syncResult = await syncNow({ superAdminSyncBypass: isSuperAdmin });
-        const elapsedSeconds = Math.max((Date.now() - startedAt) / 1000, 0.001);
-
-        if (syncResult.throttled) {
-          await waitForNextWindow(76, "Upload queued. Waiting for sync window.");
-          continue;
-        }
-
-        if (syncResult.permissionDenied) {
-          updateRetrySyncProgress(textbookId, 24, `Upload blocked: ${syncResult.message}`, "error");
-          setErrorMessage(syncResult.message);
-          break;
-        }
-
-        if (syncResult.writeBudgetExceeded || syncResult.readBudgetExceeded) {
-          updateRetrySyncProgress(textbookId, 64, `Upload paused: ${syncResult.message}`, "warning");
-          setErrorMessage(syncResult.message);
-          break;
-        }
-
-        if (!syncResult.success) {
-          if (syncResult.retryable) {
-            updateRetrySyncProgress(textbookId, 84, `Upload pending retry: ${syncResult.message}`, "warning");
-            await waitForNextWindow(84, "Preparing next retry attempt.");
+          if (syncResult.throttled) {
+            await waitForNextWindow(76, "Upload queued. Waiting for sync window.");
             continue;
           }
 
-          updateRetrySyncProgress(textbookId, 40, `Upload failed: ${syncResult.message}`, "error");
-          setErrorMessage(syncResult.message);
-          break;
-        }
+          if (syncResult.permissionDenied) {
+            updateRetrySyncProgress(textbookId, 24, `Upload blocked: ${syncResult.message}`, "error");
+            setErrorMessage(syncResult.message);
+            break;
+          }
 
-        const pendingNow = Math.max(0, syncResult.pendingCount);
-        const uploadedThisBatch = Math.max(previousPending - pendingNow, syncResult.syncRunWriteCount ?? 0);
-        const uploadedTotal = Math.max(0, initialPending - pendingNow);
-        const completedBatches = Math.max(1, Math.ceil(Math.max(1, uploadedTotal) / batchLimit));
-        const throughput = uploadedThisBatch > 0 ? uploadedThisBatch / elapsedSeconds : 0;
+          if (syncResult.writeBudgetExceeded || syncResult.readBudgetExceeded) {
+            updateRetrySyncProgress(textbookId, 64, `Upload paused: ${syncResult.message}`, "warning");
+            setErrorMessage(syncResult.message);
+            break;
+          }
 
-        if (pendingNow === 0) {
+          if (!syncResult.success) {
+            if (syncResult.retryable) {
+              updateRetrySyncProgress(textbookId, 84, `Upload pending retry: ${syncResult.message}`, "warning");
+              await waitForNextWindow(84, "Preparing next retry attempt.");
+              continue;
+            }
+
+            updateRetrySyncProgress(textbookId, 40, `Upload failed: ${syncResult.message}`, "error");
+            setErrorMessage(syncResult.message);
+            break;
+          }
+
+          const pendingNow = Math.max(0, syncResult.pendingCount);
+          const uploadedThisBatch = Math.max(previousPending - pendingNow, syncResult.syncRunWriteCount ?? 0);
+          const uploadedTotal = Math.max(0, initialPending - pendingNow);
+          const completedBatches = Math.max(1, Math.ceil(Math.max(1, uploadedTotal) / batchLimit));
+          const throughput = uploadedThisBatch > 0 ? uploadedThisBatch / elapsedSeconds : 0;
+
+          if (pendingNow === 0) {
+            updateRetrySyncProgress(
+              textbookId,
+              100,
+              `Upload complete. Final batch ${Math.min(completedBatches, estimatedBatchTotal)} of ${estimatedBatchTotal} uploaded ${uploadedThisBatch} items at ${throughput.toFixed(1)} items/s.`,
+              "success"
+            );
+            break;
+          }
+
+          const completionPercent = initialPending > 0
+            ? Math.round(Math.min(96, 20 + (uploadedTotal / initialPending) * 70))
+            : 90;
+
           updateRetrySyncProgress(
             textbookId,
-            100,
-            `Upload complete. Final batch ${Math.min(completedBatches, estimatedBatchTotal)} of ${estimatedBatchTotal} uploaded ${uploadedThisBatch} items at ${throughput.toFixed(1)} items/s.`,
-            "success"
+            completionPercent,
+            `Batch ${Math.min(completedBatches, estimatedBatchTotal)} of ${estimatedBatchTotal} uploaded ${uploadedThisBatch} items at ${throughput.toFixed(1)} items/s. ${pendingNow} items remaining.`,
+            "info"
           );
-          break;
+
+          if (pendingNow >= previousPending) {
+            stalledAttempts += 1;
+          } else {
+            stalledAttempts = 0;
+          }
+
+          if (stalledAttempts >= 2) {
+            updateRetrySyncProgress(
+              textbookId,
+              88,
+              `Upload stalled with ${pendingNow} pending items. Sync will continue in background windows.`,
+              "warning"
+            );
+            break;
+          }
+
+          previousPending = pendingNow;
+          await waitForNextWindow(completionPercent, "Batch complete.");
         }
 
-        const completionPercent = initialPending > 0
-          ? Math.round(Math.min(96, 20 + (uploadedTotal / initialPending) * 70))
-          : 90;
-
-        updateRetrySyncProgress(
-          textbookId,
-          completionPercent,
-          `Batch ${Math.min(completedBatches, estimatedBatchTotal)} of ${estimatedBatchTotal} uploaded ${uploadedThisBatch} items at ${throughput.toFixed(1)} items/s. ${pendingNow} items remaining.`,
-          "info"
-        );
-
-        if (pendingNow >= previousPending) {
-          stalledAttempts += 1;
-        } else {
-          stalledAttempts = 0;
-        }
-
-        if (stalledAttempts >= 2) {
-          updateRetrySyncProgress(
-            textbookId,
-            88,
-            `Upload stalled with ${pendingNow} pending items. Sync will continue in background windows.`,
-            "warning"
-          );
-          break;
-        }
-
-        previousPending = pendingNow;
-        await waitForNextWindow(completionPercent, "Batch complete.");
+        onRefresh();
+      } catch {
+        updateRetrySyncProgress(textbookId, 40, "Unable to retry cloud sync. Please try again.", "error");
+        setErrorMessage("Unable to retry cloud sync. Please try again.");
+      } finally {
+        setRetrySyncInProgress((prev) => {
+          const next = new Set(prev);
+          next.delete(textbookId);
+          return next;
+        });
       }
-
-      onRefresh();
-    } catch {
-      updateRetrySyncProgress(textbookId, 40, "Unable to retry cloud sync. Please try again.", "error");
-      setErrorMessage("Unable to retry cloud sync. Please try again.");
-    } finally {
-      setRetrySyncInProgress((prev) => {
-        const next = new Set(prev);
-        next.delete(textbookId);
-        return next;
-      });
-    }
+    }, {
+      textbookId,
+    });
   }
 
   async function handleRecoverCover(textbookId: string): Promise<void> {
-    setRecoverCoverFailed((prev) => { const next = new Set(prev); next.delete(textbookId); return next; });
-    setRecoverCoverInProgress((prev) => new Set(prev).add(textbookId));
-    try {
-      const recovered = await recoverTextbookCover(textbookId);
-      if (!recovered) {
+    await executeGuiCliBoundCommand("courseforge textbooks cover recover", async () => {
+      setRecoverCoverFailed((prev) => { const next = new Set(prev); next.delete(textbookId); return next; });
+      setRecoverCoverInProgress((prev) => new Set(prev).add(textbookId));
+      try {
+        const recovered = await recoverTextbookCover(textbookId);
+        if (!recovered) {
+          setRecoverCoverFailed((prev) => new Set(prev).add(textbookId));
+        } else {
+          onRefresh();
+        }
+      } catch {
         setRecoverCoverFailed((prev) => new Set(prev).add(textbookId));
-      } else {
-        onRefresh();
+      } finally {
+        setRecoverCoverInProgress((prev) => { const next = new Set(prev); next.delete(textbookId); return next; });
       }
-    } catch {
-      setRecoverCoverFailed((prev) => new Set(prev).add(textbookId));
-    } finally {
-      setRecoverCoverInProgress((prev) => { const next = new Set(prev); next.delete(textbookId); return next; });
-    }
+    }, {
+      textbookId,
+    });
   }
 
   async function handleToggleFavorite(textbook: Textbook): Promise<void> {
-    try {
-      await toggleTextbookFavorite(textbook.id, !textbook.isFavorite);
-      onRefresh();
-    } catch {
-      setErrorMessage("Unable to update favorite status.");
-    }
+    await executeGuiCliBoundCommand("courseforge textbooks favorite toggle", async () => {
+      try {
+        await toggleTextbookFavorite(textbook.id, !textbook.isFavorite);
+        onRefresh();
+      } catch {
+        setErrorMessage("Unable to update favorite status.");
+      }
+    }, {
+      textbookId: textbook.id,
+      isFavorite: !textbook.isFavorite,
+    });
   }
 
   async function handleToggleArchive(textbook: Textbook): Promise<void> {
-    try {
-      await toggleTextbookArchive(textbook.id, !textbook.isArchived);
-      onRefresh();
-    } catch {
-      setErrorMessage("Unable to update archive status.");
-    }
+    await executeGuiCliBoundCommand("courseforge textbooks archive toggle", async () => {
+      try {
+        await toggleTextbookArchive(textbook.id, !textbook.isArchived);
+        onRefresh();
+      } catch {
+        setErrorMessage("Unable to update archive status.");
+      }
+    }, {
+      textbookId: textbook.id,
+      isArchived: !textbook.isArchived,
+    });
   }
 
   function handleEdit(textbook: Textbook): void {
-    setSelectedTextbook(textbook);
+    void executeGuiCliBoundCommand("courseforge textbooks edit start", () => {
+      setSelectedTextbook(textbook);
+    }, {
+      textbookId: textbook.id,
+    });
   }
 
   const sorted = sortTextbooks(textbooks);
@@ -439,7 +467,13 @@ export function TextbookList({
       <div className="nav-button-row">
         <button
           type="button"
-          onClick={onContinueToSections}
+          onClick={() => {
+            void executeGuiCliBoundCommand("courseforge textbooks sections continue", () => {
+              onContinueToSections();
+            }, {
+              selectedTextbookId,
+            });
+          }}
           disabled={!selectedTextbookId}
           aria-label="Continue to sections"
         >
@@ -539,7 +573,13 @@ export function TextbookList({
               <div className="textbook-row__actions">
                 <button
                   type="button"
-                  onClick={() => onSelectTextbook(textbook.id)}
+                  onClick={() => {
+                    void executeGuiCliBoundCommand("courseforge textbooks select", () => {
+                      onSelectTextbook(textbook.id);
+                    }, {
+                      textbookId: textbook.id,
+                    });
+                  }}
                   disabled={selectedTextbookId === textbook.id}
                 >
                   {selectedTextbookId === textbook.id ? "Selected" : "Select"}

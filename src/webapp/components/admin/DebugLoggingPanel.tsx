@@ -6,6 +6,7 @@ import {
   listRecentDebugUploadsAdmin,
   setDebugLoggingPolicyAdmin,
 } from "../../../core/services";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 
 interface PolicyFormState {
   enabledGlobally: boolean;
@@ -38,22 +39,24 @@ export function DebugLoggingPanel(): React.JSX.Element {
   const [status, setStatus] = useState<string | null>(null);
 
   const loadData = useCallback(async (): Promise<void> => {
-    try {
-      setLoading(true);
-      setError(null);
-      const [nextPolicy, nextUploads] = await Promise.all([
-        getDebugLoggingPolicyAdmin(),
-        listRecentDebugUploadsAdmin(),
-      ]);
+    await executeGuiCliBoundCommand("courseforge admin debug-policy refresh", async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const [nextPolicy, nextUploads] = await Promise.all([
+          getDebugLoggingPolicyAdmin(),
+          listRecentDebugUploadsAdmin(),
+        ]);
 
-      setPolicy(nextPolicy);
-      setForm(toPolicyForm(nextPolicy));
-      setUploads(nextUploads);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load debug logging admin data.");
-    } finally {
-      setLoading(false);
-    }
+        setPolicy(nextPolicy);
+        setForm(toPolicyForm(nextPolicy));
+        setUploads(nextUploads);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to load debug logging admin data.");
+      } finally {
+        setLoading(false);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -65,44 +68,48 @@ export function DebugLoggingPanel(): React.JSX.Element {
   }
 
   async function savePolicy(): Promise<void> {
-    try {
-      setError(null);
-      setStatus(null);
-      setIsSaving(true);
+    await executeGuiCliBoundCommand("courseforge admin debug-policy save", async () => {
+      try {
+        setError(null);
+        setStatus(null);
+        setIsSaving(true);
 
-      const maxUploadBytes = Number(form.maxUploadBytes);
-      const maxLocalLogBytes = Number(form.maxLocalLogBytes);
+        const maxUploadBytes = Number(form.maxUploadBytes);
+        const maxLocalLogBytes = Number(form.maxLocalLogBytes);
 
-      if (!Number.isFinite(maxUploadBytes) || maxUploadBytes <= 0) {
-        setError("Max upload size must be a positive number.");
-        return;
+        if (!Number.isFinite(maxUploadBytes) || maxUploadBytes <= 0) {
+          setError("Max upload size must be a positive number.");
+          return;
+        }
+
+        if (!Number.isFinite(maxLocalLogBytes) || maxLocalLogBytes <= 0) {
+          setError("Max local log size must be a positive number.");
+          return;
+        }
+
+        const disabledUserIds = form.disabledUserIdsCsv
+          .split(",")
+          .map((entry) => entry.trim())
+          .filter(Boolean);
+
+        const next = await setDebugLoggingPolicyAdmin({
+          enabledGlobally: form.enabledGlobally,
+          maxUploadBytes,
+          maxLocalLogBytes,
+          disabledUserIds,
+        });
+
+        setPolicy(next);
+        setForm(toPolicyForm(next));
+        setStatus("Debug logging policy saved.");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to save debug logging policy.");
+      } finally {
+        setIsSaving(false);
       }
-
-      if (!Number.isFinite(maxLocalLogBytes) || maxLocalLogBytes <= 0) {
-        setError("Max local log size must be a positive number.");
-        return;
-      }
-
-      const disabledUserIds = form.disabledUserIdsCsv
-        .split(",")
-        .map((entry) => entry.trim())
-        .filter(Boolean);
-
-      const next = await setDebugLoggingPolicyAdmin({
-        enabledGlobally: form.enabledGlobally,
-        maxUploadBytes,
-        maxLocalLogBytes,
-        disabledUserIds,
-      });
-
-      setPolicy(next);
-      setForm(toPolicyForm(next));
-      setStatus("Debug logging policy saved.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save debug logging policy.");
-    } finally {
-      setIsSaving(false);
-    }
+    }, {
+      enabledGlobally: form.enabledGlobally,
+    });
   }
 
   return (

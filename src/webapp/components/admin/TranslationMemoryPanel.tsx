@@ -8,6 +8,7 @@ import {
   resetTranslationToAi,
 } from "../../../core/services/translationWorkflowService";
 import { upsertTranslationMemoryCloudEntry } from "../../../core/services/translationMemoryCloudService";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 
 function normalizeLanguage(value: string): string {
   const primary = value.trim().toLowerCase().split(/[-_]/)[0];
@@ -25,22 +26,26 @@ export function TranslationMemoryPanel(): React.JSX.Element {
   const [roadmapPreview, setRoadmapPreview] = React.useState<string[]>([]);
 
   async function refreshEntries(nextLanguage = language): Promise<void> {
-    setIsLoading(true);
-    setErrorMessage(null);
+    await executeGuiCliBoundCommand("courseforge admin translations memory refresh", async () => {
+      setIsLoading(true);
+      setErrorMessage(null);
 
-    try {
-      const entries = await listTranslationMemoryEntries(normalizeLanguage(nextLanguage));
-      entries.sort((left, right) => right.lastUpdated - left.lastUpdated);
-      setRows(entries);
-      setDraftTranslations(
-        Object.fromEntries(entries.map((entry) => [entry.id, entry.translatedText]))
-      );
-      setStatusMessage(`Loaded ${entries.length} translation entr${entries.length === 1 ? "y" : "ies"}.`);
-    } catch {
-      setErrorMessage("Unable to load translation memory entries right now.");
-    } finally {
-      setIsLoading(false);
-    }
+      try {
+        const entries = await listTranslationMemoryEntries(normalizeLanguage(nextLanguage));
+        entries.sort((left, right) => right.lastUpdated - left.lastUpdated);
+        setRows(entries);
+        setDraftTranslations(
+          Object.fromEntries(entries.map((entry) => [entry.id, entry.translatedText]))
+        );
+        setStatusMessage(`Loaded ${entries.length} translation entr${entries.length === 1 ? "y" : "ies"}.`);
+      } catch {
+        setErrorMessage("Unable to load translation memory entries right now.");
+      } finally {
+        setIsLoading(false);
+      }
+    }, {
+      language: normalizeLanguage(nextLanguage),
+    });
   }
 
   React.useEffect(() => {
@@ -48,61 +53,75 @@ export function TranslationMemoryPanel(): React.JSX.Element {
   }, []);
 
   async function handleOverride(entry: TranslationMemoryEntry, nextValue: string): Promise<void> {
-    setErrorMessage(null);
+    await executeGuiCliBoundCommand("courseforge admin translations memory override", async () => {
+      setErrorMessage(null);
 
-    try {
-      const updated = await applyTranslationOverride({
-        language: language,
-        termId: entry.termId,
-        sourceText: entry.sourceText,
-        translatedText: nextValue,
-        actor: "admin",
-      });
+      try {
+        const updated = await applyTranslationOverride({
+          language: language,
+          termId: entry.termId,
+          sourceText: entry.sourceText,
+          translatedText: nextValue,
+          actor: "admin",
+        });
 
-      await upsertTranslationMemoryCloudEntry(updated, "shared");
-      setRows((previous) => previous.map((row) => (row.id === entry.id ? updated : row)));
-      setDraftTranslations((previous) => ({
-        ...previous,
-        [entry.id]: updated.translatedText,
-      }));
-      setStatusMessage("Override saved and synced to shared translation memory.");
-    } catch {
-      setErrorMessage("Unable to save override right now.");
-    }
+        await upsertTranslationMemoryCloudEntry(updated, "shared");
+        setRows((previous) => previous.map((row) => (row.id === entry.id ? updated : row)));
+        setDraftTranslations((previous) => ({
+          ...previous,
+          [entry.id]: updated.translatedText,
+        }));
+        setStatusMessage("Override saved and synced to shared translation memory.");
+      } catch {
+        setErrorMessage("Unable to save override right now.");
+      }
+    }, {
+      id: entry.id,
+      language,
+      termId: entry.termId,
+    });
   }
 
   async function handleResetToAi(entry: TranslationMemoryEntry): Promise<void> {
-    setErrorMessage(null);
+    await executeGuiCliBoundCommand("courseforge admin translations memory reset", async () => {
+      setErrorMessage(null);
 
-    try {
-      const updated = await resetTranslationToAi(language, entry.termId);
-      if (!updated) {
-        setErrorMessage("Translation entry was not found.");
-        return;
+      try {
+        const updated = await resetTranslationToAi(language, entry.termId);
+        if (!updated) {
+          setErrorMessage("Translation entry was not found.");
+          return;
+        }
+
+        await upsertTranslationMemoryCloudEntry(updated, "shared");
+        setRows((previous) => previous.map((row) => (row.id === entry.id ? updated : row)));
+        setDraftTranslations((previous) => ({
+          ...previous,
+          [entry.id]: updated.translatedText,
+        }));
+        setStatusMessage("Translation reset to AI baseline and synced to cloud.");
+      } catch {
+        setErrorMessage("Unable to reset translation right now.");
       }
-
-      await upsertTranslationMemoryCloudEntry(updated, "shared");
-      setRows((previous) => previous.map((row) => (row.id === entry.id ? updated : row)));
-      setDraftTranslations((previous) => ({
-        ...previous,
-        [entry.id]: updated.translatedText,
-      }));
-      setStatusMessage("Translation reset to AI baseline and synced to cloud.");
-    } catch {
-      setErrorMessage("Unable to reset translation right now.");
-    }
+    }, {
+      id: entry.id,
+      language,
+      termId: entry.termId,
+    });
   }
 
   async function handleRoadmapRefresh(): Promise<void> {
-    setRoadmapStatus(null);
+    await executeGuiCliBoundCommand("courseforge admin translations roadmap refresh", async () => {
+      setRoadmapStatus(null);
 
-    try {
-      const registry = await fetchLanguageRegistryFromUrl();
-      setRoadmapPreview(registry.roadmap.slice(0, 8));
-      setRoadmapStatus(`Detected ${registry.supported.length} supported language packs and ${registry.roadmap.length} roadmap candidates.`);
-    } catch {
-      setRoadmapStatus("Unable to check language roadmap updates right now.");
-    }
+      try {
+        const registry = await fetchLanguageRegistryFromUrl();
+        setRoadmapPreview(registry.roadmap.slice(0, 8));
+        setRoadmapStatus(`Detected ${registry.supported.length} supported language packs and ${registry.roadmap.length} roadmap candidates.`);
+      } catch {
+        setRoadmapStatus("Unable to check language roadmap updates right now.");
+      }
+    });
   }
 
   return (

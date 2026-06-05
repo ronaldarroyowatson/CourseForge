@@ -28,6 +28,7 @@ import {
   type SuperAdminBackupJob,
   type SuperAdminAiProviderLimits,
 } from "../../../core/services";
+import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
 import { getCurrentUser } from "../../../firebase/auth";
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
@@ -567,31 +568,33 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
       return;
     }
 
-    setIsSaving(true);
-    setError(null);
-    try {
-      const nextPolicy = await setGlobalAiSafetyPolicy({
-        defaultDailyRequestLimit,
-        defaultDailyTokenLimit,
-        defaultMonthlyBudgetUsd,
-        openAiMonthlySpendUsd,
-        githubCopilotTier: githubTierInput,
-        githubDailyRequestLimit,
-        githubDailyTokenLimit,
-        githubRequestsPerMinuteLimit,
-        githubTokensPerRequestInputLimit,
-        githubTokensPerRequestOutputLimit,
-        githubConcurrentRequestsLimit,
-        budgetAlertThresholdPct,
-        budgetHardStopThresholdPct,
-      });
-      setStatus(`Saved AI safety policy (updated by ${nextPolicy.updatedBy || "admin"}).`);
-      await loadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save AI policy.");
-    } finally {
-      setIsSaving(false);
-    }
+    await executeGuiCliBoundCommand("courseforge admin super ai policy save", async () => {
+      setIsSaving(true);
+      setError(null);
+      try {
+        const nextPolicy = await setGlobalAiSafetyPolicy({
+          defaultDailyRequestLimit,
+          defaultDailyTokenLimit,
+          defaultMonthlyBudgetUsd,
+          openAiMonthlySpendUsd,
+          githubCopilotTier: githubTierInput,
+          githubDailyRequestLimit,
+          githubDailyTokenLimit,
+          githubRequestsPerMinuteLimit,
+          githubTokensPerRequestInputLimit,
+          githubTokensPerRequestOutputLimit,
+          githubConcurrentRequestsLimit,
+          budgetAlertThresholdPct,
+          budgetHardStopThresholdPct,
+        });
+        setStatus(`Saved AI safety policy (updated by ${nextPolicy.updatedBy || "admin"}).`);
+        await loadAll();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to save AI policy.");
+      } finally {
+        setIsSaving(false);
+      }
+    });
   }
 
   async function handleSaveUserAiOverride(): Promise<void> {
@@ -618,24 +621,28 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
       return;
     }
 
-    setIsSaving(true);
-    setError(null);
-    try {
-      await setUserAiSafetyOverride({
-        uid,
-        dailyRequestLimit,
-        dailyTokenLimit,
-        monthlyBudgetUsd,
-        githubDailyRequestLimit,
-        githubDailyTokenLimit,
-      });
-      setStatus(`Saved AI safety override for ${uid}.`);
-      await loadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save user AI override.");
-    } finally {
-      setIsSaving(false);
-    }
+    await executeGuiCliBoundCommand("courseforge admin super ai user override save", async () => {
+      setIsSaving(true);
+      setError(null);
+      try {
+        await setUserAiSafetyOverride({
+          uid,
+          dailyRequestLimit,
+          dailyTokenLimit,
+          monthlyBudgetUsd,
+          githubDailyRequestLimit,
+          githubDailyTokenLimit,
+        });
+        setStatus(`Saved AI safety override for ${uid}.`);
+        await loadAll();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to save user AI override.");
+      } finally {
+        setIsSaving(false);
+      }
+    }, {
+      uid,
+    });
   }
 
   async function handleSaveBackupConfig(): Promise<void> {
@@ -649,42 +656,46 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
       return;
     }
 
-    setIsSaving(true);
-    setError(null);
-    try {
-      const next = await setSuperAdminBackupConfig({
-        primaryDb: backupConfig.primaryDb,
-        mirrorEnabled: backupConfig.mirrorEnabled,
-        firestoreEnabled: backupConfig.firestoreEnabled,
-        cosmosEnabled: backupConfig.cosmosEnabled,
-        backupMode: backupConfig.backupMode,
-        frequencyMinutes,
-      });
-      setBackupConfig(next);
-      setBackupFrequencyInput(String(next.frequencyMinutes));
-      setStatus("Saved backup configuration.");
-      const latestJobs = await listSuperAdminBackupJobs(12);
-      setBackupJobs(latestJobs);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save backup configuration.");
-    } finally {
-      setIsSaving(false);
-    }
+    await executeGuiCliBoundCommand("courseforge admin super backup config save", async () => {
+      setIsSaving(true);
+      setError(null);
+      try {
+        const next = await setSuperAdminBackupConfig({
+          primaryDb: backupConfig.primaryDb,
+          mirrorEnabled: backupConfig.mirrorEnabled,
+          firestoreEnabled: backupConfig.firestoreEnabled,
+          cosmosEnabled: backupConfig.cosmosEnabled,
+          backupMode: backupConfig.backupMode,
+          frequencyMinutes,
+        });
+        setBackupConfig(next);
+        setBackupFrequencyInput(String(next.frequencyMinutes));
+        setStatus("Saved backup configuration.");
+        const latestJobs = await listSuperAdminBackupJobs(12);
+        setBackupJobs(latestJobs);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to save backup configuration.");
+      } finally {
+        setIsSaving(false);
+      }
+    });
   }
 
   async function handleRunBackupNow(): Promise<void> {
-    setIsRunningBackup(true);
-    setError(null);
-    setStatus("Backup request received. Starting job...");
-    try {
-      const result = await runSuperAdminBackupNow();
-      setStatus(result.message);
-      await loadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to run backup now.");
-    } finally {
-      setIsRunningBackup(false);
-    }
+    await executeGuiCliBoundCommand("courseforge admin super backup run", async () => {
+      setIsRunningBackup(true);
+      setError(null);
+      setStatus("Backup request received. Starting job...");
+      try {
+        const result = await runSuperAdminBackupNow();
+        setStatus(result.message);
+        await loadAll();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to run backup now.");
+      } finally {
+        setIsRunningBackup(false);
+      }
+    });
   }
 
   React.useEffect(() => {
@@ -923,17 +934,22 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
   const openAiRateLimitedToday = aiProviderLimits?.aggregateToday.openAiRateLimitedToday ?? 0;
 
   async function handlePromotionResolution(requestId: string, approve: boolean): Promise<void> {
-    setIsSaving(true);
-    setError(null);
-    try {
-      const message = await resolveSchoolAdminPromotionRequest({ requestId, approve });
-      setStatus(message);
-      await loadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to resolve promotion request.");
-    } finally {
-      setIsSaving(false);
-    }
+    await executeGuiCliBoundCommand("courseforge admin super promotion resolve", async () => {
+      setIsSaving(true);
+      setError(null);
+      try {
+        const message = await resolveSchoolAdminPromotionRequest({ requestId, approve });
+        setStatus(message);
+        await loadAll();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to resolve promotion request.");
+      } finally {
+        setIsSaving(false);
+      }
+    }, {
+      requestId,
+      approve,
+    });
   }
 
   async function handleAdminToggle(uid: string, isAdmin: boolean): Promise<void> {
@@ -946,17 +962,22 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
       }
     }
 
-    setIsSaving(true);
-    setError(null);
-    try {
-      const message = await setUserAdminStatus(uid, isAdmin);
-      setStatus(message);
-      await loadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to change admin role.");
-    } finally {
-      setIsSaving(false);
-    }
+    await executeGuiCliBoundCommand("courseforge admin super user admin toggle", async () => {
+      setIsSaving(true);
+      setError(null);
+      try {
+        const message = await setUserAdminStatus(uid, isAdmin);
+        setStatus(message);
+        await loadAll();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to change admin role.");
+      } finally {
+        setIsSaving(false);
+      }
+    }, {
+      uid,
+      isAdmin,
+    });
   }
 
   async function handleSuperAdminToggle(uid: string, isSuperAdmin: boolean): Promise<void> {
@@ -996,17 +1017,23 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
       transferToUid = transferTarget.uid;
     }
 
-    setIsSaving(true);
-    setError(null);
-    try {
-      const message = await setUserSuperAdminStatus(uid, isSuperAdmin, transferToUid);
-      setStatus(message);
-      await loadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to change super admin role.");
-    } finally {
-      setIsSaving(false);
-    }
+    await executeGuiCliBoundCommand("courseforge admin super user superadmin toggle", async () => {
+      setIsSaving(true);
+      setError(null);
+      try {
+        const message = await setUserSuperAdminStatus(uid, isSuperAdmin, transferToUid);
+        setStatus(message);
+        await loadAll();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to change super admin role.");
+      } finally {
+        setIsSaving(false);
+      }
+    }, {
+      uid,
+      isSuperAdmin,
+      transferToUid,
+    });
   }
 
   return (
@@ -1042,7 +1069,16 @@ export function SuperAdminPage({ onBack }: SuperAdminPageProps): React.JSX.Eleme
       <section className="admin-section">
         <div className="admin-section__header">
           <h3>Global Stats</h3>
-          <button type="button" className="btn-secondary" onClick={() => { void loadAll(); }} disabled={isLoading}>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              void executeGuiCliBoundCommand("courseforge admin super dashboard refresh", async () => {
+                await loadAll();
+              });
+            }}
+            disabled={isLoading}
+          >
             {isLoading ? "Loading…" : "Refresh"}
           </button>
         </div>

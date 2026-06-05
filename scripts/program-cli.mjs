@@ -1591,7 +1591,7 @@ function collectHelpTopics() {
         "courseforge permissions audit --json",
         "courseforge permissions repair",
         "courseforge permissions repair --apply",
-        "courseforge permissions reset --bundle-id com.courseforge.app",
+        "courseforge permissions reset --bundle-id com.ronaldarroyowatson.CourseForge",
       ],
       limitations: [
         "Direct screen/accessibility grant state cannot be read reliably from CLI without elevated host access.",
@@ -1882,9 +1882,41 @@ function runCommand(commandName, commandArgs = []) {
   return spawnSync(commandName, commandArgs, { encoding: "utf8" });
 }
 
+function getDefaultCourseForgeBundleId() {
+  const envOverride = (process.env.COURSEFORGE_BUNDLE_ID || "").trim();
+  if (envOverride) {
+    return envOverride;
+  }
+
+  const fallbackBundleId = "com.ronaldarroyowatson.CourseForge";
+  if (process.platform !== "darwin") {
+    return fallbackBundleId;
+  }
+
+  const appCandidates = [
+    "/Applications/CourseForge.app",
+    path.join(process.env.HOME || "", "Applications", "CourseForge.app"),
+  ];
+
+  for (const appPath of appCandidates) {
+    if (!appPath || !fs.existsSync(appPath)) {
+      continue;
+    }
+
+    const infoPlistPath = path.join(appPath, "Contents", "Info");
+    const read = runCommand("defaults", ["read", infoPlistPath, "CFBundleIdentifier"]);
+    const detected = (read.stdout || "").trim();
+    if ((read.status ?? 1) === 0 && detected) {
+      return detected;
+    }
+  }
+
+  return fallbackBundleId;
+}
+
 function collectPermissionsAudit() {
   const platform = process.platform;
-  const bundleId = parseFlag("bundle-id", "com.courseforge.app");
+  const bundleId = parseFlag("bundle-id", getDefaultCourseForgeBundleId());
   const installScript = path.join(process.cwd(), "scripts", "installer", "Install-CourseForge-macos.sh");
   const uninstallScript = path.join(process.cwd(), "scripts", "installer", "Uninstall-CourseForge-macos.sh");
   const tccutilAvailable = commandExists("tccutil");
@@ -2053,7 +2085,7 @@ function handlePermissionsReset() {
   const emitJson = hasFlag("json");
   const apply = hasAnyFlag(["apply", "yes"]);
   const platform = process.platform;
-  const bundleId = parseFlag("bundle-id", "com.courseforge.app");
+  const bundleId = parseFlag("bundle-id", getDefaultCourseForgeBundleId());
   const commands = [
     ["tccutil", ["reset", "ScreenCapture", bundleId]],
     ["tccutil", ["reset", "Accessibility", bundleId]],

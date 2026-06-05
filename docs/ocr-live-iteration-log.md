@@ -28,3 +28,19 @@
 | 2026-06-05T17:10:00.000Z | toc-cloud-order-fix-01 | code-fix | toc-rescue-provider-order | n/a | n/a | n/a | n/a | n/a | Updated TOC rescue provider order in `src/webapp/components/textbooks/AutoTextbookSetupFlow.tsx` to `cloud_openai_vision -> cloud_github_models_vision -> local_tesseract` (was local-first). Validated with `npx vitest run tests/integration/autoTextbookFlow.integration.test.tsx` (24/24 pass). |
 | 2026-06-05T17:17:56.109Z | desktop-live-toc-attempt-04 | live-capture | mcgraw-tab | n/a | n/a | n/a | 0 | 0 | Retried capture after user reported adding CourseForge + VS Code to Screen Recording and rebooting VS Code, but the runtime still returns `permission_denied` and explicitly names `Google Chrome` in the error. This indicates Chrome itself still needs Screen Recording approval/restart in the host OS. |
 | 2026-06-05T17:23:40.334Z | desktop-live-toc-attempt-05 | live-capture | mcgraw-tab | n/a | n/a | n/a | 0 | 0 | Retried after adding Edge to Screen Recording allow-list and confirming cloud-auth Auto session; capture still fails with `permission_denied` and browser=`Google Chrome`. Active capture runtime remains Chrome-specific and still not permitted. |
+| 2026-06-05T19:51:13.848Z | iter-01-cloud | cloud_openai_vision | center-lower-band | 6.2167 | 293.6057 | 1.000 | 3 | 22 | duration=51.4s |
+| 2026-06-05T19:51:32.460Z | iter-02-local | local_tesseract | original | 5.8615 | 192.7176 | 1.000 | 3 | 15 | duration=17.1s |
+| 2026-06-05T19:52:26.641Z | iter-03-cloud | cloud_openai_vision | original | 0.0000 | 255.7726 | 1.000 | 3 | 19 | duration=51.6s |
+| 2026-06-05T19:52:45.272Z | iter-04-local | local_tesseract | original | 5.8615 | 192.7176 | 1.000 | 3 | 15 | duration=17.1s |
+| 2026-06-05T19:54:39.029Z | iter-01-cloud | cloud_openai_vision | original | 0.0000 | 255.9503 | 1.000 | 3 | 19 | duration=55.0s |
+| 2026-06-05T19:54:57.611Z | iter-02-local | local_tesseract | original | 5.8615 | 192.7176 | 1.000 | 3 | 15 | duration=17.0s |
+| 2026-06-05T19:55:43.104Z | iter-03-cloud | cloud_openai_vision | original | 0.0000 | 255.7726 | 1.000 | 3 | 19 | duration=42.9s |
+| 2026-06-05T19:56:01.529Z | iter-04-local | local_tesseract | original | 5.8615 | 192.7176 | 1.000 | 3 | 15 | duration=17.0s |
+| 2026-06-05T19:57:27.344Z | iter-01-cloud | cloud_openai_vision | original | 0.0000 | 255.5950 | 1.000 | 3 | 19 | duration=42.2s |
+| 2026-06-05T19:57:45.744Z | iter-02-local | local_tesseract | original | 5.8615 | 192.7176 | 1.000 | 3 | 15 | duration=17.0s |
+| 2026-06-05T22:16:51.737Z | iter-01-cloud | cloud_openai_vision | original | 0.0000 | 249.2007 | 1.000 | 3 | 19 | duration=47.1s |
+| 2026-06-05T22:17:10.294Z | iter-02-local | local_tesseract | original | 5.8615 | 192.7176 | 1.000 | 3 | 15 | duration=17.1s |
+| 2026-06-05T22:17:56.861Z | iter-03-cloud | cloud_openai_vision | original | 0.0000 | 255.7726 | 1.000 | 3 | 19 | duration=44.1s |
+| 2026-06-05T22:18:15.371Z | iter-04-local | local_tesseract | original | 5.8615 | 192.7176 | 1.000 | 3 | 15 | duration=17.1s |
+| 2026-06-05T22:19:02.703Z | iter-05-cloud | cloud_openai_vision | original | 0.0000 | 249.5560 | 1.000 | 3 | 19 | duration=44.8s |
+| 2026-06-05T22:19:21.191Z | iter-06-local | local_tesseract | original | 5.8615 | 192.7176 | 1.000 | 3 | 15 | duration=17.0s |

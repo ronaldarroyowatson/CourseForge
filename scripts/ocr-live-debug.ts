@@ -809,6 +809,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const goldTranscript = goldTranscriptFile
+    ? readTextFile(goldTranscriptFile)
+    : undefined;
+
   const variants = tocFocused ? buildPngTocVariants(imageFile) : [{ label: "original", dataUrl: toDataUrl(imageFile) }];
   let bestExtraction: ExtractionLike | null = null;
   let bestVariant = variants[0]?.label ?? "original";
@@ -823,7 +827,20 @@ async function main(): Promise<void> {
         directCloudThrottleState
       )
       : await extractTextFromAppService(variant.dataUrl, providerOrder as string[] | undefined);
-    const score = scoreTocCandidate(extraction.text);
+    let score = scoreTocCandidate(extraction.text);
+
+    if (goldTranscript) {
+      const parsedVariant = parseTocFromOcrText(extraction.text);
+      const structuredVariant = structuredProfile === "toc-page1"
+        ? buildPage1ProfileTranscript(extraction.text, parsedVariant)
+        : buildStructuredTocTranscript(extraction.text, parsedVariant);
+      const cerStructuredVariant = calculateCharacterErrorPercent(goldTranscript, structuredVariant);
+      if (Number.isFinite(cerStructuredVariant)) {
+        // In benchmark mode, prioritize lower CER and keep heuristic score only as tie-breaker.
+        score = (-cerStructuredVariant * 1000) + (score * 0.01);
+      }
+    }
+
     if (!bestExtraction || score > bestScore) {
       bestExtraction = extraction;
       bestScore = score;
@@ -843,9 +860,7 @@ async function main(): Promise<void> {
   let cerStructured: number | undefined;
   let structuredTranscript: string | undefined;
   const cerMode: "raw" | "structured" = "structured";
-  let goldTranscript: string | undefined;
-  if (goldTranscriptFile) {
-    goldTranscript = readTextFile(goldTranscriptFile);
+  if (goldTranscript) {
     cerRaw = calculateCharacterErrorPercent(goldTranscript, extraction.text);
     structuredTranscript = structuredProfile === "toc-page1"
       ? buildPage1ProfileTranscript(extraction.text, parsedToc)

@@ -5,7 +5,8 @@ import {
   type AutoConflictResolutionMode,
   buildAutoConflictResolutionPlan,
 } from "../../../core/services/autoTextbookConflictService";
-import { extractTextFromImageWithFallback, type AutoOcrProviderId } from "../../../core/services/autoOcrService";
+import { extractTextFromImageWithFallback, getAutoOcrCooldownExpiryMs, type AutoOcrProviderId } from "../../../core/services/autoOcrService";
+import { RateLimitCooldownBadge } from "../shared/RateLimitCooldownBadge";
 import { appendDebugLogEntry } from "../../../core/services";
 import { persistAutoTextbook } from "../../../core/services/autoTextbookPersistenceService";
 import { uploadTextbookCoverFromDataUrl, uploadTextbookOwnershipProofFromDataUrl } from "../../../core/services/coverImageService";
@@ -1714,6 +1715,7 @@ export function AutoTextbookSetupFlow({
   const [isRunningOcr, setIsRunningOcr] = useState(false);
   const [ocrProgressMessage, setOcrProgressMessage] = useState("Analyzing image - OCR is reading your page. This usually takes a few seconds...");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [ocrCooldownExpiryMs, setOcrCooldownExpiryMs] = useState<number>(0);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [ocrProviderStatus, setOcrProviderStatus] = useState<string | null>(null);
   const [lastExtractionFields, setLastExtractionFields] = useState<string[]>([]);
@@ -2921,6 +2923,7 @@ export function AutoTextbookSetupFlow({
 
     setErrorMessage(null);
     setInfoMessage(null);
+    setOcrCooldownExpiryMs(0);
     setIsBusy(true);
 
     try {
@@ -3137,6 +3140,7 @@ export function AutoTextbookSetupFlow({
         },
       });
       setErrorMessage(userFacingMessage);
+      setOcrCooldownExpiryMs(getAutoOcrCooldownExpiryMs());
       appendDebugLogEntry({
         eventType: "error",
         message: "Display capture failed.",
@@ -3211,6 +3215,7 @@ export function AutoTextbookSetupFlow({
     }
 
     setErrorMessage("OCR could not read usable text from this image. Try recapturing, uploading a clearer cover, or editing OCR text manually.");
+    setOcrCooldownExpiryMs(getAutoOcrCooldownExpiryMs());
     return {
       text: "",
       providerId: input.sourceProviderId,
@@ -4695,6 +4700,9 @@ export function AutoTextbookSetupFlow({
       ) : null}
 
       {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
+      {ocrCooldownExpiryMs > 0 ? (
+        <RateLimitCooldownBadge expiryMs={ocrCooldownExpiryMs} />
+      ) : null}
       {infoMessage ? <p className="success-text">{infoMessage}</p> : null}
       {moderationAssessment?.decision === "review" ? (
         <p className="form-hint">Image safety review triggered: {moderationAssessment.reason}</p>

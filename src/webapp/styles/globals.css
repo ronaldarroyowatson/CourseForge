@@ -4236,6 +4236,40 @@ button.cf-ds-color-wheel__dot:active {
 }
 
 /* ============================================================
+   Rate-limit cooldown badge
+   ============================================================ */
+
+.cf-rate-limit-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--cf-surface-strong, rgba(0,0,0,0.04));
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  animation: cf-rate-limit-fadein 0.35s ease;
+}
+
+.cf-rate-limit-badge__ring {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.cf-rate-limit-badge__text {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: color 0.5s;
+}
+
+@keyframes cf-rate-limit-fadein {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
    OCR draft advanced details
    ============================================================ */
 

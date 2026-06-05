@@ -6,11 +6,13 @@ import {
   type AutoOcrProviderId,
   type AutoOcrProviderHealthRecord,
   getAutoOcrProviderHealth,
+  getAutoOcrCooldownExpiryMs,
   getCloudAutoOcrProviderPolicy,
   getEffectiveAutoOcrProviderOrder,
   setCloudAutoOcrProviderPolicy,
   setAutoOcrProviderOrder,
 } from "../../../core/services/autoOcrService";
+import { RateLimitCooldownBadge } from "../shared/RateLimitCooldownBadge";
 import { fetchLanguageRegistryFromUrl } from "../../../core/services/translationWorkflowService";
 import {
   buildFullDebugReport,
@@ -381,6 +383,7 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   const [metadataSharingEnabled, setMetadataSharingEnabled] = React.useState<boolean>(() => isMetadataCorrectionSharingEnabled());
   const [ocrProviderHealth, setOcrProviderHealth] = React.useState<AutoOcrProviderHealthRecord[]>([]);
   const [ocrProviderStatus, setOcrProviderStatus] = React.useState<string | null>(null);
+  const [ocrCooldownExpiryMs, setOcrCooldownExpiryMs] = React.useState<number>(0);
   const [isUpdatingOcrPolicy, setIsUpdatingOcrPolicy] = React.useState(false);
   const [preferenceStatus, setPreferenceStatus] = React.useState<string | null>(null);
   const [languageRegistryStatus, setLanguageRegistryStatus] = React.useState<string | null>(null);
@@ -766,6 +769,8 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
   async function refreshOcrProviderHealth(forceRefresh = false): Promise<void> {
     const health = await getAutoOcrProviderHealth({ forceRefresh });
     setOcrProviderHealth(health);
+    // Refresh cooldown badge whenever health is re-probed.
+    setOcrCooldownExpiryMs(getAutoOcrCooldownExpiryMs());
     const cloudProviders = health.filter((provider) => provider.id !== "local_tesseract");
     const unavailableProviders = cloudProviders.filter((provider) => provider.availabilityState === "unavailable");
     const unknownProviders = cloudProviders.filter((provider) => provider.availabilityState === "unknown");
@@ -1733,6 +1738,10 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
               </div>
               <p className="settings-meta">Last correction: {metadataTrainingStats.lastCorrectionAt ? new Date(metadataTrainingStats.lastCorrectionAt).toLocaleString() : "None yet"}</p>
               <p className="settings-meta">Cloud OCR health: {metadataPipelineHealth.cloudStatus}</p>
+              {(() => {
+                const expiry = ocrCooldownExpiryMs > 0 ? ocrCooldownExpiryMs : getAutoOcrCooldownExpiryMs();
+                return expiry > 0 ? <RateLimitCooldownBadge expiryMs={expiry} label="Cloud OCR rate-limit cooldown:" /> : null;
+              })()}
               <p className="settings-meta">Secondary metadata agent: {metadataPipelineHealth.secondaryAgentStatus}</p>
               <p className="settings-meta">
                 Last pipeline path: <strong>{metadataPipelineRuntime.path ?? "none"}</strong>

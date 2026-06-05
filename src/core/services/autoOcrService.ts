@@ -528,6 +528,24 @@ function clearStaleLocalTesseractCircuitState(): void {
 // Self-heal stale local_tesseract circuit state left by pre-1.7.101 releases.
 clearStaleLocalTesseractCircuitState();
 
+/**
+ * Returns the timestamp (ms since epoch) when ALL cloud OCR providers will have
+ * exited their cooldown windows, or 0 if no provider is currently cooling down.
+ * Used by UI components to render countdown timers.
+ */
+export function getAutoOcrCooldownExpiryMs(): number {
+  const state = getCircuitState();
+  const cloudProviders = CLOUD_PROVIDER_ORDER;
+  let latest = 0;
+  for (const providerId of cloudProviders) {
+    const entry = state[providerId];
+    if (entry && entry.openUntil > Date.now()) {
+      latest = Math.max(latest, entry.openUntil);
+    }
+  }
+  return latest;
+}
+
 export function getAutoOcrProviderOrder(): AutoOcrProviderId[] {
   const storage = getStorage();
   if (!storage) {

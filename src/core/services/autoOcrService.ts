@@ -61,6 +61,7 @@ const AUTO_OCR_AVAILABILITY_CACHE_TTL_MS = 3 * 60 * 1000;
 const AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS = 15 * 60 * 1000;
 const AUTO_OCR_AUTH_REQUIRED_CACHE_TTL_MS = 10 * 1000;
 const CLOUD_PROVIDER_MIN_REQUEST_GAP_MS = 1500;
+const CLOUD_OCR_LOGIN_ROUTE = "/login";
 
 const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000;
@@ -284,6 +285,55 @@ function isUnauthenticatedCallableError(error: { code: string; message: string }
   return loweredCode.includes("unauthenticated")
     || loweredMessage.includes("unauthenticated")
     || loweredMessage.includes("not authenticated");
+}
+
+function getCloudAuthRecoveryMessage(): string {
+  return `Sign in is required for Cloud OCR. Re-authenticate in the app at ${CLOUD_OCR_LOGIN_ROUTE}, or run npm run program -- auth status then npm run program -- auth refresh (or npm run program -- login --role teacher) from CLI.`;
+}
+
+async function runCloudAuthPreflight(
+  traceId: string,
+  context: "health_probe" | "extract",
+  providerId?: CloudAutoOcrProviderId,
+): Promise<{ ok: true; user: NonNullable<ReturnType<typeof getCurrentUser>> } | { ok: false; reasonCode: "no_user" | "unauthenticated"; message: string }> {
+  const user = getCurrentUser() ?? await waitForAuthStateChange(2500);
+  if (!user) {
+    const message = getCloudAuthRecoveryMessage();
+    void emitOcrDiagnostic("cloud_auth_preflight_failed", {
+      level: "warning",
+      traceId,
+      context: {
+        phase: context,
+        providerId: providerId ?? null,
+        reasonCode: "no_user",
+        message,
+      },
+    });
+    return { ok: false, reasonCode: "no_user", message };
+  }
+
+  try {
+    await user.getIdToken();
+    return { ok: true, user };
+  } catch {
+    try {
+      await user.getIdToken(true);
+      return { ok: true, user };
+    } catch {
+      const message = getCloudAuthRecoveryMessage();
+      void emitOcrDiagnostic("cloud_auth_preflight_failed", {
+        level: "warning",
+        traceId,
+        context: {
+          phase: context,
+          providerId: providerId ?? null,
+          reasonCode: "unauthenticated",
+          message,
+        },
+      });
+      return { ok: false, reasonCode: "unauthenticated", message };
+    }
+  }
 }
 
 async function callWithAuthRefreshRetry<TPayload extends object, TResponse>(
@@ -867,12 +917,12 @@ async function refreshCloudAvailabilityCache(
   });
 
   cloudAvailabilityProbeInFlight = (async () => {
-    const user = getCurrentUser() ?? await waitForAuthStateChange(2500);
-    if (!user) {
+    const authPreflight = await runCloudAuthPreflight(traceId, "health_probe");
+    if (!authPreflight.ok) {
       autoOcrAvailabilityCache = createUniformCloudCacheEntry(
         "unavailable",
-        "Sign in is required for Cloud OCR.",
-        "no_user",
+        authPreflight.message,
+        authPreflight.reasonCode,
         AUTO_OCR_AUTH_REQUIRED_CACHE_TTL_MS,
       );
       void emitOcrDiagnostic("health_probe_no_user", {
@@ -1042,6 +1092,21 @@ async function extractWithCloudVision(providerId: CloudAutoOcrProviderId, imageD
       imageBytes: imageDataUrl.length,
     },
   });
+
+  const authPreflight = await runCloudAuthPreflight(traceId, "extract", providerId);
+  if (!authPreflight.ok) {
+    updateCloudAvailabilityFromCallableError(providerId, {
+      code: authPreflight.reasonCode,
+      message: authPreflight.message,
+      details: {
+        providerId,
+        reasonCode: authPreflight.reasonCode,
+        reasonMessage: authPreflight.message,
+        failureStage: "auth_preflight",
+      },
+    });
+    throw new Error(`${getProviderLabel(providerId)} is unavailable: ${authPreflight.message}`);
+  }
 
   let response;
   try {

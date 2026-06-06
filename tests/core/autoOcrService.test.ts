@@ -355,6 +355,8 @@ describe("autoOcrService", () => {
     const first = getAutoOcrProviderHealth({ forceRefresh: true });
     const second = getAutoOcrProviderHealth({ forceRefresh: true });
 
+    // Auth preflight now runs before status callables are invoked.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(callableMocks.getAiProviderStatus).toHaveBeenCalledTimes(1);
 
     resolveStatusProbe({
@@ -444,9 +446,28 @@ describe("autoOcrService", () => {
       label: "Cloud OCR (OpenAI Vision via Firebase Function)",
       available: false,
       availabilityState: "unavailable",
-      errorMessage: "Sign in is required for Cloud OCR.",
+      reasonCode: "no_user",
     });
+    expect(cloud?.errorMessage).toContain("Sign in is required for Cloud OCR.");
+    expect(cloud?.errorMessage).toContain("/login");
     expect(callableMocks.getAiProviderStatus).not.toHaveBeenCalled();
+  });
+
+  it("guards cloud extraction with auth preflight and includes re-auth instructions", async () => {
+    authMocks.getCurrentUser.mockReturnValue(null);
+    authMocks.waitForAuthStateChange.mockResolvedValue(null);
+
+    await expect(
+      extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision"],
+      })
+    ).rejects.toThrow(/Sign in is required for Cloud OCR\./i);
+    await expect(
+      extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision"],
+      })
+    ).rejects.toThrow(/\/login/i);
+    expect(callableMocks.extractScreenshotText).not.toHaveBeenCalled();
   });
 
   it("retries status callable after auth refresh when first attempt is unauthenticated", async () => {

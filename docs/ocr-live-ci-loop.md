@@ -62,6 +62,8 @@ Cloud smoke gate retry behavior can be bounded with:
 
 Use this when provider throttle windows are long and you need a fast fail/signal instead of extended waiting.
 
+Cloud OCR auth preflight now fails fast before cloud callable attempts when the user session is missing or expired. If the loop reports auth-blocked cloud OCR, recover with `/login` in the app or `npm run program -- auth refresh` before rerunning the cloud smoke step.
+
 ## Output and evidence
 
 Every run writes a report:

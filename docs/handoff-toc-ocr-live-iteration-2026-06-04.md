@@ -2,10 +2,10 @@
 
 ## Current Release + Workspace State
 
-- Current workspace package version: 1.7.98
-- Latest published release: v1.7.98
-- Release URL: https://github.com/ronaldarroyowatson/CourseForge/releases/tag/v1.7.98
-- Local git status at handoff time: untracked generated release artifacts under `release/`
+1. Current workspace package version: 1.7.106
+2. Latest published release: v1.7.106
+3. Release URL: https://github.com/ronaldarroyowatson/CourseForge/releases/tag/v1.7.106
+4. Local git status at handoff time: dirty working tree until the auth-preflight doc updates are committed.
 
 ## What Was Shipped In v1.7.98
 
@@ -19,6 +19,30 @@
    - remote Windows/Linux installer matrix,
    - GitHub release publish,
    - updater discoverability verification.
+
+## Update: 2026-06-05 (Cloud Auth Preflight Hardening)
+
+### Current state
+
+1. Cloud OCR now performs a preflight auth check before cloud callable usage.
+2. Missing/expired auth now surfaces actionable recovery guidance instead of dead-ending on repeated cloud calls.
+3. The published live release at the time of this note remains v1.7.106; the auth-preflight change is staged locally and should ship in the next bugfix release.
+
+### Behavior added
+
+1. Health and extraction paths both verify a signed-in Firebase user before cloud calls.
+2. Preflight failures emit `cloud_auth_preflight_failed` and cache auth-unavailable state briefly.
+3. Recovery guidance now points users to:
+   - `/login` in the web app
+   - `npm run program -- auth status`
+   - `npm run program -- auth refresh`
+   - `npm run program -- login --role teacher` if refresh cannot recover
+
+### Why this matters
+
+1. Auth issues are now visible before cloud OCR attempts block the workflow.
+2. Reloads or multi-instance startup should no longer hide a broken auth session behind repeated cloud retries.
+3. The next release should include this guard so live installs can recover auth sooner and avoid unnecessary fallback churn.
 
 ## User-Reported Live Run Results (Post v1.7.98)
 

@@ -37,6 +37,11 @@ type ExtractionLike = {
 
 type DirectCloudProvider = "cloud_github_models_vision" | "cloud_openai_vision";
 
+const DIRECT_CLOUD_PROVIDER_ORDER: DirectCloudProvider[] = [
+  "cloud_openai_vision",
+  "cloud_github_models_vision",
+];
+
 type DirectCloudThrottleConfig = {
   enabled: boolean;
   batchSize: number;
@@ -130,6 +135,20 @@ function resolveProviderToken(providerId: DirectCloudProvider): string {
   }
 
   return process.env.OPENAI_API_KEY?.trim() || readKeychainSecret("courseforge.OPENAI_API_KEY");
+}
+
+function isDirectCloudProvider(value: string): value is DirectCloudProvider {
+  return value === "cloud_openai_vision" || value === "cloud_github_models_vision";
+}
+
+function resolveDirectCloudProviderOrder(providerOrder?: string[]): DirectCloudProvider[] {
+  if (!providerOrder?.length) {
+    return [...DIRECT_CLOUD_PROVIDER_ORDER];
+  }
+
+  const filtered = providerOrder.filter(isDirectCloudProvider);
+  const deduped = [...new Set(filtered)];
+  return deduped.length > 0 ? deduped : [...DIRECT_CLOUD_PROVIDER_ORDER];
 }
 
 function getDirectCloudRuntime(providerId: DirectCloudProvider): {
@@ -430,6 +449,67 @@ async function extractTextFromDirectCloud(
     providerId,
     attempts: [{ providerId, success: true }],
   };
+}
+
+async function tryDirectCloudProviderOrder(
+  imageDataUrl: string,
+  providerOrder: DirectCloudProvider[],
+  throttleConfig: DirectCloudThrottleConfig,
+  throttleState: DirectCloudThrottleState
+): Promise<{
+  extraction: ExtractionLike | null;
+  attempts: ExtractionAttempt[];
+}> {
+  const attempts: ExtractionAttempt[] = [];
+
+  for (const providerId of providerOrder) {
+    if (!resolveProviderToken(providerId)) {
+      attempts.push({
+        providerId,
+        success: false,
+        errorMessage: providerId === "cloud_github_models_vision"
+          ? "Missing COURSEFORGE_GITHUB_TOKEN/GITHUB_TOKEN (and no keychain token found)."
+          : "Missing OPENAI_API_KEY (and no keychain token found).",
+      });
+      continue;
+    }
+
+    const perProviderThrottleConfig: DirectCloudThrottleConfig = {
+      ...throttleConfig,
+      enabled: providerId === "cloud_github_models_vision",
+    };
+
+    try {
+      const extraction = await extractTextFromDirectCloud(
+        imageDataUrl,
+        providerId,
+        perProviderThrottleConfig,
+        throttleState
+      );
+
+      const combinedAttempts = [
+        ...attempts,
+        { providerId, success: true as const },
+      ];
+
+      return {
+        extraction: {
+          ...extraction,
+          attempts: combinedAttempts,
+        },
+        attempts: combinedAttempts,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      attempts.push({
+        providerId,
+        success: false,
+        errorMessage: message,
+      });
+    }
+  }
+
+  return { extraction: null, attempts };
 }
 
 function toDataUrl(imagePath: string): string {
@@ -838,19 +918,41 @@ async function main(): Promise<void> {
   let bestScore = Number.NEGATIVE_INFINITY;
 
   for (const variant of variants) {
-    const extraction = useDirectCloud
-      ? await extractTextFromDirectCloud(
+    let extraction: ExtractionLike;
+    if (useDirectCloud) {
+      extraction = await extractTextFromDirectCloud(
         variant.dataUrl,
         directCloudProvider as DirectCloudProvider,
         directCloudThrottleConfig,
         directCloudThrottleState
-      )
-      : await extractTextFromAppService(variant.dataUrl, {
-        providerOrder: providerOrder as string[] | undefined,
-        preferPrimaryCloudWait: waitForPrimary,
-        waitForPrimaryCloudCooldownMs,
-        maxPrimaryCloudWaitMs,
-      });
+      );
+    } else {
+      const directOrder = resolveDirectCloudProviderOrder(providerOrder);
+      const directAttempt = await tryDirectCloudProviderOrder(
+        variant.dataUrl,
+        directOrder,
+        directCloudThrottleConfig,
+        directCloudThrottleState,
+      );
+
+      if (directAttempt.extraction) {
+        extraction = directAttempt.extraction;
+      } else {
+        process.stdout.write("[ocr-live] Direct cloud providers unavailable; falling back to local OCR path.\n");
+        const localFallback = await extractTextFromAppService(variant.dataUrl, {
+          providerOrder: ["local_tesseract"],
+          preferPrimaryCloudWait: waitForPrimary,
+          waitForPrimaryCloudCooldownMs,
+          maxPrimaryCloudWaitMs,
+        });
+
+        extraction = {
+          ...localFallback,
+          attempts: [...directAttempt.attempts, ...localFallback.attempts],
+        };
+      }
+    }
+
     let score = scoreTocCandidate(extraction.text);
 
     if (goldTranscript) {

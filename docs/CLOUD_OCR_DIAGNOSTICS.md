@@ -63,6 +63,18 @@ Run the live smoke test with:
 npm run test:smoke:ocr:cloud
 ```
 
+Run the live OCR pipeline from CLI with cloud-first provider order using the TOC sample:
+
+```bash
+npm run program -- ocr run --image-file tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png --wait-for-primary --max-crops 2
+```
+
+CLI behavior for `courseforge ocr run`:
+
+- attempts direct cloud providers in configured order first (`cloud_openai_vision`, then `cloud_github_models_vision` unless overridden)
+- uses local Tesseract only after cloud providers fail or are unavailable
+- includes provider-attempt diagnostics in the JSON report so cloud failures are traceable
+
 What it does:
 
 - generates a copyright-page sample PNG with strict left/right column boundaries
@@ -109,6 +121,22 @@ For metadata fallback diagnostics, inspect these additional fields when present:
 - `failureSnapshot.imageArtifact.previewDataUrl`: truncated inline preview of the page image captured with the failed metadata snapshot
 
 When a cloud provider is marked unavailable, CourseForge keeps that state in the provider-health cache for the TTL window to avoid repeating dead-end calls before trying the next provider.
+
+## Auth Preflight Guard
+
+Before cloud OCR callables are invoked, CourseForge now performs an auth preflight check:
+
+- confirms a signed-in Firebase user exists
+- validates token access (with one forced refresh attempt)
+- blocks cloud callable attempts when auth is missing/expired
+
+When preflight fails, diagnostics include `cloud_auth_preflight_failed`, provider availability is cached as auth-unavailable with a short TTL, and fallback can move to the next provider/local OCR immediately.
+
+Recovery paths surfaced in OCR error messages:
+
+- Web app: open `/login` and sign in again
+- CLI: `npm run program -- auth status` then `npm run program -- auth refresh`
+- If refresh cannot recover: `npm run program -- login --role teacher`
 
 ## Metadata Interpretation Safeguards
 

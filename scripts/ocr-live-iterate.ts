@@ -84,6 +84,9 @@ async function main(): Promise<void> {
   const betweenRunsSeconds = Math.max(1, Number(typeof args["between-runs-seconds"] === "string" ? args["between-runs-seconds"] : "8") || 8);
   const cerThreshold = typeof args["cer-threshold"] === "string" ? args["cer-threshold"] : "0.1";
   const structuredProfile = typeof args["structured-profile"] === "string" ? args["structured-profile"] : "toc-page1";
+  const waitForPrimary = Boolean(args["wait-for-primary"]);
+  const traceAll = Boolean(args["trace-all"]);
+  const maxCrops = typeof args["max-crops"] === "string" ? Math.max(1, Number(args["max-crops"]) || 0) : 0;
 
   const goldTranscriptFile = requestedGoldTranscriptFile && fs.existsSync(path.resolve(requestedGoldTranscriptFile))
     ? requestedGoldTranscriptFile
@@ -134,6 +137,18 @@ async function main(): Promise<void> {
       debugArgs.push("--direct-cloud-provider", cloudProvider);
     } else {
       debugArgs.push("--provider-order", "local_tesseract");
+    }
+
+    if (waitForPrimary) {
+      debugArgs.push("--wait-for-primary");
+    }
+
+    if (traceAll) {
+      debugArgs.push("--trace-all");
+    }
+
+    if (maxCrops > 0) {
+      debugArgs.push("--max-crops", String(maxCrops));
     }
 
     const record: IterationRecord = {

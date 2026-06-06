@@ -58,12 +58,14 @@ const AUTO_OCR_CIRCUIT_STATE_KEY = "courseforge.autoOcr.circuitState";
 const AUTO_OCR_USER_PREFERENCE_SET_KEY = "courseforge.autoOcr.userPreferenceSet";
 const AUTO_OCR_AVAILABILITY_CACHE_TTL_MS = 3 * 60 * 1000;
 const AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS = 15 * 60 * 1000;
+const CLOUD_PROVIDER_MIN_REQUEST_GAP_MS = 1500;
 
 const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000;
 
 const CLOUD_PROVIDER_ORDER: CloudAutoOcrProviderId[] = ["cloud_openai_vision", "cloud_github_models_vision"];
 const DEFAULT_PROVIDER_ORDER: AutoOcrProviderId[] = [...CLOUD_PROVIDER_ORDER, "local_tesseract"];
+const cloudProviderLastRequestAt: Partial<Record<CloudAutoOcrProviderId, number>> = {};
 const UNUSABLE_OCR_PATTERNS: RegExp[] = [
   /unable to extract text from images/i,
   /can't extract text from images/i,
@@ -110,6 +112,35 @@ let cloudAvailabilityProbeInFlight: Promise<Partial<Record<CloudAutoOcrProviderI
 
 function createOcrTraceId(prefix = "ocr"): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForCloudProviderRequestSlot(providerId: AutoOcrProviderId, traceId: string): Promise<void> {
+  if (!isCloudProviderId(providerId)) {
+    return;
+  }
+
+  const lastRequestAt = cloudProviderLastRequestAt[providerId] ?? 0;
+  const elapsedMs = Date.now() - lastRequestAt;
+  const waitMs = Math.max(0, CLOUD_PROVIDER_MIN_REQUEST_GAP_MS - elapsedMs);
+  if (waitMs <= 0) {
+    cloudProviderLastRequestAt[providerId] = Date.now();
+    return;
+  }
+
+  void emitOcrDiagnostic("provider_request_paced", {
+    traceId,
+    context: {
+      providerId,
+      waitMs,
+      minGapMs: CLOUD_PROVIDER_MIN_REQUEST_GAP_MS,
+    },
+  });
+  await delay(waitMs);
+  cloudProviderLastRequestAt[providerId] = Date.now();
 }
 
 async function emitOcrDiagnostic(
@@ -1079,6 +1110,9 @@ export async function extractTextFromImageWithFallback(
   options: {
     providerOrder?: AutoOcrProviderId[];
     providersOverride?: AutoOcrProvider[];
+    preferPrimaryCloudWait?: boolean;
+    waitForPrimaryCloudCooldownMs?: number;
+    maxPrimaryCloudWaitMs?: number;
   } = {}
 ): Promise<AutoOcrExtractionResult> {
   const extractionTraceId = createOcrTraceId("ocr-fallback");
@@ -1098,6 +1132,9 @@ export async function extractTextFromImageWithFallback(
   }
   const providerOrder = normalizeExecutionProviderOrder(options.providerOrder ?? await getEffectiveAutoOcrProviderOrder());
   const primaryCloudProviderId = providerOrder.find((providerId): providerId is CloudAutoOcrProviderId => isCloudProviderId(providerId)) ?? null;
+  const preferPrimaryCloudWait = options.preferPrimaryCloudWait === true;
+  const waitForPrimaryCloudCooldownMs = Math.max(1_000, options.waitForPrimaryCloudCooldownMs ?? 45_000);
+  const maxPrimaryCloudWaitMs = Math.max(waitForPrimaryCloudCooldownMs, options.maxPrimaryCloudWaitMs ?? 90_000);
   const providerMap = new Map((options.providersOverride ?? getAutoOcrProviders()).map((provider) => [provider.id, provider]));
   const attempts: AutoOcrAttemptResult[] = [];
 
@@ -1111,13 +1148,42 @@ export async function extractTextFromImageWithFallback(
 
   for (const providerId of providerOrder) {
     if (isCircuitOpen(providerId)) {
-      attempts.push({ providerId, success: false, errorMessage: "Circuit breaker open for provider cooldown window." });
-      void emitOcrDiagnostic("provider_skipped_circuit_open", {
-        level: "warning",
-        traceId: extractionTraceId,
-        context: { providerId },
-      });
-      continue;
+      if (
+        preferPrimaryCloudWait
+        && primaryCloudProviderId
+        && providerId === primaryCloudProviderId
+      ) {
+        const circuitState = getCircuitState()[providerId];
+        const remainingMs = Math.max(0, circuitState.openUntil - Date.now());
+        const waitMs = Math.min(maxPrimaryCloudWaitMs, remainingMs);
+        if (waitMs > 0) {
+          void emitOcrDiagnostic("primary_provider_waiting_for_cooldown", {
+            level: "warning",
+            traceId: extractionTraceId,
+            context: { providerId, waitMs },
+          });
+          await delay(waitMs);
+        }
+
+        if (!isCircuitOpen(providerId)) {
+          void emitOcrDiagnostic("primary_provider_cooldown_cleared", {
+            traceId: extractionTraceId,
+            context: { providerId },
+          });
+        }
+      }
+
+      if (!isCircuitOpen(providerId)) {
+        // Cooldown window elapsed while waiting for primary cloud provider.
+      } else {
+        attempts.push({ providerId, success: false, errorMessage: "Circuit breaker open for provider cooldown window." });
+        void emitOcrDiagnostic("provider_skipped_circuit_open", {
+          level: "warning",
+          traceId: extractionTraceId,
+          context: { providerId },
+        });
+        continue;
+      }
     }
 
     const provider = providerMap.get(providerId);
@@ -1149,18 +1215,54 @@ export async function extractTextFromImageWithFallback(
     }
 
     if (!available) {
-      const errorMessage = buildUnavailableProviderMessage(providerId);
-      attempts.push({ providerId, success: false, errorMessage });
-      recordProviderFailure(providerId, errorMessage);
-      void emitOcrDiagnostic("provider_unavailable", {
-        level: "warning",
-        traceId: extractionTraceId,
-        context: { providerId, errorMessage },
-      });
-      continue;
+      if (
+        preferPrimaryCloudWait
+        && primaryCloudProviderId
+        && providerId === primaryCloudProviderId
+        && isCloudProviderId(providerId)
+      ) {
+        const cachedAvailability = getCachedCloudAvailability(providerId);
+        const rateLimited = cachedAvailability?.reasonCode === "rate_limited";
+        if (rateLimited) {
+          const waitMs = Math.min(waitForPrimaryCloudCooldownMs, maxPrimaryCloudWaitMs);
+          void emitOcrDiagnostic("primary_provider_waiting_for_rate_limit", {
+            level: "warning",
+            traceId: extractionTraceId,
+            context: { providerId, waitMs, reasonCode: cachedAvailability?.reasonCode },
+          });
+          await delay(waitMs);
+          await refreshCloudAvailabilityCache({ forceRefresh: true, providerIds: [providerId] });
+          try {
+            available = await provider.isAvailable();
+          } catch {
+            available = false;
+          }
+          if (available) {
+            void emitOcrDiagnostic("primary_provider_recovered_after_wait", {
+              traceId: extractionTraceId,
+              context: { providerId },
+            });
+          }
+        }
+      }
+
+      if (available) {
+        // Provider recovered after primary wait path.
+      } else {
+        const errorMessage = buildUnavailableProviderMessage(providerId);
+        attempts.push({ providerId, success: false, errorMessage });
+        recordProviderFailure(providerId, errorMessage);
+        void emitOcrDiagnostic("provider_unavailable", {
+          level: "warning",
+          traceId: extractionTraceId,
+          context: { providerId, errorMessage },
+        });
+        continue;
+      }
     }
 
     try {
+      await waitForCloudProviderRequestSlot(providerId, extractionTraceId);
       void emitOcrDiagnostic("provider_extract_started", {
         traceId: extractionTraceId,
         context: { providerId },

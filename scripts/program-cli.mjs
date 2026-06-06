@@ -1295,6 +1295,16 @@ function matchesOcrView(entry, view) {
     return merged.includes("fallback") || merged.includes("provider_") || merged.includes("circuit");
   }
 
+  if (view === "rate-limits") {
+    return merged.includes("rate_limit")
+      || merged.includes("rate limit")
+      || merged.includes("429")
+      || merged.includes("cooldown")
+      || merged.includes("circuit")
+      || merged.includes("throttl")
+      || merged.includes("provider_request_paced");
+  }
+
   if (view === "confidence") {
     return merged.includes("confidence") || merged.includes("score") || merged.includes("quality");
   }
@@ -1369,6 +1379,271 @@ function buildOcrDebugView(view) {
   };
 }
 
+function toPositiveInteger(value, fallbackValue = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallbackValue;
+  }
+  return Math.floor(parsed);
+}
+
+function runTsxScript(scriptPath, forwardedArgs) {
+  const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
+  return spawnSync(
+    npxCommand,
+    ["tsx", scriptPath, ...forwardedArgs],
+    {
+      cwd: process.cwd(),
+      stdio: "inherit",
+      env: process.env,
+    }
+  );
+}
+
+function resolveOcrFixture(fixtureName) {
+  const normalized = String(fixtureName || "").trim().toLowerCase();
+  if (normalized === "toc-page1") {
+    return {
+      fixture: "toc-page1",
+      imageFile: path.resolve("tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png"),
+      goldTranscriptFile: path.resolve("docs/ocr-gold/toc-page1-gold.txt"),
+      structuredProfile: "toc-page1",
+    };
+  }
+
+  return null;
+}
+
+function handleOcrCapture() {
+  const imageFile = parseFlag("image-file", "").trim();
+  if (!imageFile) {
+    console.error("Missing required flag: --image-file");
+    process.exit(1);
+  }
+
+  const resolvedImage = path.resolve(imageFile);
+  if (!fs.existsSync(resolvedImage)) {
+    console.error(`Image file not found: ${resolvedImage}`);
+    process.exit(1);
+  }
+
+  const extension = path.extname(resolvedImage) || ".png";
+  const captureDir = path.resolve("tmp-smoke/captures");
+  fs.mkdirSync(captureDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const label = parseFlag("label", "manual").trim() || "manual";
+  const outputPath = path.join(captureDir, `ocr-capture-${label}-${stamp}${extension}`);
+  fs.copyFileSync(resolvedImage, outputPath);
+
+  emitCommandResult("courseforge ocr capture", {
+    imageFile: resolvedImage,
+    capturedFile: outputPath,
+    label,
+    source: "file",
+  });
+}
+
+function handleOcrRun() {
+  const imageFile = parseFlag("image-file", "").trim();
+  if (!imageFile) {
+    console.error("Missing required flag: --image-file");
+    process.exit(1);
+  }
+
+  const forwardedArgs = ["--image-file", imageFile];
+  const fixtureName = parseFlag("fixture", "").trim();
+  if (fixtureName) {
+    const fixture = resolveOcrFixture(fixtureName);
+    if (!fixture) {
+      console.error(`Unknown OCR fixture: ${fixtureName}`);
+      process.exit(1);
+    }
+    forwardedArgs.push("--gold-transcript-file", fixture.goldTranscriptFile);
+    forwardedArgs.push("--structured-profile", fixture.structuredProfile);
+  }
+
+  const outputFile = parseFlag("output", "").trim();
+  if (outputFile) {
+    forwardedArgs.push("--output", outputFile);
+  }
+
+  const goldTranscriptFile = parseFlag("gold-transcript-file", "").trim();
+  if (goldTranscriptFile) {
+    forwardedArgs.push("--gold-transcript-file", goldTranscriptFile);
+  }
+
+  const structuredProfile = parseFlag("structured-profile", "").trim();
+  if (structuredProfile) {
+    forwardedArgs.push("--structured-profile", structuredProfile);
+  }
+
+  const cerThreshold = parseFlag("cer-threshold", "").trim();
+  if (cerThreshold) {
+    forwardedArgs.push("--cer-threshold", cerThreshold);
+  }
+
+  if (hasFlag("fail-on-cer-threshold")) {
+    forwardedArgs.push("--fail-on-cer-threshold");
+  }
+
+  const maxCrops = toPositiveInteger(parseFlag("max-crops", ""), 0);
+  if (maxCrops > 0) {
+    forwardedArgs.push("--max-crops", String(maxCrops));
+  }
+
+  if (hasFlag("trace-all")) {
+    forwardedArgs.push("--trace-all");
+  }
+
+  if (hasFlag("wait-for-primary")) {
+    forwardedArgs.push("--wait-for-primary");
+  }
+
+  const providerOrderFlag = parseFlag("provider-order", "").trim();
+  if (hasFlag("primary-only")) {
+    forwardedArgs.push("--provider-order", "cloud_openai_vision");
+  } else if (providerOrderFlag) {
+    forwardedArgs.push("--provider-order", providerOrderFlag);
+  }
+
+  const child = runTsxScript("scripts/ocr-live-debug.ts", forwardedArgs);
+  process.exit(child.status ?? 1);
+}
+
+function handleOcrIterate() {
+  const imageFile = parseFlag("image-file", "").trim();
+  if (!imageFile) {
+    console.error("Missing required flag: --image-file");
+    process.exit(1);
+  }
+
+  const isFast = hasFlag("fast");
+  const isWaitMode = hasFlag("wait");
+  const forwardedArgs = ["--image-file", imageFile];
+
+  const iterations = parseFlag("iterations", isFast ? "4" : "8").trim();
+  if (iterations) {
+    forwardedArgs.push("--iterations", iterations);
+  }
+
+  const betweenRunsSeconds = parseFlag("between-runs-seconds", isWaitMode ? "8" : (isFast ? "2" : "8")).trim();
+  if (betweenRunsSeconds) {
+    forwardedArgs.push("--between-runs-seconds", betweenRunsSeconds);
+  }
+
+  const cloudCooldownSeconds = parseFlag("cloud-cooldown-seconds", isWaitMode ? "180" : (isFast ? "45" : "180")).trim();
+  if (cloudCooldownSeconds) {
+    forwardedArgs.push("--cloud-cooldown-seconds", cloudCooldownSeconds);
+  }
+
+  const cloudProvider = parseFlag("cloud-provider", "").trim();
+  if (cloudProvider) {
+    forwardedArgs.push("--cloud-provider", cloudProvider);
+  }
+
+  const reportDir = parseFlag("report-dir", "").trim();
+  if (reportDir) {
+    forwardedArgs.push("--report-dir", reportDir);
+  }
+
+  const goldTranscriptFile = parseFlag("gold-transcript-file", "").trim();
+  if (goldTranscriptFile) {
+    forwardedArgs.push("--gold-transcript-file", goldTranscriptFile);
+  }
+
+  const structuredProfile = parseFlag("structured-profile", "").trim();
+  if (structuredProfile) {
+    forwardedArgs.push("--structured-profile", structuredProfile);
+  }
+
+  const cerThreshold = parseFlag("cer-threshold", "").trim();
+  if (cerThreshold) {
+    forwardedArgs.push("--cer-threshold", cerThreshold);
+  }
+
+  const maxCrops = toPositiveInteger(parseFlag("max-crops", ""), 0);
+  if (maxCrops > 0) {
+    forwardedArgs.push("--max-crops", String(maxCrops));
+  }
+
+  if (hasFlag("wait-for-primary")) {
+    forwardedArgs.push("--wait-for-primary");
+  }
+
+  if (hasFlag("trace-all")) {
+    forwardedArgs.push("--trace-all");
+  }
+
+  const child = runTsxScript("scripts/ocr-live-iterate.ts", forwardedArgs);
+  process.exit(child.status ?? 1);
+}
+
+function handleOcrCompare() {
+  const fixtureName = parseFlag("fixture", "").trim();
+  const fixture = fixtureName ? resolveOcrFixture(fixtureName) : null;
+  if (fixtureName && !fixture) {
+    console.error(`Unknown OCR fixture: ${fixtureName}`);
+    process.exit(1);
+  }
+
+  const imageFile = parseFlag("image-file", fixture?.imageFile ?? "").trim();
+  const goldTranscriptFile = parseFlag("gold-transcript-file", fixture?.goldTranscriptFile ?? "").trim();
+  const structuredProfile = parseFlag("structured-profile", fixture?.structuredProfile ?? "generic").trim();
+
+  if (!imageFile) {
+    console.error("Missing required flag: --image-file (or provide --fixture toc-page1)");
+    process.exit(1);
+  }
+
+  const forwardedArgs = ["--image-file", imageFile, "--structured-profile", structuredProfile];
+  if (goldTranscriptFile) {
+    forwardedArgs.push("--gold-transcript-file", goldTranscriptFile);
+  }
+
+  const outputFile = parseFlag("output", "").trim();
+  if (outputFile) {
+    forwardedArgs.push("--output", outputFile);
+  }
+
+  const cerThreshold = parseFlag("cer-threshold", "0.1").trim();
+  if (hasFlag("cer")) {
+    forwardedArgs.push("--cer-threshold", cerThreshold, "--fail-on-cer-threshold");
+  }
+
+  if (hasFlag("wait-for-primary")) {
+    forwardedArgs.push("--wait-for-primary");
+  }
+
+  const maxCrops = toPositiveInteger(parseFlag("max-crops", ""), 0);
+  if (maxCrops > 0) {
+    forwardedArgs.push("--max-crops", String(maxCrops));
+  }
+
+  const child = runTsxScript("scripts/ocr-live-debug.ts", forwardedArgs);
+  process.exit(child.status ?? 1);
+}
+
+function handleOcrLimits() {
+  const action = (args[2] || "show").toLowerCase();
+  if (!["probe", "refresh", "show", "test"].includes(action)) {
+    console.error("Unknown ocr limits action. Use probe, refresh, show, or test.");
+    process.exit(1);
+  }
+
+  const report = buildOcrDebugView("rate-limits");
+  outputOcrDebugReport({
+    view: "rate-limits",
+    generatedAt: new Date().toISOString(),
+    action,
+    totalEvents: report.totalEvents,
+    events: report.events,
+    guidance: [
+      "Use `courseforge ocr debug rate-limits --json` for raw event introspection.",
+      "Use `npm run test:smoke:ocr:cloud:gate` for live provider probe and quota diagnostics.",
+    ],
+  });
+}
+
 function renderOcrDebugHtml(report) {
   const events = Array.isArray(report.events) ? report.events : [];
   const rows = events
@@ -1440,7 +1715,7 @@ function outputOcrDebugReport(report) {
 
 function handleOcrDebug() {
   const action = (args[2] || "trace").toLowerCase();
-  const validViews = new Set(["trace", "pipeline", "crops", "garbage", "rescans", "fallback", "confidence", "structure", "tokens", "timings"]);
+  const validViews = new Set(["trace", "pipeline", "crops", "garbage", "rescans", "fallback", "rate-limits", "confidence", "structure", "tokens", "timings"]);
 
   if (action === "export") {
     const includeFull = hasFlag("full");
@@ -1467,7 +1742,7 @@ function handleOcrDebug() {
   }
 
   if (!validViews.has(action)) {
-    console.error("Unknown ocr debug action. Use trace, pipeline, crops, garbage, rescans, fallback, confidence, structure, tokens, timings, or export.");
+    console.error("Unknown ocr debug action. Use trace, pipeline, crops, garbage, rescans, fallback, rate-limits, confidence, structure, tokens, timings, or export.");
     process.exit(1);
   }
 
@@ -1482,7 +1757,32 @@ function handleOcr() {
     return;
   }
 
-  console.error("Unknown ocr action. Use debug.");
+  if (action === "capture") {
+    handleOcrCapture();
+    return;
+  }
+
+  if (action === "run") {
+    handleOcrRun();
+    return;
+  }
+
+  if (action === "iterate") {
+    handleOcrIterate();
+    return;
+  }
+
+  if (action === "compare") {
+    handleOcrCompare();
+    return;
+  }
+
+  if (action === "limits") {
+    handleOcrLimits();
+    return;
+  }
+
+  console.error("Unknown ocr action. Use debug, capture, run, iterate, compare, or limits.");
   process.exit(1);
 }
 
@@ -1611,14 +1911,20 @@ function collectHelpTopics() {
     },
     ocr: {
       command: "courseforge ocr",
-      purpose: "Inspect OCR diagnostics, fallback chains, timings, and exports.",
+      purpose: "Run OCR workflows and inspect diagnostics, fallback chains, rate limits, timings, and exports.",
       usage: [
+        "courseforge ocr capture --image-file <path> [--label <name>]",
+        "courseforge ocr run --image-file <path> [--primary-only] [--wait-for-primary] [--max-crops <n>]",
+        "courseforge ocr iterate --image-file <path> [--fast|--wait] [--trace-all]",
+        "courseforge ocr compare --fixture toc-page1 [--cer] [--structure]",
+        "courseforge ocr limits <probe|refresh|show|test> [--json]",
         "courseforge ocr debug trace [--json]",
         "courseforge ocr debug pipeline [--json]",
         "courseforge ocr debug crops [--json]",
         "courseforge ocr debug garbage [--json]",
         "courseforge ocr debug rescans [--json]",
         "courseforge ocr debug fallback [--json]",
+        "courseforge ocr debug rate-limits [--json]",
         "courseforge ocr debug confidence [--json]",
         "courseforge ocr debug structure [--json]",
         "courseforge ocr debug tokens [--json]",
@@ -1630,20 +1936,32 @@ function collectHelpTopics() {
         "--html: emit HTML export view.",
         "--full: include all OCR debug views in export mode.",
         "--output <path>: write report artifact to file.",
+        "--primary-only: force OpenAI-only provider order for run mode.",
+        "--wait-for-primary: enable primary cloud cooldown wait path before fallback.",
+        "--max-crops <n>: limit TOC variant count in run/iterate/compare flows.",
+        "--trace-all: include extended trace metadata in iterate pipelines.",
       ],
       examples: [
+        "courseforge ocr capture --image-file tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png",
+        "courseforge ocr run --image-file tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png --wait-for-primary --max-crops 3",
+        "courseforge ocr iterate --image-file tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png --fast --trace-all",
+        "courseforge ocr compare --fixture toc-page1 --cer --structure",
+        "courseforge ocr limits show --json",
         "courseforge ocr debug trace --json",
         "courseforge ocr debug fallback --json",
+        "courseforge ocr debug rate-limits --json",
         "courseforge ocr debug timings --json",
         "courseforge ocr debug export --full --json --output tmp-smoke/ocr-debug-full.json",
         "courseforge ocr debug export --html --output tmp-smoke/ocr-debug.html",
       ],
       limitations: [
-        "This command introspects locally persisted debug entries; it does not replay OCR extraction by itself.",
+        "run/iterate/compare commands wrap the existing scripts/ocr-live-debug.ts and scripts/ocr-live-iterate.ts.",
+        "limits commands summarize local debug telemetry; use cloud smoke gate for live provider probing.",
       ],
       requiredPermissions: [
         "Local debug log read access.",
         "File write access when using --output.",
+        "Network access when running live cloud OCR paths.",
       ],
       outputs: [
         "JSON payloads for trace, pipeline, fallback, timings, and related views.",
@@ -2365,7 +2683,8 @@ function showHelp() {
   console.log("  courseforge admin <status|moderation|content|debug-policy|premium> [...]");
   console.log("  courseforge settings <status|language|accessibility|debug|ocr> [...]");
   console.log("  courseforge permissions <audit|repair|reset> [--json] [--apply]");
-  console.log("  courseforge ocr debug <trace|pipeline|crops|garbage|rescans|fallback|confidence|structure|tokens|timings|export> [--json|--html] [--output path]");
+  console.log("  courseforge ocr <capture|run|iterate|compare|limits|debug> [...]");
+  console.log("  courseforge ocr debug <trace|pipeline|crops|garbage|rescans|fallback|rate-limits|confidence|structure|tokens|timings|export> [--json|--html] [--output path]");
   console.log("  courseforge plugins <install|uninstall|status> [plugin-id]");
   console.log("  courseforge debug <feature> [flags]  (alias: npm run courseforge -- debug ...)");
   console.log("  program debug <feature> [--severity info|warn|error] [--sourceType automatic|manual] [--message text]");

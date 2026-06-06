@@ -41,6 +41,15 @@ describe("program CLI help and permissions workflow", () => {
 
     expect(permissionsExamples.stdout).toContain("Examples:");
     expect(permissionsExamples.stdout).toContain("courseforge permissions audit --json");
+
+    const ocrExamples = await execFileAsync(process.execPath, ["scripts/program-cli.mjs", "help", "ocr", "--examples"], {
+      cwd: process.cwd(),
+      env,
+    });
+
+    expect(ocrExamples.stdout).toContain("courseforge ocr run --image-file");
+    expect(ocrExamples.stdout).toContain("courseforge ocr iterate --image-file");
+    expect(ocrExamples.stdout).toContain("courseforge ocr debug rate-limits --json");
   });
 
   it("supports permissions audit in json mode", async () => {

@@ -65,6 +65,13 @@ describe("program CLI OCR debug workflow", () => {
     const fallbackPayload = JSON.parse(fallback.stdout);
     expect(fallbackPayload.view).toBe("fallback");
     expect(fallbackPayload.totalEvents).toBeGreaterThan(0);
+
+    const rateLimits = await execFileAsync(process.execPath, ["scripts/program-cli.mjs", "ocr", "debug", "rate-limits", "--json"], {
+      cwd: process.cwd(),
+      env,
+    });
+    const rateLimitsPayload = JSON.parse(rateLimits.stdout);
+    expect(rateLimitsPayload.view).toBe("rate-limits");
   });
 
   it("supports OCR debug export html output", async () => {

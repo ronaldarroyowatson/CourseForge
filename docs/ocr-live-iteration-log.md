@@ -44,3 +44,7 @@
 | 2026-06-05T22:18:15.371Z | iter-04-local | local_tesseract | original | 5.8615 | 192.7176 | 1.000 | 3 | 15 | duration=17.1s |
 | 2026-06-05T22:19:02.703Z | iter-05-cloud | cloud_openai_vision | original | 0.0000 | 249.5560 | 1.000 | 3 | 19 | duration=44.8s |
 | 2026-06-05T22:19:21.191Z | iter-06-local | local_tesseract | original | 5.8615 | 192.7176 | 1.000 | 3 | 15 | duration=17.0s |
+| 2026-06-05T22:52:47.440Z | iter-01-cloud | cloud_openai_vision | original | 0.0000 | 249.3783 | 1.000 | 3 | 19 | duration=34.8s |
+| 2026-06-05T22:53:06.207Z | iter-02-local | local_tesseract | original | 5.8615 | 192.7176 | 1.000 | 3 | 15 | duration=17.2s |
+| 2026-06-05T22:53:48.827Z | iter-03-cloud | cloud_openai_vision | original | 0.0000 | 249.2007 | 1.000 | 3 | 19 | duration=40.0s |
+| 2026-06-05T22:54:07.461Z | iter-04-local | local_tesseract | original | 5.8615 | 192.7176 | 1.000 | 3 | 15 | duration=17.1s |

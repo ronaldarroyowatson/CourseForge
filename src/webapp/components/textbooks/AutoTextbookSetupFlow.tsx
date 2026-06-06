@@ -175,6 +175,11 @@ const TOC_SAMPLE_MAX_COUNT = 10;
 const TOC_SAMPLE_GAP_MS = 250;
 const TOC_SAMPLE_GOOD_CONFIDENCE = 0.94;
 const TOC_RESCUE_PROVIDER_ORDER: AutoOcrProviderId[] = ["cloud_openai_vision", "cloud_github_models_vision", "local_tesseract"];
+const TOC_PRIMARY_WAIT_OPTIONS = {
+  preferPrimaryCloudWait: true,
+  waitForPrimaryCloudCooldownMs: 45_000,
+  maxPrimaryCloudWaitMs: 90_000,
+} as const;
 
 function toOcrBufferStep(step: AutoFlowStep): OcrBufferStep {
   return step === "toc-editor" ? "toc" : step;
@@ -251,6 +256,12 @@ function sanitizeTocDraftText(rawText: string): string {
       return true;
     })
     .join("\n");
+}
+
+function waitForOcrGap(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, Math.max(0, ms));
+  });
 }
 
 function scoreTocNoise(rawText: string): number {
@@ -1501,9 +1512,6 @@ async function buildTocSamplingVariants(imageDataUrl: string): Promise<Array<{ l
   const variants: Array<{ label: string; rect: SelectionRect }> = [
     { label: "full page boundary", rect: baseBoundary },
     { label: "two-column guided crop", rect: guidedTwoColumnCrop },
-    { label: "two-column guided expanded", rect: guidedTwoColumnExpanded },
-    { label: "wide bottom crop", rect: wideBottomCrop },
-    { label: "center bottom crop", rect: centerBottomCrop },
     { label: "preferred color crop", rect: preferredCrop },
   ];
 
@@ -1521,11 +1529,6 @@ async function buildTocSamplingVariants(imageDataUrl: string): Promise<Array<{ l
       imageDataUrl: await cropDataUrlToRect(imageDataUrl, variant.rect),
     });
   }
-
-  deduped.push({
-    label: "preferred grayscale backup",
-    imageDataUrl: await toGrayscaleDataUrl(deduped.find((variant) => variant.label === "preferred color crop")?.imageDataUrl ?? deduped[0]?.imageDataUrl ?? imageDataUrl),
-  });
 
   return deduped;
 }
@@ -3862,8 +3865,12 @@ export function AutoTextbookSetupFlow({
         let bestQuality = primary;
 
         for (let rescuePass = 1; rescuePass <= maxRescuePasses; rescuePass += 1) {
+          if (rescuePass > 1) {
+            await waitForOcrGap(TOC_SAMPLE_GAP_MS);
+          }
           const rescue = await extractTextFromImageWithFallback(captured.imageDataUrl, {
             providerOrder: TOC_RESCUE_PROVIDER_ORDER,
+            ...TOC_PRIMARY_WAIT_OPTIONS,
           });
           const mergedCandidate = mergeTocTextByLineQuality(bestText, rescue.text);
           const rescueQuality = evaluateCandidate(rescue.text);
@@ -3984,10 +3991,14 @@ export function AutoTextbookSetupFlow({
       if (samplingVariants.length > 0) {
         for (let index = 0; index < samplingVariants.length; index += 1) {
           const variant = samplingVariants[index];
+          if (index > 0) {
+            await waitForOcrGap(TOC_SAMPLE_GAP_MS);
+          }
           setOcrProgressMessage(`TOC sampling ${index + 1}/${samplingVariants.length}: ${variant.label}.`);
 
           const sample = await extractTextFromImageWithFallback(variant.imageDataUrl, {
             providerOrder: TOC_RESCUE_PROVIDER_ORDER,
+            ...TOC_PRIMARY_WAIT_OPTIONS,
           });
           const sampleQuality = evaluateCandidate(sample.text);
 
@@ -4011,9 +4022,11 @@ export function AutoTextbookSetupFlow({
         }
 
         if (bestQuality.missingHeadingSignals) {
+          await waitForOcrGap(TOC_SAMPLE_GAP_MS);
           setOcrProgressMessage("TOC recovery: chapter heading(s) were detected in OCR but missing from parse. Running recovery pass...");
           const recoverySample = await extractTextFromImageWithFallback(captured.imageDataUrl, {
             providerOrder: TOC_RESCUE_PROVIDER_ORDER,
+            ...TOC_PRIMARY_WAIT_OPTIONS,
           });
           const recoveryQuality = evaluateCandidate(recoverySample.text);
           const mergedRecoveryText = mergeTocTextByLineQuality(bestText, recoverySample.text);

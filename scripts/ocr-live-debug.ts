@@ -52,19 +52,29 @@ type DirectCloudThrottleState = {
 
 async function extractTextFromAppService(
   imageDataUrl: string,
-  providerOrder?: string[]
+  options?: {
+    providerOrder?: string[];
+    preferPrimaryCloudWait?: boolean;
+    waitForPrimaryCloudCooldownMs?: number;
+    maxPrimaryCloudWaitMs?: number;
+  }
 ): Promise<ExtractionLike> {
   const modulePath = "../src/core/services/autoOcrService";
   const autoOcrModule: {
     extractTextFromImageWithFallback: (
       dataUrl: string,
-      options?: { providerOrder?: string[] }
+      options?: {
+        providerOrder?: string[];
+        preferPrimaryCloudWait?: boolean;
+        waitForPrimaryCloudCooldownMs?: number;
+        maxPrimaryCloudWaitMs?: number;
+      }
     ) => Promise<ExtractionLike>;
   } = await import(modulePath);
 
   return autoOcrModule.extractTextFromImageWithFallback(
     imageDataUrl,
-    providerOrder?.length ? { providerOrder } : undefined
+    options
   );
 }
 
@@ -456,9 +466,10 @@ function pngToDataUrl(png: PNG): string {
   return `data:image/png;base64,${PNG.sync.write(png).toString("base64")}`;
 }
 
-function buildPngTocVariants(imagePath: string): Array<{ label: string; dataUrl: string }> {
+function buildPngTocVariants(imagePath: string, maxCrops = 0): Array<{ label: string; dataUrl: string }> {
   if (path.extname(imagePath).toLowerCase() !== ".png") {
-    return [{ label: "original", dataUrl: toDataUrl(imagePath) }];
+    const single = [{ label: "original", dataUrl: toDataUrl(imagePath) }];
+    return maxCrops > 0 ? single.slice(0, Math.max(1, maxCrops)) : single;
   }
 
   const image = PNG.sync.read(fs.readFileSync(path.resolve(imagePath)));
@@ -466,7 +477,6 @@ function buildPngTocVariants(imagePath: string): Array<{ label: string; dataUrl:
 
   variants.push({ label: "original", dataUrl: pngToDataUrl(image) });
 
-  const full = { x: 0, y: 0, width: image.width, height: image.height };
   const lowerBand = {
     x: 0,
     y: Math.round(image.height * 0.22),
@@ -511,7 +521,6 @@ function buildPngTocVariants(imagePath: string): Array<{ label: string; dataUrl:
   };
 
   const cropSpecs: Array<{ label: string; rect: { x: number; y: number; width: number; height: number } }> = [
-    { label: "full", rect: full },
     { label: "lower-band", rect: lowerBand },
     { label: "center-lower-band", rect: centerLowerBand },
     { label: "center-page", rect: centerPage },
@@ -523,6 +532,10 @@ function buildPngTocVariants(imagePath: string): Array<{ label: string; dataUrl:
 
   for (const spec of cropSpecs) {
     variants.push({ label: spec.label, dataUrl: pngToDataUrl(cropPng(image, spec.rect)) });
+  }
+
+  if (maxCrops > 0) {
+    return variants.slice(0, Math.max(1, maxCrops));
   }
 
   return variants;
@@ -766,7 +779,13 @@ async function main(): Promise<void> {
   const providerOrder = typeof args["provider-order"] === "string"
     ? args["provider-order"].split(",").map((value) => value.trim()).filter(Boolean)
     : undefined;
+  const waitForPrimary = Boolean(args["wait-for-primary"]);
+  const waitForPrimaryCloudCooldownMs = parsePositiveInt(typeof args["wait-for-primary-cooldown-ms"] === "string" ? args["wait-for-primary-cooldown-ms"] : "45000", 45000);
+  const maxPrimaryCloudWaitMs = parsePositiveInt(typeof args["max-primary-wait-ms"] === "string" ? args["max-primary-wait-ms"] : "90000", 90000);
+  const maxCrops = parsePositiveInt(typeof args["max-crops"] === "string" ? args["max-crops"] : "0", 0);
+  const traceAll = Boolean(args["trace-all"]);
   const appendMarkdownLogFile = typeof args["append-markdown-log"] === "string" ? args["append-markdown-log"] : "";
+  const effectiveAppendMarkdownLogFile = appendMarkdownLogFile || (traceAll ? "docs/ocr-live-iteration-log.md" : "");
   const runLabel = typeof args["run-label"] === "string" ? args["run-label"].trim() : "";
   const githubBatchSize = parsePositiveInt(
     typeof args["github-batch-size"] === "string" ? args["github-batch-size"] : process.env.COURSEFORGE_GITHUB_SMOKE_BATCH_SIZE,
@@ -813,7 +832,7 @@ async function main(): Promise<void> {
     ? readTextFile(goldTranscriptFile)
     : undefined;
 
-  const variants = tocFocused ? buildPngTocVariants(imageFile) : [{ label: "original", dataUrl: toDataUrl(imageFile) }];
+  const variants = tocFocused ? buildPngTocVariants(imageFile, maxCrops) : [{ label: "original", dataUrl: toDataUrl(imageFile) }];
   let bestExtraction: ExtractionLike | null = null;
   let bestVariant = variants[0]?.label ?? "original";
   let bestScore = Number.NEGATIVE_INFINITY;
@@ -826,7 +845,12 @@ async function main(): Promise<void> {
         directCloudThrottleConfig,
         directCloudThrottleState
       )
-      : await extractTextFromAppService(variant.dataUrl, providerOrder as string[] | undefined);
+      : await extractTextFromAppService(variant.dataUrl, {
+        providerOrder: providerOrder as string[] | undefined,
+        preferPrimaryCloudWait: waitForPrimary,
+        waitForPrimaryCloudCooldownMs,
+        maxPrimaryCloudWaitMs,
+      });
     let score = scoreTocCandidate(extraction.text);
 
     if (goldTranscript) {
@@ -904,8 +928,8 @@ async function main(): Promise<void> {
     fs.writeFileSync(resolvedOutput, `${reportJson}\n`, "utf8");
   }
 
-  if (appendMarkdownLogFile) {
-    appendMarkdownRunLog(appendMarkdownLogFile, report, Date.now() - startedAtMs);
+  if (effectiveAppendMarkdownLogFile) {
+    appendMarkdownRunLog(effectiveAppendMarkdownLogFile, report, Date.now() - startedAtMs);
   }
 
   process.stdout.write(`${reportJson}\n`);

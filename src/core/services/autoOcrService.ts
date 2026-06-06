@@ -56,8 +56,10 @@ export interface AutoOcrProviderHealthRecord {
 const AUTO_OCR_PROVIDER_ORDER_KEY = "courseforge.autoOcr.providerOrder";
 const AUTO_OCR_CIRCUIT_STATE_KEY = "courseforge.autoOcr.circuitState";
 const AUTO_OCR_USER_PREFERENCE_SET_KEY = "courseforge.autoOcr.userPreferenceSet";
+const AUTO_OCR_CLOUD_REQUEST_PACING_KEY = "courseforge.autoOcr.cloudRequestPacing";
 const AUTO_OCR_AVAILABILITY_CACHE_TTL_MS = 3 * 60 * 1000;
 const AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS = 15 * 60 * 1000;
+const AUTO_OCR_AUTH_REQUIRED_CACHE_TTL_MS = 10 * 1000;
 const CLOUD_PROVIDER_MIN_REQUEST_GAP_MS = 1500;
 
 const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
@@ -118,29 +120,75 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function readCloudRequestPacingState(): Partial<Record<CloudAutoOcrProviderId, number>> {
+  const storage = getStorage();
+  if (!storage) {
+    return {};
+  }
+
+  const raw = storage.getItem(AUTO_OCR_CLOUD_REQUEST_PACING_KEY);
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<Record<CloudAutoOcrProviderId, unknown>>;
+    const next: Partial<Record<CloudAutoOcrProviderId, number>> = {};
+    for (const providerId of CLOUD_PROVIDER_ORDER) {
+      const value = parsed[providerId];
+      if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+        next[providerId] = Math.floor(value);
+      }
+    }
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+function saveCloudRequestPacingState(state: Partial<Record<CloudAutoOcrProviderId, number>>): void {
+  const storage = getStorage();
+  if (!storage) {
+    return;
+  }
+
+  storage.setItem(AUTO_OCR_CLOUD_REQUEST_PACING_KEY, JSON.stringify(state));
+}
+
 async function waitForCloudProviderRequestSlot(providerId: AutoOcrProviderId, traceId: string): Promise<void> {
   if (!isCloudProviderId(providerId)) {
     return;
   }
 
-  const lastRequestAt = cloudProviderLastRequestAt[providerId] ?? 0;
-  const elapsedMs = Date.now() - lastRequestAt;
-  const waitMs = Math.max(0, CLOUD_PROVIDER_MIN_REQUEST_GAP_MS - elapsedMs);
-  if (waitMs <= 0) {
-    cloudProviderLastRequestAt[providerId] = Date.now();
-    return;
+  const persisted = readCloudRequestPacingState();
+  const lastRequestAt = Math.max(
+    cloudProviderLastRequestAt[providerId] ?? 0,
+    persisted[providerId] ?? 0,
+  );
+  const now = Date.now();
+  const reservedSlotAt = Math.max(now, lastRequestAt + CLOUD_PROVIDER_MIN_REQUEST_GAP_MS);
+  const waitMs = Math.max(0, reservedSlotAt - now);
+
+  cloudProviderLastRequestAt[providerId] = reservedSlotAt;
+  persisted[providerId] = reservedSlotAt;
+  saveCloudRequestPacingState(persisted);
+
+  if (waitMs > 0) {
+    void emitOcrDiagnostic("provider_request_paced", {
+      traceId,
+      context: {
+        providerId,
+        waitMs,
+        minGapMs: CLOUD_PROVIDER_MIN_REQUEST_GAP_MS,
+      },
+    });
+    await delay(waitMs);
   }
 
-  void emitOcrDiagnostic("provider_request_paced", {
-    traceId,
-    context: {
-      providerId,
-      waitMs,
-      minGapMs: CLOUD_PROVIDER_MIN_REQUEST_GAP_MS,
-    },
-  });
-  await delay(waitMs);
-  cloudProviderLastRequestAt[providerId] = Date.now();
+  const completedAt = Math.max(reservedSlotAt, Date.now());
+  cloudProviderLastRequestAt[providerId] = completedAt;
+  persisted[providerId] = completedAt;
+  saveCloudRequestPacingState(persisted);
 }
 
 async function emitOcrDiagnostic(
@@ -619,6 +667,13 @@ export function resetAutoOcrCircuitStateForTests(): void {
   });
 }
 
+export function resetAutoOcrRequestPacingStateForTests(): void {
+  cloudProviderLastRequestAt.cloud_openai_vision = 0;
+  cloudProviderLastRequestAt.cloud_github_models_vision = 0;
+  const storage = getStorage();
+  storage?.removeItem(AUTO_OCR_CLOUD_REQUEST_PACING_KEY);
+}
+
 export function clearAutoOcrAvailabilityCache(): void {
   autoOcrAvailabilityCache = null;
 }
@@ -732,13 +787,22 @@ function setCachedCloudAvailability(providerId: CloudAutoOcrProviderId, entry: C
 function createUniformCloudCacheEntry(
   state: ProviderAvailabilityState,
   errorMessage: string,
-  reasonCode?: string
+  reasonCode?: string,
+  ttlMs = AUTO_OCR_AVAILABILITY_CACHE_TTL_MS,
 ): Partial<Record<CloudAutoOcrProviderId, CloudProviderAvailabilityCacheEntry>> {
-  const expiresAt = Date.now() + AUTO_OCR_AVAILABILITY_CACHE_TTL_MS;
+  const expiresAt = Date.now() + ttlMs;
   return {
     cloud_openai_vision: { state, expiresAt, errorMessage, reasonCode },
     cloud_github_models_vision: { state, expiresAt, errorMessage, reasonCode },
   };
+}
+
+function isAuthRequiredReasonCode(reasonCode: string | null | undefined): boolean {
+  const normalized = (reasonCode ?? "").toLowerCase();
+  return normalized === "no_user"
+    || normalized === "unauthenticated"
+    || normalized === "auth_required"
+    || normalized === "missing_auth";
 }
 
 function normalizeProbeProviderIds(providerIds?: CloudAutoOcrProviderId[]): CloudAutoOcrProviderId[] {
@@ -805,7 +869,12 @@ async function refreshCloudAvailabilityCache(
   cloudAvailabilityProbeInFlight = (async () => {
     const user = getCurrentUser() ?? await waitForAuthStateChange(2500);
     if (!user) {
-      autoOcrAvailabilityCache = createUniformCloudCacheEntry("unavailable", "Sign in is required for Cloud OCR.", "no_user");
+      autoOcrAvailabilityCache = createUniformCloudCacheEntry(
+        "unavailable",
+        "Sign in is required for Cloud OCR.",
+        "no_user",
+        AUTO_OCR_AUTH_REQUIRED_CACHE_TTL_MS,
+      );
       void emitOcrDiagnostic("health_probe_no_user", {
         level: "warning",
         traceId,
@@ -881,7 +950,12 @@ async function refreshCloudAvailabilityCache(
     } catch (error) {
       const normalized = normalizeCallableError(error);
       if (isUnauthenticatedCallableError(normalized)) {
-        autoOcrAvailabilityCache = createUniformCloudCacheEntry("unavailable", "Sign in is required for Cloud OCR.", "unauthenticated");
+        autoOcrAvailabilityCache = createUniformCloudCacheEntry(
+          "unavailable",
+          "Sign in is required for Cloud OCR.",
+          "unauthenticated",
+          AUTO_OCR_AUTH_REQUIRED_CACHE_TTL_MS,
+        );
         void emitOcrDiagnostic("health_probe_unauthenticated", {
           level: "warning",
           traceId,
@@ -937,7 +1011,9 @@ function updateCloudAvailabilityFromCallableError(providerId: CloudAutoOcrProvid
 
   const ttlMs = lowerReasonCode === "rate_limited"
     ? AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS
-    : AUTO_OCR_AVAILABILITY_CACHE_TTL_MS;
+    : isAuthRequiredReasonCode(lowerReasonCode)
+      ? AUTO_OCR_AUTH_REQUIRED_CACHE_TTL_MS
+      : AUTO_OCR_AVAILABILITY_CACHE_TTL_MS;
 
   setCachedCloudAvailability(providerId, {
     state,
@@ -1223,6 +1299,7 @@ export async function extractTextFromImageWithFallback(
       ) {
         const cachedAvailability = getCachedCloudAvailability(providerId);
         const rateLimited = cachedAvailability?.reasonCode === "rate_limited";
+        const authRequired = isAuthRequiredReasonCode(cachedAvailability?.reasonCode);
         if (rateLimited) {
           const waitMs = Math.min(waitForPrimaryCloudCooldownMs, maxPrimaryCloudWaitMs);
           void emitOcrDiagnostic("primary_provider_waiting_for_rate_limit", {
@@ -1239,6 +1316,26 @@ export async function extractTextFromImageWithFallback(
           }
           if (available) {
             void emitOcrDiagnostic("primary_provider_recovered_after_wait", {
+              traceId: extractionTraceId,
+              context: { providerId },
+            });
+          }
+        } else if (authRequired) {
+          const waitMs = Math.min(5_000, maxPrimaryCloudWaitMs);
+          void emitOcrDiagnostic("primary_provider_waiting_for_auth", {
+            level: "warning",
+            traceId: extractionTraceId,
+            context: { providerId, waitMs, reasonCode: cachedAvailability?.reasonCode ?? null },
+          });
+          await waitForAuthStateChange(waitMs);
+          await refreshCloudAvailabilityCache({ forceRefresh: true, providerIds: [providerId] });
+          try {
+            available = await provider.isAvailable();
+          } catch {
+            available = false;
+          }
+          if (available) {
+            void emitOcrDiagnostic("primary_provider_recovered_after_auth_wait", {
               traceId: extractionTraceId,
               context: { providerId },
             });

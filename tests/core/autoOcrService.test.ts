@@ -40,6 +40,7 @@ import {
   getAutoOcrProviderOrder,
   getAutoOcrProviderHealth,
   resetAutoOcrCircuitStateForTests,
+  resetAutoOcrRequestPacingStateForTests,
   setAutoOcrProviderOrder,
   type AutoOcrProvider,
 } from "../../src/core/services/autoOcrService";
@@ -78,6 +79,7 @@ describe("autoOcrService", () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     window.localStorage.clear();
     resetAutoOcrCircuitStateForTests();
+    resetAutoOcrRequestPacingStateForTests();
     clearAutoOcrAvailabilityCache();
     callableMocks.getAiProviderStatus.mockReset();
     callableMocks.extractScreenshotText.mockReset();

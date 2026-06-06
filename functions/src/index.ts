@@ -1651,6 +1651,7 @@ const DEFAULT_DEBUG_POLICY: DebugLoggingPolicyRecord = {
 };
 const OCR_RATE_LIMIT_WINDOW_MS = 60_000;
 const OCR_RATE_LIMIT_MAX_REQUESTS = 30;
+const OCR_MIN_REQUEST_GAP_MS = 1_500;
 const MAX_OCR_IMAGE_DATA_URL_BYTES = 8 * 1024 * 1024;
 const DEFAULT_USER_AI_DAILY_REQUEST_LIMIT = 120;
 const DEFAULT_USER_AI_DAILY_TOKEN_LIMIT = 120_000;
@@ -2366,7 +2367,7 @@ function inferImageMimeType(imageDataUrl: string): string {
   throw new HttpsError("invalid-argument", "Unsupported screenshot format. Use PNG, JPEG, or WEBP.");
 }
 
-async function consumeOcrRequestQuota(uid: string): Promise<void> {
+async function consumeOcrRequestQuota(uid: string, providerId: "cloud_openai_vision" | "cloud_github_models_vision"): Promise<void> {
   const usageRef = firestore.doc(`users/${uid}/ocrUsage/current`);
 
   await firestore.runTransaction(async (transaction) => {
@@ -2375,18 +2376,44 @@ async function consumeOcrRequestQuota(uid: string): Promise<void> {
     const data = snapshot.exists ? snapshot.data() ?? {} : {};
     const windowStartMs = typeof data.windowStartMs === "number" ? data.windowStartMs : now;
     const usedCount = typeof data.usedCount === "number" ? data.usedCount : 0;
+    const providerLastRequestAtMap = data.providerLastRequestAt && typeof data.providerLastRequestAt === "object"
+      ? data.providerLastRequestAt as Record<string, unknown>
+      : {};
+    const providerLastRequestAt = typeof providerLastRequestAtMap[providerId] === "number"
+      ? Math.max(0, Math.floor(providerLastRequestAtMap[providerId] as number))
+      : 0;
     const withinWindow = now - windowStartMs < OCR_RATE_LIMIT_WINDOW_MS;
 
     const nextWindowStart = withinWindow ? windowStartMs : now;
     const nextCount = withinWindow ? usedCount + 1 : 1;
 
+    if (providerLastRequestAt > 0 && now - providerLastRequestAt < OCR_MIN_REQUEST_GAP_MS) {
+      const retryAfterMs = OCR_MIN_REQUEST_GAP_MS - (now - providerLastRequestAt);
+      const retryAfterSeconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+      throw new HttpsError(
+        "resource-exhausted",
+        `OCR cooldown active for ${providerId}. Retry in about ${retryAfterSeconds}s.`,
+        {
+          reasonCode: "provider_cooldown_active",
+          providerId,
+          retryAfterSeconds,
+        }
+      );
+    }
+
     if (withinWindow && usedCount >= OCR_RATE_LIMIT_MAX_REQUESTS) {
       throw new HttpsError("resource-exhausted", "OCR request limit reached. Please wait a minute and try again.");
     }
 
+    const nextProviderLastRequestAt = {
+      ...providerLastRequestAtMap,
+      [providerId]: now,
+    };
+
     transaction.set(usageRef, {
       windowStartMs: nextWindowStart,
       usedCount: nextCount,
+      providerLastRequestAt: nextProviderLastRequestAt,
       updatedAt: new Date().toISOString(),
     }, { merge: true });
   });
@@ -5346,7 +5373,7 @@ async function executeCloudOcrExtraction(
     );
   }
 
-  await consumeOcrRequestQuota(userId);
+  await consumeOcrRequestQuota(userId, runtime.id);
   inferImageMimeType(imageDataUrl);
 
   let response: Response;

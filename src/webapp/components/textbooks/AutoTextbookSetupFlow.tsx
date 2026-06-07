@@ -176,7 +176,6 @@ const TOC_SAMPLE_TARGET_COUNT = 5;
 const TOC_SAMPLE_MAX_COUNT = 10;
 const TOC_SAMPLE_GAP_MS = 250;
 const TOC_SAMPLE_GOOD_CONFIDENCE = 0.94;
-const TOC_RESCUE_PROVIDER_ORDER: AutoOcrProviderId[] = ["cloud_openai_vision", "cloud_github_models_vision", "local_tesseract"];
 
 async function getTocOcrRuntimeOptions(): Promise<{
   providerOrder: AutoOcrProviderId[];
@@ -981,11 +980,53 @@ function saveAutoSessionDraft(draft: AutoSessionDraft): AutoSessionDraft[] {
     return [];
   }
 
+  const compactDraftForStorage = (input: AutoSessionDraft): AutoSessionDraft => ({
+    ...input,
+    coverImageDataUrl: null,
+    ownershipProofDataUrl: null,
+    tocCaptureImageDataUrl: null,
+    rawOcrText: input.rawOcrText.slice(0, 8_000),
+  });
+
+  const minimalDraftForStorage = (input: AutoSessionDraft): AutoSessionDraft => ({
+    ...compactDraftForStorage(input),
+    relatedIsbnsSnapshot: [],
+    rawOcrText: "",
+    tocPagesSnapshot: [],
+  });
+
+  const tryWriteDrafts = (entries: AutoSessionDraft[]): boolean => {
+    try {
+      window.localStorage.setItem(AUTO_SESSION_DRAFTS_KEY, JSON.stringify(entries));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   try {
     const existing = readAutoSessionDrafts().filter((entry) => entry.id !== draft.id);
     const merged = normalizeAutoSessionDrafts([draft, ...existing]);
-    window.localStorage.setItem(AUTO_SESSION_DRAFTS_KEY, JSON.stringify(merged));
-    return merged;
+    if (tryWriteDrafts(merged)) {
+      return merged;
+    }
+
+    const compactMerged = normalizeAutoSessionDrafts([
+      compactDraftForStorage(draft),
+      ...existing.map(compactDraftForStorage),
+    ]);
+    if (tryWriteDrafts(compactMerged)) {
+      return compactMerged;
+    }
+
+    const minimalMerged = normalizeAutoSessionDrafts([
+      minimalDraftForStorage(draft),
+    ]);
+    if (tryWriteDrafts(minimalMerged)) {
+      return minimalMerged;
+    }
+
+    return readAutoSessionDrafts();
   } catch {
     // Ignore quota or serialization errors; resumability is best-effort.
     return readAutoSessionDrafts();
@@ -4001,7 +4042,6 @@ export function AutoTextbookSetupFlow({
           }
           const rescue = await extractTextFromImageWithFallback(captured.imageDataUrl, {
             ...tocRuntimeOptions,
-            providerOrder: TOC_RESCUE_PROVIDER_ORDER,
           });
           const mergedCandidate = mergeTocTextByLineQuality(bestText, rescue.text);
           const rescueQuality = evaluateCandidate(rescue.text);
@@ -4134,7 +4174,6 @@ export function AutoTextbookSetupFlow({
 
           const sample = await extractTextFromImageWithFallback(variant.imageDataUrl, {
             ...tocRuntimeOptions,
-            providerOrder: TOC_RESCUE_PROVIDER_ORDER,
           });
           const sampleQuality = evaluateCandidate(sample.text);
 
@@ -4162,7 +4201,6 @@ export function AutoTextbookSetupFlow({
           setOcrProgressMessage("TOC recovery: chapter heading(s) were detected in OCR but missing from parse. Running recovery pass...");
           const recoverySample = await extractTextFromImageWithFallback(captured.imageDataUrl, {
             ...tocRuntimeOptions,
-            providerOrder: TOC_RESCUE_PROVIDER_ORDER,
           });
           const recoveryQuality = evaluateCandidate(recoverySample.text);
           const mergedRecoveryText = mergeTocTextByLineQuality(bestText, recoverySample.text);

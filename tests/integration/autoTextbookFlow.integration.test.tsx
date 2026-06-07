@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { METADATA_CORRECTION_STORAGE_KEYS } from "../../src/core/services/metadataCorrectionLearningService";
 import { persistAutoTextbook } from "../../src/core/services/autoTextbookPersistenceService";
+import { getBrowserOcrSettingsManager } from "../../src/core/services/ocrSettingsService";
 import type { TocChapter } from "../../src/core/services/textbookAutoExtractionService";
 import { AutoTextbookSetupFlow } from "../../src/webapp/components/textbooks/AutoTextbookSetupFlow";
 import { TextbookForm } from "../../src/webapp/components/textbooks/TextbookForm";
@@ -122,11 +123,28 @@ const metadataCorrectionSyncMocks = vi.hoisted(() => ({
 }));
 
 const autoOcrMocks = vi.hoisted(() => ({
-  extractTextFromImageWithFallback: vi.fn<(image: string) => Promise<{ text: string; providerId: string; attempts: string[] }>>(async (_image: string) => ({
+  extractTextFromImageWithFallback: vi.fn<(image: string, options?: Record<string, unknown>) => Promise<{ text: string; providerId: string; attempts: string[] }>>(async (_image: string) => ({
     text: "Inspire Physical Science Student Edition",
     providerId: "local_tesseract",
     attempts: ["local_tesseract"],
   })),
+}));
+
+const displayCaptureMocks = vi.hoisted(() => ({
+  captureDisplayFrame: vi.fn(async () => SOURCE_OF_TRUTH_COVER_DATA_URL),
+  getDisplayCaptureSupportInfo: vi.fn(() => ({
+    browser: "edge" as const,
+    label: "Microsoft Edge",
+    supportLevel: "strong" as const,
+    guidance: "Capture supported.",
+    extensionRecommended: false,
+  })),
+  normalizeDisplayCaptureError: vi.fn(() => ({
+    code: "unknown" as const,
+    message: "Unknown capture error.",
+    browser: "Microsoft Edge",
+  })),
+  resetDisplayCaptureSession: vi.fn(),
 }));
 
 const authMocks = vi.hoisted(() => ({
@@ -156,9 +174,16 @@ vi.mock("../../src/core/services/autoOcrService", async () => {
   const actual = await vi.importActual<typeof import("../../src/core/services/autoOcrService")>("../../src/core/services/autoOcrService");
   return {
     ...actual,
-    extractTextFromImageWithFallback: (image: string) => autoOcrMocks.extractTextFromImageWithFallback(image),
+    extractTextFromImageWithFallback: (image: string, options?: Record<string, unknown>) => autoOcrMocks.extractTextFromImageWithFallback(image, options),
   };
 });
+
+vi.mock("../../src/webapp/utils/displayCapture", () => ({
+  captureDisplayFrame: () => displayCaptureMocks.captureDisplayFrame(),
+  getDisplayCaptureSupportInfo: () => displayCaptureMocks.getDisplayCaptureSupportInfo(),
+  normalizeDisplayCaptureError: () => displayCaptureMocks.normalizeDisplayCaptureError(),
+  resetDisplayCaptureSession: () => displayCaptureMocks.resetDisplayCaptureSession(),
+}));
 
 vi.mock("../../src/firebase/auth", async () => {
   const actual = await vi.importActual<typeof import("../../src/firebase/auth")>("../../src/firebase/auth");
@@ -241,6 +266,10 @@ describe("auto textbook flow integration", () => {
     window.localStorage.removeItem("courseforge.autoExtractionCheckpoints.v1");
     metadataPipelineMocks.extractMetadataWithOcrFallbackFromDataUrl.mockClear();
     autoOcrMocks.extractTextFromImageWithFallback.mockClear();
+    displayCaptureMocks.captureDisplayFrame.mockClear();
+    displayCaptureMocks.getDisplayCaptureSupportInfo.mockClear();
+    displayCaptureMocks.normalizeDisplayCaptureError.mockClear();
+    displayCaptureMocks.resetDisplayCaptureSession.mockClear();
     syncServiceMocks.syncNow.mockClear();
     syncServiceMocks.findCloudTextbookByISBN.mockReset().mockResolvedValue(undefined);
     metadataCorrectionSyncMocks.syncMetadataCorrectionLearning.mockClear();
@@ -414,6 +443,143 @@ describe("auto textbook flow integration", () => {
       });
     } finally {
       fileReaderReadAsDataUrl.mockRestore();
+    }
+  });
+
+  it("keeps TOC rescue and sampling OCR calls aligned with wait-for-primary runtime provider order", async () => {
+    const manager = await getBrowserOcrSettingsManager();
+    await manager.resetSettings();
+    await manager.updateSettings({
+      primaryProvider: "cloud_github_models_vision",
+      fallbackBehavior: "wait",
+      dynamicRateLimitAdaptation: false,
+      shots: 1,
+      cropStrategy: "color",
+    });
+
+    const structuredTocText = [
+      "1. THE NATURE OF SCIENCE ............ 68",
+      "1.1 Nature of Science ................ 69",
+      "1.2 Scientific Models ................ 72",
+      "2. MOTION ............................ 83",
+      "2.1 Describing Motion ................ 84",
+      "2.2 Speed and Velocity ............... 86",
+    ].join("\n");
+
+    autoOcrMocks.extractTextFromImageWithFallback.mockResolvedValue({
+      text: structuredTocText,
+      providerId: "cloud_github_models_vision",
+      attempts: ["cloud_github_models_vision"],
+    });
+    const OriginalImage = globalThis.Image;
+    class ImmediateImage {
+      onload: null | (() => void) = null;
+
+      onerror: null | (() => void) = null;
+
+      naturalWidth = 1400;
+
+      naturalHeight = 900;
+
+      set src(_value: string) {
+        queueMicrotask(() => {
+          this.onload?.();
+        });
+      }
+    }
+
+    (globalThis as { Image: typeof Image }).Image = ImmediateImage as unknown as typeof Image;
+
+    try {
+      render(
+        <AutoTextbookSetupFlow
+          onSaved={() => undefined}
+          onSwitchToManual={() => undefined}
+          testingSeedState={{
+            step: "toc",
+            coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+            ownershipProofDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+            metadataDraft: {
+              title: "Inspire Physical Science",
+              subject: "Science",
+              publisher: "McGraw Hill",
+            },
+          }}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Capture TOC Page" }));
+
+      await waitFor(() => {
+        expect(autoOcrMocks.extractTextFromImageWithFallback).toHaveBeenCalled();
+      });
+
+      const runtimeCalls = autoOcrMocks.extractTextFromImageWithFallback.mock.calls
+        .map(([, options]) => options as { providerOrder?: string[] } | undefined)
+        .filter((options): options is { providerOrder: string[] } => Array.isArray(options?.providerOrder));
+
+      expect(runtimeCalls.length).toBeGreaterThan(0);
+      for (const options of runtimeCalls) {
+        expect(options.providerOrder).toEqual(["cloud_github_models_vision", "local_tesseract"]);
+      }
+    } finally {
+      (globalThis as { Image: typeof Image }).Image = OriginalImage;
+    }
+  });
+
+  it("persists resumable TOC snapshot even when the first localStorage write fails", async () => {
+    const hugeImage = `data:image/png;base64,${"A".repeat(2_500_000)}`;
+    const originalSetItem = window.localStorage.setItem;
+    let injectedQuotaFailure = false;
+
+    const setItemSpy = vi.spyOn(window.localStorage, "setItem").mockImplementation((key: string, value: string) => {
+      if (key === AUTO_SESSION_DRAFTS_KEY && !injectedQuotaFailure) {
+        injectedQuotaFailure = true;
+        throw new DOMException("Quota exceeded", "QuotaExceededError");
+      }
+
+      return originalSetItem.call(window.localStorage, key, value);
+    });
+
+    try {
+      render(
+        <AutoTextbookSetupFlow
+          onSaved={() => undefined}
+          onSwitchToManual={() => undefined}
+          testingSeedState={{
+            step: "toc-editor",
+            coverImageDataUrl: hugeImage,
+            ownershipProofDataUrl: hugeImage,
+            tocCaptureImageDataUrl: hugeImage,
+            metadataDraft: {
+              title: "Inspire Physical Science",
+              subject: "Science",
+              publisher: "McGraw Hill",
+            },
+            tocResult: SOURCE_OF_TRUTH_TOC,
+            tocPages: [
+              {
+                pageIndex: 0,
+                confidence: SOURCE_OF_TRUTH_TOC.confidence,
+                chapters: SOURCE_OF_TRUTH_TOC.chapters,
+              },
+            ],
+          }}
+        />
+      );
+
+      await waitFor(() => {
+        const raw = window.localStorage.getItem(AUTO_SESSION_DRAFTS_KEY);
+        expect(raw).toBeTruthy();
+      });
+
+      const stored = JSON.parse(window.localStorage.getItem(AUTO_SESSION_DRAFTS_KEY) ?? "[]") as Array<{
+        tocResultSnapshot?: { chapters?: unknown[] };
+      }>;
+      expect(stored.length).toBeGreaterThan(0);
+      expect(stored[0]?.tocResultSnapshot?.chapters?.length).toBeGreaterThan(0);
+    } finally {
+      setItemSpy.mockRestore();
     }
   });
 

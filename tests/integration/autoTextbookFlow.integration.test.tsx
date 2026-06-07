@@ -68,6 +68,7 @@ const metadataPipelineMocks = vi.hoisted(() => ({
 }));
 
 const repositoryMocks = vi.hoisted(() => ({
+  fetchTextbooks: vi.fn<( ) => Promise<any[]>>(async () => []),
   createTextbook: vi.fn<(input: any) => Promise<string>>(async () => "textbook-1"),
   editTextbook: vi.fn<(id: string, changes: Record<string, unknown>) => Promise<{ id: string }>>(async () => ({ id: "textbook-1" })),
   findDuplicateTextbook: vi.fn<(input: Record<string, unknown>) => Promise<any>>(async () => undefined),
@@ -169,6 +170,7 @@ vi.mock("../../src/firebase/auth", async () => {
 
 vi.mock("../../src/webapp/hooks/useRepositories", () => ({
   useRepositories: () => ({
+    fetchTextbooks: repositoryMocks.fetchTextbooks,
     createTextbook: repositoryMocks.createTextbook,
     editTextbook: repositoryMocks.editTextbook,
     findDuplicateTextbook: repositoryMocks.findDuplicateTextbook,
@@ -202,6 +204,7 @@ vi.mock("../../src/core/services/metadataExtractionPipelineService", async () =>
 
 describe("auto textbook flow integration", () => {
   beforeEach(() => {
+    repositoryMocks.fetchTextbooks.mockReset().mockResolvedValue([]);
     repositoryMocks.createTextbook.mockClear();
     repositoryMocks.editTextbook.mockClear();
     repositoryMocks.findDuplicateTextbook.mockReset().mockResolvedValue(undefined);
@@ -737,6 +740,133 @@ describe("auto textbook flow integration", () => {
     }));
     expect(repositoryMocks.fetchChaptersByTextbookId).toHaveBeenCalledWith("textbook-existing");
     expect(repositoryMocks.fetchSectionsByChapterId).toHaveBeenCalledWith("chapter-existing-1");
+  });
+
+  it("hydrates TOC chapters from title fallback when resumable draft metadata is sparse", async () => {
+    const now = Date.now();
+    repositoryMocks.findDuplicateTextbook.mockResolvedValueOnce(undefined);
+    repositoryMocks.findTextbookByISBN.mockResolvedValueOnce(undefined);
+    repositoryMocks.fetchTextbooks.mockResolvedValueOnce([
+      {
+        id: "textbook-old",
+        sourceType: "auto",
+        title: "Inspire Physical Science",
+        grade: "8",
+        subject: "Science",
+        edition: "Student",
+        publicationYear: 2020,
+        isbnRaw: "",
+        isbnNormalized: "",
+        seriesName: "",
+        publisher: "",
+        lastModified: new Date(now - 5000).toISOString(),
+        createdAt: new Date(now - 5000).toISOString(),
+        updatedAt: new Date(now - 5000).toISOString(),
+        pendingSync: false,
+        source: "local",
+        isFavorite: false,
+        isArchived: false,
+      },
+      {
+        id: "textbook-new",
+        sourceType: "auto",
+        title: "Inspire Physical Science",
+        grade: "8",
+        subject: "Science",
+        edition: "Student",
+        publicationYear: 2021,
+        isbnRaw: "",
+        isbnNormalized: "",
+        seriesName: "",
+        publisher: "",
+        lastModified: new Date(now).toISOString(),
+        createdAt: new Date(now).toISOString(),
+        updatedAt: new Date(now).toISOString(),
+        pendingSync: false,
+        source: "local",
+        isFavorite: false,
+        isArchived: false,
+      },
+    ]);
+    repositoryMocks.fetchChaptersByTextbookId.mockResolvedValueOnce([
+      {
+        id: "chapter-new-1",
+        sourceType: "auto",
+        textbookId: "textbook-new",
+        index: 4,
+        name: "MATTER AND CHANGE",
+        lastModified: new Date(now).toISOString(),
+        pendingSync: false,
+        source: "local",
+      },
+    ]);
+    repositoryMocks.fetchSectionsByChapterId.mockResolvedValueOnce([
+      {
+        id: "section-new-1",
+        sourceType: "auto",
+        chapterId: "chapter-new-1",
+        index: 1,
+        title: "Properties of Matter",
+        lastModified: new Date(now).toISOString(),
+        pendingSync: false,
+        source: "local",
+      },
+    ]);
+
+    window.localStorage.setItem(
+      AUTO_SESSION_DRAFTS_KEY,
+      JSON.stringify([
+        {
+          id: "resume-sparse-metadata",
+          version: 1,
+          savedAt: now,
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          rawOcrText: "MODULE 4: MATTER AND CHANGE",
+          metadataTitle: "Inspire Physical Science",
+          metadataSubject: "Science",
+          metadataPublisher: "",
+          metadataFormSnapshot: {
+            title: "Inspire Physical Science",
+            subtitle: "",
+            grade: "8",
+            gradeBand: "",
+            subject: "Science",
+            edition: "",
+            publicationYear: "",
+            copyrightYear: "",
+            isbnRaw: "",
+            additionalIsbnsCsv: "",
+            seriesName: "",
+            publisher: "",
+            publisherLocation: "",
+            platformUrl: "",
+            mhid: "",
+            authorsCsv: "",
+            tocExtractionConfidence: "0",
+          },
+          step: "toc-editor",
+          stepsCompleted: { cover: true, copyright: true },
+        },
+      ])
+    );
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "TOC Editor" })).toBeInTheDocument();
+    });
+
+    expect(screen.getByDisplayValue("MATTER AND CHANGE")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Properties of Matter")).toBeInTheDocument();
+    expect(repositoryMocks.fetchTextbooks).toHaveBeenCalledTimes(1);
+    expect(repositoryMocks.fetchChaptersByTextbookId).toHaveBeenCalledWith("textbook-new");
   });
 
   it("allows deleting TOC sections and chapters before recapture", async () => {

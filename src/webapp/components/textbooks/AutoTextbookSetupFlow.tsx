@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { Chapter, RelatedIsbn, RelatedIsbnType, Section } from "../../../core/models";
+import type { Chapter, RelatedIsbn, RelatedIsbnType, Section, Textbook } from "../../../core/models";
 
 import {
   type AutoConflictResolutionMode,
@@ -66,6 +66,7 @@ import {
   extractMetadataWithOcrFallbackFromDataUrl,
   type MetadataPipelineResult,
 } from "../../../core/services/metadataExtractionPipelineService";
+import { normalizeISBN } from "../../../core/services/isbnService";
 import { syncMetadataCorrectionLearning } from "../../../core/services/metadataCorrectionSyncService";
 import { syncNow } from "../../../core/services/syncService";
 import { TocPreviewTree } from "./tocPreview/TocPreviewTree";
@@ -1810,6 +1811,7 @@ export function AutoTextbookSetupFlow({
     editTextbook,
     editChapter,
     editSection,
+    fetchTextbooks,
     findTextbookByISBN,
     findDuplicateTextbook,
     fetchChaptersByTextbookId,
@@ -4450,21 +4452,61 @@ export function AutoTextbookSetupFlow({
     metadataSnapshot: MetadataFormState | undefined,
     fallbackTitle: string | undefined
   ): Promise<{ result: ParsedTocResult; pages: TocPage[] } | null> {
+    const normalize = (value: string | undefined): string => (value ?? "").trim().toLowerCase();
+    const selectNewest = (items: Textbook[]): Textbook | undefined => {
+      if (items.length === 0) {
+        return undefined;
+      }
+
+      return [...items].sort((left, right) => {
+        const leftTime = Date.parse(left.lastModified ?? "");
+        const rightTime = Date.parse(right.lastModified ?? "");
+        const leftSafe = Number.isFinite(leftTime) ? leftTime : 0;
+        const rightSafe = Number.isFinite(rightTime) ? rightTime : 0;
+        return rightSafe - leftSafe;
+      })[0];
+    };
+
     const isbnRaw = metadataSnapshot?.isbnRaw?.trim() ?? "";
+    const normalizedIsbn = normalizeISBN(isbnRaw);
     const title = metadataSnapshot?.title?.trim() || fallbackTitle?.trim() || "";
+    const normalizedTitle = normalize(title);
+    const normalizedGrade = normalize(metadataSnapshot?.grade);
     if (!isbnRaw && !title) {
       return null;
     }
 
     const publicationYearParsed = Number.parseInt(metadataSnapshot?.publicationYear ?? "", 10);
-    const match = await findDuplicateTextbook({
-      isbnRaw,
-      title,
-      grade: metadataSnapshot?.grade ?? "",
-      publisher: metadataSnapshot?.publisher ?? "",
-      seriesName: metadataSnapshot?.seriesName ?? "",
-      publicationYear: Number.isFinite(publicationYearParsed) ? publicationYearParsed : undefined,
-    });
+    let match: Textbook | undefined;
+    if (normalizedIsbn.length > 0) {
+      match = await findTextbookByISBN(isbnRaw);
+    }
+
+    if (!match) {
+      match = await findDuplicateTextbook({
+        isbnRaw,
+        title,
+        grade: metadataSnapshot?.grade ?? "",
+        publisher: metadataSnapshot?.publisher ?? "",
+        seriesName: metadataSnapshot?.seriesName ?? "",
+        publicationYear: Number.isFinite(publicationYearParsed) ? publicationYearParsed : undefined,
+      });
+    }
+
+    if (!match && normalizedTitle.length > 0) {
+      const textbooks = (await fetchTextbooks()).filter((entry) => !entry.isDeleted);
+      const titleMatches = textbooks.filter((entry) => normalize(entry.title) === normalizedTitle);
+      const sameGradeMatches = normalizedGrade.length > 0
+        ? titleMatches.filter((entry) => normalize(entry.grade) === normalizedGrade)
+        : titleMatches;
+      const sameYearMatches = Number.isFinite(publicationYearParsed)
+        ? sameGradeMatches.filter((entry) => entry.publicationYear === publicationYearParsed)
+        : sameGradeMatches;
+
+      match = selectNewest(sameYearMatches)
+        ?? selectNewest(sameGradeMatches)
+        ?? selectNewest(titleMatches);
+    }
 
     if (!match?.id) {
       return null;

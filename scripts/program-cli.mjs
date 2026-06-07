@@ -1639,7 +1639,7 @@ function handleOcrLimits() {
     events: report.events,
     guidance: [
       "Use `courseforge ocr debug rate-limits --json` for raw event introspection.",
-      "Use `npm run test:smoke:ocr:cloud:gate` for live provider probe and quota diagnostics.",
+      "Use `npm run test:smoke:ocr:cloud:gate:optin` for live provider probe and quota diagnostics.",
     ],
   });
 }
@@ -1848,7 +1848,7 @@ function collectHelpTopics() {
         "courseforge debug <feature> [flags]",
         "courseforge debug dump-log [--sourceType automatic|manual] [--output path] [--sync-cloud] [--approve-delete]",
         "courseforge debug dsc <enable|disable|report|clear>",
-        "courseforge debug ocr-live --image-file <path> [--direct-cloud-provider cloud_github_models_vision|cloud_openai_vision] [--github-rate-limit-retry-cycles <n>]",
+        "courseforge debug ocr-live --image-file <path> [--enable-direct-cloud] [--direct-cloud-provider cloud_github_models_vision|cloud_openai_vision] [--github-rate-limit-retry-cycles <n>]",
       ],
       flags: [
         "--severity info|warn|error",
@@ -1864,7 +1864,7 @@ function collectHelpTopics() {
         "courseforge debug dump-log --sourceType automatic --output tmp-smoke/debug-log.json",
         "courseforge debug dsc report --page settings --card \"Debug Log\"",
         "courseforge debug ocr-live --image-file tmp-smoke/samples/toc__example__expected.png --output tmp-smoke/ocr-debug.json",
-        "courseforge debug ocr-live --image-file tmp-smoke/samples/ocr__toc-spread-view__expect-parse-success.png --direct-cloud-provider cloud_github_models_vision --github-rate-limit-retry-cycles 2",
+        "courseforge debug ocr-live --image-file tmp-smoke/samples/ocr__toc-spread-view__expect-parse-success.png --enable-direct-cloud --direct-cloud-provider cloud_github_models_vision --github-rate-limit-retry-cycles 2",
       ],
       limitations: [
         "debug ocr-live delegates to scripts/ocr-live-debug.ts and requires project dependencies.",

@@ -196,6 +196,15 @@ function parseNonNegativeInt(value: string | undefined, fallbackValue: number): 
   return Math.floor(parsed);
 }
 
+function envFlagEnabled(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
 function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -888,7 +897,15 @@ async function main(): Promise<void> {
     1
   );
 
-  const useDirectCloud = directCloudProvider === "cloud_github_models_vision" || directCloudProvider === "cloud_openai_vision";
+  const requestedDirectCloudProvider = directCloudProvider === "cloud_github_models_vision" || directCloudProvider === "cloud_openai_vision";
+  const requestedCloudProviderOrder = Array.isArray(providerOrder)
+    && providerOrder.some((providerId) => isDirectCloudProvider(providerId));
+  const directCloudOptIn = Boolean(args["enable-direct-cloud"])
+    || envFlagEnabled(process.env.COURSEFORGE_ENABLE_DIRECT_CLOUD_DEBUG)
+    || requestedDirectCloudProvider
+    || requestedCloudProviderOrder;
+
+  const useDirectCloud = directCloudOptIn && requestedDirectCloudProvider;
   const directCloudThrottleConfig: DirectCloudThrottleConfig = {
     enabled: directCloudProvider === "cloud_github_models_vision",
     batchSize: githubBatchSize,
@@ -926,7 +943,7 @@ async function main(): Promise<void> {
         directCloudThrottleConfig,
         directCloudThrottleState
       );
-    } else {
+    } else if (directCloudOptIn) {
       const directOrder = resolveDirectCloudProviderOrder(providerOrder);
       const directAttempt = await tryDirectCloudProviderOrder(
         variant.dataUrl,
@@ -951,6 +968,21 @@ async function main(): Promise<void> {
           attempts: [...directAttempt.attempts, ...localFallback.attempts],
         };
       }
+    } else {
+      if (bestExtraction === null) {
+        process.stdout.write("[ocr-live] Cloud debug is disabled by default; running local OCR only. Use --enable-direct-cloud to opt in.\n");
+      }
+      const localOnly = await extractTextFromAppService(variant.dataUrl, {
+        providerOrder: ["local_tesseract"],
+        preferPrimaryCloudWait: false,
+        waitForPrimaryCloudCooldownMs,
+        maxPrimaryCloudWaitMs,
+      });
+
+      extraction = {
+        ...localOnly,
+        attempts: [...localOnly.attempts],
+      };
     }
 
     let score = scoreTocCandidate(extraction.text);

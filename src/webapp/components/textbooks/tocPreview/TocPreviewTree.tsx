@@ -15,6 +15,7 @@ interface TocPreviewTreeProps {
   isBusy?: boolean;
   onUpdateNode: (node: TocPreviewNodeModel, update: { numberValue: string; title: string; pageStart?: number }) => void;
   onRegenerateNode: (node: TocPreviewNodeModel) => void;
+  onDeleteNode: (node: TocPreviewNodeModel) => void;
 }
 
 export function TocPreviewTree({
@@ -24,6 +25,7 @@ export function TocPreviewTree({
   isBusy = false,
   onUpdateNode,
   onRegenerateNode,
+  onDeleteNode,
 }: TocPreviewTreeProps): React.JSX.Element {
   const summary = useMemo(() => buildTocPreviewTree(toc.chapters, toc.confidence), [toc.chapters, toc.confidence]);
 
@@ -51,6 +53,7 @@ export function TocPreviewTree({
               initiallyExpanded={expansionMode === "collapse-all" ? false : expansionMode === "expand-latest" ? index === summary.nodes.length - 1 : true}
               onUpdateNode={onUpdateNode}
               onRegenerateNode={onRegenerateNode}
+              onDeleteNode={onDeleteNode}
               isBusy={isBusy}
             />
           ))}

@@ -224,7 +224,7 @@ executeStep("OCR integration regression", "npx", ["vitest", "run", "tests/integr
 executeStep("OCR parser regression", "npx", ["vitest", "run", "tests/core/textbookAutoExtractionService.test.ts"]);
 
 if (!skipCloudSmoke) {
-  executeStep("Cloud OCR smoke gate", "npm", ["run", "test:smoke:ocr:cloud:gate"]);
+  executeStep("Cloud OCR smoke gate", "npm", ["run", "test:smoke:ocr:cloud:gate:optin"]);
 }
 
 if (!skipRemote) {

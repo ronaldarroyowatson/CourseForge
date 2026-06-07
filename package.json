@@ -1,6 +1,6 @@
 {
   "name": "courseforge",
-  "version": "1.7.115",
+  "version": "1.7.116",
   "private": true,
   "type": "module",
   "engines": {
@@ -46,6 +46,7 @@
     "test:e2e:no-rules": "npm run test:e2e && npm run test:core && npm run test:unit && npm run test:integration && npm run test:security:cli",
     "test:smoke:ocr:cloud": "powershell -ExecutionPolicy Bypass -File scripts/smoke-cloud-ocr.ps1",
     "test:smoke:ocr:cloud:gate": "node scripts/run-cloud-ocr-smoke-gate.mjs",
+    "test:smoke:ocr:cloud:gate:optin": "node scripts/run-cloud-ocr-smoke-gate.mjs --cloud",
     "token:ocr:set:openai": "bash scripts/secure-cloud-ocr-token.sh set openai",
     "token:ocr:set:github": "bash scripts/secure-cloud-ocr-token.sh set github",
     "test:smoke:ocr:cloud:secure": "bash scripts/secure-cloud-ocr-token.sh run",

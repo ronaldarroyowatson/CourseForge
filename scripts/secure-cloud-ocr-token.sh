@@ -65,7 +65,7 @@ run_cloud_smoke_gate() {
     fi
   fi
 
-  npm run test:smoke:ocr:cloud:gate
+  npm run test:smoke:ocr:cloud:gate:optin
 }
 
 print_usage() {

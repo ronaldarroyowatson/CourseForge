@@ -2,6 +2,23 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+function envFlagEnabled(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+function parseCliFlags(argv) {
+  const flags = new Set(argv.filter((token) => token.startsWith("--")));
+  return {
+    cloudOptIn: flags.has("--cloud"),
+    allowGhAuthToken: flags.has("--allow-gh-auth-token"),
+  };
+}
+
 function getTokenFromMacKeychain(serviceName) {
   if (process.platform !== "darwin") {
     return "";
@@ -57,13 +74,19 @@ function getGhTokenFromCli() {
   return String(probe.stdout ?? "").trim();
 }
 
-function hasToken() {
+function hasToken(allowGhAuthTokenFallback) {
+  const ghAuthToken = allowGhAuthTokenFallback ? getGhTokenFromCli() : "";
+
   return Boolean(
     process.env.OPENAI_API_KEY
     || process.env.COURSEFORGE_GITHUB_TOKEN
     || process.env.GITHUB_TOKEN
-    || getGhTokenFromCli()
+    || ghAuthToken
   );
+}
+
+function isCloudSmokeOptedIn(cliFlags) {
+  return cliFlags.cloudOptIn || envFlagEnabled(process.env.COURSEFORGE_ENABLE_CLOUD_SMOKE);
 }
 
 function resolvePowerShellExecutable() {
@@ -107,9 +130,20 @@ function runCloudSmokeScript(scriptArgs = []) {
   return 1;
 }
 
+const cliFlags = parseCliFlags(process.argv.slice(2));
+const allowGhAuthTokenFallback = cliFlags.allowGhAuthToken || envFlagEnabled(process.env.COURSEFORGE_ALLOW_GH_AUTH_TOKEN);
+
+if (!isCloudSmokeOptedIn(cliFlags)) {
+  console.log("[smoke-gate] Cloud smoke is disabled by default. Set COURSEFORGE_ENABLE_CLOUD_SMOKE=1 or pass --cloud to run paid cloud checks.");
+  process.exit(0);
+}
+
 hydrateSecureTokenEnvironment();
 
-if (!hasToken()) {
+if (!hasToken(allowGhAuthTokenFallback)) {
+  if (!allowGhAuthTokenFallback) {
+    console.log("[smoke-gate] No explicit cloud tokens found. gh auth token fallback is disabled unless COURSEFORGE_ALLOW_GH_AUTH_TOKEN=1 or --allow-gh-auth-token is set.");
+  }
   console.log("[smoke-gate] No cloud OCR tokens found. Skipping live cloud OCR smoke checks.");
   process.exit(0);
 }

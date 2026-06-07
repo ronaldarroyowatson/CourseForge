@@ -732,6 +732,19 @@ export function clearAutoOcrAvailabilityCache(): void {
   autoOcrAvailabilityCache = null;
 }
 
+export function resetCloudOcrCircuitState(): void {
+  saveCircuitState({
+    local_tesseract: { consecutiveFailures: 0, openUntil: 0 },
+    cloud_openai_vision: { consecutiveFailures: 0, openUntil: 0 },
+    cloud_github_models_vision: { consecutiveFailures: 0, openUntil: 0 },
+  });
+  cloudProviderLastRequestAt.cloud_openai_vision = 0;
+  cloudProviderLastRequestAt.cloud_github_models_vision = 0;
+  const storage = getStorage();
+  storage?.removeItem(AUTO_OCR_CLOUD_REQUEST_PACING_KEY);
+  clearAutoOcrAvailabilityCache();
+}
+
 export async function getCloudAutoOcrProviderPolicy(): Promise<AutoOcrProviderPolicy | null> {
   try {
     const callable = httpsCallable(functionsClient, "getAiProviderPolicy");

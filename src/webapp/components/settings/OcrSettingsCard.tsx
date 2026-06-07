@@ -8,6 +8,7 @@ import {
   getBrowserOcrSettingsManager,
 } from "../../../core/services/ocrSettingsService";
 import { executeGuiCliBoundCommand } from "../../../core/services/guiCliParityService";
+import { resetCloudOcrCircuitState } from "../../../core/services/autoOcrService";
 
 interface OcrSettingsCardProps {
   onSettingsChanged?: () => Promise<void> | void;
@@ -272,6 +273,21 @@ export function OcrSettingsCard({ onSettingsChanged }: OcrSettingsCardProps): Re
             </label>
           </div>
           {status ? <p className="settings-meta">{status}</p> : null}
+          <div className="form-actions">
+            <button
+              type="button"
+              className="btn-secondary"
+              title="Reset stuck cloud OCR circuit breakers and rate-limit pacing state. Use this if cloud OCR is falling back to Tesseract unexpectedly."
+              onClick={() => {
+                void executeGuiCliBoundCommand("courseforge ocr settings reset-circuit", () => {
+                  resetCloudOcrCircuitState();
+                  setStatus("Cloud OCR circuit breakers and pacing state cleared. Next OCR capture will retry cloud providers.");
+                }, {});
+              }}
+            >
+              Reset Cloud OCR Circuit Breakers
+            </button>
+          </div>
         </>
       ) : null}
     </article>

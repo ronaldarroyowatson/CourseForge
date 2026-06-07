@@ -4434,6 +4434,17 @@ export function AutoTextbookSetupFlow({
     });
   }
 
+  function handlePreviewNodeDelete(node: TocPreviewNodeModel): void {
+    if (node.level === "chapter") {
+      deleteChapter(node.chapterIndex);
+      return;
+    }
+
+    if (typeof node.sectionIndex === "number") {
+      deleteSection(node.chapterIndex, node.sectionIndex);
+    }
+  }
+
   function handleRegenerateNodeFromImage(node: TocPreviewNodeModel): void {
     setInfoMessage(`Regenerating ${node.level} from a new TOC image capture. Capture the page containing this node next.`);
     void handleCaptureToc();
@@ -5574,6 +5585,7 @@ export function AutoTextbookSetupFlow({
           isBusy={isBusy}
           onUpdateNode={handlePreviewNodeUpdate}
           onRegenerateNode={handleRegenerateNodeFromImage}
+          onDeleteNode={handlePreviewNodeDelete}
         />
       ) : null}
 

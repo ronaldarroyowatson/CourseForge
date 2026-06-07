@@ -19,7 +19,7 @@ Default behavior:
 
 1. `npx vitest run tests/integration/autoTextbookFlow.integration.test.tsx`
 2. `npx vitest run tests/core/textbookAutoExtractionService.test.ts`
-3. `npm run test:smoke:ocr:cloud:gate`
+3. `npm run test:smoke:ocr:cloud:gate:optin`
 4. `npm run orchestrate:installers:wait -- --description "..." --ref <ref>`
 5. `bash scripts/installer/run-macos-packaged-installer-smoke.sh`
 
@@ -59,6 +59,11 @@ The live OCR debug runner also supports:
 Cloud smoke gate retry behavior can be bounded with:
 
 - `COURSEFORGE_GITHUB_SMOKE_RETRY_CYCLES=0 npm run test:smoke:ocr:cloud:gate`
+
+Cloud smoke is now opt-in by default for maintenance safety:
+
+- `npm run test:smoke:ocr:cloud:gate` skips unless `COURSEFORGE_ENABLE_CLOUD_SMOKE=1`.
+- `npm run test:smoke:ocr:cloud:gate:optin` always requests the cloud run path.
 
 Use this when provider throttle windows are long and you need a fast fail/signal instead of extended waiting.
 
@@ -112,7 +117,7 @@ This loop:
 For forced cloud OCR in CLI context, run:
 
 ```bash
-npm run debug:ocr:live -- --image-file <snapshot.png> --gold-transcript-file <gold.txt> --direct-cloud-provider cloud_openai_vision --structured-profile toc-page1 --cer-threshold 0.1
+npm run debug:ocr:live -- --image-file <snapshot.png> --gold-transcript-file <gold.txt> --enable-direct-cloud --direct-cloud-provider cloud_openai_vision --structured-profile toc-page1 --cer-threshold 0.1
 ```
 
 4. Inspect the JSON report under `tmp-smoke/live-ci-loop/` and the OCR report path recorded in the report.

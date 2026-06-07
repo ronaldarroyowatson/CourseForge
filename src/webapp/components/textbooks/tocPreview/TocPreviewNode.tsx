@@ -9,6 +9,7 @@ interface TocPreviewNodeProps {
   initiallyExpanded?: boolean;
   onUpdateNode: (node: TocPreviewNodeModel, update: { numberValue: string; title: string; pageStart?: number }) => void;
   onRegenerateNode: (node: TocPreviewNodeModel) => void;
+  onDeleteNode: (node: TocPreviewNodeModel) => void;
   isBusy?: boolean;
 }
 
@@ -24,7 +25,7 @@ function toNodeLabel(level: TocPreviewNodeModel["level"], value: string, heading
   return value;
 }
 
-export function TocPreviewNode({ node, initiallyExpanded = true, onUpdateNode, onRegenerateNode, isBusy = false }: TocPreviewNodeProps): React.JSX.Element {
+export function TocPreviewNode({ node, initiallyExpanded = true, onUpdateNode, onRegenerateNode, onDeleteNode, isBusy = false }: TocPreviewNodeProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(initiallyExpanded);
   const [isEditing, setIsEditing] = useState(false);
   const hasChildren = node.children.length > 0;
@@ -66,6 +67,15 @@ export function TocPreviewNode({ node, initiallyExpanded = true, onUpdateNode, o
           <button type="button" className="btn-secondary" disabled={isBusy} onClick={() => onRegenerateNode(node)}>
             Regenerate from image
           </button>
+          <button
+            type="button"
+            className="btn-secondary btn-danger"
+            disabled={isBusy}
+            aria-label={`Delete ${node.level}`}
+            onClick={() => onDeleteNode(node)}
+          >
+            Delete
+          </button>
         </div>
       </div>
 
@@ -93,6 +103,7 @@ export function TocPreviewNode({ node, initiallyExpanded = true, onUpdateNode, o
               initiallyExpanded={false}
               onUpdateNode={onUpdateNode}
               onRegenerateNode={onRegenerateNode}
+              onDeleteNode={onDeleteNode}
               isBusy={isBusy}
             />
           ))}

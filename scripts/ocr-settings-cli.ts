@@ -291,7 +291,39 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.error("Unknown OCR settings action. Use get, set, reset, show, export, or import.");
+  if (action === "reset-circuit") {
+    const circuitKey = "courseforge.autoOcr.circuitState";
+    const pacingKey = "courseforge.autoOcr.cloudRequestPacing";
+    const nodeDataDir = path.resolve(".courseforge-ocr-state");
+    const circuitFile = path.join(nodeDataDir, "circuitState.json");
+    const pacingFile = path.join(nodeDataDir, "cloudRequestPacing.json");
+    const cleared: string[] = [];
+
+    if (fs.existsSync(circuitFile)) {
+      fs.rmSync(circuitFile);
+      cleared.push(circuitFile);
+    }
+
+    if (fs.existsSync(pacingFile)) {
+      fs.rmSync(pacingFile);
+      cleared.push(pacingFile);
+    }
+
+    if (emitJson) {
+      printJson({ ok: true, action, clearedFiles: cleared, note: "In-browser localStorage keys cleared on next app page load." });
+      return;
+    }
+
+    console.log("Cloud OCR circuit breaker and pacing state cleared (node files).");
+    if (cleared.length > 0) {
+      cleared.forEach((filePath) => console.log(`  Removed: ${filePath}`));
+    }
+
+    console.log(`\nNote: Browser state (localStorage keys '${circuitKey}', '${pacingKey}') is cleared by the GUI 'Reset Cloud OCR Circuit Breakers' button in Settings > OCR Settings.`);
+    return;
+  }
+
+  console.error("Unknown OCR settings action. Use get, set, reset, show, export, import, or reset-circuit.");
   process.exit(1);
 }
 

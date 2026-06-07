@@ -644,6 +644,96 @@ describe("auto textbook flow integration", () => {
     expect(screen.getByDisplayValue("Forms of Energy")).toBeInTheDocument();
   });
 
+  it("hydrates TOC chapters from saved textbook hierarchy when resumable draft has no TOC snapshot", async () => {
+    const now = Date.now();
+    repositoryMocks.findDuplicateTextbook.mockResolvedValueOnce({
+      id: "textbook-existing",
+      title: "Inspire Physical Science",
+      isbnRaw: "9780076716852",
+    });
+    repositoryMocks.fetchChaptersByTextbookId.mockResolvedValueOnce([
+      {
+        id: "chapter-existing-1",
+        sourceType: "auto",
+        textbookId: "textbook-existing",
+        index: 2,
+        name: "ENERGY AND WAVES",
+        lastModified: new Date(now).toISOString(),
+        pendingSync: false,
+        source: "local",
+      },
+    ]);
+    repositoryMocks.fetchSectionsByChapterId.mockResolvedValueOnce([
+      {
+        id: "section-existing-1",
+        sourceType: "auto",
+        chapterId: "chapter-existing-1",
+        index: 3,
+        title: "Forms of Energy",
+        lastModified: new Date(now).toISOString(),
+        pendingSync: false,
+        source: "local",
+      },
+    ]);
+
+    window.localStorage.setItem(
+      AUTO_SESSION_DRAFTS_KEY,
+      JSON.stringify([
+        {
+          id: "resume-without-toc-snapshot",
+          version: 1,
+          savedAt: now,
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          rawOcrText: "MODULE 2: ENERGY AND WAVES",
+          metadataTitle: "Inspire Physical Science",
+          metadataSubject: "Science",
+          metadataPublisher: "McGraw Hill",
+          metadataFormSnapshot: {
+            title: "Inspire Physical Science",
+            subtitle: "",
+            grade: "8",
+            gradeBand: "",
+            subject: "Science",
+            edition: "Student",
+            publicationYear: "2021",
+            copyrightYear: "",
+            isbnRaw: "9780076716852",
+            additionalIsbnsCsv: "",
+            seriesName: "",
+            publisher: "McGraw Hill",
+            publisherLocation: "",
+            platformUrl: "",
+            mhid: "",
+            authorsCsv: "",
+            tocExtractionConfidence: "0",
+          },
+          step: "toc-editor",
+          stepsCompleted: { cover: true, copyright: true },
+        },
+      ])
+    );
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "TOC Editor" })).toBeInTheDocument();
+    });
+
+    expect(screen.getByDisplayValue("ENERGY AND WAVES")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Forms of Energy")).toBeInTheDocument();
+    expect(screen.getByText(/Restored existing TOC chapters from saved textbook data/i)).toBeInTheDocument();
+    expect(repositoryMocks.findDuplicateTextbook).toHaveBeenCalled();
+    expect(repositoryMocks.fetchChaptersByTextbookId).toHaveBeenCalledWith("textbook-existing");
+    expect(repositoryMocks.fetchSectionsByChapterId).toHaveBeenCalledWith("chapter-existing-1");
+  });
+
   it("allows deleting TOC sections and chapters before recapture", async () => {
     render(
       <AutoTextbookSetupFlow

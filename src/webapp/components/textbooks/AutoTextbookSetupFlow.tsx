@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { RelatedIsbn, RelatedIsbnType } from "../../../core/models";
+import type { Chapter, RelatedIsbn, RelatedIsbnType, Section } from "../../../core/models";
 
 import {
   type AutoConflictResolutionMode,
@@ -4446,6 +4446,82 @@ export function AutoTextbookSetupFlow({
     });
   }
 
+  async function restoreTocFromSavedTextbookHierarchy(
+    metadataSnapshot: MetadataFormState | undefined,
+    fallbackTitle: string | undefined
+  ): Promise<{ result: ParsedTocResult; pages: TocPage[] } | null> {
+    const isbnRaw = metadataSnapshot?.isbnRaw?.trim() ?? "";
+    const title = metadataSnapshot?.title?.trim() || fallbackTitle?.trim() || "";
+    if (!isbnRaw && !title) {
+      return null;
+    }
+
+    const publicationYearParsed = Number.parseInt(metadataSnapshot?.publicationYear ?? "", 10);
+    const match = await findDuplicateTextbook({
+      isbnRaw,
+      title,
+      publisher: metadataSnapshot?.publisher ?? "",
+      seriesName: metadataSnapshot?.seriesName ?? "",
+      publicationYear: Number.isFinite(publicationYearParsed) ? publicationYearParsed : undefined,
+    });
+
+    if (!match?.id) {
+      return null;
+    }
+
+    const chapters = await fetchChaptersByTextbookId(match.id);
+    if (chapters.length === 0) {
+      return null;
+    }
+
+    const sortedChapters = [...chapters].sort((left, right) => left.index - right.index);
+    const sectionsByChapterId = new Map<string, Section[]>();
+    for (const chapter of sortedChapters) {
+      const sections = await fetchSectionsByChapterId(chapter.id);
+      sectionsByChapterId.set(
+        chapter.id,
+        [...sections].sort((left, right) => left.index - right.index)
+      );
+    }
+
+    const tocChapters: TocChapter[] = sortedChapters.map((chapter: Chapter, chapterIndex) => {
+      const chapterNumberValue = Number.isInteger(chapter.index) && chapter.index > 0
+        ? chapter.index
+        : chapterIndex + 1;
+      const chapterNumber = String(chapterNumberValue);
+      const chapterSections = sectionsByChapterId.get(chapter.id) ?? [];
+
+      return {
+        chapterNumber,
+        title: chapter.name?.trim() || `Chapter ${chapterNumber}`,
+        sections: chapterSections.map((section, sectionIndex) => {
+          const sectionNumberValue = Number.isInteger(section.index) && section.index > 0
+            ? section.index
+            : sectionIndex + 1;
+
+          return {
+            sectionNumber: `${chapterNumber}.${sectionNumberValue}`,
+            title: section.title,
+          };
+        }),
+      };
+    });
+
+    const result: ParsedTocResult = {
+      chapters: tocChapters,
+      confidence: 0,
+    };
+
+    return {
+      result,
+      pages: [{
+        pageIndex: 0,
+        chapters: tocChapters,
+        confidence: 0,
+      }],
+    };
+  }
+
   async function handleSaveAutoSetup(): Promise<void> {
     await executeGuiCliBoundCommand("courseforge textbooks auto save setup", async () => {
     const traceId = createAutoFlowTraceId("auto-flow-save");
@@ -4969,7 +5045,7 @@ export function AutoTextbookSetupFlow({
                       <button
                         type="button"
                         disabled={isBusy}
-                        onClick={() => {
+                        onClick={async () => {
                           // Start resumed sessions from clean in-memory OCR state.
                           resetAllOcrRuntimeCaches();
                           activeSessionDraftIdRef.current = draft.id;
@@ -4996,11 +5072,26 @@ export function AutoTextbookSetupFlow({
                             relatedIsbns: nextRelatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
                           });
                           setTocCaptureImageDataUrl(draft.tocCaptureImageDataUrl ?? null);
-                          setTocResult(draft.tocResultSnapshot ?? INITIAL_TOC_RESULT);
-                          setTocPages(draft.tocPagesSnapshot ?? (draft.tocResultSnapshot ? [{
+
+                          let restoredTocResult = draft.tocResultSnapshot;
+                          let restoredTocPages = draft.tocPagesSnapshot;
+                          if (!restoredTocResult || restoredTocResult.chapters.length === 0) {
+                            const restoredFromHierarchy = await restoreTocFromSavedTextbookHierarchy(
+                              draft.metadataFormSnapshot,
+                              draft.metadataTitle
+                            );
+                            if (restoredFromHierarchy) {
+                              restoredTocResult = restoredFromHierarchy.result;
+                              restoredTocPages = restoredFromHierarchy.pages;
+                              setInfoMessage("Restored existing TOC chapters from saved textbook data. Capture more TOC pages to append additional entries.");
+                            }
+                          }
+
+                          setTocResult(restoredTocResult ?? INITIAL_TOC_RESULT);
+                          setTocPages(restoredTocPages ?? (restoredTocResult ? [{
                             pageIndex: 0,
-                            chapters: draft.tocResultSnapshot.chapters,
-                            confidence: draft.tocResultSnapshot.confidence,
+                            chapters: restoredTocResult.chapters,
+                            confidence: restoredTocResult.confidence,
                           }] : []));
                           setGuidedCuePlan(draft.guidedCuePlan ?? createEmptyGuidedCaptureCuePlan());
                           setStep(draft.step);

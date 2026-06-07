@@ -122,6 +122,8 @@ For metadata fallback diagnostics, inspect these additional fields when present:
 
 When a cloud provider is marked unavailable, CourseForge keeps that state in the provider-health cache for the TTL window to avoid repeating dead-end calls before trying the next provider.
 
+For soft probe uncertainties (for example `missing_provider_status`, `probe_failed`, `probe_timeout`, or `provider_unreachable`), CourseForge now bypasses the cache-unavailable decision once and attempts the cloud OCR callable directly before falling back. This prevents false local-only fallback when provider-health probes are incomplete but cloud OCR itself is reachable.
+
 ## Auth Preflight Guard
 
 Before cloud OCR callables are invoked, CourseForge now performs an auth preflight check:

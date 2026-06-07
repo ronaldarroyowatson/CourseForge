@@ -1063,6 +1063,43 @@ describe("autoOcrService", () => {
       expect(result.text).toContain("Tesseract");
     });
 
+    it("attempts cloud OCR when status probe returns missing_provider_status", async () => {
+      callableMocks.getAiProviderStatus.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            providers: [
+              {
+                id: "cloud_openai_vision",
+                available: false,
+                availabilityState: "unavailable",
+                reasonCode: "missing_provider_status",
+                reasonMessage: "Cloud OCR status probe did not include provider availability.",
+                httpStatus: null,
+              },
+            ],
+          },
+        },
+      });
+      await getAutoOcrProviderHealth({ forceRefresh: true });
+
+      callableMocks.extractScreenshotText.mockResolvedValue({
+        data: {
+          success: true,
+          data: { text: "Cloud recovered after soft probe failure", providerId: "cloud_openai_vision" },
+        },
+      });
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        preferPrimaryCloudWait: false,
+        maxPrimaryCloudWaitMs: 1,
+      });
+
+      expect(result.providerId).toBe("cloud_openai_vision");
+      expect(result.text).toContain("Cloud recovered");
+    });
+
     it("does NOT bypass circuit when opened by auth failure (non-rate-limit)", async () => {
       // Seed a uniform unavailable state from auth failure — NOT rate-limited.
       callableMocks.getAiProviderStatus.mockResolvedValue({

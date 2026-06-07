@@ -66,7 +66,7 @@ describe("OcrSettingsCard integration", () => {
     });
 
     const runtime = await manager.getRuntimeOptions();
-    expect(runtime.providerOrder).toEqual(["cloud_github_models_vision", "local_tesseract"]);
+    expect(runtime.providerOrder).toEqual(["cloud_github_models_vision", "cloud_openai_vision", "local_tesseract"]);
     expect(runtime.preferPrimaryCloudWait).toBe(true);
 
     const commandIds = getGuiCliParityHistoryEntries().map((entry) => entry.commandId);

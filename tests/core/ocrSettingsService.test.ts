@@ -45,7 +45,7 @@ describe("ocrSettingsService", () => {
 
     const runtime = await manager.getRuntimeOptions();
     expect(runtime.providerOrder[0]).toBe("cloud_github_models_vision");
-    expect(runtime.providerOrder).toEqual(["cloud_github_models_vision", "local_tesseract"]);
+    expect(runtime.providerOrder).toEqual(["cloud_github_models_vision", "cloud_openai_vision", "local_tesseract"]);
     expect(runtime.preferPrimaryCloudWait).toBe(true);
     expect(runtime.waitForPrimaryCloudCooldownMs).toBeGreaterThanOrEqual(50_000);
     expect(runtime.maxPrimaryCloudWaitMs).toBeGreaterThan(runtime.waitForPrimaryCloudCooldownMs);

@@ -1081,6 +1081,19 @@ function isTemporaryRateLimitReasonCode(reasonCode: string): boolean {
     || normalized === "distributed_circuit_open";
 }
 
+function isSoftProbeFailureReasonCode(reasonCode: string | null | undefined): boolean {
+  const normalized = (reasonCode ?? "").toLowerCase();
+  return normalized === "missing_provider_status"
+    || normalized === "invalid_payload"
+    || normalized === "probe_timeout"
+    || normalized === "probe_network_error"
+    || normalized === "provider_unreachable"
+    || normalized === "probe_failed"
+    || normalized === "request_timeout"
+    || normalized === "request_failed"
+    || normalized === "provider_error";
+}
+
 function updateCloudAvailabilityFromCallableError(providerId: CloudAutoOcrProviderId, error: { code: string; message: string; details?: CallableErrorDetails }): void {
   const reasonCode = error.details?.reasonCode ?? error.code;
   const errorMessage = error.details?.reasonMessage ?? error.message;
@@ -1477,19 +1490,21 @@ export async function extractTextFromImageWithFallback(
         // Provider recovered after primary wait path.
       } else {
         const cachedAvailabilityFinal = getCachedCloudAvailability(providerId as CloudAutoOcrProviderId);
+        const reasonCodeFinal = cachedAvailabilityFinal?.reasonCode ?? "";
         const isRateLimitedFinal = isCloudProviderId(providerId)
-          && isTemporaryRateLimitReasonCode(cachedAvailabilityFinal?.reasonCode ?? "");
+          && isTemporaryRateLimitReasonCode(reasonCodeFinal);
+        const isSoftProbeFailureFinal = isCloudProviderId(providerId)
+          && isSoftProbeFailureReasonCode(reasonCodeFinal);
 
-        if (isRateLimitedFinal) {
-          // Rate-limited providers are bypassed for availability checks: attempt the extraction
-          // directly. Cloud services may recover mid-cooldown window. If the actual callable
-          // returns 429, the error is recorded and we skip to the next provider.
-          void emitOcrDiagnostic("provider_bypass_rate_limit_cache", {
+        if (isRateLimitedFinal || isSoftProbeFailureFinal) {
+          // Rate-limited or soft-probe-failure providers are bypassed for availability checks:
+          // attempt extraction directly and trust the callable response over stale/missing probe state.
+          void emitOcrDiagnostic(isRateLimitedFinal ? "provider_bypass_rate_limit_cache" : "provider_bypass_soft_probe_cache", {
             level: "warning",
             traceId: extractionTraceId,
             context: {
               providerId,
-              reasonCode: cachedAvailabilityFinal?.reasonCode ?? null,
+              reasonCode: reasonCodeFinal || null,
               retryAfterSeconds: cachedAvailabilityFinal?.retryAfterSeconds ?? null,
             },
           });

@@ -130,7 +130,7 @@ class OcrSettingsManager {
       : "cloud_openai_vision";
 
     const providerOrder: OcrProviderId[] = settings.fallbackBehavior === "wait"
-      ? [settings.primaryProvider, "local_tesseract"]
+      ? [settings.primaryProvider, secondaryCloud, "local_tesseract"]
       : [settings.primaryProvider, secondaryCloud, "local_tesseract"];
 
     const waitForPrimaryCloudCooldownMs = Math.max(1_000, settings.dynamicLimitBufferSeconds * 1_000 + 45_000);

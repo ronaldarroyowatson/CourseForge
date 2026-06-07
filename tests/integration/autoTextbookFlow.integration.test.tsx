@@ -520,7 +520,7 @@ describe("auto textbook flow integration", () => {
 
       expect(runtimeCalls.length).toBeGreaterThan(0);
       for (const options of runtimeCalls) {
-        expect(options.providerOrder).toEqual(["cloud_github_models_vision", "local_tesseract"]);
+        expect(options.providerOrder).toEqual(["cloud_github_models_vision", "cloud_openai_vision", "local_tesseract"]);
       }
     } finally {
       (globalThis as { Image: typeof Image }).Image = OriginalImage;

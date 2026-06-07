@@ -3,6 +3,7 @@
 import { functionsClient } from "../../firebase/functions";
 import type { RelatedIsbn } from "../models";
 import { extractTextFromImageWithFallback, type AutoOcrProviderId } from "./autoOcrService";
+import { getOcrSettingsManager } from "./ocrSettingsService";
 import { appendDebugLogEntry } from "./debugLogService";
 import { emitClientDebugTrace } from "./clientDebugTraceService";
 import { getCurrentUser } from "../../firebase/auth";
@@ -834,10 +835,13 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     ocrAttemptCount += 1;
     let ocrResult: Awaited<ReturnType<typeof extractTextFromImageWithFallback>>;
     try {
+      const ocrSettings = await getOcrSettingsManager();
+      const runtimeOptions = await ocrSettings.getRuntimeOptions();
       ocrResult = await extractTextFromImageWithFallback(imageDataUrl, {
-        preferPrimaryCloudWait: true,
-        waitForPrimaryCloudCooldownMs: 30_000,
-        maxPrimaryCloudWaitMs: 60_000,
+        providerOrder: runtimeOptions.providerOrder,
+        preferPrimaryCloudWait: runtimeOptions.preferPrimaryCloudWait,
+        waitForPrimaryCloudCooldownMs: runtimeOptions.waitForPrimaryCloudCooldownMs,
+        maxPrimaryCloudWaitMs: runtimeOptions.maxPrimaryCloudWaitMs,
       });
       if (!ocrResult || typeof ocrResult.text !== "string" || typeof ocrResult.providerId !== "string") {
         throw new Error("OCR enrichment returned an invalid response payload.");

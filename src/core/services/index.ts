@@ -12,6 +12,7 @@ export * from "./adminFirestoreService";
 export * from "./schoolAdminService";
 export * from "./accessibilityService";
 export * from "./autoOcrService";
+export * from "./ocrSettingsService";
 export * from "./autoExtractionOrchestrationService";
 export * from "./guidedCaptureCueService";
 export * from "./glossaryLoopExecutor";

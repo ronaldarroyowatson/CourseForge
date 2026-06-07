@@ -1,12 +1,12 @@
 # Test Index
 
-Generated: 2026-06-07T02:19:50.121Z
+Generated: 2026-06-07T04:06:12.708Z
 
 ## Summary
 
-- Total test files: 94
-- Unit test files: 63
-- Integration test files: 28
+- Total test files: 97
+- Unit test files: 65
+- Integration test files: 29
 - Rules test files: 2
 - Canonical sample files: 5
 
@@ -48,6 +48,7 @@ Generated: 2026-06-07T02:19:50.121Z
 - tests/core/metadataCorrectionSafeguards.test.ts
 - tests/core/metadataExtractionPipelineService.test.ts
 - tests/core/ocrDebugCommandService.test.ts
+- tests/core/ocrSettingsService.test.ts
 - tests/core/ocrTextMerge.test.ts
 - tests/core/pluginService.test.ts
 - tests/core/premiumUsage.limits.test.ts
@@ -55,6 +56,7 @@ Generated: 2026-06-07T02:19:50.121Z
 - tests/core/programCli.dsc.test.ts
 - tests/core/programCli.helpPermissions.test.ts
 - tests/core/programCli.ocrDebug.test.ts
+- tests/core/programCli.ocrSettings.test.ts
 - tests/core/programCli.plugins.test.ts
 - tests/core/programCli.workflowParity.test.ts
 - tests/core/semanticTokens.test.ts
@@ -94,6 +96,7 @@ Generated: 2026-06-07T02:19:50.121Z
 - tests/integration/header.superadmin-repair.integration.test.tsx
 - tests/integration/macos-auto-update-launcher.integration.test.ts
 - tests/integration/macos.installer.template.integration.test.ts
+- tests/integration/ocrSettingsCard.integration.test.tsx
 - tests/integration/package-integrity.integration.test.ts
 - tests/integration/settings.updater.integration.test.tsx
 - tests/integration/startupSync.probe.test.tsx

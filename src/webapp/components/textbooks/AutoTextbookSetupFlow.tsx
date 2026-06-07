@@ -6,6 +6,7 @@ import {
   buildAutoConflictResolutionPlan,
 } from "../../../core/services/autoTextbookConflictService";
 import { extractTextFromImageWithFallback, getAutoOcrCooldownExpiryMs, type AutoOcrProviderId } from "../../../core/services/autoOcrService";
+import { getBrowserOcrSettingsManager } from "../../../core/services/ocrSettingsService";
 import { RateLimitCooldownBadge } from "../shared/RateLimitCooldownBadge";
 import { appendDebugLogEntry } from "../../../core/services";
 import { persistAutoTextbook } from "../../../core/services/autoTextbookPersistenceService";
@@ -175,11 +176,22 @@ const TOC_SAMPLE_MAX_COUNT = 10;
 const TOC_SAMPLE_GAP_MS = 250;
 const TOC_SAMPLE_GOOD_CONFIDENCE = 0.94;
 const TOC_RESCUE_PROVIDER_ORDER: AutoOcrProviderId[] = ["cloud_openai_vision", "cloud_github_models_vision", "local_tesseract"];
-const TOC_PRIMARY_WAIT_OPTIONS = {
-  preferPrimaryCloudWait: true,
-  waitForPrimaryCloudCooldownMs: 45_000,
-  maxPrimaryCloudWaitMs: 90_000,
-} as const;
+
+async function getTocOcrRuntimeOptions(): Promise<{
+  providerOrder: AutoOcrProviderId[];
+  preferPrimaryCloudWait: boolean;
+  waitForPrimaryCloudCooldownMs: number;
+  maxPrimaryCloudWaitMs: number;
+}> {
+  const manager = await getBrowserOcrSettingsManager();
+  const runtime = await manager.getRuntimeOptions();
+  return {
+    providerOrder: runtime.providerOrder as AutoOcrProviderId[],
+    preferPrimaryCloudWait: runtime.preferPrimaryCloudWait,
+    waitForPrimaryCloudCooldownMs: runtime.waitForPrimaryCloudCooldownMs,
+    maxPrimaryCloudWaitMs: runtime.maxPrimaryCloudWaitMs,
+  };
+}
 
 function toOcrBufferStep(step: AutoFlowStep): OcrBufferStep {
   return step === "toc-editor" ? "toc" : step;
@@ -256,6 +268,23 @@ function sanitizeTocDraftText(rawText: string): string {
       return true;
     })
     .join("\n");
+}
+
+function computeCaptureFingerprint(imageDataUrl: string): string {
+  const commaIndex = imageDataUrl.indexOf(",");
+  const payload = commaIndex >= 0 ? imageDataUrl.slice(commaIndex + 1) : imageDataUrl;
+  const length = payload.length;
+  const quarter = Math.floor(length / 4);
+  const half = Math.floor(length / 2);
+  const sample = `${payload.slice(0, 512)}|${payload.slice(Math.max(0, quarter - 128), quarter + 128)}|${payload.slice(Math.max(0, half - 128), half + 128)}|${payload.slice(Math.max(0, length - 512))}`;
+
+  let hash = 2166136261;
+  for (let index = 0; index < sample.length; index += 1) {
+    hash ^= sample.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `${length}-${(hash >>> 0).toString(16)}`;
 }
 
 function waitForOcrGap(ms: number): Promise<void> {
@@ -1422,7 +1451,13 @@ function splitCropRect(rect: SelectionRect, orientation: "left" | "right" | "top
   return { x: rect.x, y: rect.y + rect.height - height, width: rect.width, height };
 }
 
-async function buildTocSamplingVariants(imageDataUrl: string): Promise<Array<{ label: string; imageDataUrl: string }>> {
+async function buildTocSamplingVariants(
+  imageDataUrl: string,
+  options: {
+    shots: 1 | 2 | 3;
+    cropStrategy: "color" | "bw" | "both";
+  }
+): Promise<Array<{ label: string; imageDataUrl: string }>> {
   const image = await loadImage(imageDataUrl);
   const baseBoundary = {
     x: 0,
@@ -1524,13 +1559,23 @@ async function buildTocSamplingVariants(imageDataUrl: string): Promise<Array<{ l
     }
 
     seenRects.add(rectKey);
-    deduped.push({
-      label: variant.label,
-      imageDataUrl: await cropDataUrlToRect(imageDataUrl, variant.rect),
-    });
+    const cropped = await cropDataUrlToRect(imageDataUrl, variant.rect);
+    if (options.cropStrategy !== "bw") {
+      deduped.push({
+        label: variant.label,
+        imageDataUrl: cropped,
+      });
+    }
+
+    if (options.cropStrategy !== "color") {
+      deduped.push({
+        label: `${variant.label} (bw)`,
+        imageDataUrl: await toGrayscaleDataUrl(cropped),
+      });
+    }
   }
 
-  return deduped;
+  return deduped.slice(0, Math.max(1, options.shots));
 }
 
 async function loadImage(dataUrl: string): Promise<HTMLImageElement> {
@@ -1857,6 +1902,8 @@ export function AutoTextbookSetupFlow({
     title: "",
   });
   const lastTocCaptureOcrRef = useRef<string>(testingSeedState?.step === "toc" || testingSeedState?.step === "toc-editor" ? (testingSeedState.ocrDraft ?? "") : "");
+  const lastTocCaptureFingerprintRef = useRef<string | null>(null);
+  const lastTocCaptureTimestampRef = useRef<number>(0);
   const ocrBuffersByStepRef = useRef<OcrStepBuffers>({
     cover: {
       raw: testingSeedState?.step === "cover" ? (testingSeedState.ocrDraft ?? "") : "",
@@ -1926,6 +1973,8 @@ export function AutoTextbookSetupFlow({
       title: "",
     };
     lastTocCaptureOcrRef.current = "";
+    lastTocCaptureFingerprintRef.current = null;
+    lastTocCaptureTimestampRef.current = 0;
     ocrBuffersByStepRef.current = {
       cover: { raw: "", draft: "" },
       title: { raw: "", draft: "" },
@@ -3042,14 +3091,84 @@ export function AutoTextbookSetupFlow({
         preferChromeTabCapture: chromeOs,
         keepSessionAlive: targetStep === "toc",
       });
+      let effectiveRawImage = rawImage;
+      if (targetStep === "toc") {
+        const fingerprint = computeCaptureFingerprint(rawImage);
+        const nowMs = Date.now();
+        const previousFingerprint = lastTocCaptureFingerprintRef.current;
+        const previousCapturedAt = lastTocCaptureTimestampRef.current;
+        const duplicateFrame = previousFingerprint !== null && previousFingerprint === fingerprint;
+
+        emitAutoFlowDiagnostic("toc_capture_frame_fingerprint", {
+          traceId,
+          context: {
+            targetStep,
+            fingerprint,
+            duplicateFrame,
+            previousCapturedAt,
+            nowMs,
+          },
+        });
+
+        if (duplicateFrame) {
+          appendDebugLogEntry({
+            eventType: "warning",
+            message: "TOC capture detected duplicate frame; forcing capture session refresh.",
+            autoModeStep: "toc",
+            context: {
+              traceId,
+              fingerprint,
+              previousCapturedAt,
+              nowMs,
+            },
+          });
+
+          resetDisplayCaptureSession();
+          const refreshedImage = await captureDisplayFrame({
+            preferChromeTabCapture: chromeOs,
+            keepSessionAlive: true,
+          });
+          const refreshedFingerprint = computeCaptureFingerprint(refreshedImage);
+          effectiveRawImage = refreshedImage;
+
+          emitAutoFlowDiagnostic("toc_capture_frame_refreshed", {
+            traceId,
+            context: {
+              targetStep,
+              previousFingerprint: fingerprint,
+              refreshedFingerprint,
+              changed: refreshedFingerprint !== fingerprint,
+            },
+          });
+
+          appendDebugLogEntry({
+            eventType: refreshedFingerprint !== fingerprint ? "info" : "warning",
+            message: refreshedFingerprint !== fingerprint
+              ? "TOC capture refresh produced a new frame."
+              : "TOC capture refresh still produced duplicate frame.",
+            autoModeStep: "toc",
+            context: {
+              traceId,
+              previousFingerprint: fingerprint,
+              refreshedFingerprint,
+            },
+          });
+
+          lastTocCaptureFingerprintRef.current = refreshedFingerprint;
+          lastTocCaptureTimestampRef.current = Date.now();
+        } else {
+          lastTocCaptureFingerprintRef.current = fingerprint;
+          lastTocCaptureTimestampRef.current = nowMs;
+        }
+      }
       emitAutoFlowDiagnostic("frame_captured", {
         traceId,
         context: {
           targetStep,
-          imageBytes: rawImage.length,
+          imageBytes: effectiveRawImage.length,
         },
       });
-      const image = await loadImage(rawImage);
+      const image = await loadImage(effectiveRawImage);
       const defaultSelection = createDefaultSelection(image);
       let cropped = "";
       let selection = defaultSelection;
@@ -3057,7 +3176,7 @@ export function AutoTextbookSetupFlow({
 
       try {
         if (requiresManualSelection) {
-          const selectedRectDisplay = await requestSelection(rawImage);
+          const selectedRectDisplay = await requestSelection(effectiveRawImage);
           if (!selectedRectDisplay) {
             setErrorMessage("Capture was canceled before selecting a region. Try again or upload a screenshot manually.");
             appendDebugLogEntry({
@@ -3080,7 +3199,7 @@ export function AutoTextbookSetupFlow({
               selectedHeight: selection.height,
             },
           });
-          cropped = await cropToSelectionAndAutoBoundary(rawImage, selection, true);
+          cropped = await cropToSelectionAndAutoBoundary(effectiveRawImage, selection, true);
         } else {
           emitAutoFlowDiagnostic("selection_skipped_full_page", {
             traceId,
@@ -3093,9 +3212,9 @@ export function AutoTextbookSetupFlow({
           if (targetStep === "toc") {
             // Keep the raw frame for TOC so no intermediate crop/re-encode step can
             // remove edge controls needed for guided cue pinning.
-            cropped = rawImage;
+            cropped = effectiveRawImage;
           } else {
-            cropped = await cropToSelectionAndAutoBoundary(rawImage, selection, true);
+            cropped = await cropToSelectionAndAutoBoundary(effectiveRawImage, selection, true);
           }
         }
       } catch (error) {
@@ -3167,7 +3286,8 @@ export function AutoTextbookSetupFlow({
             imageBytes: cropped.length,
           },
         });
-        const ocr = await extractTextFromImageWithFallback(cropped, TOC_PRIMARY_WAIT_OPTIONS);
+        const tocRuntimeOptions = await getTocOcrRuntimeOptions();
+        const ocr = await extractTextFromImageWithFallback(cropped, tocRuntimeOptions);
         setIsRunningOcr(false);
         ocrText = ocr.text;
         ocrProviderId = ocr.providerId;
@@ -3855,6 +3975,8 @@ export function AutoTextbookSetupFlow({
       || primary.garbageDetected
       || primary.sparseSectionCoverage;
 
+    const tocRuntimeOptions = await getTocOcrRuntimeOptions();
+
     if (shouldAttemptRescue) {
       try {
         setOcrProgressMessage("Analyzing image - garbage/noise detected in TOC text, rescanning immediately...");
@@ -3869,8 +3991,8 @@ export function AutoTextbookSetupFlow({
             await waitForOcrGap(TOC_SAMPLE_GAP_MS);
           }
           const rescue = await extractTextFromImageWithFallback(captured.imageDataUrl, {
+            ...tocRuntimeOptions,
             providerOrder: TOC_RESCUE_PROVIDER_ORDER,
-            ...TOC_PRIMARY_WAIT_OPTIONS,
           });
           const mergedCandidate = mergeTocTextByLineQuality(bestText, rescue.text);
           const rescueQuality = evaluateCandidate(rescue.text);
@@ -3985,7 +4107,12 @@ export function AutoTextbookSetupFlow({
     };
 
     try {
-      const samplingVariants = await buildTocSamplingVariants(captured.imageDataUrl);
+      const ocrSettingsManager = await getBrowserOcrSettingsManager();
+      const ocrSettings = await ocrSettingsManager.getSettings();
+      const samplingVariants = await buildTocSamplingVariants(captured.imageDataUrl, {
+        shots: ocrSettings.shots,
+        cropStrategy: ocrSettings.cropStrategy,
+      });
 
       setIsRunningOcr(true);
       if (samplingVariants.length > 0) {
@@ -3997,8 +4124,8 @@ export function AutoTextbookSetupFlow({
           setOcrProgressMessage(`TOC sampling ${index + 1}/${samplingVariants.length}: ${variant.label}.`);
 
           const sample = await extractTextFromImageWithFallback(variant.imageDataUrl, {
+            ...tocRuntimeOptions,
             providerOrder: TOC_RESCUE_PROVIDER_ORDER,
-            ...TOC_PRIMARY_WAIT_OPTIONS,
           });
           const sampleQuality = evaluateCandidate(sample.text);
 
@@ -4025,8 +4152,8 @@ export function AutoTextbookSetupFlow({
           await waitForOcrGap(TOC_SAMPLE_GAP_MS);
           setOcrProgressMessage("TOC recovery: chapter heading(s) were detected in OCR but missing from parse. Running recovery pass...");
           const recoverySample = await extractTextFromImageWithFallback(captured.imageDataUrl, {
+            ...tocRuntimeOptions,
             providerOrder: TOC_RESCUE_PROVIDER_ORDER,
-            ...TOC_PRIMARY_WAIT_OPTIONS,
           });
           const recoveryQuality = evaluateCandidate(recoverySample.text);
           const mergedRecoveryText = mergeTocTextByLineQuality(bestText, recoverySample.text);

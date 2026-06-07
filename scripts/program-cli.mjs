@@ -1752,6 +1752,12 @@ function handleOcrDebug() {
 
 function handleOcr() {
   const action = subcommand || "debug";
+  if (action === "settings") {
+    const forwardedArgs = args.slice(2);
+    const child = runTsxScript("scripts/ocr-settings-cli.ts", forwardedArgs);
+    process.exit(child.status ?? 1);
+  }
+
   if (action === "debug") {
     handleOcrDebug();
     return;
@@ -1782,7 +1788,7 @@ function handleOcr() {
     return;
   }
 
-  console.error("Unknown ocr action. Use debug, capture, run, iterate, compare, or limits.");
+  console.error("Unknown ocr action. Use debug, capture, run, iterate, compare, limits, or settings.");
   process.exit(1);
 }
 
@@ -1918,6 +1924,7 @@ function collectHelpTopics() {
         "courseforge ocr iterate --image-file <path> [--fast|--wait] [--trace-all]",
         "courseforge ocr compare --fixture toc-page1 [--cer] [--structure]",
         "courseforge ocr limits <probe|refresh|show|test> [--json]",
+        "courseforge ocr settings <get|set|reset|show|export|import> [flags]",
         "courseforge ocr debug trace [--json]",
         "courseforge ocr debug pipeline [--json]",
         "courseforge ocr debug crops [--json]",
@@ -1940,6 +1947,7 @@ function collectHelpTopics() {
         "--wait-for-primary: enable primary cloud cooldown wait path before fallback.",
         "--max-crops <n>: limit TOC variant count in run/iterate/compare flows.",
         "--trace-all: include extended trace metadata in iterate pipelines.",
+        "settings set flags: --auto-retries --max-retries --shots --crop-strategy --dynamic-limits --limit-buffer --primary-provider --fallback --debug-level.",
       ],
       examples: [
         "courseforge ocr capture --image-file tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png",
@@ -1947,6 +1955,9 @@ function collectHelpTopics() {
         "courseforge ocr iterate --image-file tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png --fast --trace-all",
         "courseforge ocr compare --fixture toc-page1 --cer --structure",
         "courseforge ocr limits show --json",
+        "courseforge ocr settings get --json",
+        "courseforge ocr settings set --primary-provider openai --fallback tesseract-last --shots 3",
+        "courseforge ocr settings export --output tmp-smoke/ocr-settings.json",
         "courseforge ocr debug trace --json",
         "courseforge ocr debug fallback --json",
         "courseforge ocr debug rate-limits --json",
@@ -1957,6 +1968,7 @@ function collectHelpTopics() {
       limitations: [
         "run/iterate/compare commands wrap the existing scripts/ocr-live-debug.ts and scripts/ocr-live-iterate.ts.",
         "limits commands summarize local debug telemetry; use cloud smoke gate for live provider probing.",
+        "ocr settings commands run through scripts/ocr-settings-cli.ts and persist local OCR runtime settings.",
       ],
       requiredPermissions: [
         "Local debug log read access.",
@@ -2683,7 +2695,7 @@ function showHelp() {
   console.log("  courseforge admin <status|moderation|content|debug-policy|premium> [...]");
   console.log("  courseforge settings <status|language|accessibility|debug|ocr> [...]");
   console.log("  courseforge permissions <audit|repair|reset> [--json] [--apply]");
-  console.log("  courseforge ocr <capture|run|iterate|compare|limits|debug> [...]");
+  console.log("  courseforge ocr <capture|run|iterate|compare|limits|settings|debug> [...]");
   console.log("  courseforge ocr debug <trace|pipeline|crops|garbage|rescans|fallback|rate-limits|confidence|structure|tokens|timings|export> [--json|--html] [--output path]");
   console.log("  courseforge plugins <install|uninstall|status> [plugin-id]");
   console.log("  courseforge debug <feature> [flags]  (alias: npm run courseforge -- debug ...)");

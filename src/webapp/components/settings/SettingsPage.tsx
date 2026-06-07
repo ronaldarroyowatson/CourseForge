@@ -50,6 +50,7 @@ import {
 import { useAuthStore } from "../../store/authStore";
 import { useUIStore } from "../../store/uiStore";
 import { FloatingDesignSystemCard } from "./FloatingDesignSystemCard";
+import { OcrSettingsCard } from "./OcrSettingsCard";
 import { ProgressRing } from "../admin/infographics/ProgressRing";
 import { CountdownBadge } from "../admin/infographics/CountdownBadge";
 
@@ -1739,6 +1740,10 @@ export function SettingsPage(props: SettingsPageProps = {}): React.JSX.Element {
             </>
           ) : null}
         </article>
+
+        <OcrSettingsCard onSettingsChanged={async () => {
+          await refreshOcrProviderHealth(true);
+        }} />
 
         <article className={`settings-card settings-card--expandable settings-card--compact ${showMetadataLearning ? "settings-card--expanded" : ""}`}>
           <div className="settings-card__head">

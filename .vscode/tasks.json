@@ -274,6 +274,24 @@
 			"command": "npm run ocr:ci:loop -- --description \"TOC OCR live iteration\" --ref main",
 			"isBackground": false,
 			"group": "test"
+		},
+		{
+			"label": "matrix validation with gh path",
+			"type": "shell",
+			"command": "export PATH=\"$HOME/.local/bin:$PATH\" && npm run orchestrate:installers:wait -- --description \"OCR settings panel parity + TOC recapture freshness guard\" --ref main",
+			"group": "test"
+		},
+		{
+			"label": "bugfix release publish now",
+			"type": "shell",
+			"command": "npm run bugfix:release -- -Description \"OCR settings panel parity, TOC ingestion refresh guard, and operation tests\" -AllowUnsignedMacOS",
+			"group": "test"
+		},
+		{
+			"label": "bugfix release publish with powershell path",
+			"type": "shell",
+			"command": "export PATH=\"$HOME/.local/bin:$PATH\" && npm run bugfix:release -- -Description \"OCR settings panel parity, TOC ingestion refresh guard, and operation tests\" -AllowUnsignedMacOS",
+			"group": "test"
 		}
 	],
 	"inputs": [

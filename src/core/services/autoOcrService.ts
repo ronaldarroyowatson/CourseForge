@@ -4,6 +4,7 @@ import { getCurrentUser, waitForAuthStateChange } from "../../firebase/auth";
 import { functionsClient } from "../../firebase/functions";
 import { appendDebugLogEntry } from "./debugLogService";
 import { emitClientDebugTrace } from "./clientDebugTraceService";
+import { getOcrSettingsManager } from "./ocrSettingsService";
 
 export type AutoOcrProviderId = 
   | "local_tesseract" 
@@ -1285,6 +1286,8 @@ export async function extractTextFromImageWithFallback(
     maxPrimaryCloudWaitMs?: number;
   } = {}
 ): Promise<AutoOcrExtractionResult> {
+  const ocrSettings = await getOcrSettingsManager();
+  const runtimeOptions = await ocrSettings.getRuntimeOptions();
   const extractionTraceId = createOcrTraceId("ocr-fallback");
   let preprocessedImage: string | null = null;
   async function getLocalPreparedImage(): Promise<string> {
@@ -1300,11 +1303,11 @@ export async function extractTextFromImageWithFallback(
     ]);
     return preprocessedImage;
   }
-  const providerOrder = normalizeExecutionProviderOrder(options.providerOrder ?? await getEffectiveAutoOcrProviderOrder());
+  const providerOrder = normalizeExecutionProviderOrder(options.providerOrder ?? runtimeOptions.providerOrder ?? await getEffectiveAutoOcrProviderOrder());
   const primaryCloudProviderId = providerOrder.find((providerId): providerId is CloudAutoOcrProviderId => isCloudProviderId(providerId)) ?? null;
-  const preferPrimaryCloudWait = options.preferPrimaryCloudWait === true;
-  const waitForPrimaryCloudCooldownMs = Math.max(1_000, options.waitForPrimaryCloudCooldownMs ?? 45_000);
-  const maxPrimaryCloudWaitMs = Math.max(waitForPrimaryCloudCooldownMs, options.maxPrimaryCloudWaitMs ?? 90_000);
+  const preferPrimaryCloudWait = options.preferPrimaryCloudWait ?? runtimeOptions.preferPrimaryCloudWait;
+  const waitForPrimaryCloudCooldownMs = Math.max(1_000, options.waitForPrimaryCloudCooldownMs ?? runtimeOptions.waitForPrimaryCloudCooldownMs);
+  const maxPrimaryCloudWaitMs = Math.max(waitForPrimaryCloudCooldownMs, options.maxPrimaryCloudWaitMs ?? runtimeOptions.maxPrimaryCloudWaitMs);
   const providerMap = new Map((options.providersOverride ?? getAutoOcrProviders()).map((provider) => [provider.id, provider]));
   const attempts: AutoOcrAttemptResult[] = [];
 

@@ -2,6 +2,7 @@
 
 | Timestamp | Label | Provider | Variant | CER (structured) | CER (raw) | Confidence | Chapters | Sections | Notes |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 2026-06-07T03:42:30.000Z | cli-parity-page1-page2-ingestion-check | cloud_openai_vision | original + lower-band | n/a | n/a | 1.000 | 3 | 19/23 | Verified `courseforge ocr run --json` against `tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png` and `tmp-smoke/samples/ocr__toc-spread-view__expect-parse-success.png`; page1 and page2/spread produced populated parsed TOC structures and distinct selected variants. |
 | 2026-06-05T13:54:45.689Z | iter-01-cloud | cloud_openai_vision | original | n/a | n/a | 1.000 | 2 | 13 | duration=37.3s |
 | 2026-06-05T13:54:55.709Z | iter-02-local | local_tesseract | lower-band | n/a | n/a | 1.000 | 3 | 10 | duration=7.5s |
 | 2026-06-05T13:55:40.782Z | iter-03-cloud | cloud_openai_vision | original | n/a | n/a | 1.000 | 2 | 13 | duration=41.7s |

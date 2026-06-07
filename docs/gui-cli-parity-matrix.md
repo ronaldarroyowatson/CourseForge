@@ -43,6 +43,7 @@ Safety behavior:
 | OCR live diagnostics | OCR debug workflows and live iteration scripts | `courseforge debug ocr-live` + `npm run debug:ocr:live` | Parity available | Uses snapshot-file OCR path for deterministic iteration.
 | OCR deep introspection | OCR diagnostics and fallback chain analysis | `courseforge ocr debug <trace|pipeline|crops|garbage|rescans|fallback|confidence|structure|tokens|timings|export>` | Parity available (second sweep baseline) | JSON + HTML export supported via `export --full --json` and `export --html`.
 | OCR workflow aliases | OCR runbook operations used during stabilization loops | `courseforge ocr <capture|run|iterate|compare|limits>` | Parity available (rate-limit stabilization baseline) | Aliases wrap existing OCR debug/iterate scripts and standardize command naming for operations teams.
+| OCR settings controls | Settings → OCR Settings card (all users) | `courseforge ocr settings <get|set|reset|show|export|import>` | Parity available (settings control baseline) | GUI controls are command-bound to CLI-style command IDs and backed by the shared OCR settings module. Verified by `tests/core/programCli.ocrSettings.test.ts`, `tests/core/ocrSettingsService.test.ts`, and `tests/integration/ocrSettingsCard.integration.test.tsx`.
 | OCR permission chain | macOS capture/accessibility reinstall flow | `courseforge permissions <audit|repair|reset>` | Parity available (stabilization baseline) | `repair/reset` require `--apply`.
 | Smoke gates and CI loop | smoke gate and CI loop workflows | `npm run test:smoke:ocr:cloud:gate`, `npm run ocr:ci:loop` | Parity available | Scripted execution already available.
 | Textbook CRUD flows | textbook forms/lists and setup flow | `courseforge textbooks <status|mode|isbn|save|edit>` | Parity baseline available (cycle rollout) | Command IDs now bound from GUI handlers with CLI workflow command receipts.
@@ -76,3 +77,18 @@ Additional OCR operations with CLI-only wrappers:
 - `courseforge ocr iterate --image-file <path> [--fast|--wait] [--trace-all]`
 - `courseforge ocr compare --fixture toc-page1 [--cer] [--structure]`
 - `courseforge ocr limits <probe|refresh|show|test> [--json]`
+- `courseforge ocr settings get [--json]`
+- `courseforge ocr settings set --auto-retries <true|false> --max-retries <n> --shots <n> --crop-strategy <color|bw|both> --dynamic-limits <true|false> --limit-buffer <n> --primary-provider <openai|github> --fallback <wait|backup|tesseract-last> --debug-level <off|errors|verbose|trace> [--json]`
+- `courseforge ocr settings reset [--json]`
+- `courseforge ocr settings export [--output <path>] [--json]`
+- `courseforge ocr settings import --input <path> [--json]`
+
+## Verification Snapshot
+
+- CLI parity command receipts verified:
+	- `courseforge textbooks auto capture toc`
+	- `courseforge textbooks auto toc merge chapter --chapterIndex <index>`
+- TOC ingestion verified via `courseforge ocr run --json` for:
+	- `tmp-smoke/samples/ocr__toc-text-capture__expect-parse-success.png`
+	- `tmp-smoke/samples/ocr__toc-spread-view__expect-parse-success.png`
+- Current outputs show populated parsed TOC structures with distinct selected variants (`original` and `lower-band`).

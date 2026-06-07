@@ -865,6 +865,8 @@ interface AutoSessionDraft {
   extractionCheckpoint?: AutoExtractionCheckpoint;
   guidedCuePlan?: GuidedCaptureCuePlan;
   tocCaptureImageDataUrl?: string | null;
+  tocResultSnapshot?: ParsedTocResult;
+  tocPagesSnapshot?: TocPage[];
   step: AutoFlowStep;
   stepsCompleted: { cover: boolean; copyright: boolean };
 }
@@ -890,6 +892,8 @@ function isAutoSessionDraft(value: unknown): value is AutoSessionDraft {
     && (draft.extractionCheckpoint === undefined || typeof draft.extractionCheckpoint === "object")
     && (draft.guidedCuePlan === undefined || typeof draft.guidedCuePlan === "object")
     && (draft.tocCaptureImageDataUrl === undefined || typeof draft.tocCaptureImageDataUrl === "string" || draft.tocCaptureImageDataUrl === null)
+    && (draft.tocResultSnapshot === undefined || typeof draft.tocResultSnapshot === "object")
+    && (draft.tocPagesSnapshot === undefined || Array.isArray(draft.tocPagesSnapshot))
     && (draft.step === "cover" || draft.step === "title" || draft.step === "toc" || draft.step === "toc-editor")
     && typeof draft.stepsCompleted?.cover === "boolean"
     && typeof draft.stepsCompleted?.copyright === "boolean"
@@ -2066,7 +2070,7 @@ export function AutoTextbookSetupFlow({
   // Persist a lightweight session snapshot so the user can resume after a
   // page reload.  Only save when there is something meaningful to recover.
   useEffect(() => {
-    if (!coverImageDataUrl && !ownershipProofDataUrl && !rawOcrText && !metadataForm.title) {
+    if (!coverImageDataUrl && !ownershipProofDataUrl && !rawOcrText && !metadataForm.title && tocResult.chapters.length === 0) {
       deleteAutoExtractionCheckpoint(activeSessionDraftIdRef.current);
       const remaining = deleteAutoSessionDraft(activeSessionDraftIdRef.current);
       setResumableDrafts(remaining);
@@ -2115,6 +2119,8 @@ export function AutoTextbookSetupFlow({
       extractionCheckpoint,
       guidedCuePlan,
       tocCaptureImageDataUrl,
+      tocResultSnapshot: tocResult,
+      tocPagesSnapshot: tocPages,
       step,
       stepsCompleted: {
         cover: Boolean(coverImageDataUrl),
@@ -2139,7 +2145,8 @@ export function AutoTextbookSetupFlow({
     syncWriteLimit,
     guidedCuePlan,
     tocCaptureImageDataUrl,
-    tocResult.chapters.length,
+    tocPages,
+    tocResult,
   ]);
 
   const canFinishToc = tocResult.chapters.length > 0;
@@ -4353,6 +4360,54 @@ export function AutoTextbookSetupFlow({
     });
   }
 
+  function deleteChapter(chapterIndex: number): void {
+    void executeGuiCliBoundCommand("courseforge textbooks auto toc delete chapter", () => {
+      setTocResult((current) => {
+        if (chapterIndex < 0 || chapterIndex >= current.chapters.length) {
+          return current;
+        }
+
+        const next = [...current.chapters];
+        next.splice(chapterIndex, 1);
+        return { ...current, chapters: next };
+      });
+    }, {
+      chapterIndex,
+    });
+  }
+
+  function deleteSection(chapterIndex: number, sectionIndex: number): void {
+    void executeGuiCliBoundCommand("courseforge textbooks auto toc delete section", () => {
+      setTocResult((current) => {
+        const chapter = current.chapters[chapterIndex];
+        if (!chapter || sectionIndex < 0 || sectionIndex >= chapter.sections.length) {
+          return current;
+        }
+
+        const chapters = current.chapters.map((entry, currentChapterIndex) => {
+          if (currentChapterIndex !== chapterIndex) {
+            return entry;
+          }
+
+          const sections = [...entry.sections];
+          sections.splice(sectionIndex, 1);
+          return {
+            ...entry,
+            sections,
+          };
+        });
+
+        return {
+          ...current,
+          chapters,
+        };
+      });
+    }, {
+      chapterIndex,
+      sectionIndex,
+    });
+  }
+
   function handlePreviewNodeUpdate(
     node: TocPreviewNodeModel,
     update: { numberValue: string; title: string; pageStart?: number }
@@ -4941,6 +4996,12 @@ export function AutoTextbookSetupFlow({
                             relatedIsbns: nextRelatedIsbns.filter((entry) => entry.isbn.trim().length > 0),
                           });
                           setTocCaptureImageDataUrl(draft.tocCaptureImageDataUrl ?? null);
+                          setTocResult(draft.tocResultSnapshot ?? INITIAL_TOC_RESULT);
+                          setTocPages(draft.tocPagesSnapshot ?? (draft.tocResultSnapshot ? [{
+                            pageIndex: 0,
+                            chapters: draft.tocResultSnapshot.chapters,
+                            confidence: draft.tocResultSnapshot.confidence,
+                          }] : []));
                           setGuidedCuePlan(draft.guidedCuePlan ?? createEmptyGuidedCaptureCuePlan());
                           setStep(draft.step);
                           if (draft.extractionCheckpoint) {
@@ -5530,6 +5591,9 @@ export function AutoTextbookSetupFlow({
                 <button type="button" className="btn-secondary" onClick={() => splitChapter(chapterIndex)} disabled={chapter.sections.length < 2}>
                   Split Chapter
                 </button>
+                <button type="button" className="btn-secondary" onClick={() => deleteChapter(chapterIndex)}>
+                  Delete Chapter
+                </button>
               </div>
 
               {chapter.sections.map((section, sectionIndex) => (
@@ -5558,6 +5622,14 @@ export function AutoTextbookSetupFlow({
                     onChange={(event) => updateSection(chapterIndex, sectionIndex, { pageEnd: parsePageInputValue(event.target.value) })}
                     placeholder={toPageInputValue(getSectionDerivedPageEnd(chapter, sectionIndex)) || "End page"}
                   />
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => deleteSection(chapterIndex, sectionIndex)}
+                    aria-label="Delete section"
+                  >
+                    Delete
+                  </button>
                 </div>
               ))}
             </div>

@@ -583,6 +583,116 @@ describe("auto textbook flow integration", () => {
     expect(screen.getByText(/Live TOC Structure Preview/i)).toBeInTheDocument();
   });
 
+  it("restores captured TOC chapters from resumable draft snapshots", async () => {
+    const now = Date.now();
+    const snapshot = {
+      confidence: 0.91,
+      chapters: [
+        {
+          chapterNumber: "5",
+          title: "ENERGY AND WAVES",
+          pageStart: 120,
+          sections: [
+            { sectionNumber: "5.1", title: "Forms of Energy", pageStart: 121 },
+          ],
+        },
+      ],
+    };
+
+    window.localStorage.setItem(
+      AUTO_SESSION_DRAFTS_KEY,
+      JSON.stringify([
+        {
+          id: "resume-toc-snapshot-draft",
+          version: 1,
+          savedAt: now,
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          tocCaptureImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          rawOcrText: "MODULE 5: ENERGY AND WAVES",
+          metadataTitle: "Inspire Physical Science",
+          metadataSubject: "Science",
+          metadataPublisher: "McGraw Hill",
+          tocResultSnapshot: snapshot,
+          tocPagesSnapshot: [
+            {
+              imageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+              ocrText: "MODULE 5: ENERGY AND WAVES",
+              chapters: snapshot.chapters,
+              confidence: snapshot.confidence,
+            },
+          ],
+          step: "toc-editor",
+          stepsCompleted: { cover: true, copyright: true },
+        },
+      ])
+    );
+
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "TOC Editor" })).toBeInTheDocument();
+    });
+
+    expect(screen.getByDisplayValue("ENERGY AND WAVES")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Forms of Energy")).toBeInTheDocument();
+  });
+
+  it("allows deleting TOC sections and chapters before recapture", async () => {
+    render(
+      <AutoTextbookSetupFlow
+        onSaved={() => undefined}
+        onSwitchToManual={() => undefined}
+        testingSeedState={{
+          step: "toc-editor",
+          coverImageDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          ownershipProofDataUrl: SOURCE_OF_TRUTH_COVER_DATA_URL,
+          tocResult: {
+            confidence: 0.88,
+            chapters: [
+              {
+                chapterNumber: "6",
+                title: "EARTH SYSTEMS",
+                pageStart: 140,
+                sections: [
+                  { sectionNumber: "6.1", title: "Earth Materials", pageStart: 141 },
+                  { sectionNumber: "6.2", title: "Plate Motion", pageStart: 148 },
+                ],
+              },
+            ],
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByDisplayValue("Plate Motion")).toBeInTheDocument();
+    const plateMotionInput = screen.getByDisplayValue("Plate Motion");
+    const plateMotionRow = plateMotionInput.closest(".auto-toc-editor__section-row");
+    if (!plateMotionRow) {
+      throw new Error("Expected to find section row for Plate Motion");
+    }
+    const deleteButton = plateMotionRow.querySelector("button[aria-label='Delete section']") as HTMLButtonElement | null;
+    if (!deleteButton) {
+      throw new Error("Expected delete button for Plate Motion section");
+    }
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue("Plate Motion")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Chapter" }));
+    await waitFor(() => {
+      expect(screen.getByText("No chapters detected yet.")).toBeInTheDocument();
+    });
+  });
+
   it("limits unfinished auto captures to three queue slots and allows deleting a draft to reopen capacity", async () => {
     const now = Date.now();
     window.localStorage.setItem(

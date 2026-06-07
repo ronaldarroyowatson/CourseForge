@@ -834,7 +834,11 @@ export async function extractMetadataWithOcrFallbackFromDataUrl(
     ocrAttemptCount += 1;
     let ocrResult: Awaited<ReturnType<typeof extractTextFromImageWithFallback>>;
     try {
-      ocrResult = await extractTextFromImageWithFallback(imageDataUrl);
+      ocrResult = await extractTextFromImageWithFallback(imageDataUrl, {
+        preferPrimaryCloudWait: true,
+        waitForPrimaryCloudCooldownMs: 30_000,
+        maxPrimaryCloudWaitMs: 60_000,
+      });
       if (!ocrResult || typeof ocrResult.text !== "string" || typeof ocrResult.providerId !== "string") {
         throw new Error("OCR enrichment returned an invalid response payload.");
       }

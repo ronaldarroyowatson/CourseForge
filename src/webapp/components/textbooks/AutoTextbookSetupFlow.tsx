@@ -3167,7 +3167,7 @@ export function AutoTextbookSetupFlow({
             imageBytes: cropped.length,
           },
         });
-        const ocr = await extractTextFromImageWithFallback(cropped);
+        const ocr = await extractTextFromImageWithFallback(cropped, TOC_PRIMARY_WAIT_OPTIONS);
         setIsRunningOcr(false);
         ocrText = ocr.text;
         ocrProviderId = ocr.providerId;

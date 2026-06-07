@@ -138,6 +138,36 @@ Recovery paths surfaced in OCR error messages:
 - CLI: `npm run program -- auth status` then `npm run program -- auth refresh`
 - If refresh cannot recover: `npm run program -- login --role teacher`
 
+## Dynamic Rate-Limit Adaptation
+
+All cloud OCR call paths now use **provider-supplied rate-limit timing** instead of static fallback windows.
+
+### Covered reason codes
+
+| Reason code | Action |
+|---|---|
+| `rate_limited` | Mark provider unavailable with dynamic TTL from `Retry-After`, wait, then retry primary before falling back |
+| `provider_cooldown_active` | Same — treated as a short rate limit; waits the actual `retryAfterSeconds` (typically 1–2 s) |
+| `circuit_open` | Same — waits the in-memory circuit cooldown before retrying |
+| `distributed_circuit_open` | Same — waits the Firestore circuit cooldown before retrying |
+
+### Dynamic TTL formula
+
+```
+ttlMs = (retryAfterSeconds * 1000) + 5_000 ms buffer
+       capped at AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS (15 min)
+```
+
+When `retryAfterSeconds` is absent, the static constant is used as before.
+
+### Health probe stores retry-after
+
+The `getAiProviderStatus` probe response now returns `retryAfterSeconds` per provider. The client stores it in the availability cache entry so the wait logic can use it on the next request without a fresh probe.
+
+### GUI call sites now use `preferPrimaryCloudWait`
+
+Every `extractTextFromImageWithFallback` call from the GUI (including primary TOC capture and metadata extraction) now passes `preferPrimaryCloudWait: true` so any transient rate-limit or circuit-open condition triggers a wait-and-retry path before falling back to the secondary cloud provider or local OCR.
+
 ## Metadata Interpretation Safeguards
 
 OCR text is post-processed before metadata is mapped into CourseForge fields:

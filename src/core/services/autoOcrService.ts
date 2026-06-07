@@ -51,6 +51,7 @@ export interface AutoOcrProviderHealthRecord {
   reasonCode?: string;
   httpStatus?: number | null;
   checkedAt?: string;
+  retryAfterSeconds?: number | null;
 }
 
 const AUTO_OCR_PROVIDER_ORDER_KEY = "courseforge.autoOcr.providerOrder";
@@ -99,6 +100,7 @@ interface CallableErrorDetails {
   httpStatus?: number | null;
   traceId?: string;
   failureStage?: string;
+  retryAfterSeconds?: number | null;
 }
 
 interface CloudProviderAvailabilityCacheEntry {
@@ -108,6 +110,7 @@ interface CloudProviderAvailabilityCacheEntry {
   reasonCode?: string;
   httpStatus?: number | null;
   checkedAt?: string;
+  retryAfterSeconds?: number | null;
 }
 
 let autoOcrAvailabilityCache: Partial<Record<CloudAutoOcrProviderId, CloudProviderAvailabilityCacheEntry>> | null = null;
@@ -970,9 +973,17 @@ async function refreshCloudAvailabilityCache(
         const provider = payload.data?.providers?.find((entry) => entry.id === providerId);
         const reasonCode = typeof provider?.reasonCode === "string" ? provider.reasonCode : "missing_provider_status";
         const reasonMessage = typeof provider?.reasonMessage === "string" ? provider.reasonMessage.trim() : "Cloud OCR status probe did not include provider availability.";
-        const ttlMs = reasonCode === "rate_limited"
-          ? AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS
-          : AUTO_OCR_AVAILABILITY_CACHE_TTL_MS;
+        const probeRetryAfterSeconds = typeof (provider as { retryAfterSeconds?: unknown })?.retryAfterSeconds === "number"
+          ? (provider as unknown as { retryAfterSeconds: number }).retryAfterSeconds
+          : null;
+        // Dynamic TTL: use provider-supplied retry-after when available, otherwise use static constants.
+        const dynamicTtlMs = probeRetryAfterSeconds != null && probeRetryAfterSeconds > 0
+          ? Math.min((probeRetryAfterSeconds * 1000) + 5_000, AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS)
+          : null;
+        const ttlMs = dynamicTtlMs
+          ?? (isTemporaryRateLimitReasonCode(reasonCode)
+            ? AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS
+            : AUTO_OCR_AVAILABILITY_CACHE_TTL_MS);
         nextCache[providerId] = {
           state: resolveCloudAvailabilityState(reasonCode, provider?.available, provider?.availabilityState),
           expiresAt: Date.now() + ttlMs,
@@ -980,6 +991,7 @@ async function refreshCloudAvailabilityCache(
           reasonCode,
           httpStatus: provider?.httpStatus ?? null,
           checkedAt: typeof provider?.checkedAt === "string" ? provider.checkedAt : undefined,
+          retryAfterSeconds: probeRetryAfterSeconds,
         };
       });
 
@@ -1047,23 +1059,38 @@ async function isCloudVisionConfigured(providerId: CloudAutoOcrProviderId): Prom
   return status !== "unavailable";
 }
 
+function isTemporaryRateLimitReasonCode(reasonCode: string): boolean {
+  const normalized = reasonCode.toLowerCase();
+  return normalized === "rate_limited"
+    || normalized === "provider_cooldown_active"
+    || normalized === "circuit_open"
+    || normalized === "distributed_circuit_open";
+}
+
 function updateCloudAvailabilityFromCallableError(providerId: CloudAutoOcrProviderId, error: { code: string; message: string; details?: CallableErrorDetails }): void {
   const reasonCode = error.details?.reasonCode ?? error.code;
   const errorMessage = error.details?.reasonMessage ?? error.message;
   const lowerReasonCode = reasonCode.toLowerCase();
+  const retryAfterSeconds = typeof error.details?.retryAfterSeconds === "number" ? error.details.retryAfterSeconds : null;
   let state: ProviderAvailabilityState = "unknown";
 
   if (lowerReasonCode.includes("auth") || lowerReasonCode.includes("missing_")) {
     state = "unavailable";
-  } else if (lowerReasonCode === "rate_limited") {
+  } else if (isTemporaryRateLimitReasonCode(reasonCode)) {
     state = "unavailable";
   }
 
-  const ttlMs = lowerReasonCode === "rate_limited"
-    ? AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS
-    : isAuthRequiredReasonCode(lowerReasonCode)
-      ? AUTO_OCR_AUTH_REQUIRED_CACHE_TTL_MS
-      : AUTO_OCR_AVAILABILITY_CACHE_TTL_MS;
+  // Use the provider-supplied retry-after for a precise dynamic TTL.
+  const dynamicTtlMs = retryAfterSeconds != null && retryAfterSeconds > 0
+    ? Math.min((retryAfterSeconds * 1000) + 5_000, AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS)
+    : null;
+
+  const ttlMs = dynamicTtlMs
+    ?? (isTemporaryRateLimitReasonCode(reasonCode)
+      ? AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS
+      : isAuthRequiredReasonCode(lowerReasonCode)
+        ? AUTO_OCR_AUTH_REQUIRED_CACHE_TTL_MS
+        : AUTO_OCR_AVAILABILITY_CACHE_TTL_MS);
 
   setCachedCloudAvailability(providerId, {
     state,
@@ -1071,6 +1098,7 @@ function updateCloudAvailabilityFromCallableError(providerId: CloudAutoOcrProvid
     errorMessage,
     reasonCode,
     httpStatus: error.details?.httpStatus ?? null,
+    retryAfterSeconds,
   });
 }
 
@@ -1223,6 +1251,7 @@ export async function getAutoOcrProviderHealth(options: { forceRefresh?: boolean
           reasonCode: cacheEntry?.reasonCode,
           httpStatus: cacheEntry?.httpStatus,
           checkedAt: cacheEntry?.checkedAt,
+          retryAfterSeconds: cacheEntry?.retryAfterSeconds ?? null,
         };
       }
 
@@ -1363,14 +1392,18 @@ export async function extractTextFromImageWithFallback(
         && isCloudProviderId(providerId)
       ) {
         const cachedAvailability = getCachedCloudAvailability(providerId);
-        const rateLimited = cachedAvailability?.reasonCode === "rate_limited";
+        const rateLimited = isTemporaryRateLimitReasonCode(cachedAvailability?.reasonCode ?? "");
         const authRequired = isAuthRequiredReasonCode(cachedAvailability?.reasonCode);
         if (rateLimited) {
-          const waitMs = Math.min(waitForPrimaryCloudCooldownMs, maxPrimaryCloudWaitMs);
+          // Prefer the provider-supplied retry-after for a precise dynamic wait.
+          const retryAfterMs = (cachedAvailability?.retryAfterSeconds ?? 0) > 0
+            ? Math.min((cachedAvailability!.retryAfterSeconds! * 1000) + 3_000, maxPrimaryCloudWaitMs)
+            : Math.min(waitForPrimaryCloudCooldownMs, maxPrimaryCloudWaitMs);
+          const waitMs = retryAfterMs;
           void emitOcrDiagnostic("primary_provider_waiting_for_rate_limit", {
             level: "warning",
             traceId: extractionTraceId,
-            context: { providerId, waitMs, reasonCode: cachedAvailability?.reasonCode },
+            context: { providerId, waitMs, reasonCode: cachedAvailability?.reasonCode, retryAfterSeconds: cachedAvailability?.retryAfterSeconds ?? null },
           });
           await delay(waitMs);
           await refreshCloudAvailabilityCache({ forceRefresh: true, providerIds: [providerId] });

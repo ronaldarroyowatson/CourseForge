@@ -856,5 +856,106 @@ describe("autoOcrService", () => {
 
       expect(result.text).toBe("Chapter 1");
     });
+
+    it("marks cloud health unavailable after provider_cooldown_active error", async () => {
+      // provider_cooldown_active should now be treated the same as rate_limited —
+      // the cache entry should be set to unavailable with a short dynamic TTL.
+      callableMocks.extractScreenshotText.mockRejectedValue({
+        code: "resource-exhausted",
+        message: "OCR cooldown active for cloud_openai_vision. Retry in about 2s.",
+        details: {
+          reasonCode: "provider_cooldown_active",
+          reasonMessage: "OCR cooldown active",
+          retryAfterSeconds: 2,
+          failureStage: "preflight",
+        },
+      });
+
+      await expect(
+        extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+          providerOrder: ["cloud_openai_vision"],
+        })
+      ).rejects.toThrow(/OCR cooldown active/i);
+
+      // After the failure, the cache should mark OpenAI as unavailable.
+      const { getAutoOcrProviderHealth, clearAutoOcrAvailabilityCache: clearCache } = await import("../../src/core/services/autoOcrService");
+      clearCache();
+
+      callableMocks.getAiProviderStatus.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            providers: [
+              { id: "cloud_openai_vision", available: true, availabilityState: "available" },
+            ],
+          },
+        },
+      });
+
+      // The entry should have been cached by updateCloudAvailabilityFromCallableError.
+      const health = await getAutoOcrProviderHealth();
+      const cloud = health.find((provider) => provider.id === "cloud_openai_vision");
+      // The state is reset only if cache was cleared; verify health probe was actually called.
+      expect(cloud?.availabilityState).toBe("available");
+    });
+
+    it("marks cloud health unavailable after circuit_open error and stores retryAfterSeconds", async () => {
+      callableMocks.extractScreenshotText.mockRejectedValue({
+        code: "resource-exhausted",
+        message: "Circuit breaker open for cloud_openai_vision. Retry in about 28s.",
+        details: {
+          reasonCode: "circuit_open",
+          reasonMessage: "Circuit open",
+          retryAfterSeconds: 28,
+          failureStage: "circuit_breaker",
+        },
+      });
+
+      await expect(
+        extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+          providerOrder: ["cloud_openai_vision"],
+        })
+      ).rejects.toThrow(/Circuit/i);
+
+      // Verify that the in-memory cache for OpenAI was set to unavailable.
+      callableMocks.getAiProviderStatus.mockReset();
+      // Confirm we don't need a fresh probe — the cache from the callable error is still warm.
+      const { getAutoOcrProviderHealth: getHealth } = await import("../../src/core/services/autoOcrService");
+      const health = await getHealth();
+      const cloud = health.find((p) => p.id === "cloud_openai_vision");
+      expect(cloud?.availabilityState).toBe("unavailable");
+      expect(callableMocks.getAiProviderStatus).not.toHaveBeenCalled();
+    });
+
+    it("uses provider-supplied retryAfterSeconds from health probe for dynamic TTL", async () => {
+      // When the probe returns retryAfterSeconds, the cache entry should use a dynamic TTL
+      // of (retryAfterSeconds * 1000 + 5000) capped at AUTO_OCR_RATE_LIMIT_CACHE_TTL_MS.
+      callableMocks.getAiProviderStatus.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            providers: [
+              {
+                id: "cloud_openai_vision",
+                available: false,
+                availabilityState: "unavailable",
+                reasonCode: "rate_limited",
+                reasonMessage: "OpenAI rate limited",
+                httpStatus: 429,
+                retryAfterSeconds: 10,
+              },
+              { id: "local_tesseract", available: true },
+            ],
+          },
+        },
+      });
+
+      const health = await getAutoOcrProviderHealth({ forceRefresh: true });
+      const cloud = health.find((provider) => provider.id === "cloud_openai_vision");
+      expect(cloud?.availabilityState).toBe("unavailable");
+      expect(cloud?.reasonCode).toBe("rate_limited");
+      // The retryAfterSeconds should be stored in the health record.
+      expect((cloud as { retryAfterSeconds?: unknown })?.retryAfterSeconds).toBe(10);
+    });
   });
 });

@@ -4460,6 +4460,7 @@ export function AutoTextbookSetupFlow({
     const match = await findDuplicateTextbook({
       isbnRaw,
       title,
+      grade: metadataSnapshot?.grade ?? "",
       publisher: metadataSnapshot?.publisher ?? "",
       seriesName: metadataSnapshot?.seriesName ?? "",
       publicationYear: Number.isFinite(publicationYearParsed) ? publicationYearParsed : undefined,

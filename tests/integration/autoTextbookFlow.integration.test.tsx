@@ -729,7 +729,12 @@ describe("auto textbook flow integration", () => {
     expect(screen.getByDisplayValue("ENERGY AND WAVES")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Forms of Energy")).toBeInTheDocument();
     expect(screen.getByText(/Restored existing TOC chapters from saved textbook data/i)).toBeInTheDocument();
-    expect(repositoryMocks.findDuplicateTextbook).toHaveBeenCalled();
+    expect(repositoryMocks.findDuplicateTextbook).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Inspire Physical Science",
+      grade: "8",
+      publisher: "McGraw Hill",
+      publicationYear: 2021,
+    }));
     expect(repositoryMocks.fetchChaptersByTextbookId).toHaveBeenCalledWith("textbook-existing");
     expect(repositoryMocks.fetchSectionsByChapterId).toHaveBeenCalledWith("chapter-existing-1");
   });

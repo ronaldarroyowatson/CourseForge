@@ -292,6 +292,12 @@
 			"type": "shell",
 			"command": "export PATH=\"$HOME/.local/bin:$PATH\" && npm run bugfix:release -- -Description \"OCR settings panel parity, TOC ingestion refresh guard, and operation tests\" -AllowUnsignedMacOS",
 			"group": "test"
+		},
+		{
+			"label": "bugfix release publish skip tests",
+			"type": "shell",
+			"command": "export PATH=\"$HOME/.local/bin:$PATH\" && /Users/dev-macbook/.local/bin/powershell -ExecutionPolicy Bypass -File scripts/bugfix-release.ps1 -Description \"OCR settings panel parity, TOC ingestion refresh guard, and operation tests\" -SkipTests -AllowUnsignedMacOS",
+			"group": "test"
 		}
 	],
 	"inputs": [

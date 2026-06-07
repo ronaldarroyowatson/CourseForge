@@ -144,4 +144,17 @@ describe("Functions external API resilience contracts", () => {
     expect(source).toContain("providerKey: \"openai_design_suggestions\"");
     expect(source).toContain("providerKey: \"conversion_api\"");
   });
+
+  it("records AI usage for OCR screenshot and image metadata callables", () => {
+    const source = readFunctionsSource();
+
+    expect(source).toContain("export const extractScreenshotText = guardedOnCall");
+    expect(source).toContain("kind: \"screenshot_text\"");
+    expect(source).toContain("provider: screenshotProvider");
+
+    expect(source).toContain("export const extractMetadataFromImageVision = guardedOnCall");
+    expect(source).toContain("kind: \"image_metadata\"");
+    expect(source).toContain("provider: \"openai\"");
+    expect(source).toContain("recordAiProviderFailure({");
+  });
 });

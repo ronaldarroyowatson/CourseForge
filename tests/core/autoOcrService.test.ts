@@ -958,4 +958,288 @@ describe("autoOcrService", () => {
       expect((cloud as { retryAfterSeconds?: unknown })?.retryAfterSeconds).toBe(10);
     });
   });
+
+  describe("cloud OCR bypass for rate-limited providers (regression tests)", () => {
+    it("attempts cloud OCR even when availability cache says rate_limited", async () => {
+      // Seed availability cache with rate_limited state for OpenAI.
+      callableMocks.getAiProviderStatus.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            providers: [
+              {
+                id: "cloud_openai_vision",
+                available: false,
+                availabilityState: "unavailable",
+                reasonCode: "rate_limited",
+                reasonMessage: "Rate limited",
+                httpStatus: 429,
+                retryAfterSeconds: 3600,
+              },
+            ],
+          },
+        },
+      });
+      await getAutoOcrProviderHealth({ forceRefresh: true });
+
+      // Even though cache says unavailable (rate_limited), the fallback should bypass
+      // the cache and attempt actual extraction. If cloud succeeds, it should be used.
+      callableMocks.extractScreenshotText.mockResolvedValue({
+        data: {
+          success: true,
+          data: { text: "Table of Contents\nChapter 1\nChapter 2", providerId: "cloud_openai_vision" },
+        },
+      });
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        preferPrimaryCloudWait: false,
+        maxPrimaryCloudWaitMs: 1,
+      });
+
+      // Cloud should have been attempted and succeeded despite the rate-limit cache state.
+      expect(result.providerId).toBe("cloud_openai_vision");
+      expect(result.text).toContain("Chapter");
+    });
+
+    it("falls back to next provider if cloud returns 429 during bypass attempt", async () => {
+      // Seed availability cache with rate_limited state.
+      callableMocks.getAiProviderStatus.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            providers: [
+              {
+                id: "cloud_openai_vision",
+                available: false,
+                availabilityState: "unavailable",
+                reasonCode: "rate_limited",
+                reasonMessage: "Rate limited",
+                httpStatus: 429,
+                retryAfterSeconds: 3600,
+              },
+            ],
+          },
+        },
+      });
+      await getAutoOcrProviderHealth({ forceRefresh: true });
+
+      // Cloud callable throws a 429 error during the bypass attempt.
+      callableMocks.extractScreenshotText.mockRejectedValue(
+        Object.assign(new Error("resource-exhausted: rate-limited"), {
+          code: "resource-exhausted",
+          details: { reasonCode: "rate_limited", retryAfterSeconds: 60 },
+        })
+      );
+
+      const providers: AutoOcrProvider[] = [
+        {
+          id: "cloud_openai_vision",
+          label: "Cloud OpenAI",
+          isAvailable: async () => false,
+          extractText: async () => {
+            throw Object.assign(new Error("resource-exhausted: rate-limited"), {
+              code: "resource-exhausted",
+            });
+          },
+        },
+        {
+          id: "local_tesseract",
+          label: "Tesseract",
+          isAvailable: async () => true,
+          extractText: async () => "Fallback text from Tesseract",
+        },
+      ];
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        providersOverride: providers,
+        preferPrimaryCloudWait: false,
+        maxPrimaryCloudWaitMs: 1,
+      });
+
+      // Should have fallen back to Tesseract since cloud actually failed.
+      expect(result.providerId).toBe("local_tesseract");
+      expect(result.text).toContain("Tesseract");
+    });
+
+    it("does NOT bypass circuit when opened by auth failure (non-rate-limit)", async () => {
+      // Seed a uniform unavailable state from auth failure — NOT rate-limited.
+      callableMocks.getAiProviderStatus.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            providers: [
+              {
+                id: "cloud_openai_vision",
+                available: false,
+                availabilityState: "unavailable",
+                reasonCode: "auth_failed",
+                reasonMessage: "Auth failure",
+                httpStatus: 401,
+              },
+              {
+                id: "cloud_github_models_vision",
+                available: false,
+                availabilityState: "unavailable",
+                reasonCode: "auth_failed",
+                reasonMessage: "Auth failure",
+                httpStatus: 401,
+              },
+            ],
+          },
+        },
+      });
+      await getAutoOcrProviderHealth({ forceRefresh: true });
+
+      let cloudAttempted = false;
+      const providers: AutoOcrProvider[] = [
+        {
+          id: "cloud_openai_vision",
+          label: "Cloud OpenAI",
+          isAvailable: async () => false,
+          extractText: async () => {
+            cloudAttempted = true;
+            return "should not be reached";
+          },
+        },
+        {
+          id: "local_tesseract",
+          label: "Tesseract",
+          isAvailable: async () => true,
+          extractText: async () => "Tesseract result",
+        },
+      ];
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        providersOverride: providers,
+      });
+
+      // Auth failure should NOT be bypassed — cloud extraction should be skipped.
+      expect(cloudAttempted).toBe(false);
+      expect(result.providerId).toBe("local_tesseract");
+    });
+
+    it("attempts cloud even when circuit breaker is open due to rate-limit reason code", async () => {
+      // Seed availability cache with rate_limited to indicate circuit was opened by rate limit.
+      callableMocks.getAiProviderStatus.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            providers: [
+              {
+                id: "cloud_openai_vision",
+                available: false,
+                availabilityState: "unavailable",
+                reasonCode: "rate_limited",
+                reasonMessage: "Rate limited",
+                httpStatus: 429,
+                retryAfterSeconds: 3600,
+              },
+            ],
+          },
+        },
+      });
+      await getAutoOcrProviderHealth({ forceRefresh: true });
+
+      // Manually open the circuit breaker by forcing 3 failures.
+      const failProvider: AutoOcrProvider = {
+        id: "cloud_openai_vision",
+        label: "Cloud OpenAI",
+        isAvailable: async () => true,
+        extractText: async () => { throw new Error("circuit-opening failure"); },
+      };
+      for (let index = 0; index < 3; index += 1) {
+        await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+          providerOrder: ["cloud_openai_vision"],
+          providersOverride: [failProvider],
+          preferPrimaryCloudWait: false,
+          maxPrimaryCloudWaitMs: 1,
+        }).catch(() => null);
+      }
+
+      // Now cloud succeeds — circuit bypass for rate-limited reason should allow the attempt.
+      callableMocks.extractScreenshotText.mockResolvedValue({
+        data: {
+          success: true,
+          data: { text: "Cloud result bypassing circuit", providerId: "cloud_openai_vision" },
+        },
+      });
+
+      const successProvider: AutoOcrProvider = {
+        id: "cloud_openai_vision",
+        label: "Cloud OpenAI",
+        isAvailable: async () => false,
+        extractText: async () => "Cloud result bypassing circuit",
+      };
+
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        providersOverride: [
+          successProvider,
+          {
+            id: "local_tesseract",
+            label: "Tesseract",
+            isAvailable: async () => true,
+            extractText: async () => "Tesseract result",
+          },
+        ],
+        preferPrimaryCloudWait: false,
+        maxPrimaryCloudWaitMs: 1,
+      });
+
+      // Should have used cloud even with circuit open, because the reason is rate-limit.
+      expect(result.providerId).toBe("cloud_openai_vision");
+      expect(result.text).toBe("Cloud result bypassing circuit");
+    });
+
+    it("never falls back to Tesseract permanently when cloud is temporarily rate-limited and then recovers", async () => {
+      // Step 1: Cloud is rate-limited.
+      callableMocks.getAiProviderStatus.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            providers: [
+              {
+                id: "cloud_openai_vision",
+                available: false,
+                availabilityState: "unavailable",
+                reasonCode: "rate_limited",
+                reasonMessage: "Rate limited",
+                httpStatus: 429,
+                retryAfterSeconds: 600,
+              },
+            ],
+          },
+        },
+      });
+      await getAutoOcrProviderHealth({ forceRefresh: true });
+
+      callableMocks.extractScreenshotText.mockResolvedValue({
+        data: {
+          success: true,
+          data: { text: "Recovered cloud result", providerId: "cloud_openai_vision" },
+        },
+      });
+
+      // Step 2: Attempt OCR — should bypass rate-limit cache and use cloud.
+      const result = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        preferPrimaryCloudWait: false,
+        maxPrimaryCloudWaitMs: 1,
+      });
+
+      expect(result.providerId).toBe("cloud_openai_vision");
+      expect(result.text).toBe("Recovered cloud result");
+
+      // Step 3: Subsequent OCR should still use cloud (circuit should now be clear).
+      const result2 = await extractTextFromImageWithFallback(TEST_IMAGE_DATA_URL, {
+        providerOrder: ["cloud_openai_vision", "local_tesseract"],
+        preferPrimaryCloudWait: false,
+        maxPrimaryCloudWaitMs: 1,
+      });
+      expect(result2.providerId).toBe("cloud_openai_vision");
+    });
+  });
 });

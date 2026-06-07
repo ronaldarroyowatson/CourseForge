@@ -1362,13 +1362,29 @@ export async function extractTextFromImageWithFallback(
       if (!isCircuitOpen(providerId)) {
         // Cooldown window elapsed while waiting for primary cloud provider.
       } else {
-        attempts.push({ providerId, success: false, errorMessage: "Circuit breaker open for provider cooldown window." });
-        void emitOcrDiagnostic("provider_skipped_circuit_open", {
-          level: "warning",
-          traceId: extractionTraceId,
-          context: { providerId },
-        });
-        continue;
+        // If the circuit is open due to a rate-limit reason, bypass it and attempt anyway.
+        // Rate-limited providers may recover during the cooldown window.
+        // Only hard-skip when the circuit was opened by auth/structural failures.
+        const cachedCircuitEntry = isCloudProviderId(providerId) ? getCachedCloudAvailability(providerId as CloudAutoOcrProviderId) : null;
+        const circuitOpenedForRateLimit = isCloudProviderId(providerId)
+          && isTemporaryRateLimitReasonCode(cachedCircuitEntry?.reasonCode ?? "");
+
+        if (circuitOpenedForRateLimit) {
+          void emitOcrDiagnostic("provider_bypass_circuit_rate_limit", {
+            level: "warning",
+            traceId: extractionTraceId,
+            context: { providerId, reasonCode: cachedCircuitEntry?.reasonCode ?? null },
+          });
+          // Fall through — attempt extraction directly.
+        } else {
+          attempts.push({ providerId, success: false, errorMessage: "Circuit breaker open for provider cooldown window." });
+          void emitOcrDiagnostic("provider_skipped_circuit_open", {
+            level: "warning",
+            traceId: extractionTraceId,
+            context: { providerId },
+          });
+          continue;
+        }
       }
     }
 
@@ -1460,15 +1476,35 @@ export async function extractTextFromImageWithFallback(
       if (available) {
         // Provider recovered after primary wait path.
       } else {
-        const errorMessage = buildUnavailableProviderMessage(providerId);
-        attempts.push({ providerId, success: false, errorMessage });
-        recordProviderFailure(providerId, errorMessage);
-        void emitOcrDiagnostic("provider_unavailable", {
-          level: "warning",
-          traceId: extractionTraceId,
-          context: { providerId, errorMessage },
-        });
-        continue;
+        const cachedAvailabilityFinal = getCachedCloudAvailability(providerId as CloudAutoOcrProviderId);
+        const isRateLimitedFinal = isCloudProviderId(providerId)
+          && isTemporaryRateLimitReasonCode(cachedAvailabilityFinal?.reasonCode ?? "");
+
+        if (isRateLimitedFinal) {
+          // Rate-limited providers are bypassed for availability checks: attempt the extraction
+          // directly. Cloud services may recover mid-cooldown window. If the actual callable
+          // returns 429, the error is recorded and we skip to the next provider.
+          void emitOcrDiagnostic("provider_bypass_rate_limit_cache", {
+            level: "warning",
+            traceId: extractionTraceId,
+            context: {
+              providerId,
+              reasonCode: cachedAvailabilityFinal?.reasonCode ?? null,
+              retryAfterSeconds: cachedAvailabilityFinal?.retryAfterSeconds ?? null,
+            },
+          });
+          // Fall through to the extraction attempt block below.
+        } else {
+          const errorMessage = buildUnavailableProviderMessage(providerId);
+          attempts.push({ providerId, success: false, errorMessage });
+          recordProviderFailure(providerId, errorMessage);
+          void emitOcrDiagnostic("provider_unavailable", {
+            level: "warning",
+            traceId: extractionTraceId,
+            context: { providerId, errorMessage },
+          });
+          continue;
+        }
       }
     }
 

@@ -1,5 +1,16 @@
 # CourseForge — Copilot Instructions
 
+## Branch and PR Policy — CRITICAL
+
+**NEVER create pull requests. ALWAYS commit directly to `main`.**
+
+- Do **not** open a PR, propose a PR, or push to a feature branch.
+- All commits go straight to `main`.
+- The `report_progress` tool must never be called in a way that creates a new pull request targeting `main`. If you are working in the Copilot cloud agent, finish the session by committing and pushing directly to `main`.
+- If the environment forces a PR, close it and push the commits to `main` instead.
+
+---
+
 ## Bugfix Release Workflow (ALWAYS follow this for every bug fix)
 
 When fixing a bug, complete ALL steps in this order before finishing:

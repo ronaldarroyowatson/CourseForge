@@ -29,12 +29,12 @@ describe("MemPalace startup isolation", () => {
     const task = tasksJson.tasks?.find((entry) => entry.label === "Start MemPalace MCP Server");
 
     expect(settingsJson["tasks.runOnFolderOpen" as keyof typeof settingsJson]).toBe("noop");
-    expect(settingsJson.mcpServers?.mempalace?.command).toBe("mempalace");
-    expect(settingsJson.mcpServers?.mempalace?.args).toEqual(["mcp"]);
+    expect(settingsJson.mcpServers?.mempalace?.command).toBe("mempalace-mcp");
+    expect(settingsJson.mcpServers?.mempalace?.args).toEqual([]);
     expect(task).toBeDefined();
     const command = task?.command ?? "";
 
-    expect(command).toContain("mempalace mcp");
+    expect(command).toContain("mempalace-mcp");
     expect(command).toContain("mempalace-startup-check.mjs");
     expect(command.toLowerCase()).not.toContain("watchdog");
   });

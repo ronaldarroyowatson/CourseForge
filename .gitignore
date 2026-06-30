@@ -23,9 +23,18 @@ tmp-smoke/*.png
 tmp-smoke/debug/*.jsonl
 tmp-smoke/debug/*.json
 
+# Local tooling/session artifacts (avoid indexing noisy generated bundles/logs)
+.debug/
+.continue/
+.tmp-release-download-*/
+
 # Release packaging transient artifacts
 release/.tmp-*
 
 # MemPalace startup check runtime artifacts
 .mempalace/startup-change-check.json
 .mempalace/startup-change-check.log.jsonl
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json

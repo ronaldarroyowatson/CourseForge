@@ -61,7 +61,7 @@ For plugin-related work, at minimum record:
 
 MemPalace startup now runs a repository change check before launching the MCP server.
 
-1. Task hook: `.vscode/tasks.json` `Start MemPalace MCP Server` runs `node scripts/mempalace-startup-check.mjs && mempalace mcp`.
+1. Task hook: `.vscode/tasks.json` `Start MemPalace MCP Server` runs `node scripts/mempalace-startup-check.mjs && mempalace-mcp`.
 2. Boot artifact: `.mempalace/startup-change-check.json` stores the latest branch/head/fingerprint snapshot.
 3. Boot history: `.mempalace/startup-change-check.log.jsonl` appends one record per startup.
 4. The check compares current repo fingerprint (HEAD + dirty file set) against previous startup and prints whether changes were detected.

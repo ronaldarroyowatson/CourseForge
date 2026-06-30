@@ -16,6 +16,22 @@ if (entries.length === 0) {
 
 const startupRegex = /(running on stdio|server running|mcp terminal server running|secure mcp filesystem server running)/i;
 
+function buildSpawnEnv() {
+  const env = { ...process.env };
+  const home = env.HOME;
+  const existingPath = env.PATH ?? "";
+
+  if (home) {
+    const localBin = `${home}/.local/bin`;
+    const pathParts = existingPath.split(":").filter(Boolean);
+    if (!pathParts.includes(localBin)) {
+      env.PATH = `${localBin}:${existingPath}`;
+    }
+  }
+
+  return env;
+}
+
 function runServerCheck(name, config) {
   return new Promise((resolveResult) => {
     const command = config?.command;
@@ -36,7 +52,7 @@ function runServerCheck(name, config) {
     const child = spawn(spawnCmd, spawnArgs, {
       cwd,
       shell: useShell,
-      env: process.env,
+      env: buildSpawnEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
 

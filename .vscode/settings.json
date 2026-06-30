@@ -3,10 +3,8 @@
   "tasks.runOnFolderOpen": "noop",
   "mcpServers": {
     "mempalace": {
-      "command": "mempalace",
-      "args": [
-        "mcp"
-      ]
+      "command": "mempalace-mcp",
+      "args": []
     },
     "filesystem": {
       "command": "npx",

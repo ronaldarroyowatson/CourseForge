@@ -33,7 +33,7 @@
 		{
 			"label": "Start MemPalace MCP Server",
 			"type": "shell",
-			"command": "node scripts/mempalace-startup-check.mjs && mempalace mcp",
+			"command": "export PATH=\"$HOME/.local/bin:$PATH\" && node scripts/mempalace-startup-check.mjs && mempalace-mcp",
 			"runOptions": {
 				"runOn": "folderOpen"
 			},

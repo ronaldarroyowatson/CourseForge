@@ -1,60 +1,65 @@
-wing: CourseForge
+wing: courseforge
 rooms:
-- name: general
-  description: Cross-cutting project memory, repo conventions, and shared architecture decisions
+- name: locales
+  description: Files from locales/
   keywords:
-    - architecture
-    - workflow
-    - repo
-    - shared
-- name: webapp
-  description: React and Vite webapp flows for textbooks, OCR setup, and classroom UX
+  - locales
+  - locales
+- name: plugins
+  description: Files from plugins/
   keywords:
-    - webapp
-    - textbooks
-    - auto-setup
-    - cover-image
-    - ocr
-    - ui
-- name: data-ingestion
-  description: Textbook ingestion, repositories, sync, storage, and ownership metadata
+  - plugins
+  - plugins
+- name: testing
+  description: Files from tests/
   keywords:
-    - ingestion
-    - sync
-    - firestore
-    - storage
-    - ownership
-    - metadata
+  - testing
+  - tests
+- name: tmp_smoke
+  description: Files from tmp-smoke/
+  keywords:
+  - tmp_smoke
+  - tmp-smoke
+- name: documentation
+  description: Files from docs/
+  keywords:
+  - documentation
+  - docs
+- name: scripts
+  description: Files from scripts/
+  keywords:
+  - scripts
+  - scripts
 - name: functions
-  description: Firebase Functions, moderation, admin workflows, and backend policy surfaces
+  description: Files from functions/
   keywords:
-    - functions
-    - firebase
-    - callable
-    - moderation
-    - admin
-- name: infrastructure
-  description: Workspace automation, MemPalace, MCP wiring, installer scripts, and setup tooling
+  - functions
+  - functions
+- name: configuration
+  description: Files from infrastructure/
   keywords:
-    - infrastructure
-    - mempalace
-    - mcp
-    - tasks
-    - setup
-    - installer
-- name: tests
-  description: Regression, integration, rules, and end-to-end validation coverage
+  - configuration
+  - infrastructure
+- name: modules
+  description: Files from modules/
   keywords:
-    - tests
-    - vitest
-    - rules
-    - integration
-    - e2e
-- name: docs
-  description: Product, architecture, and workflow documentation
+  - modules
+  - modules
+- name: src
+  description: Files from src/
   keywords:
-    - docs
-    - architecture
-    - prd
-    - readme
-    - workflow
+  - src
+  - src
+- name: design
+  description: Files from assets/
+  keywords:
+  - design
+  - assets
+- name: backend
+  description: Files from services/
+  keywords:
+  - backend
+  - services
+- name: general
+  description: Files that don't fit other rooms
+  keywords: []

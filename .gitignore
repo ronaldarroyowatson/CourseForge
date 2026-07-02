@@ -26,6 +26,7 @@ tmp-smoke/debug/*.json
 # Local tooling/session artifacts (avoid indexing noisy generated bundles/logs)
 .debug/
 .continue/
+.courseforge/
 .tmp-release-download-*/
 
 # Release packaging transient artifacts

@@ -1,3 +1,1 @@
-# Auto detect text files and perform LF normalization
-* text=auto
-docs/codebase-index.md merge=ours
+archive/*.zip filter=lfs diff=lfs merge=lfs -text

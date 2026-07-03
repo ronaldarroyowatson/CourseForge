@@ -1,0 +1,21 @@
+# Reduce semantic index failures by excluding non-source and binary artifacts
+.git/**
+archive/**
+deliverables/**
+
+# Binary/package artifacts
+**/*.zip
+**/*.tar
+**/*.gz
+**/*.7z
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.webp
+**/*.pdf
+**/*.mp4
+**/*.mov
+
+# Generated/runtime noise
+**/*.log
+**/.DS_Store

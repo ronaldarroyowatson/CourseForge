@@ -39,3 +39,6 @@ release/.tmp-*
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+
+# Keep archival binaries out of git history to avoid Copilot semantic index failures
+archive/*.zip

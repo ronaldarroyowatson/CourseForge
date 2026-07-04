@@ -1,3 +1,18 @@
+# 📦 CourseForge Installers
+
+Download the latest installers for your operating system:
+
+### macOS Installer (.dmg)
+👉 https://github.com/ronaldarroyowatson/CourseForge/releases/latest/download/CourseForge-macOS.dmg
+
+### Windows Installer (.exe)
+👉 https://github.com/ronaldarroyowatson/CourseForge/releases/latest/download/CourseForge-Windows.exe
+
+### Linux Installer (.AppImage)
+👉 https://github.com/ronaldarroyowatson/CourseForge/releases/latest/download/CourseForge-Linux.AppImage
+
+These installers are automatically built and published by GitHub Actions whenever a new version of CourseForge is released.
+
 # CourseForge Boot And Installer Architecture
 
 CourseForge follows a universal Otto-powered bootstrap model:

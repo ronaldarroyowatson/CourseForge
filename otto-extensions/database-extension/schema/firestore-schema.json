@@ -1,0 +1,71 @@
+{
+  "provider": "firestore",
+  "collections": {
+    "users": {
+      "path": "users/{uid}",
+      "fields": {
+        "uid": "string",
+        "email": "string",
+        "displayName": "string",
+        "createdAt": "timestamp",
+        "lastLogin": "timestamp",
+        "textbooks": "string[]"
+      }
+    },
+    "textbooks": {
+      "path": "textbooks/{id}",
+      "fields": {
+        "id": "string",
+        "ownerId": "string",
+        "title": "string",
+        "status": "new | in-progress | completed",
+        "coverImageHash": "string",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
+      }
+    },
+    "textbookMetadata": {
+      "path": "textbookMetadata/{id}",
+      "fields": {
+        "textbookId": "string",
+        "chapters": "unknown[]",
+        "sections": "unknown[]",
+        "structuralMap": "Record<string, unknown>",
+        "lastUpdated": "timestamp"
+      }
+    },
+    "teacherCreatedContent": {
+      "path": "teacherCreatedContent/{id}",
+      "fields": {
+        "textbookId": "string",
+        "ownerId": "string",
+        "vocabTerms": "unknown[]",
+        "equations": "unknown[]",
+        "concepts": "unknown[]",
+        "keyIdeas": "unknown[]",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
+      }
+    },
+    "ownershipVerification": {
+      "path": "ownershipVerification/{id}",
+      "fields": {
+        "textbookId": "string",
+        "ownerId": "string",
+        "coverImageHash": "string",
+        "verificationMethod": "pHash",
+        "verifiedAt": "timestamp"
+      }
+    },
+    "sharedContent": {
+      "path": "sharedContent/{id}",
+      "fields": {
+        "textbookId": "string",
+        "ownerId": "string",
+        "allowedOwners": "string[]",
+        "sharedContentRefs": "unknown[]",
+        "createdAt": "timestamp"
+      }
+    }
+  }
+}

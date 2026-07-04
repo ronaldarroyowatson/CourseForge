@@ -8,6 +8,19 @@
   "verifyChecksums": true,
   "allowSelfUpdate": true,
   "restartOnUpdate": true,
+  "telemetry": {
+    "cloudEnabled": false,
+    "cloudEndpoint": "",
+    "maxSplashMessages": 12
+  },
+  "splash": {
+    "ottoLogo": "assets/otto-logo.svg",
+    "courseForgeLogo": "assets/courseforge-logo.svg",
+    "assets": [
+      "assets/splash/background.png",
+      "assets/splash/progress-track.png"
+    ]
+  },
   "observability": {
     "logging": true,
     "tracing": true,

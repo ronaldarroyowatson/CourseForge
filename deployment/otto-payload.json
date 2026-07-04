@@ -4,59 +4,115 @@
   "components": [
     {
       "name": "otto-kernel",
+      "target": "otto",
       "kind": "runtime",
       "source": "https://github.com/otto-platform/otto-kernel/releases/latest/download/otto-kernel.tgz",
       "minVersion": "1.0.0",
       "checksum": "sha256:otto-kernel-tracer-bullet"
     },
     {
-      "name": "otto-update",
+      "name": "otto-update-engine",
+      "target": "otto",
       "kind": "runtime",
-      "source": "https://github.com/otto-platform/otto-update/releases/latest/download/otto-update.tgz",
+      "source": "https://github.com/otto-platform/otto-update/releases/latest/download/otto-update-engine.tgz",
       "minVersion": "1.0.0",
-      "checksum": "sha256:otto-update-tracer-bullet"
+      "checksum": "sha256:otto-update-engine-tracer-bullet"
+    },
+    {
+      "name": "otto-module-loader",
+      "target": "otto",
+      "kind": "runtime",
+      "source": "https://github.com/otto-platform/otto-runtime/releases/latest/download/otto-module-loader.tgz",
+      "minVersion": "1.0.0",
+      "checksum": "sha256:otto-module-loader-tracer-bullet"
+    },
+    {
+      "name": "otto-extension-loader",
+      "target": "otto",
+      "kind": "runtime",
+      "source": "https://github.com/otto-platform/otto-runtime/releases/latest/download/otto-extension-loader.tgz",
+      "minVersion": "1.0.0",
+      "checksum": "sha256:otto-extension-loader-tracer-bullet"
     },
     {
       "name": "otto-command-service",
-      "kind": "runtime",
+      "target": "otto",
+      "kind": "service",
       "source": "https://github.com/otto-platform/otto-command-service/releases/latest/download/otto-command-service.tgz",
       "minVersion": "1.0.0",
       "checksum": "sha256:otto-command-service-tracer-bullet"
     },
     {
-      "name": "otto-extensions-cli",
+      "name": "otto-extension-telemetry",
+      "target": "otto",
       "kind": "extension",
-      "source": "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-extensions-cli.tgz",
+      "source": "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-extension-telemetry.tgz",
       "minVersion": "1.0.0",
-      "checksum": "sha256:otto-extensions-cli-tracer-bullet"
+      "checksum": "sha256:otto-extension-telemetry-tracer-bullet"
     },
     {
-      "name": "otto-extensions-api",
+      "name": "otto-extension-auth",
+      "target": "otto",
       "kind": "extension",
-      "source": "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-extensions-api.tgz",
+      "source": "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-extension-auth.tgz",
       "minVersion": "1.0.0",
-      "checksum": "sha256:otto-extensions-api-tracer-bullet"
+      "checksum": "sha256:otto-extension-auth-tracer-bullet"
     },
     {
-      "name": "otto-logging",
-      "kind": "service",
-      "source": "https://github.com/otto-platform/otto-logging/releases/latest/download/otto-logging.tgz",
+      "name": "otto-ui-splash",
+      "target": "otto",
+      "kind": "ui",
+      "source": "https://github.com/otto-platform/otto-ui/releases/latest/download/otto-ui-splash.tgz",
       "minVersion": "1.0.0",
-      "checksum": "sha256:otto-logging-tracer-bullet"
+      "checksum": "sha256:otto-ui-splash-tracer-bullet"
     },
     {
-      "name": "otto-tracing",
-      "kind": "service",
-      "source": "https://github.com/otto-platform/otto-tracing/releases/latest/download/otto-tracing.tgz",
-      "minVersion": "1.0.0",
-      "checksum": "sha256:otto-tracing-tracer-bullet"
+      "name": "courseforge-core-shell",
+      "target": "courseforge",
+      "kind": "module",
+      "source": "https://github.com/courseforge/courseforge-core/releases/latest/download/courseforge-core-shell.tgz",
+      "minVersion": "0.1.0",
+      "checksum": "sha256:courseforge-core-shell-tracer-bullet"
     },
     {
-      "name": "otto-metrics",
-      "kind": "service",
-      "source": "https://github.com/otto-platform/otto-metrics/releases/latest/download/otto-metrics.tgz",
-      "minVersion": "1.0.0",
-      "checksum": "sha256:otto-metrics-tracer-bullet"
+      "name": "courseforge-ui-auth-card",
+      "target": "courseforge",
+      "kind": "ui",
+      "source": "https://github.com/courseforge/courseforge-ui/releases/latest/download/courseforge-ui-auth-card.tgz",
+      "minVersion": "0.1.0",
+      "checksum": "sha256:courseforge-ui-auth-card-tracer-bullet"
+    },
+    {
+      "name": "courseforge-modules-bootstrap",
+      "target": "courseforge",
+      "kind": "module",
+      "source": "https://github.com/courseforge/courseforge-modules/releases/latest/download/courseforge-modules-bootstrap.tgz",
+      "minVersion": "0.1.0",
+      "checksum": "sha256:courseforge-modules-bootstrap-tracer-bullet"
+    },
+    {
+      "name": "courseforge-extensions-bootstrap",
+      "target": "courseforge",
+      "kind": "extension",
+      "source": "https://github.com/courseforge/courseforge-extensions/releases/latest/download/courseforge-extensions-bootstrap.tgz",
+      "minVersion": "0.1.0",
+      "checksum": "sha256:courseforge-extensions-bootstrap-tracer-bullet"
+    },
+    {
+      "name": "courseforge-settings-base",
+      "target": "courseforge",
+      "kind": "config",
+      "source": "https://github.com/courseforge/courseforge-config/releases/latest/download/courseforge-settings-base.tgz",
+      "minVersion": "0.1.0",
+      "checksum": "sha256:courseforge-settings-base-tracer-bullet"
+    },
+    {
+      "name": "courseforge-assets-base",
+      "target": "courseforge",
+      "kind": "asset",
+      "source": "https://github.com/courseforge/courseforge-assets/releases/latest/download/courseforge-assets-base.tgz",
+      "minVersion": "0.1.0",
+      "checksum": "sha256:courseforge-assets-base-tracer-bullet"
     }
   ]
 }

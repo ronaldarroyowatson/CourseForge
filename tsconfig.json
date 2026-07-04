@@ -17,6 +17,9 @@
     ]
   },
   "include": [
+    "courseforge-ui/**/*.ts",
+    "courseforge-ui/**/*.tsx",
+    "otto-extensions/**/*.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
     "tests/**/*.ts",

@@ -1,43 +1,110 @@
-# CourseForge Tracer Bullet
+# CourseForge Boot And Installer Architecture
 
-CourseForge is a local-first curriculum authoring platform for teachers.
-This repository now contains a tracer-bullet bootstrap that wires a CourseForge skeleton shell to an Otto-managed startup flow.
+CourseForge follows a universal Otto-powered bootstrap model:
 
-## What This Slice Proves
+- Minimal installer footprint
+- Otto-first startup orchestration
+- Otto self-update before host update
+- Splash and telemetry controlled by Otto
+- Auth card shown only after update handoff
 
-- A CourseForge package can bootstrap Otto in CourseForge mode.
-- Otto can read the deployment payload and bootstrap config.
-- Required Otto components can be materialized into a local runtime cache, verified, and marked ready.
-- Otto can apply a bootstrap update cycle, simulate a restart when components are first installed, and hand readiness back to CourseForge.
-- CourseForge can render a skeleton UI that reports Otto, CLI, API, and update status.
+This pattern is intended to be reused by all Otto-powered applications.
 
-## Repository Structure
+## Minimal Installer Contract
 
-```text
-README.md
-SECURITY.md
-copilot-instructions.md
-deployment/
-docs/
-manifests/
-src/
-tests/
-```
+Included in installer:
+
+- CourseForge.exe bootloader
+- Otto core runtime
+- Otto payload manifest
+- Telemetry extension
+- Auth extension placeholder
+- Splash assets
+- Basic configuration files
+
+Not included in installer:
+
+- Host modules
+- Host extensions
+- Additional Otto extensions
+- CLI and API bundles
+- Content packs
+- Full CourseForge UI beyond onboarding shell
+
+## Otto-First Boot Sequence
+
+1. CourseForge.exe launches bootloader.
+2. Bootloader launches Otto.
+3. Otto initializes telemetry.
+4. Otto initializes splash.
+5. Otto loads Otto payload manifest.
+6. Otto updates Otto components.
+7. Otto restarts if update required.
+8. Otto reinitializes telemetry and splash.
+9. Otto updates CourseForge components.
+10. Otto prepares modules and extensions.
+11. Otto hands control to CourseForge auth UI.
+
+## Splash Requirements
+
+The splash is Otto-owned and reports progress from structured telemetry:
+
+- Updating Otto...
+- Restarting Otto...
+- Updating CourseForge...
+- Preparing modules...
+- Preparing extensions...
+
+## Telemetry Requirements
+
+Telemetry is structured JSON and is written to local runtime logs. Cloud forwarding is optional and controlled by config.
+
+Telemetry events include:
+
+- Download progress
+- Install progress
+- Update progress
+- Restart events
+- Errors
+- Command execution events
+- Module load events
+- Extension load events
+
+## CourseForge Handoff
+
+After Otto finishes update phases, CourseForge renders the CourseForge Cloud onboarding shell.
+
+Onboarding flow:
+
+- Splash screen with continue action
+- Auth screen with Google and Email actions
+- Workspace screen with clear teacher actions
+
+Teacher safety and ownership safeguards:
+
+- Require cover image upload for new textbook records
+- Compute and store cover hash for ownership verification
+- Share only teacher-created content and structural metadata
 
 ## Key Entry Points
 
-- `src/main.ts` starts the tracer-bullet startup flow.
-- `src/bootstrap/otto-bootstrap.ts` owns Otto bootstrap orchestration.
-- `src/bootstrap/courseforge-bootstrap.ts` waits on Otto readiness, then launches the CourseForge skeleton UI.
-- `src/ui/skeleton-ui.tsx` renders the minimal CourseForge status window.
+- src/main.ts starts the Electron shell, launches Otto-first bootstrap, and opens the CourseForge handoff window.
+- src/bootstrap/otto-bootstrap.ts runs Otto-first update pipeline.
+- src/bootstrap/courseforge-bootstrap.ts validates Otto readiness and renders CourseForge Cloud UI.
+- courseforge-ui/services/render-courseforge-ui.tsx renders Splash, Auth, and Workspace onboarding screens.
 
 ## Scripts
 
-- `npm run start` runs the bootstrap flow.
-- `npm run build` type-checks and emits JavaScript.
-- `npm test` runs the bootstrap tests.
+- npm run start builds and launches the Electron app locally.
+- npm run build compiles the Electron main process and bootstrap code.
+- npm run build:win builds the Windows installer with electron-builder.
+- npm run build:mac builds the macOS installers with electron-builder.
+- npm run build:linux builds the Linux installer with electron-builder.
+- npm test runs vitest suite.
 
-## Notes
+GitHub Actions can run the same installer scripts on push tags or manual dispatch and upload the packaged artifacts from the release folder.
 
-- Otto release URLs in `deployment/otto-payload.json` are tracer-bullet placeholders and are intended to be swapped to real Otto release endpoints once the shared Otto repos are available in this workspace.
-- Runtime artifacts are written under `.courseforge-runtime/` and are ignored by git.
+## Runtime Output
+
+- Runtime artifacts are written under .courseforge-runtime/.
+- Telemetry boot log is emitted as JSONL under .courseforge-runtime/otto/telemetry/boot-events.jsonl.

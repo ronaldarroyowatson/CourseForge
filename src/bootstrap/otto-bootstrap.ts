@@ -59,6 +59,7 @@ export interface OttoReadiness {
 }
 
 export interface OttoUpdateStatus {
+  lifecycleState: 'OTTO_INIT' | 'OTTO_CHECKING' | 'OTTO_APPLYING' | 'OTTO_DONE';
   ottoState: 'updated' | 'up-to-date';
   courseForgeState: 'updated' | 'up-to-date';
   restartRequired: boolean;
@@ -141,6 +142,7 @@ export async function bootstrapOtto(options: OttoBootstrapOptions = {}): Promise
   const actions: string[] = [];
   const splashMessages: string[] = [];
   const telemetryEvents: OttoTelemetryEvent[] = [];
+  let lifecycleState: OttoUpdateStatus['lifecycleState'] = 'OTTO_INIT';
 
   const pushSplashMessage = (message: string): void => {
     splashMessages.push(message);
@@ -170,12 +172,19 @@ export async function bootstrapOtto(options: OttoBootstrapOptions = {}): Promise
 
   emitTelemetry('otto-startup', 'progress', 'Initializing telemetry extension');
   actions.push('telemetry:init');
+  emitTelemetry('otto-startup', 'progress', 'Otto lifecycle state OTTO_INIT', 'info', { lifecycleState });
   emitTelemetry('otto-startup', 'progress', 'Initializing splash screen');
   actions.push('splash:init');
   emitTelemetry('otto-startup', 'command-exec', 'Loading Otto payload manifest', 'info', { payloadPath });
 
+  lifecycleState = 'OTTO_CHECKING';
+  emitTelemetry('otto-update', 'progress', 'Otto lifecycle state OTTO_CHECKING', 'info', { lifecycleState });
+
   pushSplashMessage('Updating Otto...');
   emitTelemetry('otto-update', 'progress', 'Updating Otto...');
+
+  lifecycleState = 'OTTO_APPLYING';
+  emitTelemetry('otto-update', 'progress', 'Otto lifecycle state OTTO_APPLYING', 'info', { lifecycleState });
 
   const appliedOttoComponents = await applyComponentUpdates({
     payload,
@@ -216,6 +225,9 @@ export async function bootstrapOtto(options: OttoBootstrapOptions = {}): Promise
   emitTelemetry('handoff', 'progress', 'Handing control to CourseForge UI');
   actions.push('handoff:courseforge-ui');
 
+  lifecycleState = 'OTTO_DONE';
+  emitTelemetry('handoff', 'progress', 'Otto lifecycle state OTTO_DONE', 'info', { lifecycleState });
+
   const readiness: OttoReadiness = {
     running: true,
     kernelLoaded: hasComponent(payload, 'otto-kernel'),
@@ -232,6 +244,7 @@ export async function bootstrapOtto(options: OttoBootstrapOptions = {}): Promise
   };
 
   const updateStatus: OttoUpdateStatus = {
+    lifecycleState,
     ottoState: appliedOttoComponents.length > 0 ? 'updated' : 'up-to-date',
     courseForgeState: appliedCourseForgeComponents.length > 0 ? 'updated' : 'up-to-date',
     restartRequired,

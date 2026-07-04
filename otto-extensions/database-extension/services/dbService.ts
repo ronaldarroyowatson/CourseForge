@@ -211,6 +211,35 @@ function enforceRules(commandName: DbCommandName, payload: unknown): void {
       assertOptionalString(commandPayload.updatedAt, 'updateSharedContent.updatedAt');
       break;
     }
+    case 'writeMetadataBlob': {
+      const commandPayload = payload as DbCommandPayloads['writeMetadataBlob'];
+      assertOptionalString(commandPayload.id, 'writeMetadataBlob.id');
+      assertString(commandPayload.ownerId, 'writeMetadataBlob.ownerId');
+      assertString(commandPayload.textbookId, 'writeMetadataBlob.textbookId');
+      assertString(commandPayload.category, 'writeMetadataBlob.category');
+      assertArray(commandPayload.terms, 'writeMetadataBlob.terms');
+      assertString(commandPayload.contentType, 'writeMetadataBlob.contentType');
+      assertAllowedValue(commandPayload.encoding, ['base64', 'utf8'], 'writeMetadataBlob.encoding');
+      assertString(commandPayload.payload, 'writeMetadataBlob.payload');
+      assertOptionalString(commandPayload.createdAt, 'writeMetadataBlob.createdAt');
+      assertOptionalString(commandPayload.updatedAt, 'writeMetadataBlob.updatedAt');
+      break;
+    }
+    case 'searchMetadataDocuments': {
+      const commandPayload = payload as DbCommandPayloads['searchMetadataDocuments'];
+      assertString(commandPayload.ownerId, 'searchMetadataDocuments.ownerId');
+      assertOptionalString(commandPayload.textbookId, 'searchMetadataDocuments.textbookId');
+      assertOptionalString(commandPayload.category, 'searchMetadataDocuments.category');
+      assertOptionalString(commandPayload.query, 'searchMetadataDocuments.query');
+      assertOptionalNumber(commandPayload.limit, 'searchMetadataDocuments.limit');
+      break;
+    }
+    case 'fetchBlobPayload': {
+      const commandPayload = payload as DbCommandPayloads['fetchBlobPayload'];
+      assertString(commandPayload.ownerId, 'fetchBlobPayload.ownerId');
+      assertString(commandPayload.blobId, 'fetchBlobPayload.blobId');
+      break;
+    }
     default:
       throw new DbRuleError(`Unknown command ${String(commandName)}`);
   }
@@ -268,6 +297,7 @@ function isWriteCommand(commandName: DbCommandName): boolean {
     commandName === 'updateTextbook' ||
     commandName === 'verifyOwnership' ||
     commandName === 'updateTeacherContent' ||
-    commandName === 'updateSharedContent'
+    commandName === 'updateSharedContent' ||
+    commandName === 'writeMetadataBlob'
   );
 }

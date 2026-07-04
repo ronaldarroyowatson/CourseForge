@@ -63,6 +63,29 @@ export interface SharedContentDocument {
   updatedAt: string;
 }
 
+export interface MetadataDocument {
+  id: string;
+  ownerId: string;
+  textbookId: string;
+  category: string;
+  terms: string[];
+  blobId: string;
+  contentType: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BlobPayloadDocument {
+  id: string;
+  ownerId: string;
+  textbookId: string;
+  contentType: string;
+  encoding: 'base64' | 'utf8';
+  payload: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface FirestoreSchemaCollections {
   users: UserDocument;
   textbooks: TextbookDocument;
@@ -70,6 +93,8 @@ export interface FirestoreSchemaCollections {
   teacherCreatedContent: TeacherCreatedContentDocument;
   ownershipVerification: OwnershipVerificationDocument;
   sharedContent: SharedContentDocument;
+  metadataDocuments: MetadataDocument;
+  blobPayloads: BlobPayloadDocument;
 }
 
 export type CollectionName = keyof FirestoreSchemaCollections;
@@ -80,5 +105,7 @@ export const firestoreSchemaCollections: CollectionName[] = [
   'textbookMetadata',
   'teacherCreatedContent',
   'ownershipVerification',
-  'sharedContent'
+  'sharedContent',
+  'metadataDocuments',
+  'blobPayloads'
 ];

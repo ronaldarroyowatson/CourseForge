@@ -109,4 +109,31 @@ describe('commands.basic', () => {
 
     expect(granted?.textbookId).toBe('tb-share');
   });
+
+  it('writes metadata+blob records then supports metadata search and blob fetch', async () => {
+    const db = createDbService();
+    const writeResult = await db.executeCommand('writeMetadataBlob', {
+      ownerId: 'owner-meta',
+      textbookId: 'tb-meta',
+      category: 'chapter-summary',
+      terms: ['chapter', 'energy', 'metabolism'],
+      contentType: 'application/json',
+      encoding: 'utf8',
+      payload: JSON.stringify({ summary: 'Metabolism drives cellular energy transfer.' })
+    });
+
+    const results = await db.executeCommand('searchMetadataDocuments', {
+      ownerId: 'owner-meta',
+      textbookId: 'tb-meta',
+      query: 'energy'
+    });
+
+    const blob = await db.executeCommand('fetchBlobPayload', {
+      ownerId: 'owner-meta',
+      blobId: writeResult.metadata.blobId
+    });
+
+    expect(results[0]?.id).toBe(writeResult.metadata.id);
+    expect(blob?.payload.includes('Metabolism')).toBe(true);
+  });
 });

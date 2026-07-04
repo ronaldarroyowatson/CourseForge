@@ -111,48 +111,48 @@
       "target": "courseforge",
       "kind": "module",
       "source": "https://github.com/courseforge/courseforge-core/releases/latest/download/courseforge-core-shell.tgz",
-      "minVersion": "0.1.0",
-      "checksum": "sha256:courseforge-core-shell-tracer-bullet"
+      "minVersion": "0.1.1",
+      "checksum": "sha256:courseforge-core-shell-tracer-bullet-v0.1.1"
     },
     {
       "name": "courseforge-ui-auth-card",
       "target": "courseforge",
       "kind": "ui",
       "source": "https://github.com/courseforge/courseforge-ui/releases/latest/download/courseforge-ui-auth-card.tgz",
-      "minVersion": "0.1.0",
-      "checksum": "sha256:courseforge-ui-auth-card-tracer-bullet"
+      "minVersion": "0.1.1",
+      "checksum": "sha256:courseforge-ui-auth-card-tracer-bullet-v0.1.1"
     },
     {
       "name": "courseforge-modules-bootstrap",
       "target": "courseforge",
       "kind": "module",
       "source": "https://github.com/courseforge/courseforge-modules/releases/latest/download/courseforge-modules-bootstrap.tgz",
-      "minVersion": "0.1.0",
-      "checksum": "sha256:courseforge-modules-bootstrap-tracer-bullet"
+      "minVersion": "0.1.1",
+      "checksum": "sha256:courseforge-modules-bootstrap-tracer-bullet-v0.1.1"
     },
     {
       "name": "courseforge-extensions-bootstrap",
       "target": "courseforge",
       "kind": "extension",
       "source": "https://github.com/courseforge/courseforge-extensions/releases/latest/download/courseforge-extensions-bootstrap.tgz",
-      "minVersion": "0.1.0",
-      "checksum": "sha256:courseforge-extensions-bootstrap-tracer-bullet"
+      "minVersion": "0.1.1",
+      "checksum": "sha256:courseforge-extensions-bootstrap-tracer-bullet-v0.1.1"
     },
     {
       "name": "courseforge-settings-base",
       "target": "courseforge",
       "kind": "config",
       "source": "https://github.com/courseforge/courseforge-config/releases/latest/download/courseforge-settings-base.tgz",
-      "minVersion": "0.1.0",
-      "checksum": "sha256:courseforge-settings-base-tracer-bullet"
+      "minVersion": "0.1.1",
+      "checksum": "sha256:courseforge-settings-base-tracer-bullet-v0.1.1"
     },
     {
       "name": "courseforge-assets-base",
       "target": "courseforge",
       "kind": "asset",
       "source": "https://github.com/courseforge/courseforge-assets/releases/latest/download/courseforge-assets-base.tgz",
-      "minVersion": "0.1.0",
-      "checksum": "sha256:courseforge-assets-base-tracer-bullet"
+      "minVersion": "0.1.1",
+      "checksum": "sha256:courseforge-assets-base-tracer-bullet-v0.1.1"
     }
   ]
 }

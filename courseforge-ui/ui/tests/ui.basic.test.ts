@@ -9,7 +9,7 @@ import { WorkspaceScreen } from '../../workspace/WorkspaceScreen.js';
 
 describe('ui.basic', () => {
   it('renders splash and workspace primary labels', () => {
-    const splashHtml = renderToStaticMarkup(React.createElement(SplashScreen, { onContinue: () => {} }));
+    const splashHtml = renderToStaticMarkup(React.createElement(SplashScreen));
     const workspaceHtml = renderToStaticMarkup(
       React.createElement(WorkspaceScreen, {
         userName: 'User',
@@ -21,7 +21,7 @@ describe('ui.basic', () => {
       })
     );
 
-    expect(splashHtml.includes('Continue') && workspaceHtml.includes('Add New Textbook')).toBe(true);
+    expect(splashHtml.includes('Otto-managed progress') && workspaceHtml.includes('Add New Textbook')).toBe(true);
   });
 
   it('renders textbook flow stub screens', () => {

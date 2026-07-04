@@ -21,4 +21,19 @@ describe('dbService.failureModes', () => {
     const db = createDbService();
     await expect(db.executeCommand('getSharedContent', { ownerId: 'owner-a' })).rejects.toBeInstanceOf(DbRuleError);
   });
+
+  it('rejects metadata writes with unsupported encoding', async () => {
+    const db = createDbService();
+    await expect(
+      db.executeCommand('writeMetadataBlob', {
+        ownerId: 'owner-a',
+        textbookId: 'tb-1',
+        category: 'chapter-summary',
+        terms: ['x'],
+        contentType: 'application/json',
+        encoding: 'binary' as never,
+        payload: '{}'
+      })
+    ).rejects.toBeInstanceOf(DbRuleError);
+  });
 });

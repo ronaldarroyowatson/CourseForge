@@ -5,11 +5,11 @@ import { SplashScreen } from '../../splash/SplashScreen.js';
 import { WorkspaceScreen } from '../../workspace/WorkspaceScreen.js';
 
 describe('ui.failureModes', () => {
-  it('does not crash SSR render when splash receives invalid callback type', () => {
+  it('does not crash SSR render for splash shell output', () => {
     let html = '';
 
     expect(() => {
-      html = renderToStaticMarkup(React.createElement(SplashScreen, { onContinue: null as unknown as never }));
+      html = renderToStaticMarkup(React.createElement(SplashScreen));
     }).not.toThrow();
 
     expect(html.includes('Splash Screen')).toBe(true);

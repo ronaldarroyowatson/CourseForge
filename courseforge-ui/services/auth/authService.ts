@@ -7,6 +7,7 @@ import {
   signInWithPopup,
   type UserCredential
 } from 'firebase/auth';
+import { loadCourseForgeCloudConfig } from '../cloud-config.js';
 
 export interface AuthIdentity {
   uid: string;
@@ -72,14 +73,21 @@ function toIdentity(credential: UserCredential): AuthIdentity {
 }
 
 function loadFirebaseConfig(): FirebaseClientConfig {
-  const env = getEnv();
+  const config = loadCourseForgeCloudConfig().firebase;
 
-  const apiKey = env.COURSEFORGE_FIREBASE_API_KEY;
-  const authDomain = env.COURSEFORGE_FIREBASE_AUTH_DOMAIN;
-  const projectId = env.COURSEFORGE_FIREBASE_PROJECT_ID;
-  const appId = env.COURSEFORGE_FIREBASE_APP_ID;
+  const apiKey = config.apiKey;
+  const authDomain = config.authDomain;
+  const projectId = config.projectId;
+  const appId = config.appId;
 
-  if (!apiKey || !authDomain || !projectId || !appId) {
+  if (
+    !apiKey ||
+    !authDomain ||
+    !projectId ||
+    !appId ||
+    apiKey.includes('REQUIRED') ||
+    appId.includes('REQUIRED')
+  ) {
     throw new Error('Missing Firebase auth configuration for CourseForge Cloud.');
   }
 
@@ -98,14 +106,4 @@ function getOrCreateFirebaseApp(config: FirebaseClientConfig): FirebaseApp {
   }
 
   return initializeApp(config);
-}
-
-function getEnv(): Record<string, string | undefined> {
-  const processEnv = typeof process !== 'undefined' ? process.env : undefined;
-  const globalEnv = (globalThis as { COURSEFORGE_ENV?: Record<string, string | undefined> }).COURSEFORGE_ENV;
-
-  return {
-    ...globalEnv,
-    ...processEnv
-  };
 }

@@ -1,4 +1,5 @@
 export type UiState = 'READY' | 'WAITING' | 'ON' | 'OFF' | 'UPDATED' | 'UP-TO-DATE';
+export type OttoLifecycleState = 'OTTO_INIT' | 'OTTO_CHECKING' | 'OTTO_APPLYING' | 'OTTO_DONE';
 
 export type TextbookStatus = 'new' | 'in-progress' | 'completed';
 
@@ -66,6 +67,8 @@ export interface CourseForgeUiContext {
   splashStatus: UiState;
   authStatus: UiState;
   updateStatus: UiState;
+  ottoLifecycleState: OttoLifecycleState;
+  ottoOverlayVisible: boolean;
   loggingStatus: UiState;
   tracingStatus: UiState;
   metricsStatus: UiState;
@@ -73,7 +76,7 @@ export interface CourseForgeUiContext {
     uid: string;
     displayName: string;
     avatarLabel: string;
-  };
+  } | null;
   authLoading: boolean;
   authErrorMessage: string | null;
   textbooks: TextbookRecord[];
@@ -84,6 +87,6 @@ export interface CourseForgeUiRenderResult {
   html: string;
   indicators: Array<{
     label: string;
-    state: UiState;
+    state: UiState | OttoLifecycleState;
   }>;
 }

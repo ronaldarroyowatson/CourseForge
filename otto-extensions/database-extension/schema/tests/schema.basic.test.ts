@@ -5,4 +5,10 @@ describe('schema.basic', () => {
   it('includes expected base collections', () => {
     expect(firestoreSchemaCollections.includes('users') && firestoreSchemaCollections.includes('textbooks')).toBe(true);
   });
+
+  it('includes metadata+blob collections for searchable payload storage', () => {
+    expect(
+      firestoreSchemaCollections.includes('metadataDocuments') && firestoreSchemaCollections.includes('blobPayloads')
+    ).toBe(true);
+  });
 });

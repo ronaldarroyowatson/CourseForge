@@ -10,6 +10,8 @@ const context = {
   splashStatus: 'ON' as const,
   authStatus: 'READY' as const,
   updateStatus: 'UPDATED' as const,
+  ottoLifecycleState: 'OTTO_DONE' as const,
+  ottoOverlayVisible: true,
   loggingStatus: 'ON' as const,
   tracingStatus: 'ON' as const,
   metricsStatus: 'ON' as const,
@@ -23,5 +25,18 @@ describe('app.basic', () => {
   it('renders onboarding flow header', () => {
     const html = renderToStaticMarkup(React.createElement(CourseForgeCloudApp, { context }));
     expect(html.includes('Flow: Splash -&gt; Auth -&gt; Workspace')).toBe(true);
+  });
+
+  it('routes straight to auth when updates are done and user is missing', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(CourseForgeCloudApp, {
+        context: {
+          ...context,
+          currentUser: null
+        }
+      })
+    );
+
+    expect(html.includes('Sign In')).toBe(true);
   });
 });

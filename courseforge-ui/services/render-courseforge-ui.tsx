@@ -13,6 +13,7 @@ export function renderCourseForgeUi(context: CourseForgeUiContext): CourseForgeU
     { label: 'Splash', state: context.splashStatus },
     { label: 'Auth', state: context.authStatus },
     { label: 'Updates', state: context.updateStatus },
+    { label: 'Otto Lifecycle', state: context.ottoLifecycleState },
     { label: 'Logging', state: context.loggingStatus },
     { label: 'Tracing', state: context.tracingStatus },
     { label: 'Metrics', state: context.metricsStatus }

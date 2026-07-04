@@ -24,6 +24,8 @@ describe('app.edgeCases', () => {
           splashStatus: 'ON',
           authStatus: 'READY',
           updateStatus: 'UPDATED',
+          ottoLifecycleState: 'OTTO_DONE',
+          ottoOverlayVisible: true,
           loggingStatus: 'ON',
           tracingStatus: 'ON',
           metricsStatus: 'ON',

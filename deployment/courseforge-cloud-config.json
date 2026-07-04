@@ -1,0 +1,20 @@
+{
+  "firebase": {
+    "apiKey": "SALVAGED_PUBLIC_API_KEY_REQUIRED",
+    "authDomain": "courseforge-app.firebaseapp.com",
+    "projectId": "courseforge-app",
+    "appId": "COURSEFORGE_APP_ID_REQUIRED",
+    "storageBucket": "courseforge-app.appspot.com"
+  },
+  "dbExtension": {
+    "firestore": {
+      "endpoint": "https://firestore.googleapis.com",
+      "databaseName": "(default)"
+    },
+    "cosmos": {
+      "apiKey": "",
+      "endpoint": "",
+      "databaseName": "courseforge-backup"
+    }
+  }
+}

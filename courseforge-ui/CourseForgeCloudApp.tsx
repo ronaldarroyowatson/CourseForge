@@ -15,10 +15,30 @@ import {
   stackLayoutStyle,
   subtleTextStyle
 } from './design-system/authority-layer.js';
+import { routeAfterUpdates, type CourseForgeRouteStage } from './services/app-flow-controller.js';
 import type { CourseForgeUiContext } from './services/models.js';
 
 export function CourseForgeCloudApp({ context }: { context: CourseForgeUiContext }): React.JSX.Element {
-  const [stage, setStage] = React.useState<'splash' | 'auth' | 'workspace'>('splash');
+  const [stage, setStage] = React.useState<CourseForgeRouteStage>(() =>
+    routeAfterUpdates(context, {
+      info: (message, data) => {
+        console.info(message, data ?? {});
+      }
+    })
+  );
+
+  React.useEffect(() => {
+    const nextStage = routeAfterUpdates(context, {
+      info: (message, data) => {
+        console.info(message, data ?? {});
+      }
+    });
+    setStage(nextStage);
+  }, [context]);
+
+  const defaultUserName = context.currentUser?.displayName ?? 'Teacher User';
+  const defaultAvatarLabel = context.currentUser?.avatarLabel ?? 'TU';
+
   const [workspaceState, setWorkspaceState] = React.useState<{
     userName: string;
     avatarLabel: string;
@@ -27,8 +47,8 @@ export function CourseForgeCloudApp({ context }: { context: CourseForgeUiContext
     hasVerifiedTextbooks: boolean;
     hasSharedContentAvailable: boolean;
   }>({
-    userName: context.currentUser.displayName,
-    avatarLabel: context.currentUser.avatarLabel,
+    userName: defaultUserName,
+    avatarLabel: defaultAvatarLabel,
     hasInProgressTextbooks: false,
     hasCompletedTextbooks: false,
     hasVerifiedTextbooks: context.textbooks.some((textbook) => textbook.verified === true),
@@ -83,13 +103,14 @@ export function CourseForgeCloudApp({ context }: { context: CourseForgeUiContext
           <div style={bodyTextStyle()}>Splash: {context.splashStatus}</div>
           <div style={bodyTextStyle()}>Auth: {context.authStatus}</div>
           <div style={bodyTextStyle()}>Updates: {context.updateStatus}</div>
+          <div style={bodyTextStyle()}>Otto Lifecycle: {context.ottoLifecycleState}</div>
           <div style={bodyTextStyle()}>Logging: {context.loggingStatus}</div>
           <div style={bodyTextStyle()}>Tracing: {context.tracingStatus}</div>
           <div style={bodyTextStyle()}>Metrics: {context.metricsStatus}</div>
         </div>
       </header>
 
-      {stage === 'splash' ? <SplashScreen onContinue={() => setStage('auth')} /> : null}
+      {stage === 'splash' ? <SplashScreen /> : null}
       {stage === 'auth' ? (
         <AuthScreen
           onAuthenticated={(result) => {
@@ -122,6 +143,51 @@ export function CourseForgeCloudApp({ context }: { context: CourseForgeUiContext
           <TextbookCompletedScreen />
         </>
       ) : null}
+
+      {context.ottoOverlayVisible ? <OttoBackgroundUpdater lifecycleState={context.ottoLifecycleState} /> : null}
     </main>
+  );
+}
+
+function OttoBackgroundUpdater({ lifecycleState }: { lifecycleState: CourseForgeUiContext['ottoLifecycleState'] }): React.JSX.Element {
+  const isDone = lifecycleState === 'OTTO_DONE';
+
+  return (
+    <>
+      <style>{'@keyframes ottoOverlayFadeOut { 0% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }'}</style>
+      <div
+        id="ottoBackgroundUpdater"
+        aria-hidden
+        style={{
+          position: 'fixed',
+          inset: 0,
+          pointerEvents: 'none',
+          display: 'grid',
+          placeItems: 'center',
+          background: authorityTokens.color.config.semantic.primary.background,
+          opacity: 1,
+          animation: isDone ? 'ottoOverlayFadeOut 480ms ease-out forwards' : undefined
+        }}
+      >
+        <div
+          style={{
+            ...resolvePrimitiveStyle('Panel', 'secondary', {
+              minWidth: '20rem',
+              minHeight: 'auto'
+            }),
+            ...stackLayoutStyle({
+              gap: authorityTokens.spacing.config.sm
+            }),
+            ...debugRegionStyle('asyncRegion')
+          }}
+        >
+          <strong style={headingTextStyle('screen')}>Otto Background Updater</strong>
+          <div style={bodyTextStyle()}>State: {lifecycleState}</div>
+          <div style={subtleTextStyle()}>
+            {isDone ? 'Update complete. Handing off to CourseForge.' : 'Applying updates in the background.'}
+          </div>
+        </div>
+      </div>
+    </>
   );
 }

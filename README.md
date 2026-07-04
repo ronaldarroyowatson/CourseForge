@@ -3,13 +3,13 @@
 Download the latest installers for your operating system:
 
 ### macOS Installer (.dmg)
-👉 https://github.com/ronaldarroyowatson/CourseForge/releases/latest/download/CourseForge-1.7.120-macos.dmg
+👉 https://github.com/ronaldarroyowatson/CourseForge/releases/latest/download/CourseForge-macOS.dmg
 
 ### Windows Installer (.exe)
-👉 https://github.com/ronaldarroyowatson/CourseForge/releases/latest/download/CourseForge-1.7.120-installer.exe
+👉 https://github.com/ronaldarroyowatson/CourseForge/releases/latest/download/CourseForge-Windows.exe
 
-### Linux Portable (.zip)
-👉 https://github.com/ronaldarroyowatson/CourseForge/releases/latest/download/CourseForge-1.7.120-portable.zip
+### Linux Installer (.AppImage)
+👉 https://github.com/ronaldarroyowatson/CourseForge/releases/latest/download/CourseForge-Linux.AppImage
 
 These installers are automatically built and published by GitHub Actions whenever a new version of CourseForge is released.
 

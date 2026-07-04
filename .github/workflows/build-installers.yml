@@ -7,7 +7,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: "build-installers-${{ github.ref }}"
@@ -23,13 +23,16 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux
-            artifact: courseforge-linux
+            source_glob: release/*.AppImage
+            output_name: CourseForge-Linux.AppImage
           - os: windows-latest
             target: win
-            artifact: courseforge-windows
+            source_glob: release/*.exe
+            output_name: CourseForge-Windows.exe
           - os: macos-latest
             target: mac
-            artifact: courseforge-macos
+            source_glob: release/*.dmg
+            output_name: CourseForge-macOS.dmg
 
     steps:
       - name: Check out repository
@@ -49,9 +52,33 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+      - name: Prepare durable installer filename
+        id: durable_installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release/durable
+          shopt -s nullglob
+          matches=( ${{ matrix.source_glob }} )
+          if [ ${#matches[@]} -eq 0 ]; then
+            echo "No installer found for pattern: ${{ matrix.source_glob }}"
+            ls -la release || true
+            exit 1
+          fi
+
+          cp "${matches[0]}" "release/durable/${{ matrix.output_name }}"
+          echo "installer_path=release/durable/${{ matrix.output_name }}" >> "$GITHUB_OUTPUT"
+
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: "${{ matrix.artifact }}"
-          path: release/**
+          name: "${{ matrix.output_name }}"
+          path: "${{ steps.durable_installer.outputs.installer_path }}"
           if-no-files-found: error
+
+      - name: Upload installer to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "${{ steps.durable_installer.outputs.installer_path }}"
+          fail_on_unmatched_files: true

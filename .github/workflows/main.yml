@@ -52,13 +52,61 @@ jobs:
         run: npm run build
 
       - name: Package macOS Installer
-        run: npm run build:mac
+        run: npm run build:mac -- --publish never
+
+      - name: Validate macOS app bundle in DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          dmgs=( release/*.dmg )
+          if [ ${#dmgs[@]} -eq 0 ]; then
+            echo "No DMG found in release/"
+            exit 1
+          fi
+
+          dmg="${dmgs[0]}"
+          mount_dir="$(mktemp -d)"
+
+          cleanup() {
+            if mount | grep -q "$mount_dir"; then
+              hdiutil detach "$mount_dir" -quiet || true
+            fi
+            rm -rf "$mount_dir"
+          }
+          trap cleanup EXIT
+
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir" -quiet
+          app_path="$mount_dir/CourseForge.app"
+
+          for required in "Contents/Info.plist" "Contents/MacOS" "Contents/Resources"; do
+            if [ ! -e "$app_path/$required" ]; then
+              echo "Missing required bundle path: $required"
+              exit 1
+            fi
+          done
+
+          executable_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_path/Contents/Info.plist")"
+          executable_path="$app_path/Contents/MacOS/$executable_name"
+          test -f "$executable_path"
+          test -x "$executable_path"
+          test "$(stat -f '%z' "$executable_path")" -gt 0
+
+          broken_links=$(find "$app_path/Contents/MacOS" "$app_path/Contents/Resources" -type l ! -exec test -e {} \; -print)
+          if [ -n "$broken_links" ]; then
+            echo "Broken symlinks found:"
+            echo "$broken_links"
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=2 "$app_path"
 
       - name: Upload macOS Installer
         uses: actions/upload-artifact@v4
         with:
           name: courseforge-macos-installer
-          path: dist/*.pkg
+          path: release/*.dmg
 
   build-linux:
     runs-on: ubuntu-latest

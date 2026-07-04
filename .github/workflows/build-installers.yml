@@ -52,6 +52,78 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+      - name: Validate macOS app bundle in DMG
+        if: matrix.target == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          dmgs=( release/*.dmg )
+          if [ ${#dmgs[@]} -eq 0 ]; then
+            echo "No DMG found in release/"
+            exit 1
+          fi
+
+          dmg="${dmgs[0]}"
+          mount_dir="$(mktemp -d)"
+
+          cleanup() {
+            if mount | grep -q "$mount_dir"; then
+              hdiutil detach "$mount_dir" -quiet || true
+            fi
+            rm -rf "$mount_dir"
+          }
+          trap cleanup EXIT
+
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir" -quiet
+
+          app_path="$mount_dir/CourseForge.app"
+          if [ ! -d "$app_path" ]; then
+            echo "Missing app bundle in DMG: $app_path"
+            exit 1
+          fi
+
+          if find "$app_path" -mindepth 2 -maxdepth 3 -name '*.app' -path '*/CourseForge.app/*' | grep -q .; then
+            echo "Unexpected nested app bundle detected in CourseForge.app"
+            find "$app_path" -mindepth 2 -maxdepth 3 -name '*.app' -path '*/CourseForge.app/*'
+            exit 1
+          fi
+
+          for required in "Contents/Info.plist" "Contents/MacOS" "Contents/Resources"; do
+            if [ ! -e "$app_path/$required" ]; then
+              echo "Missing required bundle path: $required"
+              exit 1
+            fi
+          done
+
+          executable_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_path/Contents/Info.plist")"
+          executable_path="$app_path/Contents/MacOS/$executable_name"
+          if [ ! -f "$executable_path" ]; then
+            echo "CFBundleExecutable missing: $executable_path"
+            exit 1
+          fi
+
+          size_bytes="$(stat -f '%z' "$executable_path")"
+          if [ "$size_bytes" -le 0 ]; then
+            echo "Main executable has zero size: $executable_path"
+            exit 1
+          fi
+
+          if [ ! -x "$executable_path" ]; then
+            echo "Main executable is not executable (+x): $executable_path"
+            exit 1
+          fi
+
+          broken_links=$(find "$app_path/Contents/MacOS" "$app_path/Contents/Resources" -type l ! -exec test -e {} \; -print)
+          if [ -n "$broken_links" ]; then
+            echo "Broken symlinks found:"
+            echo "$broken_links"
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+
       - name: Prepare durable installer filename
         id: durable_installer
         shell: bash

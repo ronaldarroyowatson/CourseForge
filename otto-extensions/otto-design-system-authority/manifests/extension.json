@@ -1,0 +1,19 @@
+{
+  "id": "otto.design.system",
+  "name": "Otto Design System Authority Layer",
+  "version": "0.1.0",
+  "schemaVersion": "1.0.0",
+  "description": "Immutable and versioned design tokens, primitives, behavior rules, and UI state machines for Otto-powered applications.",
+  "author": "Otto Systems",
+  "entrypoints": {
+    "index": "src/index.ts",
+    "rescan": "src/design-system-rescan.ts",
+    "wrappers": "src/wrappers/react/index.ts"
+  },
+  "capabilities": [
+    "design-system",
+    "ui-primitives",
+    "tokens",
+    "state-machines"
+  ]
+}

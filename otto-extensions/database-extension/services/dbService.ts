@@ -157,6 +157,19 @@ function enforceRules(commandName: DbCommandName, payload: unknown): void {
       assertString(commandPayload.textbookId, 'verifyOwnership.textbookId');
       assertString(commandPayload.ownerId, 'verifyOwnership.ownerId');
       assertString(commandPayload.coverImageHash, 'verifyOwnership.coverImageHash');
+      assertOptionalString(commandPayload.verifiedAt, 'verifyOwnership.verifiedAt');
+      break;
+    }
+    case 'getOwnershipRecord': {
+      const commandPayload = payload as DbCommandPayloads['getOwnershipRecord'];
+      assertString(commandPayload.ownerId, 'getOwnershipRecord.ownerId');
+      assertString(commandPayload.textbookId, 'getOwnershipRecord.textbookId');
+      break;
+    }
+    case 'getEditionOwners': {
+      const commandPayload = payload as DbCommandPayloads['getEditionOwners'];
+      assertString(commandPayload.textbookId, 'getEditionOwners.textbookId');
+      assertOptionalNumber(commandPayload.tolerance, 'getEditionOwners.tolerance');
       break;
     }
     case 'getTeacherContent': {
@@ -182,6 +195,8 @@ function enforceRules(commandName: DbCommandName, payload: unknown): void {
       const commandPayload = payload as DbCommandPayloads['getSharedContent'];
       assertOptionalString(commandPayload.id, 'getSharedContent.id');
       assertOptionalString(commandPayload.textbookId, 'getSharedContent.textbookId');
+      assertString(commandPayload.ownerId, 'getSharedContent.ownerId');
+      assertOptionalNumber(commandPayload.tolerance, 'getSharedContent.tolerance');
       if (!commandPayload.id && !commandPayload.textbookId) {
         throw new DbRuleError('getSharedContent requires id or textbookId.');
       }
@@ -191,8 +206,9 @@ function enforceRules(commandName: DbCommandName, payload: unknown): void {
       const commandPayload = payload as DbCommandPayloads['updateSharedContent'];
       assertString(commandPayload.textbookId, 'updateSharedContent.textbookId');
       assertString(commandPayload.ownerId, 'updateSharedContent.ownerId');
-      assertArray(commandPayload.allowedOwners, 'updateSharedContent.allowedOwners');
       assertArray(commandPayload.sharedContentRefs, 'updateSharedContent.sharedContentRefs');
+      assertOptionalString(commandPayload.createdAt, 'updateSharedContent.createdAt');
+      assertOptionalString(commandPayload.updatedAt, 'updateSharedContent.updatedAt');
       break;
     }
     default:
@@ -223,6 +239,16 @@ function assertArray(value: unknown, fieldName: string): void {
 function assertAllowedValue<TValue extends string>(value: TValue, allowedValues: TValue[], fieldName: string): void {
   if (!allowedValues.includes(value)) {
     throw new DbRuleError(`${fieldName} must be one of: ${allowedValues.join(', ')}.`);
+  }
+}
+
+function assertOptionalNumber(value: unknown, fieldName: string): void {
+  if (value === undefined) {
+    return;
+  }
+
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
+    throw new DbRuleError(`${fieldName} must be a non-negative number.`);
   }
 }
 

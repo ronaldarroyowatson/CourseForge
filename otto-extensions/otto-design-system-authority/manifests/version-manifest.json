@@ -1,0 +1,27 @@
+{
+  "extension": "otto-design-system",
+  "version": "0.1.0",
+  "rulesVersion": "2026.07.04",
+  "immutability": {
+    "strategy": "deep-freeze",
+    "enforced": true
+  },
+  "compatibility": {
+    "ottoUpdate": true,
+    "commandServiceLayer": true
+  },
+  "surfacePolicy": {
+    "api": "forbidden",
+    "cli": "forbidden",
+    "allowed": [
+      "tokens",
+      "components",
+      "behaviors",
+      "state",
+      "layout",
+      "motion",
+      "debug",
+      "wrappers"
+    ]
+  }
+}

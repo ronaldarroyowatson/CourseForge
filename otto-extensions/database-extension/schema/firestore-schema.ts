@@ -39,11 +39,19 @@ export interface TeacherCreatedContentDocument {
 }
 
 export interface OwnershipVerificationDocument {
+  id?: string;
   textbookId: string;
   ownerId: string;
   coverImageHash: string;
   verificationMethod: 'pHash';
   verifiedAt: string;
+}
+
+export interface EditionOwnerRecord {
+  ownerId: string;
+  textbookId: string;
+  coverImageHash: string;
+  hammingDistance: number;
 }
 
 export interface SharedContentDocument {
@@ -52,6 +60,7 @@ export interface SharedContentDocument {
   allowedOwners: string[];
   sharedContentRefs: unknown[];
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface FirestoreSchemaCollections {

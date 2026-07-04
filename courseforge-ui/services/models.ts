@@ -16,6 +16,8 @@ export interface TextbookRecord {
   ownerId: string;
   title: string;
   status: TextbookStatus;
+  verified?: boolean;
+  verificationMethod?: 'pHash';
   coverImageHash: string;
   createdAt: string;
   updatedAt: string;
@@ -54,6 +56,7 @@ export interface SharedContentRecord {
   allowedOwners: string[];
   sharedContentRefs: unknown[];
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface CourseForgeUiContext {

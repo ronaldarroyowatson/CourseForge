@@ -11,7 +11,9 @@ describe('ui.edgeCases', () => {
         userName: longText,
         avatarLabel: longText,
         hasInProgressTextbooks: false,
-        hasCompletedTextbooks: false
+        hasCompletedTextbooks: false,
+        hasVerifiedTextbooks: false,
+        hasSharedContentAvailable: false
       })
     );
 
@@ -24,7 +26,9 @@ describe('ui.edgeCases', () => {
         userName: 'User',
         avatarLabel: 'US',
         hasInProgressTextbooks: false,
-        hasCompletedTextbooks: false
+        hasCompletedTextbooks: false,
+        hasVerifiedTextbooks: false,
+        hasSharedContentAvailable: false
       })
     );
     const second = renderToStaticMarkup(
@@ -32,7 +36,9 @@ describe('ui.edgeCases', () => {
         userName: 'User',
         avatarLabel: 'US',
         hasInProgressTextbooks: false,
-        hasCompletedTextbooks: false
+        hasCompletedTextbooks: false,
+        hasVerifiedTextbooks: false,
+        hasSharedContentAvailable: false
       })
     );
 

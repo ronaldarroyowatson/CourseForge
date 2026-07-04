@@ -5,7 +5,12 @@ import { renderCourseForgeUi } from '../render-courseforge-ui.js';
 describe('services.basic', () => {
   it('allows sharing for teacher-generated non-copyrighted content', () => {
     expect(
-      canShareTeacherGeneratedContent({ includesTeacherGeneratedContent: true, includesCopyrightedPages: false })
+      canShareTeacherGeneratedContent({
+        isSameEditionOwner: true,
+        includesTeacherCreatedContent: true,
+        includesStructuralMetadataOnly: false,
+        includesCopyrightedMaterial: false
+      })
     ).toBe(true);
   });
 

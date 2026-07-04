@@ -1,5 +1,6 @@
 import type { DatabaseProvider } from '../providers/provider-types.js';
 import type {
+  EditionOwnerRecord,
   OwnershipVerificationDocument,
   SharedContentDocument,
   TeacherCreatedContentDocument,
@@ -16,6 +17,8 @@ export type DbCommandName =
   | 'createTextbook'
   | 'updateTextbook'
   | 'verifyOwnership'
+  | 'getOwnershipRecord'
+  | 'getEditionOwners'
   | 'getTeacherContent'
   | 'updateTeacherContent'
   | 'getSharedContent'
@@ -29,7 +32,15 @@ export interface DbCommandPayloads {
   getTextbooksByOwner: { ownerId: string };
   createTextbook: TextbookDocument;
   updateTextbook: { id: string; updates: Partial<TextbookDocument> };
-  verifyOwnership: { id?: string; textbookId: string; ownerId: string; coverImageHash: string };
+  verifyOwnership: {
+    id?: string;
+    textbookId: string;
+    ownerId: string;
+    coverImageHash: string;
+    verifiedAt?: string;
+  };
+  getOwnershipRecord: { ownerId: string; textbookId: string };
+  getEditionOwners: { textbookId: string; tolerance?: number };
   getTeacherContent: { id?: string; textbookId?: string };
   updateTeacherContent: {
     id?: string;
@@ -42,14 +53,14 @@ export interface DbCommandPayloads {
     createdAt?: string;
     updatedAt: string;
   };
-  getSharedContent: { id?: string; textbookId?: string };
+  getSharedContent: { id?: string; textbookId?: string; ownerId: string; tolerance?: number };
   updateSharedContent: {
     id?: string;
     textbookId: string;
     ownerId: string;
-    allowedOwners: string[];
     sharedContentRefs: unknown[];
-    createdAt: string;
+    createdAt?: string;
+    updatedAt?: string;
   };
 }
 
@@ -62,6 +73,8 @@ export interface DbCommandResults {
   createTextbook: TextbookDocument;
   updateTextbook: TextbookDocument;
   verifyOwnership: OwnershipVerificationDocument;
+  getOwnershipRecord: OwnershipVerificationDocument | null;
+  getEditionOwners: EditionOwnerRecord[];
   getTeacherContent: TeacherCreatedContentDocument | null;
   updateTeacherContent: TeacherCreatedContentDocument;
   getSharedContent: SharedContentDocument | null;

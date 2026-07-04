@@ -19,6 +19,6 @@ describe('dbService.failureModes', () => {
 
   it('rejects unknown shared content lookup shapes', async () => {
     const db = createDbService();
-    await expect(db.executeCommand('getSharedContent', {})).rejects.toBeInstanceOf(DbRuleError);
+    await expect(db.executeCommand('getSharedContent', { ownerId: 'owner-a' })).rejects.toBeInstanceOf(DbRuleError);
   });
 });

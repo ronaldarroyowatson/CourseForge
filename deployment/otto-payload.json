@@ -67,6 +67,46 @@
       "checksum": "sha256:otto-ui-splash-tracer-bullet"
     },
     {
+      "name": "otto-core",
+      "target": "otto",
+      "kind": "runtime",
+      "source": "https://github.com/otto-platform/otto-core/releases/latest/download/otto-core.tgz",
+      "minVersion": "latest",
+      "checksum": "sha256:otto-core-tracer-bullet"
+    },
+    {
+      "name": "otto-auth",
+      "target": "otto",
+      "kind": "extension",
+      "source": "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-auth.tgz",
+      "minVersion": "latest",
+      "checksum": "sha256:otto-auth-tracer-bullet"
+    },
+    {
+      "name": "otto-telemetry",
+      "target": "otto",
+      "kind": "extension",
+      "source": "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-telemetry.tgz",
+      "minVersion": "latest",
+      "checksum": "sha256:otto-telemetry-tracer-bullet"
+    },
+    {
+      "name": "otto-splash",
+      "target": "otto",
+      "kind": "ui",
+      "source": "https://github.com/otto-platform/otto-ui/releases/latest/download/otto-splash.tgz",
+      "minVersion": "latest",
+      "checksum": "sha256:otto-splash-tracer-bullet"
+    },
+    {
+      "name": "otto-design-system",
+      "target": "otto",
+      "kind": "extension",
+      "source": "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-design-system.tgz",
+      "minVersion": "0.1.0",
+      "checksum": "sha256:otto-design-system-tracer-bullet"
+    },
+    {
       "name": "courseforge-core-shell",
       "target": "courseforge",
       "kind": "module",

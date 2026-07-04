@@ -14,14 +14,19 @@ export interface ContentService {
     createdAt?: string;
     updatedAt: string;
   }): Promise<TeacherCreatedContentRecord>;
-  getSharedContent(input: { id?: string; textbookId?: string }): Promise<SharedContentRecord | null>;
+  getSharedContent(input: {
+    id?: string;
+    textbookId?: string;
+    ownerId: string;
+    tolerance?: number;
+  }): Promise<SharedContentRecord | null>;
   updateSharedContent(input: {
     id?: string;
     textbookId: string;
     ownerId: string;
-    allowedOwners: string[];
     sharedContentRefs: unknown[];
-    createdAt: string;
+    createdAt?: string;
+    updatedAt?: string;
   }): Promise<SharedContentRecord>;
 }
 
@@ -44,7 +49,12 @@ export class DefaultContentService implements ContentService {
     return dbClient.run('updateTeacherContent', input);
   }
 
-  async getSharedContent(input: { id?: string; textbookId?: string }): Promise<SharedContentRecord | null> {
+  async getSharedContent(input: {
+    id?: string;
+    textbookId?: string;
+    ownerId: string;
+    tolerance?: number;
+  }): Promise<SharedContentRecord | null> {
     return dbClient.run('getSharedContent', input);
   }
 
@@ -52,9 +62,9 @@ export class DefaultContentService implements ContentService {
     id?: string;
     textbookId: string;
     ownerId: string;
-    allowedOwners: string[];
     sharedContentRefs: unknown[];
-    createdAt: string;
+    createdAt?: string;
+    updatedAt?: string;
   }): Promise<SharedContentRecord> {
     return dbClient.run('updateSharedContent', input);
   }

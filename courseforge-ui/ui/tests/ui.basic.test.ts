@@ -15,7 +15,9 @@ describe('ui.basic', () => {
         userName: 'User',
         avatarLabel: 'US',
         hasInProgressTextbooks: true,
-        hasCompletedTextbooks: true
+        hasCompletedTextbooks: true,
+        hasVerifiedTextbooks: true,
+        hasSharedContentAvailable: true
       })
     );
 
@@ -27,6 +29,10 @@ describe('ui.basic', () => {
     const resumeHtml = renderToStaticMarkup(React.createElement(TextbookResumeScreen));
     const completedHtml = renderToStaticMarkup(React.createElement(TextbookCompletedScreen));
 
-    expect(createHtml.includes('Create Textbook') && resumeHtml.includes('Resume') && completedHtml.includes('Completed')).toBe(true);
+    expect(
+      createHtml.includes('pHash Ownership Verification') &&
+        resumeHtml.includes('Resume') &&
+        completedHtml.includes('Completed')
+    ).toBe(true);
   });
 });

@@ -13,9 +13,35 @@ describe('hooks.basic', () => {
   });
 
   it('returns ownership verification hash using the provided service', () => {
-    const service = { computePerceptualHash: vi.fn().mockReturnValue('hash-value') };
+    const service = {
+      computePerceptualHash: vi.fn().mockReturnValue('hash-value'),
+      compareHashes: vi.fn().mockReturnValue(0),
+      isSameEdition: vi.fn().mockReturnValue(true)
+    };
     const result = useOwnershipVerification({ coverImageBytes: new Uint8Array([1, 2, 3]) }, service);
 
     expect(result.coverImageHash).toBe('hash-value');
+    expect(result.hammingDistance).toBeNull();
+    expect(result.sameEdition).toBeNull();
+  });
+
+  it('returns hamming distance and same-edition status when comparison hash is provided', () => {
+    const service = {
+      computePerceptualHash: vi.fn().mockReturnValue('hash-value'),
+      compareHashes: vi.fn().mockReturnValue(4),
+      isSameEdition: vi.fn().mockReturnValue(true)
+    };
+
+    const result = useOwnershipVerification(
+      {
+        coverImageBytes: new Uint8Array([1, 2, 3]),
+        compareWithHash: 'abcdabcdabcdabcd',
+        tolerance: 10
+      },
+      service
+    );
+
+    expect(result.hammingDistance).toBe(4);
+    expect(result.sameEdition).toBe(true);
   });
 });

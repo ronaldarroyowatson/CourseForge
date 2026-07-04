@@ -22,7 +22,11 @@ describe('hooks.edgeCases', () => {
   });
 
   it('supports unusual but valid zero-length cover images', () => {
-    const service = { computePerceptualHash: vi.fn().mockReturnValue('zero') };
+    const service = {
+      computePerceptualHash: vi.fn().mockReturnValue('zero'),
+      compareHashes: vi.fn().mockReturnValue(0),
+      isSameEdition: vi.fn().mockReturnValue(true)
+    };
     expect(useOwnershipVerification({ coverImageBytes: new Uint8Array([]) }, service).coverImageHash).toBe('zero');
   });
 });

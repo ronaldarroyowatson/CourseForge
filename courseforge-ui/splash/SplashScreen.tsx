@@ -1,16 +1,26 @@
 import React from 'react';
 import { LogoPlaceholder, PrimaryButton, RuleList, ScreenCard, SectionTitle } from '../components/common.js';
+import { authorityTokens, bodyTextStyle, debugRegionStyle, stackLayoutStyle, subtleTextStyle } from '../design-system/authority-layer.js';
 
 export function SplashScreen({ onContinue }: { onContinue: () => void }): React.JSX.Element {
   return (
     <ScreenCard title="Splash Screen">
       <SectionTitle text="Layout" />
-      <div>Fullscreen centered column with logo, tagline, then primary action.</div>
+      <div style={bodyTextStyle()}>Fullscreen centered column with logo, tagline, then primary action.</div>
 
       <SectionTitle text="Components" />
-      <div style={{ display: 'grid', gap: '8px', justifyItems: 'center', textAlign: 'center' }}>
+      <div
+        style={{
+          ...stackLayoutStyle({
+            gap: authorityTokens.spacing.config.md,
+            alignItems: 'center',
+            textAlign: 'center'
+          }),
+          ...debugRegionStyle('layoutBounds')
+        }}
+      >
         <LogoPlaceholder />
-        <div>TaglineText: Build your course data safely and privately.</div>
+        <div style={subtleTextStyle()}>TaglineText: Build your course data safely and privately.</div>
         <PrimaryButton id="continueButton" label="Continue" onClick={onContinue} />
       </div>
 

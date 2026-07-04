@@ -1,5 +1,7 @@
 import { createTextbook } from './createTextbook.js';
 import { createUser } from './createUser.js';
+import { getEditionOwners } from './getEditionOwners.js';
+import { getOwnershipRecord } from './getOwnershipRecord.js';
 import { getSharedContent } from './getSharedContent.js';
 import { getTeacherContent } from './getTeacherContent.js';
 import { getTextbook } from './getTextbook.js';
@@ -21,6 +23,8 @@ export const commandHandlers: { [TCommand in DbCommandName]: DbCommandHandler<TC
   createTextbook,
   updateTextbook,
   verifyOwnership,
+  getOwnershipRecord,
+  getEditionOwners,
   getTeacherContent,
   updateTeacherContent,
   getSharedContent,

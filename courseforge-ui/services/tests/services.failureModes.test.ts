@@ -24,7 +24,12 @@ describe('services.failureModes', () => {
 
   it('denies sharing when copyrighted pages are present', () => {
     expect(
-      canShareTeacherGeneratedContent({ includesTeacherGeneratedContent: true, includesCopyrightedPages: true })
+      canShareTeacherGeneratedContent({
+        isSameEditionOwner: true,
+        includesTeacherCreatedContent: true,
+        includesStructuralMetadataOnly: false,
+        includesCopyrightedMaterial: true
+      })
     ).toBe(false);
   });
 });

@@ -21,7 +21,9 @@ describe('ui.failureModes', () => {
         userName: 'User',
         avatarLabel: 'US',
         hasInProgressTextbooks: undefined as unknown as boolean,
-        hasCompletedTextbooks: null as unknown as boolean
+        hasCompletedTextbooks: null as unknown as boolean,
+        hasVerifiedTextbooks: false,
+        hasSharedContentAvailable: false
       })
     );
 

@@ -11,4 +11,11 @@ describe('commands.failureModes', () => {
     const db = createDbService();
     await expect(db.executeCommand('getTeacherContent', {})).rejects.toBeInstanceOf(DbRuleError);
   });
+
+  it('rejects negative tolerance for getEditionOwners', async () => {
+    const db = createDbService();
+    await expect(db.executeCommand('getEditionOwners', { textbookId: 'tb-x', tolerance: -1 })).rejects.toBeInstanceOf(
+      DbRuleError
+    );
+  });
 });

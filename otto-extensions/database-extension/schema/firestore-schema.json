@@ -50,6 +50,7 @@
     "ownershipVerification": {
       "path": "ownershipVerification/{id}",
       "fields": {
+        "id": "string",
         "textbookId": "string",
         "ownerId": "string",
         "coverImageHash": "string",
@@ -64,7 +65,8 @@
         "ownerId": "string",
         "allowedOwners": "string[]",
         "sharedContentRefs": "unknown[]",
-        "createdAt": "timestamp"
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
       }
     }
   }

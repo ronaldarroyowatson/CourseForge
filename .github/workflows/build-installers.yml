@@ -84,9 +84,9 @@ jobs:
             exit 1
           fi
 
-          if find "$app_path" -mindepth 2 -maxdepth 3 -name '*.app' -path '*/CourseForge.app/*' | grep -q .; then
-            echo "Unexpected nested app bundle detected in CourseForge.app"
-            find "$app_path" -mindepth 2 -maxdepth 3 -name '*.app' -path '*/CourseForge.app/*'
+          if find "$app_path" -mindepth 2 -type d -name 'CourseForge.app' | grep -q .; then
+            echo "Unexpected self-nested CourseForge.app bundle detected"
+            find "$app_path" -mindepth 2 -type d -name 'CourseForge.app'
             exit 1
           fi
 

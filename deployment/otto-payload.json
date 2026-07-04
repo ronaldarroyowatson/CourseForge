@@ -1,0 +1,62 @@
+{
+  "mode": "courseforge",
+  "releaseChannel": "stable",
+  "components": [
+    {
+      "name": "otto-kernel",
+      "kind": "runtime",
+      "source": "https://github.com/otto-platform/otto-kernel/releases/latest/download/otto-kernel.tgz",
+      "minVersion": "1.0.0",
+      "checksum": "sha256:otto-kernel-tracer-bullet"
+    },
+    {
+      "name": "otto-update",
+      "kind": "runtime",
+      "source": "https://github.com/otto-platform/otto-update/releases/latest/download/otto-update.tgz",
+      "minVersion": "1.0.0",
+      "checksum": "sha256:otto-update-tracer-bullet"
+    },
+    {
+      "name": "otto-command-service",
+      "kind": "runtime",
+      "source": "https://github.com/otto-platform/otto-command-service/releases/latest/download/otto-command-service.tgz",
+      "minVersion": "1.0.0",
+      "checksum": "sha256:otto-command-service-tracer-bullet"
+    },
+    {
+      "name": "otto-extensions-cli",
+      "kind": "extension",
+      "source": "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-extensions-cli.tgz",
+      "minVersion": "1.0.0",
+      "checksum": "sha256:otto-extensions-cli-tracer-bullet"
+    },
+    {
+      "name": "otto-extensions-api",
+      "kind": "extension",
+      "source": "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-extensions-api.tgz",
+      "minVersion": "1.0.0",
+      "checksum": "sha256:otto-extensions-api-tracer-bullet"
+    },
+    {
+      "name": "otto-logging",
+      "kind": "service",
+      "source": "https://github.com/otto-platform/otto-logging/releases/latest/download/otto-logging.tgz",
+      "minVersion": "1.0.0",
+      "checksum": "sha256:otto-logging-tracer-bullet"
+    },
+    {
+      "name": "otto-tracing",
+      "kind": "service",
+      "source": "https://github.com/otto-platform/otto-tracing/releases/latest/download/otto-tracing.tgz",
+      "minVersion": "1.0.0",
+      "checksum": "sha256:otto-tracing-tracer-bullet"
+    },
+    {
+      "name": "otto-metrics",
+      "kind": "service",
+      "source": "https://github.com/otto-platform/otto-metrics/releases/latest/download/otto-metrics.tgz",
+      "minVersion": "1.0.0",
+      "checksum": "sha256:otto-metrics-tracer-bullet"
+    }
+  ]
+}

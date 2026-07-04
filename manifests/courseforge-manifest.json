@@ -1,0 +1,33 @@
+{
+  "id": "courseforge-shell",
+  "name": "CourseForge",
+  "version": "0.1.0",
+  "description": "Tracer-bullet CourseForge shell wired to Otto bootstrap services.",
+  "entryPoint": "src/main.ts",
+  "otto": {
+    "mode": "courseforge",
+    "minimumVersion": "1.0.0",
+    "requiredComponents": [
+      "otto-kernel",
+      "otto-update",
+      "otto-command-service",
+      "otto-extensions-cli",
+      "otto-extensions-api",
+      "otto-logging",
+      "otto-tracing",
+      "otto-metrics"
+    ]
+  },
+  "modules": [
+    {
+      "id": "courseforge-bootstrap",
+      "kind": "bootstrap",
+      "entryPoint": "src/bootstrap/courseforge-bootstrap.ts"
+    },
+    {
+      "id": "courseforge-ui",
+      "kind": "ui",
+      "entryPoint": "src/ui/skeleton-ui.tsx"
+    }
+  ]
+}

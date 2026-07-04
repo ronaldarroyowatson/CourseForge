@@ -1,0 +1,16 @@
+{
+  "mode": "courseforge",
+  "payloadPath": "deployment/otto-payload.json",
+  "manifestPath": "manifests/courseforge-manifest.json",
+  "runtimeRoot": ".courseforge-runtime/otto",
+  "componentReceiptDir": "components",
+  "stateFile": "state/otto-state.json",
+  "verifyChecksums": true,
+  "allowSelfUpdate": true,
+  "restartOnUpdate": true,
+  "observability": {
+    "logging": true,
+    "tracing": true,
+    "metrics": true
+  }
+}

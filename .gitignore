@@ -27,6 +27,7 @@ tmp-smoke/debug/*.json
 .debug/
 .continue/
 .courseforge/
+.courseforge-runtime/
 .tmp-release-download-*/
 
 # Release packaging transient artifacts

@@ -6,6 +6,7 @@
   "main": "dist/src/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "prebuild:win": "npm run build",
     "prebuild:mac": "npm run build",
     "prebuild:linux": "npm run build",

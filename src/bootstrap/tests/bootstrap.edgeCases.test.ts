@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,5 +21,32 @@ describe('bootstrap.edgeCases', () => {
     const second = await bootstrapOtto({ repoRoot, runtimeRoot });
 
     expect(second.updateStatus.ottoState).toBe('up-to-date');
+  });
+
+  it('detects a newer release version when the resolver advances', async () => {
+    const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), 'otto-release-'));
+    runtimeRoots.push(runtimeRoot);
+
+    const first = await bootstrapOtto({
+      repoRoot,
+      runtimeRoot,
+      resolveReleaseVersion: async (component) => (component.name === 'otto-core' ? '1.0.0' : null)
+    });
+
+    expect(first.updateStatus.appliedOttoComponents).toContain('otto-core');
+
+    const second = await bootstrapOtto({
+      repoRoot,
+      runtimeRoot,
+      resolveReleaseVersion: async (component) => (component.name === 'otto-core' ? '1.0.1' : null)
+    });
+
+    expect(second.updateStatus.appliedOttoComponents).toContain('otto-core');
+
+    const receiptPath = path.join(runtimeRoot, 'components', 'otto', 'otto-core.json');
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as { version: string; resolvedVersionSource?: string };
+
+    expect(receipt.version).toBe('1.0.1');
+    expect(receipt.resolvedVersionSource).toBe('release-metadata');
   });
 });

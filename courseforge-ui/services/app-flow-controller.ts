@@ -13,11 +13,17 @@ const noOpLogger: AppFlowLogger = {
 export function routeAfterUpdates(context: CourseForgeUiContext, logger: AppFlowLogger = noOpLogger): CourseForgeRouteStage {
   logger.info('courseforge.routeAfterUpdates: evaluating route', {
     ottoLifecycleState: context.ottoLifecycleState,
-    hasCurrentUser: Boolean(context.currentUser)
+    hasCurrentUser: Boolean(context.currentUser),
+    authLoading: context.authLoading
   });
 
   if (context.ottoLifecycleState !== 'OTTO_DONE') {
     logger.info('courseforge.routeAfterUpdates: Otto not finished, keeping splash visible');
+    return 'splash';
+  }
+
+  if (context.authLoading) {
+    logger.info('courseforge.routeAfterUpdates: auth still loading, keeping splash visible');
     return 'splash';
   }
 

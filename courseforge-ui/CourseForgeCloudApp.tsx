@@ -28,6 +28,22 @@ export function CourseForgeCloudApp({ context }: { context: CourseForgeUiContext
   );
 
   React.useEffect(() => {
+    console.info('courseforge.ui: route stage resolved', {
+      stage,
+      hasCurrentUser: Boolean(context.currentUser),
+      ottoLifecycleState: context.ottoLifecycleState,
+      authLoading: context.authLoading
+    });
+
+    if (stage === 'splash') {
+      console.info('courseforge.ui: splash mounted', {
+        ottoLifecycleState: context.ottoLifecycleState,
+        authLoading: context.authLoading
+      });
+    }
+  }, [stage, context.currentUser, context.ottoLifecycleState, context.authLoading]);
+
+  React.useEffect(() => {
     const nextStage = routeAfterUpdates(context, {
       info: (message, data) => {
         console.info(message, data ?? {});
@@ -38,6 +54,7 @@ export function CourseForgeCloudApp({ context }: { context: CourseForgeUiContext
 
   const defaultUserName = context.currentUser?.displayName ?? 'Teacher User';
   const defaultAvatarLabel = context.currentUser?.avatarLabel ?? 'TU';
+  const showSplashOverlay = stage === 'splash' || context.ottoLifecycleState !== 'OTTO_DONE' || context.authLoading;
 
   const [workspaceState, setWorkspaceState] = React.useState<{
     userName: string;
@@ -114,6 +131,10 @@ export function CourseForgeCloudApp({ context }: { context: CourseForgeUiContext
       {stage === 'auth' ? (
         <AuthScreen
           onAuthenticated={(result) => {
+            console.info('courseforge.ui: authenticated, navigating to workspace', {
+              uid: result.user.uid,
+              displayName: result.user.displayName
+            });
             setWorkspaceState({
               userName: result.user.displayName,
               avatarLabel: result.user.displayName.slice(0, 2).toUpperCase() || 'CF',
@@ -144,7 +165,7 @@ export function CourseForgeCloudApp({ context }: { context: CourseForgeUiContext
         </>
       ) : null}
 
-      {context.ottoOverlayVisible ? <OttoBackgroundUpdater lifecycleState={context.ottoLifecycleState} /> : null}
+      {context.ottoOverlayVisible && showSplashOverlay ? <OttoBackgroundUpdater lifecycleState={context.ottoLifecycleState} /> : null}
     </main>
   );
 }

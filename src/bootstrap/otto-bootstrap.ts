@@ -96,9 +96,11 @@ export interface OttoBootstrapOptions {
   runtimeRoot?: string;
   payloadPath?: string;
   configPath?: string;
+  resolveReleaseVersion?: (component: OttoComponentSpec) => Promise<string | null> | string | null;
 }
 
 interface CourseForgeManifest {
+  version?: string;
   otto?: {
     requiredComponents?: string[];
     minimalInstallerContents?: string[];
@@ -111,6 +113,18 @@ interface ComponentReceipt {
   checksum: string;
   source: string;
   installedAt: string;
+  installDirectory?: string;
+  resolvedVersionSource?: string;
+}
+
+interface PackageManifest {
+  version?: string;
+}
+
+interface ResolvedComponentVersion {
+  version: string;
+  source: 'release-metadata' | 'manifest-minVersion' | 'receipt-version';
+  releaseApiUrl?: string | null;
 }
 
 interface OttoStateRecord {
@@ -129,12 +143,31 @@ export async function bootstrapOtto(options: OttoBootstrapOptions = {}): Promise
   const payloadPath = path.resolve(repoRoot, options.payloadPath ?? config.payloadPath);
   const payload = await readJsonFile<OttoPayload>(payloadPath);
   const manifestPath = path.resolve(repoRoot, config.manifestPath);
+  const packageManifestPath = path.resolve(repoRoot, 'package.json');
+  const packageManifest = await readJsonFile<PackageManifest>(packageManifestPath);
+  const courseForgeManifest = await readJsonFile<CourseForgeManifest>(manifestPath);
   const runtimeRoot = path.resolve(repoRoot, options.runtimeRoot ?? config.runtimeRoot);
   const componentReceiptRoot = path.join(runtimeRoot, config.componentReceiptDir);
   const stateFilePath = path.join(runtimeRoot, config.stateFile);
   const telemetryLogPath = path.join(runtimeRoot, 'telemetry', 'boot-events.jsonl');
+  const packageVersion = packageManifest.version ?? 'unknown';
+  const courseForgeVersion = courseForgeManifest.version ?? 'unknown';
+  const ottoKernelVersion = payload.components.find((component) => component.name === 'otto-kernel')?.minVersion ?? 'unknown';
+  const ottoCoreVersion = payload.components.find((component) => component.name === 'otto-core')?.minVersion ?? 'unknown';
+  const releaseVersionResolver =
+    options.resolveReleaseVersion ?? getDefaultReleaseVersionResolver({ enabled: process.env.NODE_ENV !== 'test' });
+  const resolvedReleaseVersionCache = new Map<string, Promise<ResolvedComponentVersion | null>>();
+  const logBootstrap = (message: string, data?: Record<string, unknown>): void => {
+    if (config.observability.logging) {
+      console.info(`otto.bootstrap: ${message}`, data ?? {});
+    }
+  };
 
-  await verifyCourseForgeManifest(manifestPath, payload);
+  await verifyCourseForgeManifest(courseForgeManifest, payload, {
+    manifestPath,
+    packageVersion,
+    logBootstrap
+  });
   await mkdir(componentReceiptRoot, { recursive: true });
   await mkdir(path.dirname(stateFilePath), { recursive: true });
   await mkdir(path.dirname(telemetryLogPath), { recursive: true });
@@ -175,7 +208,25 @@ export async function bootstrapOtto(options: OttoBootstrapOptions = {}): Promise
   emitTelemetry('otto-startup', 'progress', 'Otto lifecycle state OTTO_INIT', 'info', { lifecycleState });
   emitTelemetry('otto-startup', 'progress', 'Initializing splash screen');
   actions.push('splash:init');
-  emitTelemetry('otto-startup', 'command-exec', 'Loading Otto payload manifest', 'info', { payloadPath });
+  emitTelemetry('otto-startup', 'command-exec', 'Loading Otto payload manifest', 'info', {
+    payloadPath,
+    manifestPath,
+    packageVersion,
+    courseForgeVersion,
+    ottoKernelVersion,
+    ottoCoreVersion,
+    ottoExtensionVersions: payload.components
+      .filter((component) => component.target === 'otto' && component.kind === 'extension')
+      .map((component) => ({ name: component.name, version: component.minVersion, source: component.source }))
+  });
+  logBootstrap('loaded version sources', {
+    manifestPath,
+    packageManifestPath,
+    packageVersion,
+    courseForgeVersion,
+    ottoKernelVersion,
+    ottoCoreVersion
+  });
 
   lifecycleState = 'OTTO_CHECKING';
   emitTelemetry('otto-update', 'progress', 'Otto lifecycle state OTTO_CHECKING', 'info', { lifecycleState });
@@ -192,7 +243,41 @@ export async function bootstrapOtto(options: OttoBootstrapOptions = {}): Promise
     componentReceiptRoot,
     verifyChecksums: config.verifyChecksums,
     actions,
-    emitTelemetry
+    emitTelemetry,
+    resolveReleaseVersion: async (component) => {
+      const releaseApiUrl = getGitHubLatestReleaseApiUrl(component.source);
+      if (!releaseApiUrl) {
+        return null;
+      }
+
+      const cacheKey = releaseApiUrl;
+      if (!resolvedReleaseVersionCache.has(cacheKey)) {
+        resolvedReleaseVersionCache.set(
+          cacheKey,
+          Promise.resolve(releaseVersionResolver(component)).then((resolved) => {
+            if (typeof resolved === 'string' && resolved.trim().length > 0) {
+              return {
+                version: resolved.trim(),
+                source: 'release-metadata' as const,
+                releaseApiUrl
+              };
+            }
+
+            const fallbackVersion = component.minVersion === 'latest' ? null : component.minVersion;
+            return fallbackVersion
+              ? {
+                  version: fallbackVersion,
+                  source: 'manifest-minVersion' as const,
+                  releaseApiUrl
+                }
+              : null;
+          })
+        );
+      }
+
+      return resolvedReleaseVersionCache.get(cacheKey) ?? null;
+    },
+    logBootstrap
   });
 
   const restartRequired = config.allowSelfUpdate && config.restartOnUpdate && appliedOttoComponents.length > 0;
@@ -213,7 +298,28 @@ export async function bootstrapOtto(options: OttoBootstrapOptions = {}): Promise
     componentReceiptRoot,
     verifyChecksums: config.verifyChecksums,
     actions,
-    emitTelemetry
+    emitTelemetry,
+    resolveReleaseVersion: async (component) => {
+      const resolved = await Promise.resolve(releaseVersionResolver(component));
+      if (typeof resolved === 'string' && resolved.trim().length > 0) {
+        return {
+          version: resolved.trim(),
+          source: 'release-metadata' as const,
+          releaseApiUrl: getGitHubLatestReleaseApiUrl(component.source)
+        };
+      }
+
+      if (component.minVersion === 'latest') {
+        return null;
+      }
+
+      return {
+        version: component.minVersion,
+        source: 'manifest-minVersion' as const,
+        releaseApiUrl: getGitHubLatestReleaseApiUrl(component.source)
+      };
+    },
+    logBootstrap
   });
 
   pushSplashMessage('Preparing modules...');
@@ -282,9 +388,32 @@ export async function bootstrapOtto(options: OttoBootstrapOptions = {}): Promise
   };
 }
 
-async function verifyCourseForgeManifest(manifestPath: string, payload: OttoPayload): Promise<void> {
-  const manifest = await readJsonFile<CourseForgeManifest>(manifestPath);
+async function verifyCourseForgeManifest(
+  manifest: CourseForgeManifest,
+  payload: OttoPayload,
+  options: {
+    manifestPath: string;
+    packageVersion: string;
+    logBootstrap: (message: string, data?: Record<string, unknown>) => void;
+  }
+): Promise<void> {
   const requiredComponents = manifest.otto?.requiredComponents ?? [];
+
+  options.logBootstrap('verifying CourseForge manifest and version alignment', {
+    manifestPath: options.manifestPath,
+    manifestVersion: manifest.version ?? 'unknown',
+    packageVersion: options.packageVersion,
+    versionAligned: manifest.version ? manifest.version === options.packageVersion : true,
+    requiredComponentCount: requiredComponents.length
+  });
+
+  if (manifest.version && manifest.version !== options.packageVersion) {
+    options.logBootstrap('CourseForge app version differs from manifest version', {
+      manifestPath: options.manifestPath,
+      manifestVersion: manifest.version,
+      packageVersion: options.packageVersion
+    });
+  }
 
   for (const componentName of requiredComponents) {
     if (!hasComponent(payload, componentName)) {
@@ -303,6 +432,8 @@ async function applyComponentUpdates(options: {
   componentReceiptRoot: string;
   verifyChecksums: boolean;
   actions: string[];
+  resolveReleaseVersion: (component: OttoComponentSpec) => Promise<ResolvedComponentVersion | null>;
+  logBootstrap: (message: string, data?: Record<string, unknown>) => void;
   emitTelemetry: (
     stage: OttoTelemetryEvent['stage'],
     type: OttoTelemetryEvent['type'],
@@ -312,28 +443,61 @@ async function applyComponentUpdates(options: {
   ) => void;
 }): Promise<string[]> {
   const applied: string[] = [];
+  const targetRoot = path.join(options.componentReceiptRoot, options.target);
+  await mkdir(targetRoot, { recursive: true });
 
   for (const component of options.payload.components.filter((entry) => entry.target === options.target)) {
-    const targetRoot = path.join(options.componentReceiptRoot, options.target);
-    await mkdir(targetRoot, { recursive: true });
-
     const receiptPath = path.join(targetRoot, `${component.name}.json`);
+    const installDirectory = path.join(targetRoot, component.name);
+    const installReceiptPath = path.join(installDirectory, 'receipt.json');
     const currentReceipt = await readOptionalJsonFile<ComponentReceipt>(receiptPath);
-    const needsInstall = !currentReceipt || !satisfiesMinVersion(currentReceipt.version, component.minVersion);
+    const resolvedVersion = await options.resolveReleaseVersion(component);
+    const targetVersion = resolvedVersion?.version ?? component.minVersion;
+    const versionNeedsUpdate = !currentReceipt || !satisfiesMinVersion(currentReceipt.version, targetVersion);
+    const sourceChanged = currentReceipt?.source !== component.source;
     const checksumChanged = currentReceipt?.checksum !== component.checksum;
+    const needsInstall = versionNeedsUpdate || sourceChanged || checksumChanged;
+
+    options.logBootstrap('evaluating component update', {
+      target: options.target,
+      component: component.name,
+      currentVersion: currentReceipt?.version ?? null,
+      targetVersion,
+      currentSource: currentReceipt?.source ?? null,
+      source: component.source,
+      installDirectory,
+      versionNeedsUpdate,
+      sourceChanged,
+      checksumChanged,
+      resolvedVersionSource: resolvedVersion?.source ?? 'manifest-minVersion',
+      releaseApiUrl: resolvedVersion?.releaseApiUrl ?? null
+    });
 
     if (needsInstall || checksumChanged) {
       const receipt: ComponentReceipt = {
         name: component.name,
-        version: component.minVersion,
+        version: targetVersion,
         checksum: component.checksum,
         source: component.source,
-        installedAt: new Date().toISOString()
+        installedAt: new Date().toISOString(),
+        installDirectory,
+        resolvedVersionSource: resolvedVersion?.source ?? 'manifest-minVersion'
       };
 
+      await mkdir(installDirectory, { recursive: true });
       await writeJsonFile(receiptPath, receipt);
+      await writeJsonFile(installReceiptPath, receipt);
+      await writeJsonFile(path.join(installDirectory, 'installed-component.json'), {
+        component,
+        targetVersion,
+        installedAt: receipt.installedAt,
+        receiptPath,
+        installReceiptPath
+      });
       applied.push(component.name);
       options.actions.push(`downloaded:${component.name}`);
+      options.actions.push(`extracted:${component.name}`);
+      options.actions.push(`replaced:${component.name}`);
 
       const stage = options.target === 'otto' ? 'otto-update' : 'courseforge-update';
       const eventType =
@@ -342,10 +506,33 @@ async function applyComponentUpdates(options: {
           : component.kind === 'module'
             ? 'module-load'
             : 'install';
+      options.logBootstrap('applied component update', {
+        target: options.target,
+        component: component.name,
+        targetVersion,
+        installDirectory,
+        receiptPath,
+        installReceiptPath,
+        resolvedVersionSource: receipt.resolvedVersionSource
+      });
       options.emitTelemetry(stage, eventType, `Installed ${component.name}`, 'info', {
         target: options.target,
         kind: component.kind,
-        source: component.source
+        source: component.source,
+        targetVersion,
+        installDirectory,
+        receiptPath,
+        installReceiptPath,
+        resolvedVersionSource: receipt.resolvedVersionSource
+      });
+    } else {
+      options.logBootstrap('no update needed', {
+        target: options.target,
+        component: component.name,
+        currentVersion: currentReceipt?.version ?? null,
+        targetVersion,
+        source: component.source,
+        reason: versionNeedsUpdate ? 'version check passed but install skipped by source/checksum state' : 'already current'
       });
     }
 
@@ -369,8 +556,16 @@ async function applyComponentUpdates(options: {
 }
 
 function satisfiesMinVersion(version: string, minimumVersion: string): boolean {
+  if (version === minimumVersion) {
+    return true;
+  }
+
   const left = normalizeVersion(version);
   const right = normalizeVersion(minimumVersion);
+
+  if (left.length === 0 || right.length === 0) {
+    return false;
+  }
 
   for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
     const leftPart = left[index] ?? 0;
@@ -392,7 +587,78 @@ function normalizeVersion(version: string): number[] {
   return version
     .split('.')
     .map((segment) => Number.parseInt(segment.replace(/[^0-9].*$/, ''), 10))
-    .map((segment) => (Number.isNaN(segment) ? 0 : segment));
+    .filter((segment) => !Number.isNaN(segment));
+}
+
+function getDefaultReleaseVersionResolver(options: { enabled: boolean }): (component: OttoComponentSpec) => Promise<string | null> {
+  const cache = new Map<string, Promise<string | null>>();
+
+  return async (component: OttoComponentSpec) => {
+    if (!options.enabled) {
+      return null;
+    }
+
+    const releaseApiUrl = getGitHubLatestReleaseApiUrl(component.source);
+    if (!releaseApiUrl) {
+      return null;
+    }
+
+    if (!cache.has(releaseApiUrl)) {
+      cache.set(releaseApiUrl, resolveGitHubLatestReleaseVersion(releaseApiUrl));
+    }
+
+    return cache.get(releaseApiUrl) ?? null;
+  };
+}
+
+function getGitHubLatestReleaseApiUrl(source: string): string | null {
+  try {
+    const parsedSource = new URL(source);
+    if (parsedSource.hostname !== 'github.com') {
+      return null;
+    }
+
+    const match = parsedSource.pathname.match(/^\/([^/]+)\/([^/]+)\/releases\/latest\/download\//);
+    if (!match) {
+      return null;
+    }
+
+    const owner = match[1];
+    const repo = match[2];
+    return `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveGitHubLatestReleaseVersion(releaseApiUrl: string): Promise<string | null> {
+  if (typeof fetch !== 'function') {
+    return null;
+  }
+
+  try {
+    const response = await fetch(releaseApiUrl, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'CourseForge-Otto-Bootstrap'
+      },
+      signal: typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(750) : undefined
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const release = (await response.json()) as { tag_name?: string; name?: string };
+    const version = release.tag_name?.trim() || release.name?.trim() || '';
+    if (!version) {
+      return null;
+    }
+
+    return version;
+  } catch {
+    return null;
+  }
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T> {

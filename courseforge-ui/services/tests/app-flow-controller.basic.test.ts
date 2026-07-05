@@ -38,6 +38,16 @@ describe('app-flow-controller.basic', () => {
     expect(stage).toBe('auth');
   });
 
+  it('keeps splash visible while auth is still loading', () => {
+    const stage = routeAfterUpdates(
+      createContext({
+        authLoading: true
+      })
+    );
+
+    expect(stage).toBe('splash');
+  });
+
   it('routes to workspace when updates are done and user exists', () => {
     const stage = routeAfterUpdates(
       createContext({

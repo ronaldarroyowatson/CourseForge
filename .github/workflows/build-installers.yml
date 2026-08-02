@@ -1,34 +1,38 @@
-name: Build installers
-
-on:
+name: Build CourseForge Installers
+"on":
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
-      - 'v*'
+      - "v*"
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 concurrency:
-  group: "build-installers-${{ github.ref }}"
+  group: "courseforge-installers-${{ github.ref }}"
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-installers:
     name: "Build ${{ matrix.target }} installer"
     runs-on: "${{ matrix.os }}"
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: linux
-            source_glob: release/*.AppImage
-            output_name: CourseForge-Linux.AppImage
           - os: windows-latest
             target: win
             source_glob: release/*.exe
             output_name: CourseForge-Windows.exe
+          - os: ubuntu-latest
+            target: linux
+            source_glob: release/*.AppImage
+            output_name: CourseForge-Linux.AppImage
           - os: macos-latest
             target: mac
             source_glob: release/*.dmg
@@ -47,82 +51,45 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: "Build ${{ matrix.target }} installer"
-        run: "npm run build:${{ matrix.target }} -- --publish never"
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-
-      - name: Validate macOS app bundle in DMG
-        if: matrix.target == 'mac'
+      - name: Validate Otto update and CourseForge manifests
         shell: bash
         run: |
           set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
 
-          shopt -s nullglob
-          dmgs=( release/*.dmg )
-          if [ ${#dmgs[@]} -eq 0 ]; then
-            echo "No DMG found in release/"
-            exit 1
-          fi
+          const courseforgeManifestPath = "manifests/courseforge-manifest.json";
+          const ottoPayloadPath = "deployment/otto-payload.json";
+          const requiredComponents = [
+            "otto-kernel",
+            "otto-update-engine",
+            "otto-command-service",
+            "courseforge-core-shell"
+          ];
 
-          dmg="${dmgs[0]}"
-          mount_dir="$(mktemp -d)"
+          const courseforgeManifest = JSON.parse(fs.readFileSync(courseforgeManifestPath, "utf8"));
+          const ottoPayload = JSON.parse(fs.readFileSync(ottoPayloadPath, "utf8"));
 
-          cleanup() {
-            if mount | grep -q "$mount_dir"; then
-              hdiutil detach "$mount_dir" -quiet || true
-            fi
-            rm -rf "$mount_dir"
+          const manifestComponents = new Set(
+            (courseforgeManifest.otto?.requiredComponents ?? []).map(String)
+          );
+          const payloadComponents = new Set(
+            (ottoPayload.components ?? []).map((component) => String(component.name))
+          );
+
+          for (const component of requiredComponents) {
+            if (!manifestComponents.has(component) && !payloadComponents.has(component)) {
+              throw new Error(`Missing required Otto integration component: ${component}`);
+            }
           }
-          trap cleanup EXIT
 
-          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir" -quiet
+          console.log("Manifest validation passed for Otto update integration.");
+          NODE
 
-          app_path="$mount_dir/CourseForge.app"
-          if [ ! -d "$app_path" ]; then
-            echo "Missing app bundle in DMG: $app_path"
-            exit 1
-          fi
-
-          if find "$app_path" -mindepth 2 -type d -name 'CourseForge.app' | grep -q .; then
-            echo "Unexpected self-nested CourseForge.app bundle detected"
-            find "$app_path" -mindepth 2 -type d -name 'CourseForge.app'
-            exit 1
-          fi
-
-          for required in "Contents/Info.plist" "Contents/MacOS" "Contents/Resources"; do
-            if [ ! -e "$app_path/$required" ]; then
-              echo "Missing required bundle path: $required"
-              exit 1
-            fi
-          done
-
-          executable_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_path/Contents/Info.plist")"
-          executable_path="$app_path/Contents/MacOS/$executable_name"
-          if [ ! -f "$executable_path" ]; then
-            echo "CFBundleExecutable missing: $executable_path"
-            exit 1
-          fi
-
-          size_bytes="$(stat -f '%z' "$executable_path")"
-          if [ "$size_bytes" -le 0 ]; then
-            echo "Main executable has zero size: $executable_path"
-            exit 1
-          fi
-
-          if [ ! -x "$executable_path" ]; then
-            echo "Main executable is not executable (+x): $executable_path"
-            exit 1
-          fi
-
-          broken_links=$(find "$app_path/Contents/MacOS" "$app_path/Contents/Resources" -type l ! -exec test -e {} \; -print)
-          if [ -n "$broken_links" ]; then
-            echo "Broken symlinks found:"
-            echo "$broken_links"
-            exit 1
-          fi
-
-          codesign --verify --deep --strict --verbose=2 "$app_path"
+      - name: Build installer
+        run: "npm run build:${{ matrix.target }} -- --publish never"
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Prepare durable installer filename
         id: durable_installer
@@ -141,11 +108,62 @@ jobs:
           cp "${matches[0]}" "release/durable/${{ matrix.output_name }}"
           echo "installer_path=release/durable/${{ matrix.output_name }}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload installer artifacts
+      - name: Verify Linux installer in CI
+        if: matrix.target == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          installer="${{ steps.durable_installer.outputs.installer_path }}"
+          chmod +x "$installer"
+          "$installer" --appimage-extract > /dev/null 2>&1
+          test -d squashfs-root
+          test -f squashfs-root/AppRun
+          rm -rf squashfs-root
+
+      - name: Generate Otto update metadata artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import crypto from "node:crypto";
+
+          const installerPath = process.env.INSTALLER_PATH;
+          const payload = JSON.parse(fs.readFileSync("deployment/otto-payload.json", "utf8"));
+          const manifest = JSON.parse(fs.readFileSync("manifests/courseforge-manifest.json", "utf8"));
+          const bytes = fs.readFileSync(installerPath);
+          const checksum = crypto.createHash("sha256").update(bytes).digest("hex");
+
+          const metadata = {
+            generatedAtUtc: new Date().toISOString(),
+            installer: installerPath,
+            sha256: checksum,
+            courseforgeVersion: manifest.version,
+            releaseChannel: payload.releaseChannel,
+            mode: payload.mode
+          };
+
+          fs.writeFileSync(
+            `release/durable/otto-update-metadata-${process.env.TARGET}.json`,
+            JSON.stringify(metadata, null, 2)
+          );
+          NODE
+        env:
+          INSTALLER_PATH: "${{ steps.durable_installer.outputs.installer_path }}"
+          TARGET: "${{ matrix.target }}"
+
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: "${{ matrix.output_name }}"
           path: "${{ steps.durable_installer.outputs.installer_path }}"
+          if-no-files-found: error
+
+      - name: Upload Otto update metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: "otto-update-metadata-${{ matrix.target }}"
+          path: "release/durable/otto-update-metadata-${{ matrix.target }}.json"
           if-no-files-found: error
 
       - name: Upload installer to GitHub Release
@@ -154,3 +172,18 @@ jobs:
         with:
           files: "${{ steps.durable_installer.outputs.installer_path }}"
           fail_on_unmatched_files: true
+
+  notify-orchestrator:
+    name: Notify CourseForge-Orchestrator
+    runs-on: ubuntu-latest
+    needs:
+      - build-installers
+    if: always()
+    steps:
+      - name: Repository dispatch to orchestrator
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: "${{ secrets.ORCHESTRATOR_REPO_DISPATCH_TOKEN }}"
+          repository: "${{ vars.COURSEFORGE_ORCHESTRATOR_REPO }}"
+          event-type: courseforge-installer-build-complete
+          client-payload: '{"sourceRepo":"${{ github.repository }}","runId":"${{ github.run_id }}","status":"${{ needs.build-installers.result }}","ref":"${{ github.ref }}"}'

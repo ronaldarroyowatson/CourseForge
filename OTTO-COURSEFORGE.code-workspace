@@ -1,0 +1,16 @@
+{
+  "folders": [
+    { "path": "." },
+    { "path": "../Maestro" },
+    { "path": "../otto-kernel" },
+    { "path": "../otto-command-service" },
+    { "path": "../otto-update" },
+    { "path": "../otto-extensions" },
+    { "path": "../otto-protocol" },
+    { "path": "../otto-ui" },
+    { "path": "../otto-server" }
+  ],
+  "settings": {
+    "git.openRepositoryInParentFolders": "never"
+  }
+}

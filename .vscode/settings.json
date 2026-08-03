@@ -3,6 +3,14 @@
     ".github/workflows/*.yml": "yaml",
     ".github/workflows/*.yaml": "yaml"
   },
+  "git.statusLimit": 50000,
+  "git.untrackedChanges": "mixed",
+  "files.watcherExclude": {
+    "**/release/**": true
+  },
+  "search.exclude": {
+    "**/release/**": true
+  },
   "yaml.schemas": {
     "https://json.schemastore.org/github-workflow.json": [
       ".github/workflows/*.yml",

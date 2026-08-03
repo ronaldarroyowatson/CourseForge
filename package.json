@@ -1,66 +1,66 @@
 {
-  "name": "courseforge",
-  "version": "0.1.1",
-  "private": true,
-  "type": "module",
-  "main": "dist/src/main.js",
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prebuild:win": "npm run build",
-    "prebuild:mac": "npm run build",
-    "prebuild:linux": "npm run build",
-    "start": "electron .",
-    "prestart": "npm run build",
-    "build:win": "electron-builder --win",
-    "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux",
-    "test": "vitest run"
-  },
-  "build": {
-    "appId": "com.courseforge.app",
-    "productName": "CourseForge",
-    "asar": true,
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "deployment/**/*",
-      "manifests/**/*",
-      "package.json"
-    ],
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "identity": "-"
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ]
-    },
-    "linux": {
-      "target": [
-        "AppImage"
-      ]
-    }
-  },
-  "dependencies": {
-    "firebase": "^12.15.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0"
-  },
-  "devDependencies": {
-    "@types/node": "^24.0.10",
-    "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6",
-    "electron": "^37.3.1",
-    "electron-builder": "^26.0.12",
-    "tsx": "^4.20.3",
-    "typescript": "^5.8.3",
-    "vitest": "^3.2.4"
-  }
+    "name":  "courseforge",
+    "version":  "0.1.2",
+    "private":  true,
+    "type":  "module",
+    "main":  "dist/src/main.js",
+    "scripts":  {
+                    "build":  "tsc -p tsconfig.json",
+                    "typecheck":  "tsc -p tsconfig.json --noEmit",
+                    "prebuild:win":  "npm run build",
+                    "prebuild:mac":  "npm run build",
+                    "prebuild:linux":  "npm run build",
+                    "start":  "electron .",
+                    "prestart":  "npm run build",
+                    "build:win":  "electron-builder --win",
+                    "build:mac":  "electron-builder --mac",
+                    "build:linux":  "electron-builder --linux",
+                    "test":  "vitest run"
+                },
+    "build":  {
+                  "appId":  "com.courseforge.app",
+                  "productName":  "CourseForge",
+                  "asar":  true,
+                  "directories":  {
+                                      "output":  "release"
+                                  },
+                  "files":  [
+                                "dist/**/*",
+                                "deployment/**/*",
+                                "manifests/**/*",
+                                "package.json"
+                            ],
+                  "mac":  {
+                              "target":  [
+                                             "dmg",
+                                             "zip"
+                                         ],
+                              "identity":  "-"
+                          },
+                  "win":  {
+                              "target":  [
+                                             "nsis"
+                                         ]
+                          },
+                  "linux":  {
+                                "target":  [
+                                               "AppImage"
+                                           ]
+                            }
+              },
+    "dependencies":  {
+                         "firebase":  "^12.15.0",
+                         "react":  "^19.1.0",
+                         "react-dom":  "^19.1.0"
+                     },
+    "devDependencies":  {
+                            "@types/node":  "^24.0.10",
+                            "@types/react":  "^19.1.8",
+                            "@types/react-dom":  "^19.1.6",
+                            "electron":  "^37.3.1",
+                            "electron-builder":  "^26.0.12",
+                            "tsx":  "^4.20.3",
+                            "typescript":  "^5.8.3",
+                            "vitest":  "^3.2.4"
+                        }
 }

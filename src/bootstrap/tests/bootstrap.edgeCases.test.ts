@@ -49,4 +49,30 @@ describe('bootstrap.edgeCases', () => {
     expect(receipt.version).toBe('1.0.1');
     expect(receipt.resolvedVersionSource).toBe('release-metadata');
   });
+
+  it('reinstalls component when install directory metadata is missing but top-level receipt exists', async () => {
+    const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), 'otto-recovery-metadata-'));
+    runtimeRoots.push(runtimeRoot);
+
+    await bootstrapOtto({ repoRoot, runtimeRoot });
+
+    const installReceiptPath = path.join(runtimeRoot, 'components', 'otto', 'otto-kernel', 'receipt.json');
+    await rm(installReceiptPath, { force: true });
+
+    const second = await bootstrapOtto({ repoRoot, runtimeRoot });
+    expect(second.updateStatus.appliedOttoComponents).toContain('otto-kernel');
+  });
+
+  it('reinstalls component when install directory is missing after broken uninstall', async () => {
+    const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), 'otto-recovery-uninstall-'));
+    runtimeRoots.push(runtimeRoot);
+
+    await bootstrapOtto({ repoRoot, runtimeRoot });
+
+    const installDirectory = path.join(runtimeRoot, 'components', 'courseforge', 'courseforge-core-shell');
+    await rm(installDirectory, { recursive: true, force: true });
+
+    const second = await bootstrapOtto({ repoRoot, runtimeRoot });
+    expect(second.updateStatus.appliedCourseForgeComponents).toContain('courseforge-core-shell');
+  });
 });

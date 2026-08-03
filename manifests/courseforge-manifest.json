@@ -1,86 +1,86 @@
 {
-  "id": "courseforge-shell",
-  "name": "CourseForge",
-  "version": "0.1.1",
-  "description": "Minimal CourseForge shell that boots through Otto-first update orchestration.",
-  "entryPoint": "src/main.ts",
-  "otto": {
-    "mode": "courseforge",
-    "minimumVersion": "1.0.0",
-    "extensions": [
-      {
-        "id": "otto-core",
-        "version": "latest",
-        "source": "https://github.com/otto-platform/otto-core/releases/latest/download/otto-core.tgz",
-        "devOnly": false,
-        "shippingProfile": "runtime"
-      },
-      {
-        "id": "otto-auth",
-        "version": "latest",
-        "source": "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-auth.tgz",
-        "devOnly": false,
-        "shippingProfile": "runtime"
-      },
-      {
-        "id": "otto-telemetry",
-        "version": "latest",
-        "source": "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-telemetry.tgz",
-        "devOnly": false,
-        "shippingProfile": "runtime"
-      },
-      {
-        "id": "otto-splash",
-        "version": "latest",
-        "source": "https://github.com/otto-platform/otto-ui/releases/latest/download/otto-splash.tgz",
-        "devOnly": false,
-        "shippingProfile": "runtime"
-      },
-      {
-        "id": "otto-design-system",
-        "version": "0.1.0",
-        "source": "./otto-extensions/otto-design-system-authority/manifests/version-manifest.json",
-        "devOnly": false,
-        "shippingProfile": "runtime"
-      },
-      {
-        "id": "otto-design-system-dev-ui",
-        "version": "latest",
-        "source": "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-design-system-dev-ui.tgz",
-        "devOnly": true,
-        "shippingProfile": "development"
-      }
-    ],
-    "requiredComponents": [
-      "otto-kernel",
-      "otto-update-engine",
-      "otto-module-loader",
-      "otto-extension-loader",
-      "otto-command-service",
-      "otto-extension-telemetry",
-      "otto-extension-auth",
-      "otto-ui-splash"
-    ],
-    "minimalInstallerContents": [
-      "CourseForge.exe",
-      "otto-runtime",
-      "otto-payload-manifest",
-      "otto-extension-telemetry",
-      "otto-extension-auth",
-      "otto-ui-splash-assets",
-      "courseforge-basic-config"
-    ]
-  },
-  "modules": [
-    {
-      "id": "courseforge-bootstrap",
-      "kind": "bootstrap",
-      "entryPoint": "src/bootstrap/courseforge-bootstrap.ts"
-    },
-    {
-      "id": "courseforge-ui",
-      "kind": "ui",
-      "entryPoint": "courseforge-ui/services/render-courseforge-ui.tsx"
-    }
-  ]
+    "id":  "courseforge-shell",
+    "name":  "CourseForge",
+    "version":  "0.1.2",
+    "description":  "Minimal CourseForge shell that boots through Otto-first update orchestration.",
+    "entryPoint":  "src/main.ts",
+    "otto":  {
+                 "mode":  "courseforge",
+                 "minimumVersion":  "1.0.0",
+                 "extensions":  [
+                                    {
+                                        "id":  "otto-core",
+                                        "version":  "latest",
+                                        "source":  "https://github.com/otto-platform/otto-core/releases/latest/download/otto-core.tgz",
+                                        "devOnly":  false,
+                                        "shippingProfile":  "runtime"
+                                    },
+                                    {
+                                        "id":  "otto-auth",
+                                        "version":  "latest",
+                                        "source":  "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-auth.tgz",
+                                        "devOnly":  false,
+                                        "shippingProfile":  "runtime"
+                                    },
+                                    {
+                                        "id":  "otto-telemetry",
+                                        "version":  "latest",
+                                        "source":  "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-telemetry.tgz",
+                                        "devOnly":  false,
+                                        "shippingProfile":  "runtime"
+                                    },
+                                    {
+                                        "id":  "otto-splash",
+                                        "version":  "latest",
+                                        "source":  "https://github.com/otto-platform/otto-ui/releases/latest/download/otto-splash.tgz",
+                                        "devOnly":  false,
+                                        "shippingProfile":  "runtime"
+                                    },
+                                    {
+                                        "id":  "otto-design-system",
+                                        "version":  "0.1.0",
+                                        "source":  "./otto-extensions/otto-design-system-authority/manifests/version-manifest.json",
+                                        "devOnly":  false,
+                                        "shippingProfile":  "runtime"
+                                    },
+                                    {
+                                        "id":  "otto-design-system-dev-ui",
+                                        "version":  "latest",
+                                        "source":  "https://github.com/otto-platform/otto-extensions/releases/latest/download/otto-design-system-dev-ui.tgz",
+                                        "devOnly":  true,
+                                        "shippingProfile":  "development"
+                                    }
+                                ],
+                 "requiredComponents":  [
+                                            "otto-kernel",
+                                            "otto-update-engine",
+                                            "otto-module-loader",
+                                            "otto-extension-loader",
+                                            "otto-command-service",
+                                            "otto-extension-telemetry",
+                                            "otto-extension-auth",
+                                            "otto-ui-splash"
+                                        ],
+                 "minimalInstallerContents":  [
+                                                  "CourseForge.exe",
+                                                  "otto-runtime",
+                                                  "otto-payload-manifest",
+                                                  "otto-extension-telemetry",
+                                                  "otto-extension-auth",
+                                                  "otto-ui-splash-assets",
+                                                  "courseforge-basic-config"
+                                              ]
+             },
+    "modules":  [
+                    {
+                        "id":  "courseforge-bootstrap",
+                        "kind":  "bootstrap",
+                        "entryPoint":  "src/bootstrap/courseforge-bootstrap.ts"
+                    },
+                    {
+                        "id":  "courseforge-ui",
+                        "kind":  "ui",
+                        "entryPoint":  "courseforge-ui/services/render-courseforge-ui.tsx"
+                    }
+                ]
 }

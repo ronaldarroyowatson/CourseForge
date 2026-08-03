@@ -450,13 +450,16 @@ async function applyComponentUpdates(options: {
     const receiptPath = path.join(targetRoot, `${component.name}.json`);
     const installDirectory = path.join(targetRoot, component.name);
     const installReceiptPath = path.join(installDirectory, 'receipt.json');
+    const installMetadataPath = path.join(installDirectory, 'installed-component.json');
     const currentReceipt = await readOptionalJsonFile<ComponentReceipt>(receiptPath);
     const resolvedVersion = await options.resolveReleaseVersion(component);
     const targetVersion = resolvedVersion?.version ?? component.minVersion;
     const versionNeedsUpdate = !currentReceipt || !satisfiesMinVersion(currentReceipt.version, targetVersion);
     const sourceChanged = currentReceipt?.source !== component.source;
     const checksumChanged = currentReceipt?.checksum !== component.checksum;
-    const needsInstall = versionNeedsUpdate || sourceChanged || checksumChanged;
+    const installIntegrityMissing =
+      !currentReceipt || !(await exists(installDirectory)) || !(await exists(installReceiptPath)) || !(await exists(installMetadataPath));
+    const needsInstall = versionNeedsUpdate || sourceChanged || checksumChanged || installIntegrityMissing;
 
     options.logBootstrap('evaluating component update', {
       target: options.target,
@@ -469,6 +472,7 @@ async function applyComponentUpdates(options: {
       versionNeedsUpdate,
       sourceChanged,
       checksumChanged,
+      installIntegrityMissing,
       resolvedVersionSource: resolvedVersion?.source ?? 'manifest-minVersion',
       releaseApiUrl: resolvedVersion?.releaseApiUrl ?? null
     });
@@ -487,7 +491,7 @@ async function applyComponentUpdates(options: {
       await mkdir(installDirectory, { recursive: true });
       await writeJsonFile(receiptPath, receipt);
       await writeJsonFile(installReceiptPath, receipt);
-      await writeJsonFile(path.join(installDirectory, 'installed-component.json'), {
+      await writeJsonFile(installMetadataPath, {
         component,
         targetVersion,
         installedAt: receipt.installedAt,
@@ -674,6 +678,15 @@ async function readOptionalJsonFile<T>(filePath: string): Promise<T | null> {
   }
 
   return readJsonFile<T>(filePath);
+}
+
+async function exists(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
